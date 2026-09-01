@@ -82,10 +82,6 @@
 
 <div id="toast" class="toast" hidden></div>
 
-<!-- A tokenless install works, but on the basic map — and a 2-second toast is
-     not enough signposting for the one action that unlocks satellite and 3D. -->
-<button id="tokenNudge" class="tokennudge" hidden>Street map only — <b>add map token</b></button>
-
 <!-- ── Record controls ───────────────────────────────────────────── -->
 <section id="sheetRecord" class="sheet">
   <!-- The sheet owns half a phone screen. In a field you need the map more than
@@ -94,6 +90,10 @@
     <span class="grab"></span>
     <span class="grab-label" id="sheetLabel">Hide controls</span>
   </button>
+
+  <!-- A tokenless install works, but on the basic map — and a 2-second toast
+       is not enough signposting for the one action unlocking satellite & 3D. -->
+  <button id="tokenNudge" class="tokennudge" hidden>Street map only — <b>add map token</b></button>
 
   <div class="maprow">
     <button class="chip" data-style="satellite" aria-pressed="true">Satellite</button>
@@ -337,6 +337,12 @@
 </section>
 
 <script src="https://api.mapbox.com/mapbox-gl-js/v3.14.0/mapbox-gl.js"></script>
+<!-- mapbox-gl v3 validates its token against the API even for styles that
+     never touch Mapbox, so a tokenless install cannot render ANY map with it.
+     MapLibre (the token-free fork) carries the street-map fallback; mapbox-gl
+     takes over as soon as a token exists. -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.min.css">
+<script src="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.min.js"></script>
 <!-- The Mapbox token lives OUTSIDE the repository (token.js is gitignored):
      GitHub's push protection blocks any push containing it, public though it
      is. On GitHub Pages this file 404s harmlessly and the token arrives once

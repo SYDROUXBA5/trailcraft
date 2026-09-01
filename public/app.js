@@ -25,7 +25,7 @@ import { encodeTrail, decodeTrail } from './card.js';
    an offline copy that fell behind looks identical to the current one — a
    missing feature then reads as a bug. This stamp is how a phone stops being
    able to lie about what it is running. Bump it with every change. */
-const BUILD = '2026-08-28g';
+const BUILD = '2026-08-28h';
 
 const S = {
   sessions: 'tc.sessions', settings: 'tc.settings', team: 'tc.team',
@@ -113,16 +113,16 @@ const RASTER_FALLBACK = {
 };
 
 function buildMap() {
-  /* mapbox-gl THROWS in its constructor when accessToken is empty — for ANY
-     style, even one whose sources never touch Mapbox (the library bills per
-     map load and checks first). An uncaught throw here takes the whole app
-     down: no buttons, no onboarding, no Settings — which is exactly where the
-     token would be pasted. So a tokenless install gets a placeholder string
-     to satisfy the constructor and an OSM style that makes no Mapbox calls,
-     and the app boots. */
+  /* mapbox-gl v3 demands a VALID token even for styles whose sources never
+     touch Mapbox — it phones home at start-up and dies on a 401 — so the
+     tokenless fallback runs on MapLibre, the token-free fork, with plain OSM
+     tiles. The two engines share enough API for everything this app does; the
+     Mapbox-only extras (terrain, fog, 3D objects) are already gated on the
+     token. When a token arrives later, the app reloads into the Mapbox path. */
   const noToken = !settings.mbToken;
-  mapboxgl.accessToken = settings.mbToken || 'pk.tokenless';
-  map = new mapboxgl.Map({
+  const GL = (noToken && typeof maplibregl !== 'undefined') ? maplibregl : mapboxgl;
+  if (GL === mapboxgl) mapboxgl.accessToken = settings.mbToken || 'pk.tokenless';
+  map = new GL.Map({
     container: 'map',
     style: noToken ? RASTER_FALLBACK : (STYLES[settings.basemap] || STYLES.satellite),
     center: [-2.6449, 51.2094],   // Wells, Somerset — replaced by first fix
@@ -2555,18 +2555,16 @@ function wire() {
   bind('stillCap', 'stillCap', 'stillCapVal'); bind('exagg', 'exagg', 'exaggVal');
   bind('mbToken', 'mbToken');
 
-  /* Pasting the token must work THERE AND THEN — "save it and reload" is a
-     support call. On commit, swap the live map up to satellite and terrain. */
+  /* Pasting the token must visibly WORK — "save it and reload yourself" is a
+     support call. The tokenless map is a MapLibre instance that cannot load
+     Mapbox styles, so the upgrade is a restart: settings are already saved,
+     and the reload boots straight into the Mapbox engine. */
   $('mbToken').addEventListener('change', () => {
     const tok = (settings.mbToken || '').trim();
     if (!/^pk\./.test(tok)) return;
-    mapboxgl.accessToken = tok;
     $('tokenNudge').hidden = true;
-    mapReady = false;
-    map.setStyle(STYLES[settings.basemap] || STYLES.satellite);
-    map.once('styledata', addOverlays);
-    ensureStyleAlive();
-    toast('Satellite & 3D on');
+    toast('Satellite & 3D on — restarting the map');
+    setTimeout(() => location.reload(), 800);
   });
   $('tokenNudge').addEventListener('click', () => {
     fillSettings(); show('viewSettings'); tabTo('settings');
