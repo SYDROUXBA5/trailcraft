@@ -25,7 +25,7 @@ import { encodeTrail, decodeTrail } from './card.js';
    an offline copy that fell behind looks identical to the current one — a
    missing feature then reads as a bug. This stamp is how a phone stops being
    able to lie about what it is running. Bump it with every change. */
-const BUILD = '2026-08-28e';
+const BUILD = '2026-08-28f';
 
 const S = {
   sessions: 'tc.sessions', settings: 'tc.settings', team: 'tc.team',
@@ -113,13 +113,15 @@ const RASTER_FALLBACK = {
 };
 
 function buildMap() {
-  mapboxgl.accessToken = settings.mbToken;
-  /* With no token at all, the Mapbox constructor THROWS — and an uncaught
-     throw here would take the whole app down with it: no buttons, no
-     onboarding, nothing. A tokenless install (fresh device on GitHub Pages,
-     before its #mbt link or Settings paste) starts on plain OSM instead, and
-     says so, once. */
+  /* mapbox-gl THROWS in its constructor when accessToken is empty — for ANY
+     style, even one whose sources never touch Mapbox (the library bills per
+     map load and checks first). An uncaught throw here takes the whole app
+     down: no buttons, no onboarding, no Settings — which is exactly where the
+     token would be pasted. So a tokenless install gets a placeholder string
+     to satisfy the constructor and an OSM style that makes no Mapbox calls,
+     and the app boots. */
   const noToken = !settings.mbToken;
+  mapboxgl.accessToken = settings.mbToken || 'pk.tokenless';
   map = new mapboxgl.Map({
     container: 'map',
     style: noToken ? RASTER_FALLBACK : (STYLES[settings.basemap] || STYLES.satellite),
@@ -146,26 +148,32 @@ function buildMap() {
 }
 
 function addOverlays() {
-  if (!map.getSource('dem')) {
-    map.addSource('dem', {
-      type: 'raster-dem', url: 'mapbox://mapbox.mapbox-terrain-dem-v1',
-      tileSize: 512, maxzoom: 14,
-    });
-  }
-  map.setTerrain({ source: 'dem', exaggeration: Number(settings.exagg) });
+  /* Terrain, fog and 3D objects are Mapbox services — with no real token their
+     tile requests would just 401. The trails, plume and design layers below
+     are plain GeoJSON and work on any style, so a tokenless map still shows
+     the actual training record. */
+  if (settings.mbToken) {
+    if (!map.getSource('dem')) {
+      map.addSource('dem', {
+        type: 'raster-dem', url: 'mapbox://mapbox.mapbox-terrain-dem-v1',
+        tileSize: 512, maxzoom: 14,
+      });
+    }
+    map.setTerrain({ source: 'dem', exaggeration: Number(settings.exagg) });
 
-  /* Haze on the far ground is what makes a ridge read as distant rather than
-     as a texture. Wrapped because it only exists on styles that support it. */
-  try {
-    map.setFog({
-      range: [1, 12], color: '#1b2430', 'high-color': '#2b3a4d',
-      'horizon-blend': 0.22, 'space-color': '#0b0f16', 'star-intensity': 0,
-    });
-  } catch { /* style without atmosphere — no loss */ }
+    /* Haze on the far ground is what makes a ridge read as distant rather than
+       as a texture. Wrapped because it only exists on styles that support it. */
+    try {
+      map.setFog({
+        range: [1, 12], color: '#1b2430', 'high-color': '#2b3a4d',
+        'horizon-blend': 0.22, 'space-color': '#0b0f16', 'star-intensity': 0,
+      });
+    } catch { /* style without atmosphere — no loss */ }
 
-  // Standard styles can draw real buildings and landmarks on the terrain.
-  for (const [k, v] of [['show3dObjects', true], ['showPointOfInterestLabels', false]]) {
-    try { map.setConfigProperty('basemap', k, v); } catch { /* not a Standard style */ }
+    // Standard styles can draw real buildings and landmarks on the terrain.
+    for (const [k, v] of [['show3dObjects', true], ['showPointOfInterestLabels', false]]) {
+      try { map.setConfigProperty('basemap', k, v); } catch { /* not a Standard style */ }
+    }
   }
 
   applyWind();
@@ -2613,6 +2621,11 @@ async function checkForUpdate() {
     const tried = sessionStorage.getItem('tc.updateTried');
     if (busy || tried === remote) return toast(`Update ${remote} ready — close and reopen the app`);
     sessionStorage.setItem('tc.updateTried', remote);
+    /* On a CDN host the plain reload would re-serve the same stale files for
+       up to its cache max-age and the loop guard would then give up. Prime the
+       HTTP cache with forced fetches first, so the reload boots the update. */
+    await Promise.all(['./', 'app.js', 'app.css', 'sw.js']
+      .map(u => fetch(u, { cache: 'reload' }).catch(() => {})));
     location.reload();
   } catch { /* offline — nothing to compare against */ }
 }
