@@ -25,7 +25,7 @@ import { encodeTrail, decodeTrail } from './card.js';
    an offline copy that fell behind looks identical to the current one — a
    missing feature then reads as a bug. This stamp is how a phone stops being
    able to lie about what it is running. Bump it with every change. */
-const BUILD = '2026-08-28d';
+const BUILD = '2026-08-28e';
 
 const S = {
   sessions: 'tc.sessions', settings: 'tc.settings', team: 'tc.team',
@@ -114,12 +114,20 @@ const RASTER_FALLBACK = {
 
 function buildMap() {
   mapboxgl.accessToken = settings.mbToken;
+  /* With no token at all, the Mapbox constructor THROWS — and an uncaught
+     throw here would take the whole app down with it: no buttons, no
+     onboarding, nothing. A tokenless install (fresh device on GitHub Pages,
+     before its #mbt link or Settings paste) starts on plain OSM instead, and
+     says so, once. */
+  const noToken = !settings.mbToken;
   map = new mapboxgl.Map({
     container: 'map',
-    style: STYLES[settings.basemap] || STYLES.satellite,
+    style: noToken ? RASTER_FALLBACK : (STYLES[settings.basemap] || STYLES.satellite),
     center: [-2.6449, 51.2094],   // Wells, Somerset — replaced by first fix
     zoom: 15, pitch: 68, maxPitch: 85, attributionControl: { compact: true },
   });
+  if (noToken) setTimeout(() =>
+    toast('Basic map — paste your Mapbox token in Settings for satellite & 3D'), 1200);
   map.addControl(new mapboxgl.NavigationControl({ visualizePitch: true }), 'top-right');
   map.addControl(new mapboxgl.GeolocateControl({
     positionOptions: { enableHighAccuracy: true }, trackUserLocation: true, showAccuracyCircle: true,
@@ -2502,6 +2510,15 @@ function wire() {
       save(S.settings, settings);
       if (fmt) $(fmt).textContent = el.value;
       if (key === 'exagg' && mapReady) map.setTerrain({ source: 'dem', exaggeration: Number(el.value) });
+      // A token pasted into Settings upgrades the map right now, not after a
+      // reload nobody knows to do.
+      if (key === 'mbToken' && el.value.startsWith('pk.') && el.value.length > 60) {
+        mapboxgl.accessToken = el.value;
+        mapReady = false;
+        map.setStyle(STYLES[settings.basemap] || STYLES.satellite);
+        map.once('styledata', addOverlays);
+        toast('Satellite map on');
+      }
     });
   };
   bind('accCap', 'accCap', 'accCapVal');
