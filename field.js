@@ -9,10 +9,12 @@
    closer to the truth than the raw number, which is the whole argument for
    doing this at all.
 
-   Three things act on the air here:
-     1. deflection — air cannot drive into a hillside, so it follows the contour
-     2. drainage   — cold dense air slides downhill, but only under an inversion
-     3. shelter    — ridges accelerate the flow, hollows go slack
+   Four things act on the air here:
+     1. deflection  — air cannot drive into a hillside, so it follows the contour
+     2. drainage    — cold dense air runs downhill hard under an inversion
+     3. scent-creep — the ground-hugging scent film slides a little downhill on
+                      any slope, in nearly any air (a handler's rule, and true)
+     4. shelter     — ridges accelerate the flow, hollows go slack
 
    Everything in this file is pure: no DOM, no map, no globals. That is not
    tidiness, it is the reason the maths can be checked in Node instead of being
@@ -163,6 +165,13 @@ export function stability(soilT, airT) {
 
 /* ── The flow field ───────────────────────────────────────────────── */
 
+/* Downslope scent-creep weight per stability regime — how much of the
+   ground-hugging scent film survives to slide downhill. */
+const CREEP = {
+  'convective+': 0.08, convective: 0.16, neutral: 0.38,
+  stable: 0.55, inversion: 0.65, unknown: 0.30,
+};
+
 /** Metres per second the synoptic wind blows, as an east/south vector. */
 export function synoptic(speedMs, fromDeg) {
   const to = ((fromDeg ?? 0) + 180) * Math.PI / 180;    // direction it blows TOWARD
@@ -203,15 +212,25 @@ export function flowAt(T, x, y, wx, st, out = { u: 0, v: 0 }) {
       u += k * Math.abs(up) * cx * sgn * 0.34;
       v += k * Math.abs(up) * cy * sgn * 0.34;
 
-      /* Drainage. Only under a stable layer, and this is the case where the
-         forecast is simply wrong: at dawn with the ground 3 °C colder than the
-         air, the wind number can say 0.8 m/s from the north while the air at
-         nose height runs downhill regardless of it. */
+      /* Drainage. Under a stable layer the cold air is a river: at dawn with
+         the ground 3 °C colder than the air, the wind number can say 0.8 m/s
+         from the north while the air at nose height runs downhill regardless. */
       if (st && st.drain > 0 && st.dT < 0) {
         const d = Math.min(1.6, 2.6 * gm * st.drain * (-st.dT) * 0.5);
         u -= ux * d;
         v -= uy * d;
       }
+
+      /* Scent-creep — the handler's rule the pure meteorology misses: the
+         scent-carrying film hugging the ground is cool and heavy, and it
+         slides downhill on ANY slope in nearly ANY air, not only under an
+         inversion. Small beside true drainage and easily owned by a real
+         wind, but never zero on a hillside: strongest in stable air, still
+         present in neutral, mostly lifted away once the sun has the ground
+         cooking. */
+      const creep = Math.min(0.9, gm * 4.5 * (CREEP[st?.key] ?? 0.3));
+      u -= ux * creep;
+      v -= uy * creep;
     }
 
     // Shelter and speed-up: ridges expose, hollows go slack.
@@ -300,19 +319,24 @@ export function insolation(T, x, y, sun) {
    into one number. "6 m downwind" and "6 m downhill" are different sentences,
    different layers, and different advice to a handler. */
 export function regime(T, trailPts, wx, st) {
-  if (!st || st.drain < 0.3 || st.dT >= -0.6) return { key: 'wind', word: 'downwind' };
+  if (!st) return { key: 'wind', word: 'downwind' };
   if (!T || T.flat) return { key: 'wind', word: 'downwind' };
 
-  // Drainage only leads if it actually beats the synoptic wind over this ground.
+  // Downhill only leads if it actually beats the synoptic wind over this
+  // ground — counting both true drainage and the always-on scent-creep, so a
+  // steep hillside in calm stable air reads "downhill" like it works.
   const s = synoptic(wx?.wind_speed, wx?.wind_direction);
   const windMag = Math.hypot(s.u, s.v);
-  let drainMag = 0;
+  let downMag = 0;
   const step = 1 / 8;
   for (let y = step / 2; y < 1; y += step) for (let x = step / 2; x < 1; x += step) {
     const gm = Math.hypot(sample(T.gx, T.n, x, y), sample(T.gy, T.n, x, y));
-    drainMag = Math.max(drainMag, Math.min(1.6, 2.6 * gm * st.drain * (-st.dT) * 0.5));
+    const drain = (st.drain > 0 && st.dT < 0)
+      ? Math.min(1.6, 2.6 * gm * st.drain * (-st.dT) * 0.5) : 0;
+    const creep = Math.min(0.9, gm * 4.5 * (CREEP[st.key] ?? 0.3));
+    downMag = Math.max(downMag, drain + creep);
   }
-  return drainMag > windMag
+  return downMag > windMag
     ? { key: 'drain', word: 'downhill' }
     : { key: 'wind', word: 'downwind' };
 }
