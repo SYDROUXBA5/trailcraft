@@ -1,0 +1,14 @@
+{
+  "name": "trailcraft",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Scent-work training record: dual-track GPS, 3D terrain, scent drift.",
+  "scripts": {
+    "dev": "node server.cjs",
+    "dev:http": "HTTP=1 node server.cjs",
+    "cert": "sh scripts/make-cert.sh",
+    "test": "node test/geo.test.mjs && node test/field.test.mjs && node test/gesture.test.mjs && node test/team.test.mjs && node test/design.test.mjs && node test/card.test.mjs && node test/build.test.mjs",
+    "build": "node scripts/build-single.mjs"
+  },
+  "type": "module"
+}

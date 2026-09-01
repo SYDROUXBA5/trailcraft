@@ -1,0 +1,14 @@
+# Certificates. certs/ holds PRIVATE KEYS (ca-key.pem, key.pem) — these must
+# never leave this machine. Nothing is lost by excluding them: `npm run cert`
+# reissues the whole set, and the server certificate has to be reissued anyway
+# whenever the router hands this Mac a different address.
+certs/
+
+# Runtime noise
+*.log
+.DS_Store
+
+# Not used today — there are no dependencies — but harmless insurance.
+node_modules/
+dist/
+public/token.js
