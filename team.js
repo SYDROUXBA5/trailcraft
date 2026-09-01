@@ -17,14 +17,17 @@ import { pathLen } from './geo.js';
    without losing anything. */
 export const CLASS_BOUNDS = { hot: 30 * 60000, warm: 3 * 3600000 };
 
+/* A dog's level speaks the same language as the trails: a Hot dog works only
+   fresh trails, a Warm dog handles aged ones, a Cold dog runs anything. One
+   vocabulary for the dog and the ground it can work. */
 export const LEVELS = [
-  { id: 'novice', label: 'Novice' },
-  { id: 'intermediate', label: 'Intermediate' },
-  { id: 'advanced', label: 'Advanced' },
+  { id: 'hot', label: 'Hot' },
+  { id: 'warm', label: 'Warm' },
+  { id: 'cold', label: 'Cold' },
 ];
 
 export const levelLabel = (id) =>
-  LEVELS.find(l => l.id === id)?.label ?? 'Novice';
+  LEVELS.find(l => l.id === id)?.label ?? 'Hot';
 
 /** Age of the trail when the dog started → 'hot' | 'warm' | 'cold'.
     Null when there is nothing to classify (no linked trail, or a clock that
