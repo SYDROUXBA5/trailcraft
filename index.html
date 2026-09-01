@@ -1,0 +1,347 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
+<meta name="theme-color" content="#EAF0F8">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Trailcraft</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="stylesheet" href="https://api.mapbox.com/mapbox-gl-js/v3.14.0/mapbox-gl.css">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+
+<div id="map"></div>
+<canvas id="windCanvas" class="wind-canvas" hidden></canvas>
+<canvas id="scentCanvas" class="scent-canvas" hidden></canvas>
+
+<!-- ── Replay ────────────────────────────────────────────────────────
+     One clock drives the trails, the plume, the wind and the verdict, so
+     they cannot disagree with each other. -->
+<section id="replay" class="replay" hidden>
+  <div id="rpBuild" class="rp-build" hidden>Reading terrain…</div>
+
+  <div id="rpLayers" class="rp-panel rp-layers"></div>
+
+  <div id="rpVerdict" class="rp-panel rp-verdict off" hidden></div>
+
+  <div class="rp-foot">
+    <div id="rpRegime" class="rp-panel rp-regime"></div>
+    <div id="rpInst" class="rp-panel rp-inst"></div>
+    <div class="rp-panel rp-bar">
+      <button id="rpPlay" aria-label="Play">▶</button>
+      <div class="rp-clock"><b id="rpClock">--:--</b><i id="rpElapsed">0:00</i></div>
+      <input id="rpScrub" type="range" min="0" max="1000" step="1" value="0" aria-label="Session time">
+      <span id="rpStage" class="rp-stage"></span>
+      <button id="rpClose" class="rp-close">Close</button>
+    </div>
+    <p id="rpTerrain" class="rp-terrain"></p>
+  </div>
+</section>
+
+<!-- GPS quality: always visible while recording. This is the number both
+     incumbent apps hide, and it is the one handlers actually need. -->
+<div id="hud" class="hud" hidden>
+  <div class="hud-row">
+    <span id="fixDot" class="dot"></span>
+    <span id="fixText" class="hud-label">Waiting for fix</span>
+    <span id="fixAcc" class="hud-acc">—</span>
+  </div>
+  <div class="hud-stats">
+    <div><b id="statDist">0</b><i>m</i></div>
+    <div><b id="statTime">0:00</b><i>elapsed</i></div>
+    <div><b id="statPts">0</b><i>points</i></div>
+    <div><b id="statDrop">0</b><i>rejected</i></div>
+  </div>
+</div>
+
+<!-- Wind, always on the map. It used to live inside the bottom sheet, which is
+     the one place it is no use: that sheet is collapsed whenever you actually
+     need to see the ground. -->
+<div id="windBadge" class="windbadge" hidden>
+  <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true">
+    <g id="wbArrow" transform="rotate(0 11 11)">
+      <path d="M11 2 L15.5 18 L11 14.6 L6.5 18 Z" fill="#ffffff"/>
+    </g>
+  </svg>
+  <div class="wb-read">
+    <b><span id="wbSpeed">—</span><s>m/s</s></b>
+    <i id="wbSub">from —</i>
+  </div>
+</div>
+
+<!-- An empty plume and a broken app look identical on screen. When the model says
+     there is nothing left to work, it has to say so out loud. -->
+<div id="scentState" class="scentstate" hidden></div>
+
+<!-- Counting a trail down while it ages. The plume keeps building behind it, so
+     the wait is the thing you are actually watching. -->
+<div id="ageChip" class="agechip" hidden></div>
+
+<div id="toast" class="toast" hidden></div>
+
+<!-- ── Record controls ───────────────────────────────────────────── -->
+<section id="sheetRecord" class="sheet">
+  <!-- The sheet owns half a phone screen. In a field you need the map more than
+       the controls, so it drops out of the way and leaves a handle behind. -->
+  <button class="grab-btn" id="sheetToggle" aria-expanded="true" aria-controls="sheetRecord">
+    <span class="grab"></span>
+    <span class="grab-label" id="sheetLabel">Hide controls</span>
+  </button>
+
+  <div class="maprow">
+    <button class="chip" data-style="satellite" aria-pressed="true">Satellite</button>
+    <button class="chip" data-style="outdoors" aria-pressed="false">Outdoors</button>
+    <button class="chip" id="windToggle" aria-pressed="false">Wind</button>
+    <button class="chip" id="scentToggle" aria-pressed="true">Scent</button>
+  </div>
+  <p id="windRead" class="windread" hidden></p>
+
+  <div class="mode-row" id="modeRow">
+    <button class="mode" data-mode="runner" aria-pressed="true">
+      <span class="mode-name">Runner</span><span class="mode-sub">lay the trail</span>
+    </button>
+    <button class="mode" data-mode="dog" aria-pressed="false">
+      <span class="mode-name">Dog</span><span class="mode-sub">work the trail</span>
+    </button>
+  </div>
+
+  <div id="trailPicker" class="picker" hidden>
+    <label for="trailSelect">Working which trail?</label>
+    <select id="trailSelect"></select>
+  </div>
+
+  <!-- Which dog is on the line. Only appears with two or more registered dogs —
+       with one there is nothing to choose, and the session is attributed anyway. -->
+  <div id="dogPicker" class="picker" hidden>
+    <label>Which dog?</label>
+    <div id="dogChips" class="dog-chips"></div>
+  </div>
+
+  <button id="btnRecord" class="record">
+    <span class="record-ring"></span><span id="recordLabel">Start</span>
+  </button>
+
+  <button id="btnDraw" class="draw-open">Draw a trail instead
+    <em>for a trail nobody recorded — tap it onto the map</em>
+  </button>
+
+  <div id="waypoints" class="waypoints" hidden>
+    <button class="wp" data-wp="indication">Indication</button>
+    <button class="wp" data-wp="lost">Lost it</button>
+    <button class="wp" data-wp="refound">Re-found</button>
+    <button class="wp" data-wp="article">Article</button>
+    <button class="wp" data-wp="reward">Reward</button>
+    <button class="wp" data-wp="note">Mark</button>
+  </div>
+
+  <nav class="tabs">
+    <button data-view="map" class="active">Map</button>
+    <button data-view="sessions">Sessions</button>
+    <button data-view="team">Team</button>
+    <button data-view="settings">Settings</button>
+  </nav>
+</section>
+
+<!-- ── Draw a trail ──────────────────────────────────────────────────
+     The person who lays a trail usually has no phone running, and an instructor
+     setting one for a student wants to plan it first. A drawn line carries no
+     clock, so this asks for the two things a walked track gives free: when it
+     was laid, and how fast it was walked. -->
+<section id="drawSheet" class="sheet draw-sheet" hidden>
+  <button class="grab-btn" id="drawToggle" aria-expanded="true" aria-controls="drawSheet">
+    <span class="grab"></span>
+    <span class="grab-label" id="drawLabel">Hide controls</span>
+  </button>
+  <h2 class="draw-title">Draw the trail</h2>
+  <p class="hint" id="drawHint">Tap the map at each corner of the line that was walked.</p>
+
+  <div class="draw-stats">
+    <div><b id="drawPts">0</b><i>corners</i></div>
+    <div><b id="drawLen">0</b><i>metres</i></div>
+    <div><b id="drawDur">0:00</b><i>walk time</i></div>
+  </div>
+
+  <!-- The instructor's read, live while tapping: legs coloured by wind regime,
+       objectives the design earns, and its weakest aspect. -->
+  <div id="drawRead" class="draw-read" hidden>
+    <div class="leg-legend" aria-hidden="true">
+      <span><i class="lg cross"></i>crosswind</span>
+      <span><i class="lg tail"></i>downwind</span>
+      <span><i class="lg head"></i>into wind</span>
+    </div>
+    <div id="drawChips" class="card-meta"></div>
+    <p id="drawAdvice" class="hint"></p>
+  </div>
+
+  <div class="field">
+    <label for="drawWhen">Laid at</label>
+    <input id="drawWhen" type="datetime-local">
+  </div>
+  <div class="field">
+    <label for="drawPace">Walking pace <b id="drawPaceVal">1.3</b> m/s</label>
+    <input id="drawPace" type="range" min="0.6" max="3" step="0.1" value="1.3">
+  </div>
+
+  <div class="row-btns">
+    <button class="ghost" id="drawUndo">Undo</button>
+    <button class="ghost" id="drawClear">Clear</button>
+    <button class="ghost" id="drawCancel">Cancel</button>
+  </div>
+  <button id="drawSave" class="record">Save trail</button>
+</section>
+
+<!-- ── Trail Card: share ─────────────────────────────────────────────
+     A trail as a single QR — instructor's phone to student's phone in a
+     car park with zero bars. The data IS the code; no server touches it. -->
+<section id="cardModal" class="panel" hidden>
+  <header class="panel-head">
+    <h1>Trail Card</h1>
+    <button class="ghost" data-close>Close</button>
+  </header>
+  <div class="detail card-share">
+    <div id="cardQr" class="qr-plate" role="img" aria-label="Trail Card QR code"></div>
+    <p id="cardMeta" class="hint"></p>
+    <p class="hint">The other phone opens Trailcraft → Sessions → Scan card.
+      The trail travels inside the code itself — no signal needed.</p>
+  </div>
+</section>
+
+<!-- ── Trail Card: scan ────────────────────────────────────────────── -->
+<section id="scanModal" class="panel" hidden>
+  <header class="panel-head">
+    <h1>Scan a Trail Card</h1>
+    <button class="ghost" data-close>Close</button>
+  </header>
+  <div class="detail">
+    <video id="scanVideo" class="scan-video" playsinline muted hidden></video>
+    <p id="scanState" class="hint">Point the camera at a Trail Card.</p>
+    <div class="row-btns">
+      <button class="ghost" id="scanFromPhoto">From a photo instead</button>
+    </div>
+    <input id="scanFile" type="file" accept="image/*" hidden>
+  </div>
+</section>
+
+<!-- ── Sessions ──────────────────────────────────────────────────── -->
+<section id="viewSessions" class="panel" hidden>
+  <header class="panel-head">
+    <h1>Sessions</h1>
+    <button class="ghost" id="btnScanCard">Scan card</button>
+    <button class="ghost" data-close>Close</button>
+  </header>
+  <div id="sessFilter" class="filter-row" hidden></div>
+  <div id="sessionList" class="list"></div>
+</section>
+
+<!-- ── Team ──────────────────────────────────────────────────────────
+     The handler and the dogs, with each dog's record by trail class. The
+     classes are computed from real timestamps, so this page is earned, not
+     self-reported — the legend states the cut-offs out loud. -->
+<section id="viewTeam" class="panel" hidden>
+  <header class="panel-head">
+    <h1>Team</h1>
+    <button class="ghost" id="btnEditTeam">Edit</button>
+    <button class="ghost" data-close>Close</button>
+  </header>
+  <div id="teamBody" class="detail"></div>
+</section>
+
+<!-- ── Team setup ────────────────────────────────────────────────────
+     First thing on first launch: who is holding the line, and who is on it.
+     Also the editor, later. Skippable — a registration wall in a field would
+     be absurd, and the app records fine without one. -->
+<section id="viewSetup" class="panel" hidden>
+  <header class="panel-head">
+    <h1 id="setupTitle">Your team</h1>
+    <button class="ghost" id="setupSkip">Later</button>
+  </header>
+  <div class="detail">
+    <h2 class="sec">Handler</h2>
+    <div class="handler-row">
+      <button class="avatar-btn" id="handlerPhotoBtn" aria-label="Handler photo">
+        <span id="handlerAvatar" class="avatar big">?</span>
+        <em>photo</em>
+      </button>
+      <div class="field grow">
+        <label for="handlerName">Your name</label>
+        <input id="handlerName" type="text" placeholder="e.g. Rémi" autocomplete="name">
+      </div>
+    </div>
+
+    <h2 class="sec">Dogs</h2>
+    <div id="dogRows"></div>
+    <button class="ghost wide" id="btnAddDog">+ Add a dog</button>
+
+    <button id="setupSave" class="record">Save team</button>
+    <p class="hint">Stays on this phone, like everything else here. Each dog's
+      trails are then kept under its own name — hot, warm and cold — from the
+      real time between laying and running.</p>
+  </div>
+</section>
+
+<!-- ── Session detail ────────────────────────────────────────────── -->
+<section id="viewDetail" class="panel" hidden>
+  <header class="panel-head">
+    <h1 id="detailTitle">Trail</h1>
+    <button class="ghost" data-close>Close</button>
+  </header>
+  <div id="detailBody" class="detail"></div>
+</section>
+
+<!-- ── Settings ──────────────────────────────────────────────────── -->
+<section id="viewSettings" class="panel" hidden>
+  <header class="panel-head">
+    <h1>Settings</h1>
+    <button class="ghost" data-close>Close</button>
+  </header>
+  <div class="detail">
+    <p class="hint">Handler and dogs moved to the <b>Team</b> tab.</p>
+
+    <h2 class="sec">GPS filter</h2>
+    <p class="hint">The reason tracks look like scribbles when you stand still is
+      unfiltered GPS noise. These two settings suppress it.</p>
+    <div class="field">
+      <label for="accCap">Reject fixes worse than <b id="accCapVal">25</b> m</label>
+      <input id="accCap" type="range" min="8" max="60" step="1" value="25">
+    </div>
+    <div class="field">
+      <label for="stillCap">Ignore movement under <b id="stillCapVal">2.5</b> m</label>
+      <input id="stillCap" type="range" min="0" max="10" step="0.5" value="2.5">
+    </div>
+
+    <h2 class="sec">Map</h2>
+    <div class="field">
+      <label for="exagg">Terrain exaggeration <b id="exaggVal">1.6</b>×</label>
+      <input id="exagg" type="range" min="1" max="5" step="0.1" value="2.4">
+    </div>
+    <div class="field">
+      <label for="mbToken">Mapbox token <span class="opt">optional</span></label>
+      <input id="mbToken" type="text" placeholder="pk.eyJ1…">
+      <p class="hint">Free tier is 25,000 monthly users. Restrict this token to your own URLs in your Mapbox account — public tokens ship inside the page.</p>
+    </div>
+
+    <h2 class="sec">Data</h2>
+    <div class="row-btns">
+      <button class="ghost" id="btnExportAll">Export all as JSON</button>
+      <button class="danger" id="btnWipe">Delete everything</button>
+    </div>
+    <p class="hint" id="storageNote"></p>
+  </div>
+</section>
+
+<script src="https://api.mapbox.com/mapbox-gl-js/v3.14.0/mapbox-gl.js"></script>
+<!-- The Mapbox token lives OUTSIDE the repository (token.js is gitignored):
+     GitHub's push protection blocks any push containing it, public though it
+     is. On GitHub Pages this file 404s harmlessly and the token arrives once
+     via a #mbt= link or the Settings field, then persists on the device. -->
+<script src="token.js"></script>
+<!-- Classic scripts on purpose: both are UMD globals (qrcode, jsQR), vendored
+     so Trail Cards work in a car park with zero signal. -->
+<script src="vendor/qrcode.js"></script>
+<script src="vendor/jsQR.js"></script>
+<script src="app.js" type="module"></script>
+</body>
+</html>
