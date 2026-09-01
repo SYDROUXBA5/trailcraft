@@ -1,6 +1,6 @@
 /* Offline shell. Trails happen where there is no signal, so the app itself must
    survive with none. Map tiles cache opportunistically as you pan an area. */
-const V = 'trailcraft-v9';
+const V = 'trailcraft-v10';
 /* Every module the app cannot start without. app.js is an ES module and its
    imports are separate requests — listing only app.js precaches a shell that
    cannot boot, which shows up as a working app that dies the first time it is
@@ -12,7 +12,7 @@ const V = 'trailcraft-v9';
 const SHELL = [
   './', 'index.html', 'app.css', 'manifest.webmanifest', 'token.js',
   'app.js', 'geo.js', 'field.js', 'sim.js', 'wind.js', 'gesture.js', 'team.js',
-  'design.js', 'card.js', 'vendor/qrcode.js', 'vendor/jsQR.js', 'build.txt',
+  'design.js', 'card.js', 'engine-demo.js', 'vendor/qrcode.js', 'vendor/jsQR.js', 'build.txt',
 ];
 const VENDOR = [
   'https://api.mapbox.com/mapbox-gl-js/v3.14.0/mapbox-gl.js',

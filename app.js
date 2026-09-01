@@ -16,6 +16,7 @@ import {
 } from './team.js';
 import { analyseDesign } from './design.js';
 import { encodeTrail, decodeTrail } from './card.js';
+import { openEngineDemo, stopEngineDemo } from './engine-demo.js';
 
 /* Trailcraft — scent-work training record.
    Map: MapLibre + free OpenFreeMap vector tiles + free AWS Terrarium DEM (no keys).
@@ -25,7 +26,7 @@ import { encodeTrail, decodeTrail } from './card.js';
    an offline copy that fell behind looks identical to the current one — a
    missing feature then reads as a bug. This stamp is how a phone stops being
    able to lie about what it is running. Bump it with every change. */
-const BUILD = '2026-08-28l';
+const BUILD = '2026-08-28m';
 
 const S = {
   sessions: 'tc.sessions', settings: 'tc.settings', team: 'tc.team',
@@ -2370,8 +2371,9 @@ async function handleCard(data) {
 /* ── Views ────────────────────────────────────────────────────────── */
 function show(view) {
   stopScan();
+  stopEngineDemo();
   for (const v of ['viewSessions', 'viewDetail', 'viewSettings', 'viewTeam', 'viewSetup',
-                   'cardModal', 'scanModal']) $(v).hidden = true;
+                   'cardModal', 'scanModal', 'viewEngine']) $(v).hidden = true;
   if (view) $(view).hidden = false;
 }
 
@@ -2607,6 +2609,13 @@ function wire() {
   $('tokenNudge').addEventListener('click', () => {
     fillSettings(); show('viewSettings'); tabTo('settings');
     setTimeout(() => $('mbToken').focus(), 250);
+  });
+
+  /* The client-facing engine demo. Show first, start second: the canvas
+     needs its laid-out size before the ground is painted onto it. */
+  $('btnEngine').addEventListener('click', () => {
+    show('viewEngine');
+    openEngineDemo();
   });
 
   $('btnExportAll').addEventListener('click', () => {
