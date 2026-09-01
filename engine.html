@@ -1,0 +1,641 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
+<meta name="theme-color" content="#0A1014">
+<title>Trailcraft Scent Engine</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=Barlow+Condensed:wght@500;600&display=swap">
+<style>
+/* An instrument, deliberately single-theme: this is a field display read at
+   dawn in a wet field, and a light version of it would be a different object.
+   Every colour is painted explicitly so it holds on any host ground. */
+:root{
+  --ground:#0A1014;          /* deep blue-black, cyan-biased &mdash; not a neutral grey */
+  --panel:rgba(15,23,29,.92);
+  --panel-2:rgba(22,32,40,.72);
+  --rule:rgba(150,190,210,.15);
+  --rule-soft:rgba(150,190,210,.075);
+  --ink:#E9F1F5;
+  --muted:#8397A3;
+  --dim:#5D6E79;
+  --scent:#FFA62B;           /* the one warm thing on a cold instrument */
+  --scent-hot:#FF6B2C;
+  --air:#5EC8F2;
+  --dog:#5FD38A;
+  --alert:#F2705B;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  --sans:"IBM Plex Sans",-apple-system,BlinkMacSystemFont,system-ui,sans-serif;
+  --cond:"Barlow Condensed","IBM Plex Sans",system-ui,sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;overflow:hidden;background:var(--ground);color:var(--ink);
+  font-family:var(--sans);-webkit-font-smoothing:antialiased;overscroll-behavior:none}
+
+#app{display:flex;flex-direction:column;height:100dvh;background:var(--ground)}
+
+/* ── the field ─────────────────────────────────────────── */
+#field{position:relative;flex:1 1 auto;min-height:0;overflow:hidden}
+#c{position:absolute;inset:0;width:100%;height:100%;display:block}
+
+#mark{position:absolute;top:12px;left:13px;pointer-events:none}
+#mark h1{font-family:var(--cond);font-size:15px;font-weight:600;letter-spacing:.22em;
+  text-transform:uppercase;color:var(--ink)}
+#mark p{margin-top:2px;font-family:var(--mono);font-size:9.5px;letter-spacing:.06em;color:var(--dim)}
+
+/* State reads as form, not just number: the chip takes the colour of the regime. */
+#regime{position:absolute;left:13px;bottom:12px;right:13px;
+  background:var(--panel);border:1px solid var(--rule);border-radius:11px;padding:9px 11px;
+  -webkit-backdrop-filter:blur(16px) saturate(1.3);backdrop-filter:blur(16px) saturate(1.3)}
+#regime .top{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+#regime .chip{font-family:var(--cond);font-size:12px;font-weight:600;letter-spacing:.13em;
+  text-transform:uppercase;padding:3px 8px;border-radius:5px;
+  background:rgba(94,200,242,.14);color:var(--air)}
+#regime .chip.up{background:rgba(255,107,44,.16);color:var(--scent-hot)}
+#regime .chip.down{background:rgba(95,211,138,.15);color:var(--dog)}
+#regime .move{font-family:var(--mono);font-size:11px;color:var(--muted)}
+#regime .move b{color:var(--ink);font-weight:500}
+#regime p{margin-top:6px;font-size:11.5px;line-height:1.45;color:var(--muted)}
+#regime p b{color:var(--ink);font-weight:500}
+#regime p b.good{color:var(--dog)}
+#regime p b.bad{color:var(--alert)}
+
+/* ── the deck ──────────────────────────────────────────── */
+#deck{flex:0 0 auto;background:var(--ground);border-top:1px solid var(--rule);
+  padding:10px 13px calc(10px + env(safe-area-inset-bottom,0px));
+  display:flex;flex-direction:column;gap:10px;max-height:56dvh;overflow-y:auto}
+
+.lbl{font-family:var(--cond);font-size:11px;font-weight:600;letter-spacing:.16em;
+  text-transform:uppercase;color:var(--dim)}
+
+/* instruments &mdash; summary before detail */
+#inst{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;
+  background:var(--rule-soft);border:1px solid var(--rule);border-radius:10px;overflow:hidden}
+.cell{background:var(--panel-2);padding:7px 5px;text-align:center}
+.cell i{display:block;font-style:normal;font-family:var(--cond);font-size:10px;font-weight:600;
+  letter-spacing:.12em;text-transform:uppercase;color:var(--dim)}
+.cell b{display:block;margin-top:1px;font-family:var(--mono);font-size:15px;font-weight:500;
+  font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+.cell b s{text-decoration:none;font-size:9px;color:var(--dim);margin-left:1px}
+
+/* layers &mdash; a thumb-friendly scrolling rail, not a desktop corner panel */
+#layers{display:flex;gap:6px;overflow-x:auto;padding-bottom:2px;scrollbar-width:none}
+#layers::-webkit-scrollbar{display:none}
+.ly{flex:0 0 auto;display:flex;align-items:center;gap:6px;min-height:38px;padding:0 11px;
+  border:1px solid var(--rule);border-radius:9px;background:transparent;color:var(--muted);
+  font-family:var(--sans);font-size:12.5px;cursor:pointer;white-space:nowrap}
+.ly .sw{width:8px;height:8px;border-radius:2px;opacity:.5}
+.ly[aria-pressed=true]{background:rgba(150,190,210,.1);color:var(--ink);border-color:rgba(150,190,210,.3)}
+.ly[aria-pressed=true] .sw{opacity:1;box-shadow:0 0 8px currentColor}
+.ly[disabled]{opacity:.35;cursor:default}
+.ly .why{font-family:var(--cond);font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--dim)}
+
+/* transport */
+#transport{display:flex;align-items:center;gap:10px}
+#play{flex:none;width:42px;height:42px;border-radius:50%;border:1px solid var(--rule);
+  background:rgba(150,190,210,.09);color:var(--ink);font-size:13px;cursor:pointer;
+  display:grid;place-items:center}
+#play:active{background:rgba(150,190,210,.2)}
+#clockwrap{flex:none;line-height:1.1;min-width:52px}
+#clockwrap b{display:block;font-family:var(--mono);font-size:14px;font-variant-numeric:tabular-nums}
+#clockwrap i{display:block;font-style:normal;font-family:var(--cond);font-size:10px;
+  letter-spacing:.1em;text-transform:uppercase;color:var(--dim)}
+
+input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:22px;
+  background:transparent;outline:none;cursor:pointer;display:block}
+input[type=range]::-webkit-slider-runnable-track{height:3px;border-radius:2px;background:rgba(150,190,210,.2)}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;height:20px;border-radius:50%;
+  background:var(--ink);border:3px solid var(--ground);margin-top:-8.5px;
+  box-shadow:0 0 0 1px rgba(150,190,210,.4),0 2px 6px rgba(0,0,0,.6)}
+input[type=range]::-moz-range-track{height:3px;border-radius:2px;background:rgba(150,190,210,.2)}
+input[type=range]::-moz-range-thumb{width:16px;height:16px;border-radius:50%;background:var(--ink);
+  border:3px solid var(--ground);box-shadow:0 0 0 1px rgba(150,190,210,.4)}
+input[type=range]:focus-visible::-webkit-slider-thumb{box-shadow:0 0 0 2px var(--air)}
+
+.ctl .row{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.ctl .k{font-size:12px;color:var(--muted)}
+.ctl .v{font-family:var(--mono);font-size:13px;font-variant-numeric:tabular-nums}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px 14px}
+
+/* The differential is the master switch, so it gets the one piece of real
+   chrome on the page: a scale you can read the regime off directly. */
+#dtbar{position:relative;height:4px;border-radius:2px;margin-top:7px;
+  background:linear-gradient(90deg,#2E6F9E 0%,#4E93B4 30%,#5D6E79 50%,#D68A34 72%,#FF6B2C 100%)}
+#dtpin{position:absolute;top:-4px;width:2px;height:12px;background:var(--ink);border-radius:1px;
+  box-shadow:0 0 4px rgba(0,0,0,.9);transition:left .08s linear}
+#dtends{display:flex;justify-content:space-between;margin-top:4px}
+#dtends span{font-family:var(--cond);font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim)}
+
+#foot{font-size:10.5px;line-height:1.5;color:var(--dim);border-top:1px solid var(--rule-soft);padding-top:9px}
+#foot b{color:var(--muted);font-weight:500}
+
+@media (min-width:760px){
+  #app{flex-direction:row-reverse}
+  #deck{flex:0 0 340px;max-height:none;border-top:0;border-left:1px solid var(--rule);
+    padding:16px 16px calc(16px + env(safe-area-inset-bottom,0px))}
+  #layers{flex-wrap:wrap;overflow:visible}
+  .grid2{grid-template-columns:1fr}
+}
+@media (prefers-reduced-motion:reduce){
+  #dtpin{transition:none}
+}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="field">
+    <canvas id="c"></canvas>
+    <div id="mark">
+      <h1>Trailcraft</h1>
+      <p>SCENT ENGINE &middot; SYNTHETIC GROUND</p>
+    </div>
+    <div id="regime">
+      <div class="top">
+        <span class="chip" id="rChip">neutral</span>
+        <span class="move">scent moves <b id="rWord">downwind</b></span>
+      </div>
+      <p id="rText"></p>
+    </div>
+  </div>
+
+  <div id="deck">
+    <div id="inst">
+      <div class="cell"><i>air</i><b id="iAir">&mdash;</b></div>
+      <div class="cell"><i>ground</i><b id="iSoil">&mdash;</b></div>
+      <div class="cell"><i>rain</i><b id="iRain">&mdash;</b></div>
+      <div class="cell"><i>scent life</i><b id="iLife">&mdash;</b></div>
+    </div>
+
+    <div id="layers">
+      <button class="ly" data-l="flow"  aria-pressed="true"><span class="sw" style="background:#5EC8F2;color:#5EC8F2"></span>Wind</button>
+      <button class="ly" data-l="scent" aria-pressed="true"><span class="sw" style="background:#FFA62B;color:#FFA62B"></span>Scent</button>
+      <button class="ly" data-l="pool"  aria-pressed="false"><span class="sw" style="background:#3A84E2;color:#3A84E2"></span>Pooling</button>
+      <button class="ly" data-l="sun"   aria-pressed="false"><span class="sw" style="background:#E8B84C;color:#E8B84C"></span>Sun</button>
+      <button class="ly" data-l="shelter" aria-pressed="false"><span class="sw" style="background:#8B7FD4;color:#8B7FD4"></span>Shelter</button>
+      <button class="ly" data-l="slope" aria-pressed="false"><span class="sw" style="background:#7D8590;color:#7D8590"></span>Slope</button>
+    </div>
+
+    <div id="transport">
+      <button id="play" aria-label="Play">&#9654;</button>
+      <div id="clockwrap"><b id="clock">0:00</b><i id="stage">start</i></div>
+      <input type="range" id="scrub" min="0" max="1000" value="820" aria-label="Session time">
+    </div>
+
+    <div class="ctl">
+      <div class="row"><span class="k">Ground vs air</span><span class="v" id="vDT">+0.0 &deg;C</span></div>
+      <input type="range" id="sDT" min="-6" max="6" step="0.1" value="0" aria-label="Ground versus air temperature">
+      <div id="dtbar"><span id="dtpin"></span></div>
+      <div id="dtends"><span>Scent pools low</span><span>Scent lifts</span></div>
+    </div>
+
+    <div class="grid2">
+      <div class="ctl">
+        <div class="row"><span class="k">Wind</span><span class="v" id="vWind">3.0</span></div>
+        <input type="range" id="sWind" min="0" max="14" step="0.1" value="3" aria-label="Wind speed">
+      </div>
+      <div class="ctl">
+        <div class="row"><span class="k">From</span><span class="v" id="vDir">315&deg;</span></div>
+        <input type="range" id="sDir" min="0" max="359" step="1" value="315" aria-label="Wind direction">
+      </div>
+      <div class="ctl">
+        <div class="row"><span class="k">Humidity</span><span class="v" id="vHum">78%</span></div>
+        <input type="range" id="sHum" min="25" max="100" step="1" value="78" aria-label="Humidity">
+      </div>
+      <div class="ctl">
+        <div class="row"><span class="k">Rain</span><span class="v" id="vRain">0.0</span></div>
+        <input type="range" id="sRain" min="0" max="6" step="0.1" value="0" aria-label="Rainfall">
+      </div>
+    </div>
+
+    <p id="foot">Synthetic terrain, real model. The full app reads elevation from
+      Mapbox and conditions from Open&#8209;Meteo at 15&#8209;minute resolution.
+      <b>Drag ground&#8209;vs&#8209;air below zero and watch the air start running downhill.</b></p>
+  </div>
+</div>
+
+<script>
+'use strict';
+/* The same model that ships in the app \u2014 field.js and sim.js, inlined and
+   running over invented ground. Three forces act on the air: deflection along
+   contours, drainage under an inversion, and shelter in the hollows. */
+
+const N = 150, EXTENT = 420, CELL = EXTENT / N;
+const SESSION = 118, LAY_END = 38, DOG_IN = 62;
+const AIRBORNE = 52, NOSE = 0.28;
+
+/* ── terrain ─────────────────────────────────────────── */
+const H = new Float32Array(N * N);
+const bump = (x, y, cx, cy, r, a) => a * Math.exp(-(((x - cx) ** 2 + (y - cy) ** 2) / r));
+for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+  const x = i / (N - 1), y = j / (N - 1);
+  let h = 19 * (1 - y);
+  h += bump(x, y, 0.24, 0.22, 0.052, 30);
+  h += bump(x, y, 0.79, 0.18, 0.030, 22);
+  h += bump(x, y, 0.60, 0.50, 0.016, 9);
+  h -= bump(x, y, 0.52, 0.80, 0.048, 21);
+  h -= bump(x, y, 0.13, 0.68, 0.026, 11);
+  h += 1.5 * Math.sin(x * 13) * Math.cos(y * 11);
+  H[j * N + i] = h;
+}
+const hAt = (i, j) => H[Math.min(N-1, Math.max(0, j)) * N + Math.min(N-1, Math.max(0, i))];
+const GX = new Float32Array(N*N), GY = new Float32Array(N*N), EXPO = new Float32Array(N*N);
+for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+  GX[j*N+i] = (hAt(i+1,j) - hAt(i-1,j)) / (2*CELL);
+  GY[j*N+i] = (hAt(i,j+1) - hAt(i,j-1)) / (2*CELL);
+  let s = 0, n = 0;
+  for (let d = -6; d <= 6; d += 3) for (let e = -6; e <= 6; e += 3) { s += hAt(i+e, j+d); n++; }
+  EXPO[j*N+i] = H[j*N+i] - s/n;
+}
+function samp(g, x, y) {
+  const fx = Math.min(N-1.001, Math.max(0, x*(N-1))), fy = Math.min(N-1.001, Math.max(0, y*(N-1)));
+  const i = fx|0, j = fy|0, tx = fx-i, ty = fy-j;
+  return (g[j*N+i]*(1-tx) + g[j*N+i+1]*tx)*(1-ty) + (g[(j+1)*N+i]*(1-tx) + g[(j+1)*N+i+1]*tx)*ty;
+}
+
+/* ── conditions ──────────────────────────────────────── */
+const C = { wind: 3, dir: 315, dT: 0, hum: 78, rain: 0, airT: 13.4 };
+
+function stability(dT) {
+  if (dT >  3) return { k:'convective+', mix:1.9, drain:0,   life:0.34, label:'strongly convective', dir:'up',
+    text:'Ground is much warmer than the air. Scent lifts fast and breaks into pockets \u2014 expect the dog high-headed and casting wide.' };
+  if (dT >  1) return { k:'convective', mix:1.4, drain:0, life:0.58, label:'convective', dir:'up',
+    text:'Ground is warmer than the air. Scent rises and disperses; the workable band widens quickly.' };
+  if (dT > -1) return { k:'neutral', mix:1.0, drain:0.1, life:1.0, label:'neutral', dir:'',
+    text:'Ground and air are close. Textbook downwind cone.' };
+  if (dT > -3) return { k:'stable', mix:0.62, drain:0.7, life:1.7, label:'stable', dir:'down',
+    text:'Ground is cooler than the air. A lid on the air \u2014 scent stays low and holds its line.' };
+  return { k:'inversion', mix:0.40, drain:1.0, life:2.6, label:'strong inversion', dir:'down',
+    text:'Strong inversion. Scent hugs the ground and runs downhill into hollows; trails stay workable far longer than usual.' };
+}
+let ST = stability(0);
+
+/* ── the flow field ──────────────────────────────────── */
+function flow(x, y, out) {
+  const to = (C.dir + 180) * Math.PI / 180;
+  let u = Math.sin(to) * C.wind, v = -Math.cos(to) * C.wind;
+  const gx = samp(GX,x,y), gy = samp(GY,x,y), gm = Math.hypot(gx,gy);
+
+  if (gm > 1e-4) {
+    const ux = gx/gm, uy = gy/gm, up = u*ux + v*uy;
+    const k = 0.52 * Math.min(1, gm * 1.7);          // gentle: Somerset, not the Alps
+    u -= k*up*ux; v -= k*up*uy;
+    const cx = -uy, cy = ux, sgn = (u*cx + v*cy) >= 0 ? 1 : -1;
+    u += k*Math.abs(up)*cx*sgn*0.34;
+    v += k*Math.abs(up)*cy*sgn*0.34;
+    if (ST.drain > 0 && C.dT < 0) {                  // cold air slides downhill
+      const d = Math.min(1.6, 2.6*gm*ST.drain*(-C.dT)*0.5);
+      u -= ux*d; v -= uy*d;
+    }
+  }
+  const m = Math.max(0.28, Math.min(1.7, 1 + samp(EXPO,x,y)*0.052));
+  out.u = u*m; out.v = v*m;
+  return out;
+}
+const _f = { u:0, v:0 };
+
+function scentLife() {
+  const fH = 0.42 + C.hum/78, fW = 1/(1 + C.wind/4.2);
+  const fR = C.rain <= 0 ? 1 : C.rain < 0.6 ? 1.25 : 1/(1 + (C.rain-0.6)*1.4);
+  return Math.max(8, 82 * fH * fW * fR * ST.life);
+}
+
+/* Does drainage actually beat the wind over this ground? */
+function regime() {
+  if (ST.drain < 0.3 || C.dT >= -0.6) return 'downwind';
+  let best = 0;
+  for (let y = 0.06; y < 1; y += 0.12) for (let x = 0.06; x < 1; x += 0.12) {
+    const gm = Math.hypot(samp(GX,x,y), samp(GY,x,y));
+    best = Math.max(best, Math.min(1.6, 2.6*gm*ST.drain*(-C.dT)*0.5));
+  }
+  return best > C.wind ? 'downhill' : 'downwind';
+}
+
+/* ── the trail ───────────────────────────────────────── */
+const TRAIL = [];
+{
+  const pts = [[0.10,0.30],[0.24,0.33],[0.36,0.30],[0.47,0.36],[0.56,0.44],
+               [0.66,0.42],[0.75,0.47],[0.83,0.56],[0.88,0.66]];
+  for (let s = 0; s < pts.length-1; s++) {
+    for (let t = 0; t < 1; t += 0.05) {
+      const p = (s+t)/(pts.length-1);
+      TRAIL.push({ x: pts[s][0] + (pts[s+1][0]-pts[s][0])*t,
+                   y: pts[s][1] + (pts[s+1][1]-pts[s][1])*t, born: p*LAY_END });
+    }
+  }
+}
+let DOG = [];
+function buildDog() {
+  DOG = TRAIL.map((p, i) => {
+    const at = DOG_IN + (i/TRAIL.length)*(SESSION-DOG_IN);
+    flow(p.x, p.y, _f);
+    const sp = Math.hypot(_f.u,_f.v);
+    const dm = Math.min(46, sp*2.6*(1 - Math.exp(-(at-p.born)/22)))*1.25;
+    const nx = sp > 1e-3 ? _f.u/sp : 0, ny = sp > 1e-3 ? _f.v/sp : 0;
+    const wob = Math.sin(i*0.42)*5 + Math.sin(i*0.17)*7;
+    return { x: p.x + (nx*dm - ny*wob)/EXTENT, y: p.y + (ny*dm + nx*wob)/EXTENT, t: at };
+  });
+}
+
+/* ── scent particles: continuous ground source ───────────
+   Not puffs blown downwind for the whole trail age \u2014 at 0.8 m/s that would put
+   an 80-minute trail's scent 4 km away. The ground keeps emitting, so what a
+   dog works is a plume re-supplied from the line, tens of metres off it. */
+const SP = [];
+const PER = 5;
+for (const p of TRAIL) for (let k = 0; k < PER; k++) {
+  SP.push({ hx:p.x + (Math.random()-.5)*0.004, hy:p.y + (Math.random()-.5)*0.004,
+            born:p.born, phase:(k + Math.random())/PER, x:p.x, y:p.y, str:0 });
+}
+function advance(t) {
+  const life = scentLife(), mix = Math.max(0.5, ST.mix);
+  for (const s of SP) {
+    const age = t - s.born;
+    if (age < 0) { s.str = 0; continue; }
+    s.str = Math.exp(-age/life) * (1 - s.phase*0.72);
+    if (s.str < 0.02) continue;
+    let x = s.hx, y = s.hy;
+    const secs = s.phase * AIRBORNE / mix, dt = secs/5;
+    for (let i = 0; i < 5; i++) {
+      flow(x, y, _f);
+      x += (_f.u * dt * NOSE)/EXTENT;
+      y += (_f.v * dt * NOSE)/EXTENT;
+    }
+    s.x = x; s.y = y;
+  }
+}
+
+/* ── canvas ──────────────────────────────────────────── */
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const base = document.createElement('canvas'), bctx = base.getContext('2d');
+const fx = document.createElement('canvas'), fctx = fx.getContext('2d');
+const buf = document.createElement('canvas'), ubx = buf.getContext('2d');
+let W = 0, Ht = 0, SC = 1, OX = 0, OY = 0, sprite = null;
+
+function makeSprite(size = 64) {
+  const c = document.createElement('canvas'); c.width = c.height = size;
+  const x = c.getContext('2d'), r = size/2;
+  const g = x.createRadialGradient(r,r,0,r,r,r);
+  g.addColorStop(0, 'rgba(255,201,96,1)');
+  g.addColorStop(0.45, 'rgba(247,148,44,0.45)');
+  g.addColorStop(1, 'rgba(228,96,36,0)');
+  x.fillStyle = g; x.fillRect(0,0,size,size);
+  return c;
+}
+function resize() {
+  const dpr = Math.min(devicePixelRatio || 1, 2);
+  const r = document.getElementById('field').getBoundingClientRect();
+  W = Math.max(1, r.width); Ht = Math.max(1, r.height);
+  for (const c of [cv, base, fx, buf]) { c.width = W*dpr; c.height = Ht*dpr; }
+  for (const c of [ctx, bctx, fctx, ubx]) c.setTransform(dpr,0,0,dpr,0,0);
+  SC = Math.min(W, Ht) * 0.96; OX = (W-SC)/2; OY = (Ht-SC)/2;
+  sprite = sprite || makeSprite();
+  seedWind(); drawBase();
+}
+const px = x => OX + x*SC, py = y => OY + y*SC;
+
+/* ── base: hillshade, contours, the chosen layer ─────── */
+let LAYER = { flow:true, scent:true, pool:false, sun:false, shelter:false, slope:false };
+function drawBase() {
+  bctx.clearRect(0,0,W,Ht);
+  bctx.fillStyle = '#0A1014'; bctx.fillRect(0,0,W,Ht);
+
+  const R = 260, img = bctx.createImageData(R,R), d = img.data;
+  const az = 128*Math.PI/180, el = 21*Math.PI/180;
+  const lx = Math.sin(az)*Math.cos(el), ly = -Math.cos(az)*Math.cos(el), lz = Math.sin(el);
+  const e = 1/(R-1);
+
+  for (let j = 0; j < R; j++) for (let i = 0; i < R; i++) {
+    const x = i/(R-1), y = j/(R-1), o = (j*R+i)*4;
+    const gx = samp(GX,x,y), gy = samp(GY,x,y), gm = Math.hypot(gx,gy), ex = samp(EXPO,x,y);
+    const nz = 1/Math.sqrt(1+gx*gx+gy*gy);
+    const il = Math.max(0, (-gx*nz)*lx + (-gy*nz)*ly + nz*lz);
+    const sh = 0.10 + Math.pow(il, 0.9)*0.74;
+    let r = 16+sh*70, g = 22+sh*80, b = 28+sh*94;
+
+    if (LAYER.sun) { const t = Math.pow(il,0.8)*0.8;
+      r = r*(1-t)+250*t; g = g*(1-t)+186*t; b = b*(1-t)+66*t; }
+    if (LAYER.slope) { const t = Math.min(1, gm*3.4)*0.7;
+      r = r*(1-t)+190*t; g = g*(1-t)+200*t; b = b*(1-t)+214*t; }
+    if (LAYER.shelter) { flow(x,y,_f);
+      const t = Math.max(0, 1 - Math.hypot(_f.u,_f.v)/Math.max(0.2,C.wind))*0.8;
+      r = r*(1-t)+128*t; g = g*(1-t)+116*t; b = b*(1-t)+212*t; }
+    if (LAYER.pool) {
+      let div = 0;
+      flow(x+e,y,_f); div += _f.u; flow(x-e,y,_f); div -= _f.u;
+      flow(x,y+e,_f); div += _f.v; flow(x,y-e,_f); div -= _f.v;
+      const conv = Math.max(0,-div)*0.5 + Math.max(0,-ex)*0.028;
+      const t = Math.min(1, conv*ST.drain*1.5);
+      r = r*(1-t)+58*t; g = g*(1-t)+132*t; b = b*(1-t)+226*t;
+    }
+    d[o]=r; d[o+1]=g; d[o+2]=b; d[o+3]=255;
+  }
+  const tmp = document.createElement('canvas'); tmp.width = tmp.height = R;
+  tmp.getContext('2d').putImageData(img,0,0);
+  bctx.drawImage(tmp, px(0), py(0), SC, SC);
+
+  // contours by marching squares \u2014 terrain has to read as terrain
+  bctx.lineWidth = 1;
+  for (let lv = -16; lv <= 44; lv += 4) {
+    bctx.strokeStyle = (lv % 20 === 0) ? 'rgba(190,220,235,0.14)' : 'rgba(190,220,235,0.06)';
+    bctx.beginPath();
+    for (let j = 0; j < N-1; j += 1) for (let i = 0; i < N-1; i += 1) {
+      const a = H[j*N+i], b2 = H[j*N+i+1], c = H[(j+1)*N+i+1], d2 = H[(j+1)*N+i], hit = [];
+      if ((a-lv)*(b2-lv) < 0) hit.push([i + (lv-a)/(b2-a), j]);
+      if ((b2-lv)*(c-lv) < 0) hit.push([i+1, j + (lv-b2)/(c-b2)]);
+      if ((d2-lv)*(c-lv) < 0) hit.push([i + (lv-d2)/(c-d2), j+1]);
+      if ((a-lv)*(d2-lv) < 0) hit.push([i, j + (lv-a)/(d2-a)]);
+      if (hit.length === 2) {
+        bctx.moveTo(px(hit[0][0]/(N-1)), py(hit[0][1]/(N-1)));
+        bctx.lineTo(px(hit[1][0]/(N-1)), py(hit[1][1]/(N-1)));
+      }
+    }
+    bctx.stroke();
+  }
+  bctx.strokeStyle = 'rgba(190,220,235,0.13)';
+  bctx.strokeRect(px(0), py(0), SC, SC);
+}
+
+/* ── wind particles ──────────────────────────────────── */
+let WP = [];
+function seedWind() {
+  const n = Math.round(Math.min(1600, (W*Ht)/620));
+  WP = Array.from({length:n}, () => ({ x:Math.random(), y:Math.random(),
+    age:Math.random()*40, max:28 + Math.random()*38 }));
+}
+function stepWind() {
+  fctx.globalCompositeOperation = 'destination-out';
+  fctx.fillStyle = 'rgba(0,0,0,0.2)';
+  fctx.fillRect(0,0,W,Ht);
+  fctx.globalCompositeOperation = 'lighter';
+  if (!LAYER.flow) return;
+
+  fctx.lineWidth = 1.1; fctx.lineCap = 'round';
+  fctx.save();
+  fctx.beginPath(); fctx.rect(px(0), py(0), SC, SC); fctx.clip();
+  for (const p of WP) {
+    flow(p.x, p.y, _f);
+    const sp = Math.hypot(_f.u,_f.v), x0 = px(p.x), y0 = py(p.y);
+    p.x += (_f.u/EXTENT)*1.3; p.y += (_f.v/EXTENT)*1.3; p.age++;
+    const t = Math.min(1, sp/9);
+    fctx.strokeStyle = `rgba(${72+t*150},${180+t*40},${242-t*90},${Math.min(.5,.12+sp*.05)})`;
+    fctx.beginPath(); fctx.moveTo(x0,y0); fctx.lineTo(px(p.x), py(p.y)); fctx.stroke();
+    if (p.age > p.max || p.x < -.04 || p.x > 1.04 || p.y < -.04 || p.y > 1.04) {
+      p.x = Math.random(); p.y = Math.random(); p.age = 0;
+    }
+  }
+  fctx.restore();
+}
+
+/* ── scent + tracks ──────────────────────────────────── */
+function drawScent() {
+  if (!LAYER.scent) return;
+  ubx.clearRect(0,0,W,Ht);
+  ubx.globalCompositeOperation = 'lighter';
+  let drawn = 0;
+  for (const s of SP) {
+    if (s.str < 0.02) continue;
+    const rad = (4 + s.phase*18*ST.mix) * (SC/620) + 3;
+    ubx.globalAlpha = Math.min(0.95, s.str*0.9);
+    ubx.drawImage(sprite, px(s.x)-rad, py(s.y)-rad, rad*2, rad*2);
+    drawn++;
+  }
+  ubx.globalAlpha = 1; ubx.globalCompositeOperation = 'source-over';
+  if (drawn) { ctx.globalAlpha = 0.9; ctx.drawImage(buf,0,0,W,Ht); ctx.globalAlpha = 1; }
+}
+function drawTracks(t) {
+  const laid = TRAIL.filter(p => p.born <= t);
+  if (laid.length > 1) {
+    ctx.strokeStyle = 'rgba(233,241,245,.85)'; ctx.lineWidth = 1.8;
+    ctx.setLineDash([5,4]); ctx.lineJoin = 'round';
+    ctx.beginPath(); laid.forEach((p,i) => i ? ctx.lineTo(px(p.x),py(p.y)) : ctx.moveTo(px(p.x),py(p.y)));
+    ctx.stroke(); ctx.setLineDash([]);
+  }
+  const worked = DOG.filter(p => p.t <= t);
+  if (worked.length > 1) {
+    ctx.strokeStyle = 'rgba(95,211,138,.95)'; ctx.lineWidth = 2.3; ctx.lineJoin = 'round';
+    ctx.beginPath(); worked.forEach((p,i) => i ? ctx.lineTo(px(p.x),py(p.y)) : ctx.moveTo(px(p.x),py(p.y)));
+    ctx.stroke();
+  }
+  const dot = (p, col) => {
+    ctx.save(); ctx.shadowColor = col; ctx.shadowBlur = 11; ctx.fillStyle = col;
+    ctx.beginPath(); ctx.arc(px(p.x), py(p.y), 4.4, 0, 6.2832); ctx.fill(); ctx.restore();
+  };
+  if (t <= LAY_END && laid.length) dot(laid[laid.length-1], '#E9F1F5');
+  if (worked.length) {
+    const d = worked[worked.length-1], h = worked[Math.max(0, worked.length-4)];
+    ctx.strokeStyle = 'rgba(233,241,245,.3)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(px(h.x),py(h.y)); ctx.lineTo(px(d.x),py(d.y)); ctx.stroke();
+    dot(h, '#5EC8F2'); dot(d, '#5FD38A');
+  }
+}
+
+/* ── loop ────────────────────────────────────────────── */
+let T = 82, playing = false, lastAdv = -1;
+function frame(now) {
+  if (playing) {
+    T += 0.32;
+    if (T >= SESSION) { T = SESSION; setPlaying(false); }
+    setTime(T, true);
+  }
+  if (T !== lastAdv) { advance(T); lastAdv = T; }
+  stepWind();
+  ctx.clearRect(0,0,W,Ht);
+  ctx.drawImage(base,0,0,W,Ht);
+  ctx.drawImage(fx,0,0,W,Ht);
+  drawScent();
+  drawTracks(T);
+  requestAnimationFrame(frame);
+}
+
+/* ── UI ──────────────────────────────────────────────── */
+const $ = id => document.getElementById(id);
+const COMPASS = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
+
+function setTime(t, fromPlay) {
+  T = Math.max(0, Math.min(SESSION, t));
+  if (!fromPlay) lastAdv = -1;
+  $('scrub').value = Math.round(T/SESSION*1000);
+  const m = Math.floor(T);
+  $('clock').textContent = `${m}:${String(Math.floor((T-m)*60)).padStart(2,'0')}`;
+  $('stage').textContent = T < 0.5 ? 'start' : T <= LAY_END ? 'laying' : T < DOG_IN ? 'ageing' : 'dog working';
+}
+function setPlaying(v) { playing = v; $('play').textContent = v ? '\u275A\u275A' : '\u25B6';
+  $('play').setAttribute('aria-label', v ? 'Pause' : 'Play'); }
+
+function refresh(rebuild) {
+  ST = stability(C.dT);
+  const life = scentLife(), soil = C.airT + C.dT, word = regime();
+
+  $('vWind').textContent = C.wind.toFixed(1);
+  $('vDir').textContent  = `${C.dir}\u00B0 ${COMPASS[Math.round(C.dir/22.5)%16]}`;
+  $('vDT').textContent   = `${C.dT >= 0 ? '+' : ''}${C.dT.toFixed(1)} \u00B0C`;
+  $('vHum').textContent  = `${C.hum}%`;
+  $('vRain').textContent = C.rain.toFixed(1);
+  $('dtpin').style.left  = `${(C.dT+6)/12*100}%`;
+
+  $('iAir').innerHTML  = `${C.airT.toFixed(1)}<s>\u00B0C</s>`;
+  $('iSoil').innerHTML = `${soil.toFixed(1)}<s>\u00B0C</s>`;
+  $('iRain').innerHTML = `${C.rain.toFixed(1)}<s>mm</s>`;
+  $('iLife').innerHTML = `${Math.round(life)}<s>min</s>`;
+
+  const chip = $('rChip');
+  chip.textContent = ST.label;
+  chip.className = 'chip' + (ST.dir ? ' ' + ST.dir : '');
+  $('rWord').textContent = word;
+
+  // Rain is the counterintuitive one: drizzle is the best condition of the week.
+  const rainNote = C.rain <= 0 ? ''
+    : C.rain < 0.6 ? ' <b class="good">Light rain is refreshing the surface</b> \u2014 scent is better than it looks.'
+    : ' <b class="bad">Heavy rain is washing scent off the ground.</b>';
+  $('rText').innerHTML = ST.text + rainNote;
+
+  // A layer that isn't a factor today says so, rather than inventing structure.
+  const poolable = ST.drain > 0.3 && C.dT < -0.6;
+  const pb = document.querySelector('[data-l=pool]');
+  pb.disabled = !poolable;
+  let why = pb.querySelector('.why');
+  if (!poolable) {
+    if (!why) { why = document.createElement('span'); why.className = 'why'; pb.appendChild(why); }
+    why.textContent = 'not today';
+    if (LAYER.pool) { LAYER.pool = false; pb.setAttribute('aria-pressed','false'); }
+  } else if (why) why.remove();
+
+  if (rebuild !== false) { buildDog(); drawBase(); }
+  lastAdv = -1;
+}
+
+$('play').onclick = () => { if (T >= SESSION) setTime(0); setPlaying(!playing); };
+$('scrub').oninput = e => { setPlaying(false); setTime(+e.target.value/1000*SESSION); };
+
+const bind = (id, key, rebuild) => {
+  $(id).addEventListener('input', e => { C[key] = +e.target.value; refresh(rebuild); });
+};
+bind('sWind','wind'); bind('sDir','dir'); bind('sDT','dT');
+bind('sHum','hum', false); bind('sRain','rain', false);
+
+document.querySelectorAll('.ly').forEach(b => b.onclick = () => {
+  if (b.disabled) return;
+  const k = b.dataset.l, v = b.getAttribute('aria-pressed') !== 'true';
+  b.setAttribute('aria-pressed', String(v));
+  LAYER[k] = v;
+  if (v && ['pool','sun','shelter','slope'].includes(k)) {
+    for (const o of ['pool','sun','shelter','slope']) if (o !== k) {
+      LAYER[o] = false;
+      document.querySelector(`[data-l=${o}]`).setAttribute('aria-pressed','false');
+    }
+  }
+  drawBase();
+});
+
+addEventListener('resize', () => { resize(); refresh(false); });
+if (window.visualViewport) visualViewport.addEventListener('resize', () => { resize(); refresh(false); });
+
+resize();
+refresh();
+setTime(82);
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
