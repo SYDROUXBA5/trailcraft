@@ -25,7 +25,7 @@ import { encodeTrail, decodeTrail } from './card.js';
    an offline copy that fell behind looks identical to the current one — a
    missing feature then reads as a bug. This stamp is how a phone stops being
    able to lie about what it is running. Bump it with every change. */
-const BUILD = '2026-08-28i';
+const BUILD = '2026-08-28j';
 
 const S = {
   sessions: 'tc.sessions', settings: 'tc.settings', team: 'tc.team',
@@ -101,6 +101,11 @@ const toast = (msg) => {
 /* ── Map ──────────────────────────────────────────────────────────── */
 const EMPTY = { type: 'FeatureCollection', features: [] };
 let map, mapReady = false;
+/* Which GL library owns the current map. EVERYTHING constructed for the map —
+   controls, bounds — must come from the same library: a Mapbox control's
+   onAdd() calls Mapbox-only internals on the map it is given, and handing it
+   a MapLibre map crashes the whole boot. */
+let GL = mapboxgl;
 
 // Last data pushed to each source. A style swap wipes sources, so keep a copy.
 const srcData = { drift: EMPTY, runner: EMPTY, dog: EMPTY, wps: EMPTY, design: EMPTY };
@@ -127,7 +132,7 @@ function buildMap() {
      Mapbox-only extras (terrain, fog, 3D objects) are already gated on the
      token. When a token arrives later, the app reloads into the Mapbox path. */
   const noToken = !settings.mbToken;
-  const GL = (noToken && typeof maplibregl !== 'undefined') ? maplibregl : mapboxgl;
+  GL = (noToken && typeof maplibregl !== 'undefined') ? maplibregl : mapboxgl;
   if (GL === mapboxgl) mapboxgl.accessToken = settings.mbToken || 'pk.tokenless';
   map = new GL.Map({
     container: 'map',
@@ -140,8 +145,8 @@ function buildMap() {
     setTimeout(() =>
       toast('Basic map — paste your Mapbox token in Settings for satellite & 3D'), 1200);
   }
-  map.addControl(new mapboxgl.NavigationControl({ visualizePitch: true }), 'top-right');
-  map.addControl(new mapboxgl.GeolocateControl({
+  map.addControl(new GL.NavigationControl({ visualizePitch: true }), 'top-right');
+  map.addControl(new GL.GeolocateControl({
     positionOptions: { enableHighAccuracy: true }, trackUserLocation: true, showAccuracyCircle: true,
   }), 'top-right');
 
@@ -378,7 +383,7 @@ function setSrc(id, data) {
 function fitTo(...groups) {
   const pts = groups.flat().filter(Boolean);
   if (pts.length < 2 || !mapReady) return;
-  const b = new mapboxgl.LngLatBounds();
+  const b = new GL.LngLatBounds();
   pts.forEach(p => b.extend([p.lon, p.lat]));
   map.fitBounds(b, { padding: 70, pitch: 62, duration: 900 });
 }
