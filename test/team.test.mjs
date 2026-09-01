@@ -113,10 +113,11 @@ t('backfillClasses: classes old sessions from stored timestamps, once', () => {
   assert.equal(backfillClasses(past), 0, 'second run finds nothing — idempotent');
 });
 
-t('levelLabel: labels the known levels, defaults the unknown', () => {
-  assert.equal(levelLabel('advanced'), 'Advanced');
-  assert.equal(levelLabel('bogus'), 'Novice');
-  assert.equal(levelLabel(undefined), 'Novice');
+t('levelLabel: labels speak the trail-class vocabulary, defaults to Hot', () => {
+  assert.equal(levelLabel('cold'), 'Cold');
+  assert.equal(levelLabel('warm'), 'Warm');
+  assert.equal(levelLabel('bogus'), 'Hot');
+  assert.equal(levelLabel(undefined), 'Hot');
 });
 
 console.log(`\n${pass} passed total`);

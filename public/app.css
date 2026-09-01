@@ -380,7 +380,10 @@ input[type="range"] { width: 100%; accent-color: var(--blue); height: 34px; }
 }
 .team-card .who { min-width: 0; flex: 1; }
 .team-card h3 { margin: 0; font-size: 15.5px; font-weight: 700; }
-.team-card .lvl { font-size: 11.5px; color: var(--dim); }
+.team-card .lvl { font-size: 11.5px; color: var(--dim); font-weight: 600; }
+.team-card .lvl.hot  { color: var(--hot); }
+.team-card .lvl.warm { color: var(--runner); }
+.team-card .lvl.cold { color: var(--drift); }
 .team-card .card-meta { margin-top: 7px; }
 .team-card[data-dogtrails]:active { border-color: var(--blue); }
 

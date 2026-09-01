@@ -25,7 +25,7 @@ import { encodeTrail, decodeTrail } from './card.js';
    an offline copy that fell behind looks identical to the current one — a
    missing feature then reads as a bug. This stamp is how a phone stops being
    able to lie about what it is running. Bump it with every change. */
-const BUILD = '2026-08-28h';
+const BUILD = '2026-08-28i';
 
 const S = {
   sessions: 'tc.sessions', settings: 'tc.settings', team: 'tc.team',
@@ -67,6 +67,13 @@ if (backfillClasses(sessions)) save(S.sessions, sessions);
 /* Who holds the line and who runs it. One handler per phone — this is a
    personal field record, not an account system. */
 let team = { handler: null, dogs: [], lastDog: null, ...load(S.team, {}) };
+/* Levels were renamed into the trail-class vocabulary — carry old rosters over. */
+{
+  const RENAME = { novice: 'hot', intermediate: 'warm', advanced: 'cold' };
+  let touched = false;
+  for (const d of team.dogs) if (RENAME[d.level]) { d.level = RENAME[d.level]; touched = true; }
+  if (touched) { try { save(S.team, team); } catch { /* photos near quota — keep going */ } }
+}
 const dogById = (id) => team.dogs.find(d => d.id === id);
 const activeDog = () =>
   dogById(team.lastDog) || team.dogs[0] || null;
@@ -2075,7 +2082,7 @@ function renderTeam() {
         ${avatarHtml(d, 'big')}
         <div class="who">
           <h3>${esc(d.name)}</h3>
-          <div class="lvl">${levelLabel(d.level)}</div>
+          <div class="lvl ${esc(d.level)}">${levelLabel(d.level)} trails</div>
           <div class="card-meta">
             <span class="pill dog">${st.trails} trail${st.trails === 1 ? '' : 's'}</span>
             ${['hot', 'warm', 'cold'].map(k =>
@@ -2120,7 +2127,7 @@ function openSetup(first = false) {
     dogs: team.dogs.length
       ? team.dogs.map(d => ({ ...d }))
       // Seed from the old single dog-name setting, so nothing typed is retyped.
-      : [{ id: `d${Date.now()}`, name: settings.dogName || '', level: 'novice', photo: null }],
+      : [{ id: `d${Date.now()}`, name: settings.dogName || '', level: 'hot', photo: null }],
   };
   $('setupTitle').textContent = first ? 'Welcome — your team' : 'Edit team';
   $('setupSkip').textContent = first ? 'Later' : 'Cancel';
@@ -2505,7 +2512,7 @@ function wire() {
     setup.handler.name = e.target.value; paintHandlerAvatar();
   });
   $('btnAddDog').addEventListener('click', () => {
-    setup.dogs.push({ id: `d${Date.now()}_${setup.dogs.length}`, name: '', level: 'novice', photo: null });
+    setup.dogs.push({ id: `d${Date.now()}_${setup.dogs.length}`, name: '', level: 'hot', photo: null });
     renderDogRows();
   });
   $('dogRows').addEventListener('input', (e) => {
