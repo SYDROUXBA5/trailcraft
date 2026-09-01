@@ -25,7 +25,7 @@ import { encodeTrail, decodeTrail } from './card.js';
    an offline copy that fell behind looks identical to the current one — a
    missing feature then reads as a bug. This stamp is how a phone stops being
    able to lie about what it is running. Bump it with every change. */
-const BUILD = '2026-08-28k';
+const BUILD = '2026-08-28l';
 
 const S = {
   sessions: 'tc.sessions', settings: 'tc.settings', team: 'tc.team',
@@ -1024,6 +1024,19 @@ class ScentOverlay {
     bctx.clearRect(0, 0, this.w, this.h);
     bctx.globalCompositeOperation = 'lighter';
 
+    /* Pixels per metre at the view centre. Sprites are METRIC — a puff of
+       scent is metres wide, not pixels wide. Drawn in pixels they turn into a
+       necklace of glowing beads the moment the map zooms out, because the
+       real drift compresses while every bead stays fat. Clamped so distance
+       still leaves a visible thread and close-up does not bloom into fog. */
+    let ppm = 1;
+    try {
+      const c = this.map.getCenter();
+      const o = this.map.project(c);
+      const e = this.map.project([c.lng + 1 / (111320 * Math.cos(c.lat * Math.PI / 180) || 1), c.lat]);
+      ppm = Math.hypot(e.x - o.x, e.y - o.y) || 1;
+    } catch { /* map not ready — pixel fallback */ }
+
     let drawn = 0;
     for (const s of parts) {
       if (s.str < 0.02) continue;
@@ -1033,7 +1046,8 @@ class ScentOverlay {
 
       // Spread grows with how long the particle has been airborne, and faster
       // when the air is convective. This width IS the uncertainty.
-      const rad = 5 + s.phase * 20 * mix;
+      const radM = 1.6 + s.phase * 7.5 * mix;
+      const rad = Math.max(2.2, Math.min(28, radM * ppm));
       bctx.globalAlpha = Math.min(0.95, s.str * 0.9);
       bctx.drawImage(this.sprite, p.x - rad, p.y - rad, rad * 2, rad * 2);
       drawn++;
@@ -1247,7 +1261,19 @@ function liveFrame(now) {
    ground. So when there is nothing left, it says so and says why. */
 function paintScentState() {
   const el = $('scentState');
-  if (!LIVE.on || !LIVE.sim || !LIVE.wx) { el.hidden = true; return; }
+  if (!LIVE.on || !LIVE.sim) { el.hidden = true; return; }
+
+  /* No weather is the one state that MUST explain itself: without wind the
+     particles sit on the laid line, which looks like a broken plume. */
+  if (!LIVE.wx) {
+    el.hidden = false;
+    el.classList.remove('cold');
+    el.classList.toggle('below-hud', !$('hud').hidden);
+    el.innerHTML = `<span class="k">Scent</span>
+       No weather reading yet — showing the laid line with <b>no drift</b>.
+       It joins as soon as a forecast loads.`;
+    return;
+  }
 
   const live = LIVE.sim.parts.reduce((n, p) => n + (p.str >= 0.02 ? 1 : 0), 0);
   const life = Math.round(scentLife(LIVE.wx, LIVE.st));
