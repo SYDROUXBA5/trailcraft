@@ -21,11 +21,15 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const pub = (f) => readFileSync(join(root, 'public', f), 'utf8');
 
 /* Dependency order: roots first, then their dependents, app last. */
-const MODULES = ['geo', 'field', 'sim', 'gesture', 'team', 'design', 'card', 'wind', 'demo'];
+const MODULES = ['geo', 'field', 'sim', 'gesture', 'team', 'design', 'card', 'wind', 'demo', 'engine-demo'];
 
 /** Inline-script safety: a literal "</script>" inside JS would end the tag.
     The escape is invisible at runtime (identical string value). */
 const safe = (js) => js.replace(/<\/script/gi, '<\\/script');
+
+/** Namespace identifier for a module file name — hyphens are not valid in
+    JS identifiers, so engine-demo becomes __engine_demo. */
+const ns = (name) => '__' + name.replace(/-/g, '_');
 
 /** One module → an IIFE namespace. Imports become destructuring, exports are
     collected and returned. */
@@ -33,8 +37,8 @@ function toNamespace(name) {
   let src = pub(`${name}.js`);
   const preludes = [];
 
-  src = src.replace(/import\s*\{([\s\S]*?)\}\s*from\s*'\.\/(\w+)\.js';?/g, (_, names, dep) => {
-    preludes.push(`const {${names.replace(/\s+/g, ' ').trim()}} = __${dep};`);
+  src = src.replace(/import\s*\{([\s\S]*?)\}\s*from\s*'\.\/([\w-]+)\.js';?/g, (_, names, dep) => {
+    preludes.push(`const {${names.replace(/\s+/g, ' ').trim()}} = ${ns(dep)};`);
     return '';
   });
 
@@ -46,7 +50,7 @@ function toNamespace(name) {
   if (/^export\s/m.test(src)) throw new Error(`${name}.js: unhandled export form`);
   if (!exported.length) throw new Error(`${name}.js: no exports found`);
 
-  return `const __${name} = (() => {\n${preludes.join('\n')}\n${src}\nreturn { ${exported.join(', ')} };\n})();`;
+  return `const ${ns(name)} = (() => {\n${preludes.join('\n')}\n${src}\nreturn { ${exported.join(', ')} };\n})();`;
 }
 
 /** app.js is the program, not a library: imports become top-level
@@ -54,8 +58,8 @@ function toNamespace(name) {
 function appBody() {
   let src = pub('app.js');
   const preludes = [];
-  src = src.replace(/import\s*\{([\s\S]*?)\}\s*from\s*'\.\/(\w+)\.js';?/g, (_, names, dep) => {
-    preludes.push(`const {${names.replace(/\s+/g, ' ').trim()}} = __${dep};`);
+  src = src.replace(/import\s*\{([\s\S]*?)\}\s*from\s*'\.\/([\w-]+)\.js';?/g, (_, names, dep) => {
+    preludes.push(`const {${names.replace(/\s+/g, ' ').trim()}} = ${ns(dep)};`);
     return '';
   });
   src = src.replace(/await\s+import\('\.\/demo\.js'\)/g, '__demo');

@@ -197,6 +197,50 @@
   <button id="drawSave" class="record">Save trail</button>
 </section>
 
+<!-- ── The scent engine, explained ───────────────────────────────────
+     A client-facing demo: synthetic hillside, the app's REAL physics. The
+     white dashes are the laid trail; the amber is where the scent actually
+     sits; the streaks are the air moving over the ground. -->
+<section id="viewEngine" class="panel" hidden>
+  <header class="panel-head">
+    <h1>The scent engine</h1>
+    <button class="ghost" data-close>Close</button>
+  </header>
+  <div class="detail">
+    <canvas id="engCanvas" class="eng-canvas"></canvas>
+    <div id="engStats" class="card-meta eng-stats"></div>
+    <p id="engVerdict" class="hint eng-verdict"></p>
+
+    <div class="field">
+      <label for="engDT">Ground vs air <b id="engDTVal">+0.0 °C</b></label>
+      <input id="engDT" type="range" min="-5" max="5" step="0.5" value="0">
+      <p class="hint">Colder ground pins scent low and sends it <b>downhill</b>;
+        warmer ground lifts it and shortens its life.</p>
+    </div>
+    <div class="field">
+      <label for="engWind">Wind <b id="engWindVal">3.0 m/s</b></label>
+      <input id="engWind" type="range" min="0" max="9" step="0.1" value="3">
+    </div>
+    <div class="field">
+      <label for="engFrom">From <b id="engFromVal">315° NW</b></label>
+      <input id="engFrom" type="range" min="0" max="359" step="1" value="315">
+    </div>
+    <div class="field">
+      <label for="engHum">Humidity <b id="engHumVal">78%</b></label>
+      <input id="engHum" type="range" min="30" max="100" step="1" value="78">
+    </div>
+    <div class="field">
+      <label for="engRain">Rain <b id="engRainVal">0.0 mm</b></label>
+      <input id="engRain" type="range" min="0" max="4" step="0.1" value="0">
+      <p class="hint">A light shower refreshes scent; a downpour strips it.</p>
+    </div>
+
+    <p class="hint">Synthetic hillside, real model — the same code that reads
+      your recorded trails, with real elevation and real 15-minute weather.
+      The trail here is 22 minutes old.</p>
+  </div>
+</section>
+
 <!-- ── Trail Card: share ─────────────────────────────────────────────
      A trail as a single QR — instructor's phone to student's phone in a
      car park with zero bars. The data IS the code; no server touches it. -->
@@ -326,6 +370,11 @@
       <input id="mbToken" type="text" placeholder="pk.eyJ1…">
       <p class="hint">Free tier is 25,000 monthly users. Restrict this token to your own URLs in your Mapbox account — public tokens ship inside the page.</p>
     </div>
+
+    <h2 class="sec">The engine</h2>
+    <button class="record" id="btnEngine">How the scent engine works</button>
+    <p class="hint">An interactive hillside running the app's real physics —
+      made for showing a client why the dog works where it works.</p>
 
     <h2 class="sec">Data</h2>
     <div class="row-btns">

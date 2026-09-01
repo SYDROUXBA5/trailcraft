@@ -408,6 +408,15 @@ input[type="range"] { width: 100%; accent-color: var(--blue); height: 34px; }
 .klass-btns .klass.warm { border-color: var(--runner); background: var(--sheet); box-shadow: var(--shadow-soft); }
 .klass-btns .klass.cold { border-color: var(--drift); background: var(--sheet); box-shadow: var(--shadow-soft); }
 
+/* ── Engine demo ────────────────────────────────────────────────────── */
+.eng-canvas {
+  width: 100%; aspect-ratio: 1; display: block;
+  border-radius: var(--radius); box-shadow: var(--shadow-soft);
+  background: #b6bfa9;
+}
+.eng-stats { margin-top: 10px; }
+.eng-verdict { min-height: 34px; }
+
 /* ── Trail Cards ────────────────────────────────────────────────────── */
 .card-share { display: flex; flex-direction: column; align-items: center; text-align: center; }
 /* A QR is black modules on white by contract — the plate stays light in every
