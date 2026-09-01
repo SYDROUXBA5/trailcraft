@@ -21,7 +21,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const pub = (f) => readFileSync(join(root, 'public', f), 'utf8');
 
 /* Dependency order: roots first, then their dependents, app last. */
-const MODULES = ['geo', 'field', 'sim', 'gesture', 'team', 'design', 'card', 'wind', 'demo', 'engine-demo'];
+const MODULES = ['geo', 'field', 'sim', 'gesture', 'team', 'design', 'card', 'wind', 'demo'];
 
 /** Inline-script safety: a literal "</script>" inside JS would end the tag.
     The escape is invisible at runtime (identical string value). */
@@ -93,6 +93,11 @@ html = html.replace(
 html = html.replace(/<script src="vendor\/qrcode\.js"><\/script>/, () => `<script>\n${safe(pub('vendor/qrcode.js'))}\n</script>`);
 html = html.replace(/<script src="vendor\/jsQR\.js"><\/script>/, () => `<script>\n${safe(pub('vendor/jsQR.js'))}\n</script>`);
 html = html.replace(/<script src="app\.js" type="module"><\/script>/, () => `<script type="module">\n${safe(bundle)}\n</script>`);
+
+/* The engine demo travels inside an inert <template>: scripts in template
+   content never run, and the app lifts it into the iframe as srcdoc when
+   opened — a file build has no sibling pages for an iframe src to find. */
+html = html.replace('</body>', () => `<template id="engSrc">\n${pub('engine.html')}\n</template>\n</body>`);
 
 for (const leftover of ['href="app.css"', 'src="app.js"', 'vendor/qrcode.js"', 'vendor/jsQR.js"']) {
   if (html.includes(leftover)) throw new Error(`assembly incomplete: ${leftover} still referenced`);

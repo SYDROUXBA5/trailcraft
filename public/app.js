@@ -16,7 +16,21 @@ import {
 } from './team.js';
 import { analyseDesign } from './design.js';
 import { encodeTrail, decodeTrail } from './card.js';
-import { openEngineDemo, stopEngineDemo } from './engine-demo.js';
+
+/* The engine demo is the original instrument page, framed whole. Blanking the
+   frame on close is what stops its render loop — an unloaded page burns
+   nothing, and the next open starts it at its 82:00 dog-working moment. */
+function openEngineDemo() {
+  const f = $('engFrame'), inline = $('engSrc');
+  if (inline) f.srcdoc = inline.innerHTML;     // single-file build carries it inline
+  else f.src = 'engine.html';
+}
+function stopEngineDemo() {
+  const f = $('engFrame');
+  if (!f) return;
+  if (f.hasAttribute('srcdoc')) f.removeAttribute('srcdoc');
+  if (f.getAttribute('src')) f.src = 'about:blank';
+}
 
 /* Trailcraft — scent-work training record.
    Map: MapLibre + free OpenFreeMap vector tiles + free AWS Terrarium DEM (no keys).
@@ -26,7 +40,7 @@ import { openEngineDemo, stopEngineDemo } from './engine-demo.js';
    an offline copy that fell behind looks identical to the current one — a
    missing feature then reads as a bug. This stamp is how a phone stops being
    able to lie about what it is running. Bump it with every change. */
-const BUILD = '2026-08-28m';
+const BUILD = '2026-08-28n';
 
 const S = {
   sessions: 'tc.sessions', settings: 'tc.settings', team: 'tc.team',

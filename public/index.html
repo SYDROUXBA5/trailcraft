@@ -201,44 +201,14 @@
      A client-facing demo: synthetic hillside, the app's REAL physics. The
      white dashes are the laid trail; the amber is where the scent actually
      sits; the streaks are the air moving over the ground. -->
-<section id="viewEngine" class="panel" hidden>
-  <header class="panel-head">
+<!-- The demo is its own self-contained page (the original dark instrument,
+     verbatim) hosted in a frame so its styling and the app's never touch. -->
+<section id="viewEngine" class="panel eng-panel" hidden>
+  <header class="panel-head eng-head">
     <h1>The scent engine</h1>
     <button class="ghost" data-close>Close</button>
   </header>
-  <div class="detail">
-    <canvas id="engCanvas" class="eng-canvas"></canvas>
-    <div id="engStats" class="card-meta eng-stats"></div>
-    <p id="engVerdict" class="hint eng-verdict"></p>
-
-    <div class="field">
-      <label for="engDT">Ground vs air <b id="engDTVal">+0.0 °C</b></label>
-      <input id="engDT" type="range" min="-5" max="5" step="0.5" value="0">
-      <p class="hint">Colder ground pins scent low and sends it <b>downhill</b>;
-        warmer ground lifts it and shortens its life.</p>
-    </div>
-    <div class="field">
-      <label for="engWind">Wind <b id="engWindVal">3.0 m/s</b></label>
-      <input id="engWind" type="range" min="0" max="9" step="0.1" value="3">
-    </div>
-    <div class="field">
-      <label for="engFrom">From <b id="engFromVal">315° NW</b></label>
-      <input id="engFrom" type="range" min="0" max="359" step="1" value="315">
-    </div>
-    <div class="field">
-      <label for="engHum">Humidity <b id="engHumVal">78%</b></label>
-      <input id="engHum" type="range" min="30" max="100" step="1" value="78">
-    </div>
-    <div class="field">
-      <label for="engRain">Rain <b id="engRainVal">0.0 mm</b></label>
-      <input id="engRain" type="range" min="0" max="4" step="0.1" value="0">
-      <p class="hint">A light shower refreshes scent; a downpour strips it.</p>
-    </div>
-
-    <p class="hint">Synthetic hillside, real model — the same code that reads
-      your recorded trails, with real elevation and real 15-minute weather.
-      The trail here is 22 minutes old.</p>
-  </div>
+  <iframe id="engFrame" class="eng-frame" title="Trailcraft scent engine demo"></iframe>
 </section>
 
 <!-- ── Trail Card: share ─────────────────────────────────────────────
