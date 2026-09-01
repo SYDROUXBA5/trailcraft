@@ -1,6 +1,6 @@
 /* Offline shell. Trails happen where there is no signal, so the app itself must
    survive with none. Map tiles cache opportunistically as you pan an area. */
-const V = 'trailcraft-v8';
+const V = 'trailcraft-v9';
 /* Every module the app cannot start without. app.js is an ES module and its
    imports are separate requests — listing only app.js precaches a shell that
    cannot boot, which shows up as a working app that dies the first time it is
@@ -17,6 +17,8 @@ const SHELL = [
 const VENDOR = [
   'https://api.mapbox.com/mapbox-gl-js/v3.14.0/mapbox-gl.js',
   'https://api.mapbox.com/mapbox-gl-js/v3.14.0/mapbox-gl.css',
+  'https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.min.js',
+  'https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.min.css',
 ];
 
 self.addEventListener('install', (e) => {
@@ -32,7 +34,7 @@ self.addEventListener('activate', (e) => {
 });
 
 const cacheable = (url) =>
-  /mapbox|openstreetmap/.test(url.hostname);
+  /mapbox|openstreetmap|jsdelivr/.test(url.hostname);
 
 self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET') return;
