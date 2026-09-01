@@ -25,7 +25,7 @@ import { encodeTrail, decodeTrail } from './card.js';
    an offline copy that fell behind looks identical to the current one — a
    missing feature then reads as a bug. This stamp is how a phone stops being
    able to lie about what it is running. Bump it with every change. */
-const BUILD = '2026-08-28f';
+const BUILD = '2026-08-28g';
 
 const S = {
   sessions: 'tc.sessions', settings: 'tc.settings', team: 'tc.team',
@@ -128,8 +128,11 @@ function buildMap() {
     center: [-2.6449, 51.2094],   // Wells, Somerset — replaced by first fix
     zoom: 15, pitch: 68, maxPitch: 85, attributionControl: { compact: true },
   });
-  if (noToken) setTimeout(() =>
-    toast('Basic map — paste your Mapbox token in Settings for satellite & 3D'), 1200);
+  if (noToken) {
+    $('tokenNudge').hidden = false;
+    setTimeout(() =>
+      toast('Basic map — paste your Mapbox token in Settings for satellite & 3D'), 1200);
+  }
   map.addControl(new mapboxgl.NavigationControl({ visualizePitch: true }), 'top-right');
   map.addControl(new mapboxgl.GeolocateControl({
     positionOptions: { enableHighAccuracy: true }, trackUserLocation: true, showAccuracyCircle: true,
@@ -233,6 +236,21 @@ function addOverlays() {
   map.resize();
   ensureWx(true);
   setInterval(() => ensureWx(), 300000);
+}
+
+/* A style swap that never comes back (bad token, offline, revoked account)
+   leaves a white void where the map was — and everything painted on it goes
+   with it, which reads as "the app stopped working". If the new style has not
+   produced a ready map within a few seconds, fall back to the tokenless
+   street map: a working OSM map beats a broken satellite one. */
+function ensureStyleAlive() {
+  clearTimeout(ensureStyleAlive._t);
+  ensureStyleAlive._t = setTimeout(() => {
+    if (mapReady || document.visibilityState !== 'visible') return;
+    toast('That map style would not load — back to the basic map');
+    map.setStyle(RASTER_FALLBACK);
+    map.once('styledata', addOverlays);
+  }, 6000);
 }
 
 /* MapLibre requests tiles from inside its rAF render loop, so a hidden tab
@@ -2340,12 +2358,16 @@ function wire() {
   }));
 
   document.querySelectorAll('.chip[data-style]').forEach(b => b.addEventListener('click', () => {
+    /* Without a token both Mapbox styles just 401 — switching would wipe the
+       working street map for a white void (and it did, on a real phone). */
+    if (!settings.mbToken) return toast('Satellite needs the map token — see Settings');
     settings.basemap = b.dataset.style; save(S.settings, settings);
     document.querySelectorAll('.chip[data-style]').forEach(x =>
       x.setAttribute('aria-pressed', String(x === b)));
     mapReady = false;
     map.setStyle(STYLES[settings.basemap]);
     map.once('styledata', addOverlays);
+    ensureStyleAlive();
   }));
 
   const wt = $('windToggle');
@@ -2517,7 +2539,7 @@ function wire() {
       settings[key] = el.type === 'range' ? Number(el.value) : el.value;
       save(S.settings, settings);
       if (fmt) $(fmt).textContent = el.value;
-      if (key === 'exagg' && mapReady) map.setTerrain({ source: 'dem', exaggeration: Number(el.value) });
+      if (key === 'exagg' && mapReady && settings.mbToken) map.setTerrain({ source: 'dem', exaggeration: Number(el.value) });
       // A token pasted into Settings upgrades the map right now, not after a
       // reload nobody knows to do.
       if (key === 'mbToken' && el.value.startsWith('pk.') && el.value.length > 60) {
@@ -2532,6 +2554,24 @@ function wire() {
   bind('accCap', 'accCap', 'accCapVal');
   bind('stillCap', 'stillCap', 'stillCapVal'); bind('exagg', 'exagg', 'exaggVal');
   bind('mbToken', 'mbToken');
+
+  /* Pasting the token must work THERE AND THEN — "save it and reload" is a
+     support call. On commit, swap the live map up to satellite and terrain. */
+  $('mbToken').addEventListener('change', () => {
+    const tok = (settings.mbToken || '').trim();
+    if (!/^pk\./.test(tok)) return;
+    mapboxgl.accessToken = tok;
+    $('tokenNudge').hidden = true;
+    mapReady = false;
+    map.setStyle(STYLES[settings.basemap] || STYLES.satellite);
+    map.once('styledata', addOverlays);
+    ensureStyleAlive();
+    toast('Satellite & 3D on');
+  });
+  $('tokenNudge').addEventListener('click', () => {
+    fillSettings(); show('viewSettings'); tabTo('settings');
+    setTimeout(() => $('mbToken').focus(), 250);
+  });
 
   $('btnExportAll').addEventListener('click', () => {
     const url = URL.createObjectURL(new Blob([JSON.stringify(sessions, null, 2)], { type: 'application/json' }));

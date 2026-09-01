@@ -670,6 +670,20 @@ input[type="range"] { width: 100%; accent-color: var(--blue); height: 34px; }
 /* Mapbox's own controls live top-right, so step under them. */
 @media (max-width: 560px) { .agechip { top: calc(env(safe-area-inset-top, 0px) + 108px); } }
 
+/* One tap from the thing it advertises. Centre-top: the wind chip owns the
+   left, the ageing chip the right. */
+.tokennudge {
+  position: fixed; z-index: 5; left: 50%; transform: translateX(-50%);
+  top: calc(env(safe-area-inset-top, 0px) + 10px);
+  min-height: 40px; padding: 9px 16px;
+  border: 1.5px solid rgba(255, 255, 255, .85); border-radius: 999px;
+  background: var(--grad-pink); color: #fff; font: 600 12.5px inherit;
+  box-shadow: 0 8px 20px rgba(232, 68, 111, .38); cursor: pointer;
+  white-space: nowrap;
+}
+.tokennudge b { font-weight: 800; color: #fff; }
+.tokennudge:active { transform: translateX(-50%) scale(0.96); }
+
 /* ── Work this trail ─────────────────────────────────────────────── */
 .worknow { margin: 12px 0 4px; }
 .worknow > span {
