@@ -25,7 +25,7 @@ import { encodeTrail, decodeTrail } from './card.js';
    an offline copy that fell behind looks identical to the current one — a
    missing feature then reads as a bug. This stamp is how a phone stops being
    able to lie about what it is running. Bump it with every change. */
-const BUILD = '2026-08-28j';
+const BUILD = '2026-08-28k';
 
 const S = {
   sessions: 'tc.sessions', settings: 'tc.settings', team: 'tc.team',

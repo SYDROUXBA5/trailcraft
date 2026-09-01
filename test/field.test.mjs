@@ -143,7 +143,7 @@ t('flowAt: a hillside deflects wind driving into it', () => {
   assert.ok(Math.abs(f.v) > 0.05, 'and some of it is redirected along the contour');
 });
 
-t('flowAt: drainage runs downhill under an inversion, and only then', () => {
+t('flowAt: drainage runs downhill hardest under an inversion', () => {
   const T = make(33, 10, (_x, y) => 60 * (1 - y));    // falls to the south
   const calm = { wind_speed: 0.3, wind_direction: 0 };
 
@@ -151,8 +151,27 @@ t('flowAt: drainage runs downhill under an inversion, and only then', () => {
   assert.ok(cold.v > 0.5, `cold air should run south (downhill), got v=${cold.v}`);
 
   const warm = flowAt(T, 0.5, 0.5, calm, CONVECT);
-  assert.ok(warm.v < cold.v, 'convective air does not drain');
+  assert.ok(warm.v < cold.v, 'convective air barely drains');
   assert.ok(Math.hypot(warm.u, warm.v) < 1, 'and stays near the light forecast wind');
+});
+
+t('flowAt: scent-creep — any slope pulls scent a little downhill, in any air', () => {
+  const T = make(33, 10, (_x, y) => 60 * (1 - y));    // falls to the south
+  const still = { wind_speed: 0, wind_direction: 0 };
+  const south = (st) => flowAt(T, 0.5, 0.5, still, st).v;
+
+  const neu = south(NEUTRAL), con = south(CONVECT);
+  const stb = south(stability(11, 13));                // ground 2 °C cooler: stable
+  const inv = south(INVERSION);
+  assert.ok(neu > 0.1, `neutral air still creeps downhill, got ${neu.toFixed(2)}`);
+  assert.ok(con > 0.02 && con < neu, `sun lifts most of it but not all, got ${con.toFixed(2)}`);
+  assert.ok(inv > stb && stb > neu && neu > con,
+    `downhill pull orders by stability: ${inv.toFixed(2)} > ${stb.toFixed(2)} > ${neu.toFixed(2)} > ${con.toFixed(2)}`);
+
+  // An 8 m/s wind blowing uphill still owns the direction — creep is a bias,
+  // not a hurricane.
+  const windy = flowAt(T, 0.5, 0.5, { wind_speed: 8, wind_direction: 180 }, NEUTRAL);
+  assert.ok(windy.v < 0, `real wind beats creep, got v=${windy.v.toFixed(2)}`);
 });
 
 t('flowAt: drainage follows the slope, not the compass', () => {
