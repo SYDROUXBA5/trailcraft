@@ -40,7 +40,7 @@ function stopEngineDemo() {
    an offline copy that fell behind looks identical to the current one — a
    missing feature then reads as a bug. This stamp is how a phone stops being
    able to lie about what it is running. Bump it with every change. */
-const BUILD = '2026-08-28n';
+const BUILD = '2026-08-28o';
 
 const S = {
   sessions: 'tc.sessions', settings: 'tc.settings', team: 'tc.team',
@@ -1064,7 +1064,30 @@ class ScentOverlay {
       const radM = 1.6 + s.phase * 7.5 * mix;
       const rad = Math.max(2.2, Math.min(28, radM * ppm));
       bctx.globalAlpha = Math.min(0.95, s.str * 0.9);
-      bctx.drawImage(this.sprite, p.x - rad, p.y - rad, rad * 2, rad * 2);
+
+      /* Wind-smeared, not round: each puff stretches along its own drift
+         direction (ground anchor → current position), which is what a plume
+         actually looks like — filaments running with the air, round only where
+         the air is still. Near-line puffs skip the transform work. */
+      let dx = 0, dy = 0;
+      if (s.hlon != null) {
+        try {
+          const a = this.map.project([s.hlon, s.hlat]);
+          dx = p.x - a.x; dy = p.y - a.y;
+        } catch { /* anchor off-globe — draw round */ }
+      }
+      const dispPx = Math.hypot(dx, dy);
+      if (dispPx > 4) {
+        const stretch = 1 + Math.min(1.6, dispPx / (rad * 2.2));
+        bctx.save();
+        bctx.translate(p.x, p.y);
+        bctx.rotate(Math.atan2(dy, dx));
+        bctx.scale(stretch, 1);
+        bctx.drawImage(this.sprite, -rad, -rad, rad * 2, rad * 2);
+        bctx.restore();
+      } else {
+        bctx.drawImage(this.sprite, p.x - rad, p.y - rad, rad * 2, rad * 2);
+      }
       drawn++;
     }
     bctx.globalAlpha = 1;
@@ -1195,16 +1218,23 @@ async function startLive(opts = {}) {
   if (!first || !source?.length) return;   // nothing to emit from yet
   LIVE.on = true;
   LIVE.preview = !rec.on;                  // showing a trail rather than recording one
+  /* Cancellation: stopLive() during the awaits below must actually stop this.
+     Without the guard, a cancelled start finishes anyway — unhiding the canvas
+     for a dead loop and wedging the next plume from ever starting. */
+  const gen = LIVE.gen = (LIVE.gen || 0) + 1;
 
   try {
     LIVE.wx = await fetchWeather(first.lat, first.lon, Date.now());
     LIVE.wxAt = Date.now();
   } catch { /* offline — the plume waits rather than inventing a wind */ }
+  if (gen !== LIVE.gen || !LIVE.on) return;
   LIVE.st = stability(LIVE.wx?.soil_temp, LIVE.wx?.temp);
   if (LIVE.wx) paintWindBadge(LIVE.wx);
 
   // A generous square around where we started, so an ordinary trail stays inside it.
-  LIVE.T = await terrainFor([first], 400);
+  const T = await terrainFor([first], 400);
+  if (gen !== LIVE.gen || !LIVE.on) return;
+  LIVE.T = T;
   terrain = LIVE.T;
 
   LIVE.sim = new ScentSim().seed(source);
@@ -1389,6 +1419,7 @@ function armWork(trailId, minutes) {
 }
 
 function stopLive() {
+  LIVE.gen = (LIVE.gen || 0) + 1;   // invalidate any in-flight startLive
   LIVE.on = false;
   LIVE.preview = false;
   $('scentState').hidden = true;
@@ -1952,14 +1983,17 @@ function updateDraw() {
    every corner, undo, pace or laid-at change after that just re-seeds the
    existing sim — the particles' state is a pure function of the points' ages,
    so a re-seed lands mid-development instead of restarting the plume. */
-let drawPlumeStarting = false;
+let drawPlumeStartedAt = 0;
 async function syncDrawPlume(points) {
   if (!settings.liveScent || rec.on) return;
   if (!LIVE.on) {
-    if (drawPlumeStarting) return;
-    drawPlumeStarting = true;
+    // A timestamp, not a boolean: a boolean held by a start that never
+    // resolves (slow tiles over a mis-tapped far-away trail) wedges every
+    // later plume. After 8 s a stuck attempt forfeits its claim.
+    if (Date.now() - drawPlumeStartedAt < 8000) return;
+    drawPlumeStartedAt = Date.now();
     try { await startLive({ trail: points, origin: points[0] }); }
-    finally { drawPlumeStarting = false; }
+    finally { drawPlumeStartedAt = 0; }
     return;
   }
   if (LIVE.preview && LIVE.sim && draw.on) LIVE.sim.seed(points);

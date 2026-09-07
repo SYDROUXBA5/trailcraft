@@ -16,7 +16,7 @@
    plume and faded. Between them they draw a band, and the band's width is the
    uncertainty, not a decoration. */
 
-import { project, bearing } from './geo.js';
+import { project, bearing, dist } from './geo.js';
 import { flowAt, normOf, scentLife } from './field.js';
 
 /** Seconds a particle stays workable once it has left the ground. Airborne
@@ -93,6 +93,10 @@ export class ScentSim {
           hlat: p.lat, hlon: p.lon,        // ground source, fixed
           born: p.t,
           phase: (k + Math.random()) / PER_POINT,   // spread across the airborne life
+          // A fixed random identity. Meander and convective patchiness must be
+          // stable per particle — re-rolled each frame they would flicker, and
+          // a flickering plume reads as a bug, not as air.
+          seed: Math.random() * 6.28318,
           str: 0,
         });
       }
@@ -111,21 +115,50 @@ export class ScentSim {
   advance(T, wx, st, now) {
     const lifeMs = scentLife(wx, st) * 60000;
     const mix = Math.max(0.5, st?.mix ?? 1);
+    const drain = st?.drain ?? 0;
+
+    /* Gustiness drives how much the plume MEANDERS. The forecast carries both
+       mean wind and gusts; their ratio is real turbulence data this model was
+       ignoring. A steady airflow (gusts ≈ wind) gives a clean cone; a gusty
+       one snakes, and the snaking breathes on a ~8 s cycle. */
+    const wind = wx?.wind_speed ?? 0;
+    const gustiness = Math.max(0, ((wx?.wind_gusts ?? wind) - wind) / Math.max(0.5, wind));
+    const breathe = now / 8000;
 
     for (const s of this.parts) {
       const age = now - s.born;
       if (age < 0) { s.str = 0; continue; }
-
-      // Ground source fades as the trail ages; the particle also thins as it
-      // drifts away from the source that is still feeding it.
-      s.str = Math.exp(-age / lifeMs) * (1 - s.phase * 0.72);
-      if (s.str < 0.02) continue;
 
       // Convection strips a particle out of the working layer sooner, so it
       // travels less far horizontally before it stops mattering.
       const secs = s.phase * AIRBORNE / mix;
       const d = driftFrom(T, { lat: s.hlat, lon: s.hlon }, secs, wx, st);
       s.lat = d.lat; s.lon = d.lon;
+
+      const dispM = dist({ lat: s.hlat, lon: s.hlon }, d);
+
+      if (dispM > 0.5 && gustiness > 0.02) {
+        // Perpendicular wander, amplitude from gustiness and how far the
+        // particle has travelled — sin averages to zero, so the MEAN offset
+        // the verdict grades is untouched.
+        const amp = Math.min(12, dispM * gustiness * 0.4);
+        const sway = amp * Math.sin(breathe + s.seed * 3.1 + s.phase * 6.28318);
+        const brg = bearing({ lat: s.hlat, lon: s.hlon }, d);
+        const p2 = project({ lat: s.lat, lon: s.lon }, (brg + 90) % 360, sway);
+        s.lat = p2.lat; s.lon = p2.lon;
+      }
+
+      /* Ground source fades as the trail ages; the particle also thins as it
+         drifts from the source still feeding it. Two modifiers:
+         - LINGER: under a stable layer, scent in slack air (a sheltered hollow,
+           a windless dawn) decays slower — pools hold. Slack is read off the
+           particle's own displacement, which the slack air already made small.
+         - POCKETS: convective air tears the plume into patches; each particle
+           keeps a fixed share of the damage so the patches hold still. */
+      const slack = 1 - Math.min(1, dispM / Math.max(1.5, secs * 0.45));
+      const linger = 1 + drain * slack * 0.9;
+      const pocket = mix > 1.25 ? 0.55 + 0.45 * (0.5 + 0.5 * Math.sin(s.seed * 13.7)) : 1;
+      s.str = Math.exp(-age / (lifeMs * linger)) * (1 - s.phase * 0.72) * pocket;
     }
     return this.parts;
   }
