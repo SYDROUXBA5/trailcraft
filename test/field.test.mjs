@@ -371,4 +371,54 @@ t('ScentSim: seeds from a trail, fades with age, and never moves its source', ()
   assert.equal(sim.visible().length, 0, 'no scent before the runner walked past');
 });
 
+t('ScentSim: gusts make the plume meander wider, but never shift its mean', () => {
+  const t0 = Date.parse('2026-08-24T07:00:00Z');
+  const trail = [];
+  for (let i = 0; i < 30; i++) trail.push({ lat: WELLS.lat, lon: WELLS.lon + i * 1e-4, t: t0 + i * 9000 });
+
+  // Wind from the south drifts scent north; the MEANDER is the east-west
+  // scatter of each particle around its own anchor.
+  const lateral = (wx) => {
+    const sim = new ScentSim().seed(trail);
+    sim.advance(FLAT, wx, NEUTRAL, t0 + 20 * 60000);
+    const devs = sim.visible().map(s => (s.lon - s.hlon));
+    const mean = devs.reduce((a, b) => a + b, 0) / devs.length;
+    const spread = Math.sqrt(devs.reduce((a, d) => a + (d - mean) ** 2, 0) / devs.length);
+    return { mean, spread };
+  };
+
+  const steady = lateral({ wind_speed: 4, wind_direction: 180, wind_gusts: 4, humidity: 70, soil_temp: 12 });
+  const gusty  = lateral({ wind_speed: 4, wind_direction: 180, wind_gusts: 10, humidity: 70, soil_temp: 12 });
+  assert.ok(gusty.spread > steady.spread * 1.15,
+    `gusts widen the snake: ${gusty.spread.toExponential(2)} vs ${steady.spread.toExponential(2)}`);
+  assert.ok(Math.abs(gusty.mean) < gusty.spread,
+    'the wander averages out — the verdict’s mean offset is not biased');
+});
+
+t('ScentSim: stable slack air lingers, convective air tears pockets', () => {
+  const t0 = Date.parse('2026-08-24T07:00:00Z');
+  const trail = [{ lat: WELLS.lat, lon: WELLS.lon, t: t0 }];
+  const calm = { wind_speed: 0, wind_direction: 0, wind_gusts: 0, humidity: 70, soil_temp: 12 };
+  const when = t0 + 45 * 60000;
+
+  // Same age, same calm: the stable sim's particles must outlast neutral's —
+  // scent pooled in still air under a lid decays slower.
+  const strOf = (st) => {
+    const s = new ScentSim().seed(trail);
+    s.advance(FLAT, calm, st, when);
+    return s.parts.reduce((a, p) => a + p.str, 0) / s.parts.length;
+  };
+  const STABLE = stability(10, 12);
+  assert.ok(strOf(STABLE) > strOf(NEUTRAL) * 1.05,
+    'pooled scent under a stable layer holds longer');
+
+  // Under convection the plume is patchy: same-phase particles differ in
+  // strength (fixed per particle — pockets, not flicker).
+  const conv = new ScentSim().seed(trail);
+  conv.advance(FLAT, calm, CONVECT, t0 + 5 * 60000);
+  const strs = conv.parts.map(p => p.str);
+  const spread = Math.max(...strs) - Math.min(...strs);
+  assert.ok(spread > 0.05, `convective pockets vary strength, spread=${spread.toFixed(3)}`);
+});
+
 console.log(`\n${pass} passed total`);
