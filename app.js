@@ -40,7 +40,7 @@ function stopEngineDemo() {
    an offline copy that fell behind looks identical to the current one — a
    missing feature then reads as a bug. This stamp is how a phone stops being
    able to lie about what it is running. Bump it with every change. */
-const BUILD = '2026-08-28o';
+const BUILD = '2026-09-07a';
 
 const S = {
   sessions: 'tc.sessions', settings: 'tc.settings', team: 'tc.team',
@@ -216,10 +216,10 @@ function addOverlays() {
      the one place it is used. Filled stronger, plus a dashed edge so the
      envelope reads as a shape even where the fill sits on pale grass. */
   add({ id: 'drift-fill', type: 'fill', source: 'drift',
-        paint: { 'fill-color': '#2E7CF6', 'fill-opacity': 0.3 } });
+        paint: { 'fill-color': '#62B6FF', 'fill-opacity': 0.3 } });
   add({ id: 'drift-edge', type: 'line', source: 'drift',
         layout: { 'line-cap': 'round', 'line-join': 'round' },
-        paint: { 'line-color': '#2E7CF6', 'line-width': 1.6, 'line-opacity': 0.55,
+        paint: { 'line-color': '#62B6FF', 'line-width': 1.6, 'line-opacity': 0.55,
                  'line-dasharray': [1.5, 1.8] } });
   /* A dark casing under each track. Amber on sunlit grass measures under 2:1 —
      the line is legible on a desk and vanishes in a field, which is the only
@@ -233,7 +233,7 @@ function addOverlays() {
         paint: { 'line-color': '#0d1117', 'line-width': 8.5, 'line-opacity': 0.6 } });
   add({ id: 'runner-line', type: 'line', source: 'runner',
         layout: { 'line-cap': 'butt', 'line-join': 'round' },
-        paint: { 'line-color': '#f0a92c', 'line-width': 4.5, 'line-opacity': 0.98,
+        paint: { 'line-color': '#D8F259', 'line-width': 4.5, 'line-opacity': 0.98,
                  'line-dasharray': [2.2, 1.4] } });
   /* Draw-mode leg grading paints OVER the dashed runner line: solid colour per
      wind regime. Red for downwind is deliberate — free scent is the design
@@ -244,15 +244,15 @@ function addOverlays() {
         paint: { 'line-width': 4.5, 'line-opacity': 0.98,
                  // Must match the sheet's leg legend exactly, or the legend lies.
                  'line-color': ['match', ['get', 'k'],
-                   'tailwind', '#E8446F', 'headwind', '#17B389', '#2E7CF6'] } });
+                   'tailwind', '#FF5C7E', 'headwind', '#35E0B0', '#62B6FF'] } });
   add({ id: 'dog-casing', type: 'line', source: 'dog',
         layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: { 'line-color': '#0d1117', 'line-width': 8.5, 'line-opacity': 0.6 } });
   add({ id: 'dog-line', type: 'line', source: 'dog',
         layout: { 'line-cap': 'round', 'line-join': 'round' },
-        paint: { 'line-color': '#3fb950', 'line-width': 4.5, 'line-opacity': 0.98 } });
+        paint: { 'line-color': '#35E0B0', 'line-width': 4.5, 'line-opacity': 0.98 } });
   add({ id: 'wp-dots', type: 'circle', source: 'wps',
-        paint: { 'circle-radius': 7, 'circle-color': '#58a6ff',
+        paint: { 'circle-radius': 7, 'circle-color': '#FFFFFF',
                  'circle-stroke-width': 2, 'circle-stroke-color': '#0d1117' } });
   add({ id: 'wp-text', type: 'symbol', source: 'wps',
         layout: { 'text-field': ['get', 'kind'], 'text-size': 11, 'text-offset': [0, 1.4], 'text-anchor': 'top' },
@@ -882,10 +882,10 @@ function compass(wx) {
   const to = ((wx.wind_direction ?? 0) + 180) % 360;
   return `<div class="compass">
     <svg width="66" height="66" viewBox="0 0 66 66" aria-hidden="true">
-      <circle cx="33" cy="33" r="30" fill="none" stroke="#DCE4F0" stroke-width="2"/>
-      <text x="33" y="12" fill="#8B96AA" font-size="9" text-anchor="middle">N</text>
+      <circle cx="33" cy="33" r="30" fill="none" stroke="rgba(242,244,234,.2)" stroke-width="2"/>
+      <text x="33" y="12" fill="#979D87" font-size="9" text-anchor="middle">N</text>
       <g transform="rotate(${to} 33 33)">
-        <path d="M33 12 L39 42 L33 37 L27 42 Z" fill="#2E7CF6"/>
+        <path d="M33 12 L39 42 L33 37 L27 42 Z" fill="#D8F259"/>
       </g>
     </svg>
     <p>Wind from <b>${cardinal(wx.wind_direction)}</b>
