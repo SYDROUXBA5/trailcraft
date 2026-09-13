@@ -109,8 +109,24 @@ export class ScentSim {
           // stable per particle — re-rolled each frame they would flicker, and
           // a flickering plume reads as a bug, not as air.
           seed: Math.random() * 6.28318,
+          dwellS: p.dwellS ?? 0,           // seconds spent standing here
           str: 0,
         });
+      }
+      /* A mid-trail PAUSE is a deposit, not a footstep: the longer the stand,
+         the wider and stronger the patch it leaves. Scatter extra particles
+         over the disc that dwell earned. The end of the trail is handled by
+         the live pool below — this is for pauses along the way. */
+      if ((p.dwellS ?? 0) >= 45) {
+        const R = poolRadius(p.dwellS);
+        for (let k = 0; k < 10; k++) {
+          const g = project(p, Math.random() * 360, Math.sqrt(Math.random()) * R);
+          this.parts.push({
+            lat: g.lat, lon: g.lon, hlat: g.lat, hlon: g.lon, born: p.t,
+            phase: (k + Math.random()) / 10, seed: Math.random() * 6.28318,
+            dwellS: p.dwellS, str: 0,
+          });
+        }
       }
       this.trail.push(p);
     }
@@ -118,23 +134,42 @@ export class ScentSim {
     return this;
   }
 
+  /** A hide is a source with no walk: placed, stamped, and emitting from that
+      moment until the dog arrives — the dwell-pool model, used directly. */
+  seedHides(hides) {
+    this.trail = [];
+    this.parts = [];
+    this.hides = (hides || []).slice();
+    this.reseedPool();
+    return this;
+  }
+
   /** The pool belongs to whichever point is currently the end, so laying live
       moves it along: each appended fix rebuilds it at the new end. Cheap —
       a few dozen objects, at most once per GPS fix. */
+  /** Continuous sources: the trail's end (someone standing, waiting to be
+      found) and every hide. Both feed the air the whole time. */
+  poolSources() {
+    const end = this.trail[this.trail.length - 1];
+    return [...(end ? [end] : []), ...(this.hides || [])];
+  }
+
   reseedPool() {
     this.pool.length = 0;
-    const end = this.trail[this.trail.length - 1];
-    if (!end) return;
-    for (let k = 0; k < POOL_PARTS; k++) {
-      this.pool.push({
-        lat: end.lat, lon: end.lon, hlat: end.lat, hlon: end.lon,
-        born: end.t,
-        phase: (k + Math.random()) / POOL_PARTS,
-        seed: Math.random() * 6.28318,
-        ang: Math.random() * 360,             // where on the disc it sits
-        rad: Math.sqrt(Math.random()),        // sqrt → uniform over the disc
-        str: 0,
-      });
+    const srcs = this.poolSources();
+    for (let i = 0; i < srcs.length; i++) {
+      const src = srcs[i];
+      for (let k = 0; k < POOL_PARTS; k++) {
+        this.pool.push({
+          lat: src.lat, lon: src.lon, hlat: src.lat, hlon: src.lon,
+          born: src.t, src: i,
+          phase: (k + Math.random()) / POOL_PARTS,
+          seed: Math.random() * 6.28318,
+          ang: Math.random() * 360,             // where on the disc it sits
+          rad: Math.sqrt(Math.random()),        // sqrt → uniform over the disc
+          str: 0,
+        });
+      }
     }
   }
 
@@ -194,7 +229,10 @@ export class ScentSim {
       const slack = 1 - Math.min(1, dispM / Math.max(1.5, secs * 0.45));
       const linger = 1 + drain * slack * 0.9;
       const pocket = mix > 1.25 ? 0.55 + 0.45 * (0.5 + 0.5 * Math.sin(s.seed * 13.7)) : 1;
-      s.str = Math.exp(-age / (lifeMs * linger)) * (1 - s.phase * 0.72) * pocket;
+      // Standing still deposits more: emission scales with the dwell the
+      // fix stream folded into this point.
+      const dwellBoost = 1 + Math.min(3, (s.dwellS ?? 0) / 60);
+      s.str = Math.exp(-age / (lifeMs * linger)) * (1 - s.phase * 0.72) * pocket * dwellBoost;
     }
 
     /* The end pool. Two deliberate differences from the trail plume:
@@ -202,20 +240,20 @@ export class ScentSim {
          feeding it, the whole time;
        - it ACCUMULATES: ~10 minutes of standing reaches two-thirds of full
          contamination, and the disc keeps widening as sqrt(dwell). */
-    const end = this.trail[this.trail.length - 1];
-    if (end) {
-      const dwellS = (now - end.t) / 1000;
-      const build = 1 - Math.exp(-Math.max(0, dwellS) / 600);
+    const srcs = this.poolSources();
+    for (const s of this.pool) {
+      const src = srcs[s.src];
+      if (!src) { s.str = 0; continue; }
+      const dwellS = (now - src.t) / 1000;
+      if (dwellS <= 0) { s.str = 0; continue; }
+      const build = 1 - Math.exp(-dwellS / 600);
       const poolR = poolRadius(dwellS);
-      for (const s of this.pool) {
-        if (dwellS <= 0) { s.str = 0; continue; }
-        const g = project({ lat: end.lat, lon: end.lon }, s.ang, s.rad * poolR);
-        s.hlat = g.lat; s.hlon = g.lon;
-        const d = driftFrom(T, g, s.phase * AIRBORNE / mix, wx, st);
-        s.lat = d.lat; s.lon = d.lon;
-        // Up to ~1.5× a fresh trail particle — the hottest thing on the map.
-        s.str = (0.55 + 0.95 * build) * (1 - s.phase * 0.45);
-      }
+      const g = project({ lat: src.lat, lon: src.lon }, s.ang, s.rad * poolR);
+      s.hlat = g.lat; s.hlon = g.lon;
+      const d = driftFrom(T, g, s.phase * AIRBORNE / mix, wx, st);
+      s.lat = d.lat; s.lon = d.lon;
+      // Up to ~1.5× a fresh trail particle — the hottest thing on the map.
+      s.str = (0.55 + 0.95 * build) * (1 - s.phase * 0.45);
     }
     return this.parts;
   }

@@ -119,6 +119,28 @@ export function createStore(backend) {
       };
     },
 
+    /* ── Calibration ─────────────────────────────────────────────────
+       Every graded run banks one row: predicted side, observed signed offset,
+       wind, stability, and the drift constant that run implies. Nothing is
+       fitted until a dog has FIVE — one gusty afternoon must not rewrite the
+       model — and then the median replaces the literature default. */
+    addCalibration(dogId, row) {
+      if (!dogId) return;
+      const key = `cal:${dogId}`;
+      const rows = kv.get(key, []);
+      rows.push(row);
+      kv.set(key, rows.slice(-50));
+    },
+    calibration(dogId) { return kv.get(`cal:${dogId}`, []); },
+    /** Per-dog metres-per-(m/s) drift constant, or null while under-evidenced. */
+    dogDrift(dogId) {
+      const ks = kv.get(`cal:${dogId}`, []).map(r => r.k).filter(k => Number.isFinite(k) && k > 0);
+      if (ks.length < 5) return null;
+      const sorted = [...ks].sort((a, b) => a - b);
+      const med = sorted[Math.floor(sorted.length / 2)];
+      return Math.min(6, Math.max(0.5, med));   // no single dog rewrites physics
+    },
+
     exportAll() {
       return JSON.stringify({
         version: 2, exportedAt: new Date().toISOString(),

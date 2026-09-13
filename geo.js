@@ -327,3 +327,39 @@ export function lineCorrect(track, lineM) {
     return { ...p, lat: q.lat, lon: q.lon };
   });
 }
+
+/* ── Dwell ──────────────────────────────────────────────────────────
+   The stillness filter used to THROW AWAY stationary fixes — which is exactly
+   backwards for scent: standing still is not noise, it is the strongest source
+   on the trail. The fix stream now folds stillness into dwell time on the last
+   kept point, and the sim scales emission with it. */
+
+/** Classify one incoming fix against the last kept point.
+    'keep'  — a real step: append it.
+    'dwell' — stationary: fold its seconds into the last point's dwell.
+    'drop'  — the device itself says the fix is poor: worthless either way. */
+export function dwellFold(last, fix, accCap, stillCap) {
+  if (fix.acc != null && fix.acc > accCap) return 'drop';
+  if (last && dist(last, fix) < stillCap) return 'dwell';
+  return 'keep';
+}
+
+/** Fold a whole fix stream: kept points carry `dwellS` — seconds spent
+    standing at that point — and rejected-for-quality fixes are counted. */
+export function foldFixes(fixes, accCap, stillCap) {
+  const kept = [];
+  let dropped = 0;
+  for (const f of fixes) {
+    const last = kept[kept.length - 1];
+    const verdict = dwellFold(last, f, accCap, stillCap);
+    if (verdict === 'drop') { dropped++; continue; }
+    if (verdict === 'dwell') {
+      last.dwellS = (last.dwellS ?? 0) + Math.max(0, (f.t - (last._lastSeen ?? last.t)) / 1000);
+      last._lastSeen = f.t;
+      continue;
+    }
+    kept.push({ ...f, dwellS: 0, _lastSeen: f.t });
+  }
+  kept.forEach(p => delete p._lastSeen);
+  return [kept, dropped];
+}
