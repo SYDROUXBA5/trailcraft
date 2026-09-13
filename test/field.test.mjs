@@ -421,4 +421,39 @@ t('ScentSim: stable slack air lingers, convective air tears pockets', () => {
   assert.ok(spread > 0.05, `convective pockets vary strength, spread=${spread.toFixed(3)}`);
 });
 
+t('ScentSim: the runner standing at the end builds a wide, hot pool', () => {
+  const t0 = Date.parse('2026-08-24T07:00:00Z');
+  const trail = [];
+  for (let i = 0; i < 10; i++) trail.push({ lat: WELLS.lat, lon: WELLS.lon + i * 1e-4, t: t0 + i * 60000 });
+  const wx = { wind_speed: 2, wind_direction: 270, wind_gusts: 2, humidity: 70, soil_temp: 12 };
+
+  const sim = new ScentSim().seed(trail);
+  sim.advance(FLAT, wx, NEUTRAL, t0 + 40 * 60000);
+
+  // Hotter: the person is still feeding the end while the walked line fades.
+  const mean = (a) => a.reduce((x, p) => x + p.str, 0) / a.length;
+  assert.ok(sim.pool.length > 0, 'the end point owns pool particles');
+  assert.ok(mean(sim.pool) > mean(sim.parts) * 1.5,
+    'the dwell pool outshines the aged trail');
+
+  // Wider: ground anchors scatter around the end, and the scatter grows.
+  const end = trail[trail.length - 1];
+  const spreadAt = (mins) => {
+    sim.advance(FLAT, wx, NEUTRAL, t0 + mins * 60000);
+    return Math.max(...sim.pool.map(p => dist(end, { lat: p.hlat, lon: p.hlon })));
+  };
+  const early = spreadAt(11), late = spreadAt(41);
+  assert.ok(early > 4, `the pool is an AREA, not a point (${early.toFixed(1)} m)`);
+  assert.ok(late > early * 1.2, `and it keeps growing: ${late.toFixed(1)} vs ${early.toFixed(1)} m`);
+
+  // Laying live moves the pool with the moving end.
+  const before = sim.pool[0].born;
+  sim.append([{ lat: WELLS.lat, lon: WELLS.lon + 12e-4, t: t0 + 12 * 60000 }]);
+  assert.ok(sim.pool[0].born > before, 'a new end point re-homes the pool');
+
+  // Before the runner arrives there is nothing to pool.
+  sim.advance(FLAT, wx, NEUTRAL, t0 - 60000);
+  assert.ok(sim.pool.every(p => p.str === 0), 'no pool before the walk');
+});
+
 console.log(`\n${pass} passed total`);

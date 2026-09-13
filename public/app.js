@@ -40,7 +40,7 @@ function stopEngineDemo() {
    an offline copy that fell behind looks identical to the current one — a
    missing feature then reads as a bug. This stamp is how a phone stops being
    able to lie about what it is running. Bump it with every change. */
-const BUILD = '2026-09-07a';
+const BUILD = '2026-09-13a';
 
 const S = {
   sessions: 'tc.sessions', settings: 'tc.settings', team: 'tc.team',
@@ -1296,7 +1296,7 @@ function liveFrame(now) {
     paintScentState();
     LIVE.lastState = now;
   }
-  LIVE.fx.render(LIVE.sim.parts, LIVE.st?.mix ?? 1);
+  LIVE.fx.render(LIVE.sim.drawable(), LIVE.st?.mix ?? 1);
   LIVE.raf = requestAnimationFrame(liveFrame);
 }
 
@@ -1330,11 +1330,12 @@ function paintScentState() {
   el.classList.toggle('below-hud', !$('hud').hidden);
 
   el.innerHTML = live === 0
-    ? `<span class="k">No workable scent</span>
+    ? `<span class="k">No workable scent on the trail</span>
        This trail is <b>${ageMin} min</b> old and scent life here is
        <b>${life} min</b>. ${LIVE.st?.dT > 1
          ? 'Ground is warmer than the air, so it has lifted and gone.'
-         : 'Conditions have stripped it.'}`
+         : 'Conditions have stripped it.'}
+       Only the <b>end pool</b> is left — a person standing there keeps feeding it.`
     : `<span class="k">Scent</span>
        <b>${life} min</b> of life &middot; trail is <b>${ageMin} min</b> old`;
 }
@@ -1556,7 +1557,7 @@ function replayFrame(now) {
     RP.lastAdv = now;
     windFx?.setField(fieldFor(RP.T, RP.wx, RP.st));
   }
-  RP.scentFx.render(RP.sim.parts, RP.st?.mix ?? 1);
+  RP.scentFx.render(RP.sim.drawable(), RP.st?.mix ?? 1);
 
   if (!RP.lastDraw || now - RP.lastDraw > 200) {
     drawReplayTracks();
