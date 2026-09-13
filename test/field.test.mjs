@@ -10,7 +10,7 @@ import {
   FLAT, buildTerrain, normOf, sample, stability, synoptic, flowAt,
   scentLife, solarPosition, insolation, regime, lerpDir, wxAt,
 } from '../public/field.js';
-import { driftFrom, predictedOffsets, ScentSim, NOSE, AIRBORNE } from '../public/sim.js';
+import { driftFrom, predictedOffsets, ScentSim, NOSE, AIRBORNE, RESIDENCE } from '../public/sim.js';
 import { dist, scentOffset } from '../public/geo.js';
 
 let pass = 0;
@@ -502,6 +502,72 @@ t('ScentSim.prune: an hour of laying does not grow without bound', () => {
   const n = fresh.parts.length;
   fresh.prune(t0 + 5000, wx, st);
   assert.equal(fresh.parts.length, n, 'nothing old, nothing dropped');
+});
+
+t('ScentSim: parcels do not all stop at the same distance', () => {
+  /* Every parcel sharing one airborne time drew a ruler-straight edge across
+     the end of the plume — the one shape a plume never has. Turbulence takes
+     scent out of the working layer at random, so residence time is spread. */
+  const t0 = Date.parse('2026-08-24T07:00:00Z');
+  const wx = { wind_speed: 4, wind_direction: 270, temp: 12, soil_temp: 11, humidity: 70 };
+  const trail = Array.from({ length: 8 }, (_, i) => ({
+    lat: WELLS.lat, lon: WELLS.lon + i * 2e-4, t: t0 + i * 20000,
+  }));
+  const sim = new ScentSim().seed(trail);
+  sim.advance(FLAT, wx, NEUTRAL, t0 + 8 * 20000);
+
+  // Take the parcels from ONE piece of ground: their spread is the edge.
+  const g = sim.parts.filter(p => Math.abs(p.hlon - trail[0].lon) < 1e-9);
+  const reach = g.map(p => dist({ lat: p.hlat, lon: p.hlon }, { lat: p.lat, lon: p.lon }));
+  const spread = Math.max(...reach) - Math.min(...reach);
+  assert.ok(spread > 5, `parcels from one spot reach different distances (spread ${spread.toFixed(1)} m)`);
+  assert.ok(g.some(p => p.life !== g[0].life), 'each parcel carries its own residence time');
+
+  // And the plume's outer boundary is not a ruler: how far the furthest
+  // parcel from each piece of ground gets varies along the whole line.
+  const reachOf = (lon) => {
+    const set = sim.parts.filter(p => Math.abs(p.hlon - lon) < 1e-9);
+    return Math.max(...set.map(p => dist({ lat: p.hlat, lon: p.hlon }, { lat: p.lat, lon: p.lon })));
+  };
+  const edges = trail.map(p => reachOf(p.lon)).filter(Number.isFinite);
+  const ragged = (Math.max(...edges) - Math.min(...edges)) / Math.max(...edges);
+  assert.ok(ragged > 0.15, `the far edge varies along the line by ${(ragged * 100).toFixed(0)}%, not a straight cut`);
+
+  // The far parcels are the faint ones: the plume thins out, it does not stop.
+  const byReach = g.map((p, i) => ({ r: reach[i], s: p.str })).sort((a2, b2) => a2.r - b2.r);
+  assert.ok(byReach[byReach.length - 1].s < byReach[0].s,
+    'the furthest parcel is fainter than the closest');
+});
+
+t('RESIDENCE: mostly short, occasionally long, never zero or absurd', () => {
+  const draws = Array.from({ length: 3000 }, () => RESIDENCE());
+  assert.ok(draws.every(d => d >= 0.18 && d <= 1.9), 'bounded at both ends');
+  const mean = draws.reduce((a, b) => a + b, 0) / draws.length;
+  assert.ok(mean > 0.35 && mean < 0.95, `mean residence ${mean.toFixed(2)} is a fraction of the nominal life`);
+  const short = draws.filter(d => d < 0.5).length / draws.length;
+  assert.ok(short > 0.3, `most parcels are mixed out early (${(short * 100).toFixed(0)}%)`);
+  assert.ok(draws.some(d => d > 1.2), 'and a few ride a long way');
+});
+
+t('flowAt: scent runs downhill, and a steeper slope moves it further', () => {
+  /* The handler's rule the pure meteorology misses. This is what makes the
+     plume lean off a hillside instead of obeying the forecast alone. */
+  const wx = { wind_speed: 1.2, wind_direction: 270, temp: 12, soil_temp: 11 };
+  const gentle = make(33, 12, (x) => 60 + x * 6);      // rises east, gently
+  const steep  = make(33, 12, (x) => 60 + x * 40);     // rises east, steeply
+  const start = { lat: WELLS.lat, lon: WELLS.lon };
+
+  const onFlat   = driftFrom(FLAT,   start, 40, wx, NEUTRAL);
+  const onGentle = driftFrom(gentle, start, 40, wx, NEUTRAL);
+  const onSteep  = driftFrom(steep,  start, 40, wx, NEUTRAL);
+
+  // Uphill is east, so downhill is west: the slope pulls scent back westward.
+  assert.ok(onGentle.lon < onFlat.lon, 'a slope pulls the drift downhill');
+  assert.ok(onSteep.lon < onGentle.lon, 'and a steeper slope pulls it further');
+
+  // Under a stable layer the cold air drains, so the effect is stronger still.
+  const drained = driftFrom(steep, start, 40, wx, INVERSION);
+  assert.ok(drained.lon < onSteep.lon, 'stable air drains downhill harder than neutral');
 });
 
 console.log(`\n${pass} passed total`);

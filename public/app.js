@@ -18,7 +18,7 @@ import { encodeTrail, decodeTrail, cardUrl, cardFromText } from './card.js';
 import { createStore, migrateV1, TARGETS, targetById, verbs, uid } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-13j';
+const BUILD = '2026-09-13k';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true, mbToken: (window.MB_TOKEN || '') };
@@ -687,7 +687,31 @@ function dropHideAtFeet() {
    where the model stops being sure, never a hard-edged corridor. And it is
    drawn only when there is real weather to drive it: no weather, no plume,
    because a guessed plume is worse than none. */
-const plume = { sim: null, tick: 0, T: FLAT, wx: null, st: null, trail: null };
+const plume = { sim: null, tick: 0, T: FLAT, wx: null, st: null, trail: null, tAt: 0, tLen: 0 };
+
+/* The ground the air is running over.
+
+   flowAt already deflects wind around slopes, runs cold air downhill under a
+   stable layer, and creeps the scent-carrying film downhill on ANY slope —
+   but only if it is handed a real terrain grid. It was being handed FLAT
+   everywhere except the first seconds of a lay, so all of that was switched
+   off exactly where it matters.
+
+   The grid is built around the trail so far, and rebuilt as the trail walks
+   out of it — a 90 m margin around the first fix is no use 400 m later. */
+async function plumeTerrain(force = false) {
+  if (!plume.trail?.length) return;
+  const len = pathLen(plume.trail);
+  const stale = force || !plume.tAt
+    || (Date.now() - plume.tAt > 45000 && len - plume.tLen > 120);
+  if (!stale) return;
+  plume.tAt = Date.now();
+  plume.tLen = len;
+  try {
+    const T = await terrainFor(plume.trail);
+    if (plume.sim) plume.T = T;
+  } catch { /* flat is honest when the DEM will not answer */ }
+}
 
 function plumeStart(trail, wx, T) {
   plumeStop();
@@ -703,6 +727,9 @@ function plumeStart(trail, wx, T) {
   plume.T = T || FLAT;
   plume.st = stability(wx.soil_temp, wx.temp);
   plume.trail = trail ? [...trail] : [];
+  plume.T = T || FLAT;
+  plume.tAt = 0; plume.tLen = 0;
+  plumeTerrain(true);
   plume.tick = setInterval(plumeFrame, 240);
   plumeFrame();
   tracersStart();
@@ -851,6 +878,7 @@ function plumeFrame() {
     geometry: { type: 'Point', coordinates: [s.lon, s.lat] },
   })) });
   paintFlow();
+  plumeTerrain();
 }
 
 /* ── Following ────────────────────────────────────────────────────────
@@ -948,7 +976,7 @@ function onFix(pos) {
       /* The plume needs real weather, and the first fix is the first moment
          there is somewhere to ask about. It joins a second or two in. */
       fetchWeather(lat, lon, pt.t)
-        .then(wx => { rec.wx = wx; plumeStart(rec.pts, wx, FLAT); terrainFor(rec.pts).then(T => { plume.T = T; }).catch(() => {}); })
+        .then(wx => { rec.wx = wx; plumeStart(rec.pts, wx); })
         .catch(() => toast('No weather — the plume needs it, so it stays off'));
     } else {
       plumeAdd(pt);
@@ -1526,7 +1554,7 @@ function toggleReveal() {
     setSrc('runner', run.revealed ? lineOf(s.data.trail) : EMPTY);
     /* The plume is the trail, drawn in air. Showing it before Reveal would
        hand the handler the answer, so it waits for the same button. */
-    if (run.revealed) plumeStart(s.data.trail, s.data.weather, FLAT);
+    if (run.revealed) plumeStart(s.data.trail, s.data.weather);
     else plumeStop();
     setSrc('contam', run.revealed
       ? { type: 'FeatureCollection',
@@ -1763,7 +1791,7 @@ function showOnMap(from = 'scrResult') {
         : scentField(s.data.trail, wx, s.data.trackStarted ?? undefined);
       if (field.length) setSrc('drift', plumePolygon(field));
       // ...and the air itself, moving, as it was when the dog worked it.
-      plumeStart(s.data.trail, wx, FLAT);
+      plumeStart(s.data.trail, wx);
     }
   } else {
     setSrc('hides', pointsOf(s.data.hides));
