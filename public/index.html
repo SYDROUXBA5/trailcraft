@@ -220,6 +220,7 @@
       <div id="shareQr" class="qr-plate" role="img" aria-label="Trail Card QR code"></div>
       <p class="body small center muted" id="shareQrCaption">Scan this with the other phone</p>
     </div>
+    <button class="btn card-btn" id="btnSharePlume">Watch the scent on the map</button>
     <button class="btn card-btn" id="btnContam" hidden>Add a contamination trail</button>
     <div class="page-bottom">
       <button class="btn ember" id="btnOff" hidden>She&rsquo;s off — start the countdown</button>
@@ -341,6 +342,10 @@
     <p class="body small" id="gpsReport" hidden></p>
     <details class="advanced">
       <summary class="label">Advanced</summary>
+      <label class="switch-row" for="plumeOn">
+        <span>Show the scent plume<i>Parcels of scent drifting off the line, while you lay it</i></span>
+        <input id="plumeOn" type="checkbox" checked>
+      </label>
       <label class="field-label">Reject GPS fixes worse than <b id="accCapVal">25</b> m</label>
       <input id="accCap" type="range" min="8" max="60" step="1" value="25">
       <label class="field-label">Ignore movement under <b id="stillCapVal">2.5</b> m</label>

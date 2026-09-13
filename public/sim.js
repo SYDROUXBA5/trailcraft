@@ -260,6 +260,30 @@ export class ScentSim {
 
   /** Live particles, strongest first, for drawing. */
   visible() { return this.parts.filter(s => s.str >= 0.02); }
+
+  /** Drop particles the air has finished with.
+
+      Laying a trail live runs for an hour and appends the whole way; without
+      this the set only ever grows, and a phone in a pocket pays to carry
+      every dead particle. Four lifetimes is well past anything drawable —
+      the cut is invisible on screen and the arithmetic stops climbing. */
+  prune(now, wx, st, { lives = 5, max = 4000 } = {}) {
+    const cutoff = now - scentLife(wx, st) * 60000 * lives;
+    if (Number.isFinite(cutoff)) {
+      const keptTrail = this.trail.filter(p => p.t > cutoff);
+      // The pool's source is the trail's END, so never prune the last point
+      // out from under it — a trail with no end has nothing standing at it.
+      if (keptTrail.length) this.trail = keptTrail;
+      this.parts = this.parts.filter(s => s.born > cutoff);
+    }
+    /* A budget as well as an age. Scent can stay workable for hours, so age
+       alone retires particles far slower than a live lay appends them. The
+       oldest are also the faintest, which makes them the right ones to lose
+       when the phone needs the arithmetic back — the visible plume near the
+       walker is untouched, the far tail stops being drawn. */
+    if (this.parts.length > max) this.parts = this.parts.slice(this.parts.length - max);
+    return this.parts.length;
+  }
 }
 
 /* ── What the model claims, so it can be graded ───────────────────── */

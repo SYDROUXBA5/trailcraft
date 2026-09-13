@@ -456,4 +456,42 @@ t('ScentSim: the runner standing at the end builds a wide, hot pool', () => {
   assert.ok(sim.pool.every(p => p.str === 0), 'no pool before the walk');
 });
 
+t('ScentSim.prune: an hour of laying does not grow without bound', () => {
+  /* A live lay appends the whole way. Scent stays workable for hours, so age
+     alone retires particles far slower than walking creates them — the budget
+     is what actually keeps a phone in a pocket from paying for all of them. */
+  const t0 = Date.parse('2026-08-24T07:00:00Z');
+  const leg = (n, from, step = 60000) => Array.from({ length: n }, (_, i) => ({
+    lat: WELLS.lat, lon: WELLS.lon + (from + i) * 2e-4, t: t0 + (from + i) * step,
+  }));
+  const wx = { wind_speed: 3, wind_direction: 270, temp: 12, soil_temp: 11, humidity: 70 };
+  const st = stability(11, 12);
+  const now = t0 + 90 * 60000;
+
+  // The budget: a long lay is capped, and what survives is the RECENT ground.
+  const sim = new ScentSim().seed(leg(90, 0));
+  const before = sim.parts.length;
+  sim.prune(now, wx, st, { max: 200 });
+  assert.ok(before > 200 && sim.parts.length === 200, `capped ${before} to ${sim.parts.length}`);
+  const oldest = Math.min(...sim.parts.map(p => p.born));
+  assert.ok(oldest > t0, 'the faint far tail is what goes, not the fresh ground');
+
+  // The end of the trail is the pool's source; pruning must never orphan it.
+  assert.equal(sim.trail[sim.trail.length - 1].t, t0 + 89 * 60000, 'the trail keeps its real end');
+  sim.advance(FLAT, wx, st, now);
+  assert.ok(sim.pool.length > 0, 'and the pool still stands there after a prune');
+
+  // Age: ground far older than the scent could possibly last is dropped.
+  const stale = new ScentSim().seed(leg(20, 0));
+  stale.prune(t0 + 48 * 3600e3, wx, st);            // two days later
+  assert.equal(stale.parts.length, 0, 'two-day-old air holds nothing');
+  assert.ok(stale.trail.length > 0, 'but the trail itself is never left empty');
+
+  // Nothing old and nothing over budget means nothing changes.
+  const fresh = new ScentSim().seed(leg(5, 0, 1000));
+  const n = fresh.parts.length;
+  fresh.prune(t0 + 5000, wx, st);
+  assert.equal(fresh.parts.length, n, 'nothing old, nothing dropped');
+});
+
 console.log(`\n${pass} passed total`);

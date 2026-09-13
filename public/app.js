@@ -13,15 +13,15 @@ import {
   progressAlong, splitLine, smoothBearing,
 } from './geo.js';
 import { FLAT, buildTerrain, stability, regime } from './field.js';
-import { predictedOffsets } from './sim.js';
+import { predictedOffsets, ScentSim } from './sim.js';
 import { encodeTrail, decodeTrail, cardUrl, cardFromText } from './card.js';
 import { createStore, migrateV1, TARGETS, targetById, verbs, uid } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-13g';
+const BUILD = '2026-09-13h';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
-const DEFAULTS = { accCap: 25, stillCap: 2.5, exagg: 2.4, mbToken: (window.MB_TOKEN || '') };
+const DEFAULTS = { accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true, mbToken: (window.MB_TOKEN || '') };
 const loadJson = (k, f) => { try { return JSON.parse(localStorage.getItem(k)) ?? f; } catch { return f; } };
 let settings = { ...DEFAULTS, ...loadJson('tc.settings', {}) };
 const saveSettings = () => localStorage.setItem('tc.settings', JSON.stringify(settings));
@@ -111,7 +111,7 @@ const EMPTY = { type: 'FeatureCollection', features: [] };
 let map, mapReady = false;
 let GL = mapboxgl;   // every control/bounds must come from the SAME library
 const srcData = { runner: EMPTY, dog: EMPTY, wps: EMPTY, drift: EMPTY, start: EMPTY, hides: EMPTY, contam: EMPTY,
-                  routeDone: EMPTY, routeAhead: EMPTY, puck: EMPTY };
+                  routeDone: EMPTY, routeAhead: EMPTY, puck: EMPTY, scent: EMPTY };
 
 const SAT_STYLE = 'mapbox://styles/mapbox/standard-satellite';
 const RASTER_FALLBACK = {
@@ -165,6 +165,16 @@ function addOverlays() {
   add({ id: 'drift-edge', type: 'line', source: 'drift',
         layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: { 'line-color': '#62B6FF', 'line-width': 1.6, 'line-opacity': 0.55, 'line-dasharray': [1.5, 1.8] } });
+  /* The air itself. Each dot is one parcel of scent the model is carrying
+     downwind; the crowd of them IS the plume, and where they thin out is
+     genuinely where the model is unsure. Drawn under every line, so it never
+     hides the trail it belongs to. */
+  add({ id: 'scent-dots', type: 'circle', source: 'scent',
+        paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 14, 1.6, 17, 3.4, 19, 6],
+                 'circle-color': '#7FD4FF',
+                 'circle-opacity': ['*', ['get', 's'], 0.75],
+                 'circle-blur': 0.6 } });
+
   // Contamination trails: same family as the laid trail, visibly not it.
   add({ id: 'contam-line', type: 'line', source: 'contam',
         layout: { 'line-cap': 'butt', 'line-join': 'round' },
@@ -547,7 +557,7 @@ function sessionCard(s) {
 }
 
 /* ── Lay a trail / Set a hide ─────────────────────────────────────── */
-const rec = { on: false, kind: null, pts: [], wps: [], hides: [], started: 0, dropped: 0, watch: null, lock: null, tick: 0 };
+const rec = { on: false, kind: null, pts: [], wps: [], hides: [], started: 0, dropped: 0, wx: null, watch: null, lock: null, tick: 0 };
 let pendingSession = null;   // built at Confirm, shared/run afterwards
 
 function gpsHudText() {
@@ -612,6 +622,59 @@ function dropHideAtFeet() {
     paintHides();
     map.easeTo({ center: [p.coords.longitude, p.coords.latitude] });
   }, () => toast('No GPS fix — tap the map instead'), { enableHighAccuracy: true, timeout: 10000 });
+}
+
+/* ── The plume, live ──────────────────────────────────────────────────
+   Scent is the thing this app is about, and until now it only appeared once
+   the run was over. Watching it leave the line as you walk is the whole
+   lesson: which way it goes, how fast it spreads, how much of it there is.
+
+   It is a MODEL, and it is drawn as one — a crowd of parcels whose edges are
+   where the model stops being sure, never a hard-edged corridor. And it is
+   drawn only when there is real weather to drive it: no weather, no plume,
+   because a guessed plume is worse than none. */
+const plume = { sim: null, tick: 0, T: FLAT, wx: null, st: null, trail: null };
+
+function plumeStart(trail, wx, T) {
+  plumeStop();
+  if (!settings.plume || !wx) return;
+  plume.sim = new ScentSim();
+  plume.sim.seed(trail || []);
+  plume.wx = wx;
+  plume.T = T || FLAT;
+  plume.st = stability(wx.soil_temp, wx.temp);
+  plume.trail = trail ? [...trail] : [];
+  plume.tick = setInterval(plumeFrame, 240);
+  plumeFrame();
+}
+/** New ground, one fix at a time — append, never reseed, or it flickers. */
+function plumeAdd(pt) {
+  if (!plume.sim) return;
+  plume.sim.append([pt]);
+  plume.trail.push(pt);
+}
+function plumeStop() {
+  clearInterval(plume.tick); plume.tick = 0;
+  plume.sim = null; plume.trail = null;
+  setSrc('scent', EMPTY);
+  setSrc('drift', EMPTY);
+}
+function plumeFrame() {
+  if (!plume.sim) return;
+  const now = Date.now();
+  plume.sim.prune(now, plume.wx, plume.st);
+  plume.sim.advance(plume.T, plume.wx, plume.st, now);
+  const live = plume.sim.drawable().filter(s => s.str >= 0.03);
+  setSrc('scent', { type: 'FeatureCollection', features: live.map(s => ({
+    type: 'Feature',
+    properties: { s: Math.min(1, s.str) },
+    geometry: { type: 'Point', coordinates: [s.lon, s.lat] },
+  })) });
+  // The band under the parcels: the same uncertainty, stated as an area.
+  if (plume.trail && plume.trail.length >= 2) {
+    const f = scentField(plume.trail, plume.wx, now);
+    if (f.length) setSrc('drift', plumePolygon(f));
+  }
 }
 
 /* ── Following ────────────────────────────────────────────────────────
@@ -704,6 +767,17 @@ function onFix(pos) {
   if (rec.kind === 'lay') setSrc('runner', lineOf(rec.pts));
   if (rec.kind === 'run') setSrc('dog', lineOf(rec.pts));
   paintNav();
+  if (rec.kind === 'lay') {
+    if (rec.pts.length === 1) {
+      /* The plume needs real weather, and the first fix is the first moment
+         there is somewhere to ask about. It joins a second or two in. */
+      fetchWeather(lat, lon, pt.t)
+        .then(wx => { rec.wx = wx; plumeStart(rec.pts, wx, FLAT); terrainFor(rec.pts).then(T => { plume.T = T; }).catch(() => {}); })
+        .catch(() => toast('No weather — the plume needs it, so it stays off'));
+    } else {
+      plumeAdd(pt);
+    }
+  }
   if (rec.pts.length === 1 && !nav.follow) map.easeTo({ center: [lon, lat], zoom: 17 });
 }
 
@@ -791,6 +865,7 @@ async function confirmLay() {
   db.addSession(s);
   snap();
   pendingSession = s;
+  plumeStop();              // the share screen is paper; the map is behind it
   go('scrShare');
   renderShare(s);
 
@@ -805,6 +880,7 @@ async function confirmLay() {
 }
 
 function discardLay() {
+  plumeStop();
   clearMap();
   pendingSession = null;
   go('scrHome');
@@ -834,6 +910,9 @@ function renderShare(s) {
   $('shareTitle').textContent = isHide ? 'Hide set' : isPlan ? 'Trail planned' : 'Trail laid';
   $('btnRunHere').textContent = isHide ? 'Search it on this phone' : 'Run it on this phone';
   $('btnContam').hidden = isHide;
+  /* A plan is a drawn sketch with no walked times behind it — modelling scent
+     off it would dress a guess as a measurement. */
+  $('btnSharePlume').hidden = isHide || isPlan || !s.data.weather;
   $('btnOff').hidden = !isPlan;
   if (isPlan) {
     $('btnOff').textContent = s.data.offAt
@@ -1269,6 +1348,10 @@ function toggleReveal() {
   const t = targetById(s.targetId);
   if (t.kind === 'person') {
     setSrc('runner', run.revealed ? lineOf(s.data.trail) : EMPTY);
+    /* The plume is the trail, drawn in air. Showing it before Reveal would
+       hand the handler the answer, so it waits for the same button. */
+    if (run.revealed) plumeStart(s.data.trail, s.data.weather, FLAT);
+    else plumeStop();
     setSrc('contam', run.revealed
       ? { type: 'FeatureCollection',
           features: (s.data.contamination || []).map(c => lineOf(c.points).features[0]).filter(Boolean) }
@@ -1293,6 +1376,7 @@ function addWaypoint(kind) {
 async function stopRun() {
   await stopWatch();
   stopFollowing();
+  plumeStop();
   const s = run.session;
   if (!s) return go('scrHome');
   if (rec.pts.length < 2) {
@@ -1479,9 +1563,12 @@ function renderResult(s) {
 const cap = (w) => w ? w.charAt(0).toUpperCase() + w.slice(1) : w;
 
 /* ── Show on map: the ONLY place the plume band appears ───────────── */
-function showOnMap() {
+let mapCameFrom = 'scrResult';
+
+function showOnMap(from = 'scrResult') {
   const s = run.session ?? pendingSession;
   if (!s) return;
+  mapCameFrom = from;
   const t = targetById(s.targetId);
   clearMap();
   const wx = s.data.weather;
@@ -1499,6 +1586,8 @@ function showOnMap() {
         ? scentField(s.data.trail, wx, s.data.trackStarted ?? undefined, k)
         : scentField(s.data.trail, wx, s.data.trackStarted ?? undefined);
       if (field.length) setSrc('drift', plumePolygon(field));
+      // ...and the air itself, moving, as it was when the dog worked it.
+      plumeStart(s.data.trail, wx, FLAT);
     }
   } else {
     setSrc('hides', pointsOf(s.data.hides));
@@ -1508,9 +1597,10 @@ function showOnMap() {
     setSrc('wps', pointsOf(s.data.trackWaypoints || [], 'kind'));
   }
   fitTo(s.data.trail || s.data.hides || [], s.data.track || []);
-  $('showMapText').textContent = wx && t.kind === 'person'
-    ? 'The band is where scent MAY sit — its width is the uncertainty'
-    : (t.kind === 'hide' ? 'Hides and the search track' : 'No weather was saved for this one');
+  $('showMapText').textContent = t.kind === 'hide'
+    ? 'Hides and the search track'
+    : !wx ? 'No weather for this one, so no plume — a guessed one would be worse'
+    : 'Modelled scent, ageing in real time. The width is the uncertainty, never narrowed.';
   go('scrShowMap');
 }
 
@@ -1690,6 +1780,7 @@ function renderSettings() {
     : `<p class="body small muted">None yet.</p>`)
     + `<button class="btn ghost small" id="setAddLayer">Add person</button>`;
 
+  $('plumeOn').checked = settings.plume !== false;
   $('accCap').value = settings.accCap; $('accCapVal').textContent = settings.accCap;
   $('stillCap').value = settings.stillCap; $('stillCapVal').textContent = settings.stillCap;
   $('mbToken').value = settings.mbToken;
@@ -1816,6 +1907,7 @@ function wire() {
   $('btnLayCancel').addEventListener('click', async () => {
     await stopWatch();
     stopFollowing();
+    plumeStop();
     if (rec.kind === 'hide') { map.off('click', onHideTap); map.getCanvas().style.cursor = ''; }
     clearMap();
     go('scrHome');
@@ -1932,8 +2024,11 @@ function wire() {
   });
 
   // Result
-  $('btnShowMap').addEventListener('click', showOnMap);
-  $('btnShowMapBack').addEventListener('click', () => go('scrResult'));
+  $('btnShowMap').addEventListener('click', () => showOnMap('scrResult'));
+  $('btnSharePlume').addEventListener('click', () => {
+    if (pendingSession) { run.session = null; showOnMap('scrShare'); }
+  });
+  $('btnShowMapBack').addEventListener('click', () => { plumeStop(); go(mapCameFrom); });
   $('btnResDone').addEventListener('click', () => { clearMap(); go('scrHome'); });
 
   // Sessions
@@ -1971,6 +2066,11 @@ function wire() {
       if (fmtId) $(fmtId).textContent = $(id).value;
     });
   };
+  $('plumeOn').addEventListener('change', () => {
+    settings.plume = $('plumeOn').checked;
+    saveSettings();
+    if (!settings.plume) plumeStop();
+  });
   bind('accCap', 'accCap', 'accCapVal');
   bind('stillCap', 'stillCap', 'stillCapVal');
   bind('mbToken', 'mbToken');
