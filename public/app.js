@@ -7,7 +7,7 @@
    without. Weather: Open-Meteo, the one public API with soil temperature. */
 
 import {
-  pathLen, cardinal, dist, shouldKeep, bearing,
+  pathLen, cardinal, dist, dwellFold, bearing,
   scentField, plumePolygon, densify, timestamps,
   signedOffsets, meanSigned, sideOfDrift, sideAgreement, lineCorrect,
 } from './geo.js';
@@ -17,7 +17,7 @@ import { encodeTrail, decodeTrail } from './card.js';
 import { createStore, migrateV1, TARGETS, targetById, verbs, uid } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-13b';
+const BUILD = '2026-09-13c';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { accCap: 25, stillCap: 2.5, exagg: 2.4, mbToken: (window.MB_TOKEN || '') };
@@ -546,10 +546,17 @@ function onFix(pos) {
   if (!rec.on) return;
   const pt = { lat, lon, t: pos.timestamp || Date.now(), acc, alt: alt ?? null };
   const last = rec.pts[rec.pts.length - 1];
-  if (!shouldKeep(last, pt, Number(settings.accCap), Number(settings.stillCap))) {
-    rec.dropped++;
+  /* Stillness is not noise — it is the strongest source on the trail. A
+     stationary fix folds its seconds into the last kept point's dwell, and
+     the engine emits more from it. Only device-poor fixes are dropped. */
+  const verdict = dwellFold(last, pt, Number(settings.accCap), Number(settings.stillCap));
+  if (verdict === 'drop') { rec.dropped++; return; }
+  if (verdict === 'dwell') {
+    last.dwellS = (last.dwellS ?? 0) + Math.max(0, (pt.t - (last._seen ?? last.t)) / 1000);
+    last._seen = pt.t;
     return;
   }
+  pt.dwellS = 0;
   rec.pts.push(pt);
   if (rec.kind === 'lay') setSrc('runner', lineOf(rec.pts));
   if (rec.kind === 'run') setSrc('dog', lineOf(rec.pts));
@@ -623,6 +630,7 @@ async function confirmLay() {
   const isHide = rec.kind === 'hide';
   const origin = isHide ? rec.hides[0] : rec.pts[0];
   const startedAt = isHide ? rec.hides[0].t : rec.pts[0].t;
+  rec.pts.forEach(p => delete p._seen);
 
   const s = {
     id: uid(), handlerId: S.handler.id, dogId: null,
@@ -877,6 +885,7 @@ async function stopRun() {
     toast('Too short to grade — nothing saved');
     return go('scrHome');
   }
+  rec.pts.forEach(p => delete p._seen);
   const result = await computeResult(s, rec.pts, rec.wps, run.startedAt);
   db.updateSession(s.id, {
     dogId: S.dog?.id ?? null,
@@ -933,6 +942,16 @@ async function computeResult(s, track, wps, startedAt) {
     try { reg = regime(T, trail, wx, st); } catch { reg = null; }
   }
   const agree = sideAgreement(offs, predSide);
+
+  /* Bank this run for the dog's own drift constant. k is only computed when
+     the run can actually speak to it: real wind, a real offset, real ageing. */
+  const settle = 1 - Math.exp(-Math.max(0, (startedAt - s.startedAt) / 1000) / 900);
+  const k = (wx?.wind_speed > 0.5 && mean != null && Math.abs(mean) > 1 && settle > 0.05)
+    ? Math.abs(mean) / (wx.wind_speed * settle) : null;
+  db.addCalibration(dogRow?.id, {
+    t: startedAt, predSide, mean, wind: wx?.wind_speed ?? null,
+    stability: st?.label ?? null, k,
+  });
 
   const sideWord = mean == null ? '' : mean > 0 ? 'right' : 'left';
   const mAbs = mean == null ? 0 : Math.abs(mean);
@@ -1042,7 +1061,11 @@ function showOnMap() {
         features: s.data.contamination.map(c => lineOf(c.points).features[0]).filter(Boolean) });
     }
     if (wx) {
-      const field = scentField(s.data.trail, wx, s.data.trackStarted ?? undefined);
+      // The dog's own calibrated drift, once five runs have earned it.
+      const k = db.dogDrift(s.dogId);
+      const field = k != null
+        ? scentField(s.data.trail, wx, s.data.trackStarted ?? undefined, k)
+        : scentField(s.data.trail, wx, s.data.trackStarted ?? undefined);
       if (field.length) setSrc('drift', plumePolygon(field));
     }
   } else {

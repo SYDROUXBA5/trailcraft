@@ -3,6 +3,7 @@ import {
   dist, project, pathLen, cardinal, driftMetres, driftPolygon, meanOffset, filterFixes,
   densify, timestamps,
   crossTrackSigned, signedOffsets, meanSigned, sideOfDrift, sideAgreement, lineCorrect,
+  dwellFold, foldFixes,
 } from '../public/geo.js';
 
 let pass = 0;
@@ -317,6 +318,26 @@ t('lineCorrect: fixes move one line-length along the heading of travel', () => {
   near(dist(still[4], out2[4]), 10, 0.3, 'stationary fix still projects');
   assert.equal(lineCorrect(track, 0).length, 4, 'zero line is a no-op copy');
   near(dist(lineCorrect(track, 0)[1], track[1]), 0, 0.01, 'and does not move fixes');
+});
+
+
+t('foldFixes: standing still becomes dwell on the last point, not lost fixes', () => {
+  const at = (m, t, acc = 5) => ({ ...project(WELLS, 0, m), t: t * 1000, acc });
+  const fixes = [
+    at(0, 0), at(10, 8),
+    // Two minutes shuffling on the spot: jitter under the stillness cap.
+    { ...project(project(WELLS, 0, 10), 90, 0.8), t: 68000, acc: 5 },
+    { ...project(project(WELLS, 0, 10), 270, 0.9), t: 128000, acc: 5 },
+    at(11, 130, 99),                  // device-poor: genuinely dropped
+    at(30, 140),
+  ];
+  const [kept, dropped] = foldFixes(fixes, 25, 2.5);
+  assert.equal(kept.length, 3, 'three real positions');
+  assert.equal(dropped, 1, 'only the poor fix is dropped');
+  near(kept[1].dwellS, 120, 1, 'two minutes of standing folded into the pause point');
+  assert.equal(kept[0].dwellS, 0, 'walked-through points carry no dwell');
+  assert.equal(kept[1]._lastSeen, undefined, 'bookkeeping does not leak into the data');
+  assert.equal(dwellFold(kept[2], at(30.5, 141), 25, 2.5), 'dwell', 'the predicate agrees with the fold');
 });
 
 console.log(`\n${pass} passed total\n`);

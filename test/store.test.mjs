@@ -123,4 +123,20 @@ t('migration: the field phone keeps its team and its trails', () => {
   assert.equal(migrateV1(backend, db), 0, 'running it again moves nothing');
 });
 
+
+t('calibration: silent under five runs, then the median speaks, clamped', () => {
+  const db = createStore(fakeBackend());
+  const row = (k) => ({ t: 1, predSide: 1, mean: 8, wind: 4, stability: 'Stable', k });
+  for (const k of [2.1, 1.9, 2.4]) db.addCalibration('bo', row(k));
+  assert.equal(db.dogDrift('bo'), null, 'three runs are not evidence');
+  db.addCalibration('bo', row(2.0));
+  db.addCalibration('bo', row(55));            // one absurd gusty outlier
+  const d = db.dogDrift('bo');
+  assert.ok(d >= 1.9 && d <= 2.4, `median shrugs off the outlier (${d})`);
+  db.addCalibration('bo', row(null));          // an ungradeable run banks nothing usable
+  assert.ok(db.dogDrift('bo') != null, 'null k rows are kept but never counted');
+  assert.equal(db.dogDrift('nell'), null, 'another dog starts from zero');
+  assert.equal(db.calibration('bo').length, 6, 'rows are all retained');
+});
+
 console.log(`\n${pass} passed total\n`);
