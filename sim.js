@@ -42,6 +42,16 @@ export const NOSE = 0.28;
    comparable with whatever calibration data already exists. */
 export const PEAK_SECS = 7;
 
+/* Residence time, as a multiple of the nominal airborne seconds. Turbulence
+   removes scent from the working layer at random rather than on a timer, so
+   the spread is roughly exponential: most parcels are mixed out early, a few
+   ride a long way. Clamped at both ends — zero would be a parcel that never
+   existed, and an unbounded tail would throw specks into the next county. */
+export function RESIDENCE() {
+  const u = Math.max(1e-6, Math.random());
+  return Math.min(1.9, Math.max(0.18, -Math.log(u) * 0.62));
+}
+
 /** Particles per trail point. Enough to read as a plume, few enough to stay at
     60 fps on a phone, which is where this actually has to run. */
 const PER_POINT = 7;
@@ -109,6 +119,13 @@ export class ScentSim {
           // stable per particle — re-rolled each frame they would flicker, and
           // a flickering plume reads as a bug, not as air.
           seed: Math.random() * 6.28318,
+          /* How long THIS parcel stays in the working layer, as a share of
+             the nominal airborne time. Turbulence does not remove scent on a
+             timer: most parcels are mixed out early and a few ride a long
+             way, which is roughly an exponential residence time. Giving every
+             parcel the same one put a ruler-straight edge across the end of
+             the plume — the one shape a plume never has. */
+          life: RESIDENCE(),
           dwellS: p.dwellS ?? 0,           // seconds spent standing here
           str: 0,
         });
@@ -124,7 +141,7 @@ export class ScentSim {
           this.parts.push({
             lat: g.lat, lon: g.lon, hlat: g.lat, hlon: g.lon, born: p.t,
             phase: (k + Math.random()) / 10, seed: Math.random() * 6.28318,
-            dwellS: p.dwellS, str: 0,
+            life: RESIDENCE(), dwellS: p.dwellS, str: 0,
           });
         }
       }
@@ -167,6 +184,7 @@ export class ScentSim {
           seed: Math.random() * 6.28318,
           ang: Math.random() * 360,             // where on the disc it sits
           rad: Math.sqrt(Math.random()),        // sqrt → uniform over the disc
+          life: RESIDENCE(),
           str: 0,
         });
       }
@@ -201,8 +219,10 @@ export class ScentSim {
       if (age < 0) { s.str = 0; continue; }
 
       // Convection strips a particle out of the working layer sooner, so it
-      // travels less far horizontally before it stops mattering.
-      const secs = s.phase * AIRBORNE / mix;
+      // travels less far horizontally before it stops mattering — and each
+      // parcel carries its own residence time on top of that, so they do not
+      // all stop at the same distance.
+      const secs = s.phase * AIRBORNE * (s.life ?? 1) / mix;
       const d = driftFrom(T, { lat: s.hlat, lon: s.hlon }, secs, wx, st);
       s.lat = d.lat; s.lon = d.lon;
 
@@ -232,7 +252,12 @@ export class ScentSim {
       // Standing still deposits more: emission scales with the dwell the
       // fix stream folded into this point.
       const dwellBoost = 1 + Math.min(3, (s.dwellS ?? 0) / 60);
-      s.str = Math.exp(-age / (lifeMs * linger)) * (1 - s.phase * 0.72) * pocket * dwellBoost;
+      /* `phase` is already how far through its own airborne life a parcel
+         is, so it carries the fade on its own. What ragged the edge is the
+         residence time above: parcels from the same piece of ground reach
+         very different distances, and the far ones are both fainter and much
+         rarer, which is how a plume actually ends. */
+      s.str = Math.exp(-age / (lifeMs * linger)) * (1 - s.phase * 0.78) * pocket * dwellBoost;
     }
 
     /* The end pool. Two deliberate differences from the trail plume:
@@ -250,7 +275,7 @@ export class ScentSim {
       const poolR = poolRadius(dwellS);
       const g = project({ lat: src.lat, lon: src.lon }, s.ang, s.rad * poolR);
       s.hlat = g.lat; s.hlon = g.lon;
-      const d = driftFrom(T, g, s.phase * AIRBORNE / mix, wx, st);
+      const d = driftFrom(T, g, s.phase * AIRBORNE * (s.life ?? 1) / mix, wx, st);
       s.lat = d.lat; s.lon = d.lon;
       // Up to ~1.5× a fresh trail particle — the hottest thing on the map.
       s.str = (0.55 + 0.95 * build) * (1 - s.phase * 0.45);
