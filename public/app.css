@@ -478,3 +478,139 @@ input[type="range"] { width: 100%; accent-color: var(--moss); height: 40px; }
 @media (prefers-reduced-transparency: reduce) {
   .legend { background: #121814; backdrop-filter: none; }
 }
+
+/* ── Liquid glass ─────────────────────────────────────────────────────
+   The same palette, given a surface. A pill reads as a real object when
+   three things agree: light catches its top edge, the face falls away
+   underneath, and it throws its own colour onto the paper below it. That
+   last one is what makes the moss and ember buttons feel lit rather than
+   printed — the glow under them is their own colour, not a grey shadow.
+
+   Nothing here changes a hue. --moss and --ember are exactly what they were;
+   they are just no longer flat fills. */
+
+.btn, .chip, .age-chip, .radio-card {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.20) 0%,
+                                            rgba(255, 255, 255, 0.04) 46%,
+                                            rgba(0, 0, 0, 0.10) 100%);
+  box-shadow:
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.55),     /* the lit top edge */
+    inset 0 -2px 7px rgba(23, 32, 26, 0.16),       /* the face falling away */
+    0 1px 2px rgba(23, 32, 26, 0.10),
+    0 9px 20px -10px rgba(23, 32, 26, 0.32);
+}
+
+/* The specular sheen: a bright wash over the top half, clipped to the pill. */
+.btn::before, .chip::before, .age-chip::before, .radio-card::before {
+  content: '';
+  position: absolute;
+  left: 0; right: 0; top: 0; height: 54%;
+  border-radius: inherit;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.42), rgba(255, 255, 255, 0));
+  pointer-events: none;
+  z-index: 0;
+}
+/* Content sits above the sheen, never under it. */
+.btn > *, .chip > *, .age-chip > *, .radio-card > * { position: relative; z-index: 1; }
+
+/* Filled buttons throw their own colour down onto the paper. */
+.btn.moss, .chip.selected, .age-chip.selected, .radio-card.selected {
+  box-shadow:
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.38),
+    inset 0 -3px 9px rgba(0, 0, 0, 0.22),
+    0 2px 4px rgba(30, 51, 40, 0.22),
+    0 12px 26px -8px rgba(47, 74, 58, 0.55);
+}
+.btn.ember {
+  box-shadow:
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.42),
+    inset 0 -3px 9px rgba(0, 0, 0, 0.20),
+    0 2px 4px rgba(140, 62, 22, 0.22),
+    0 12px 26px -8px rgba(217, 102, 43, 0.55);
+}
+
+/* Ghost stays glass rather than losing its surface to `background: transparent`. */
+.btn.ghost {
+  background-color: rgba(255, 253, 248, 0.55);
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0.06));
+  backdrop-filter: blur(8px);
+}
+.glass .btn.ghost { background-color: rgba(255, 253, 248, 0.9); }
+
+.btn.moss-on-dark {
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0.02));
+  backdrop-filter: blur(8px);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3), 0 8px 22px -10px rgba(0, 0, 0, 0.6);
+}
+
+/* Pressed: the light rolls off the top edge as the face tips away. */
+.btn:active, .chip:active, .age-chip:active, .radio-card:active {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.28),
+    inset 0 3px 10px rgba(23, 32, 26, 0.22),
+    0 2px 6px -2px rgba(23, 32, 26, 0.28);
+}
+.btn:active::before, .chip:active::before,
+.age-chip:active::before, .radio-card:active::before { opacity: 0.55; }
+
+.map-fab {
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0.05));
+  box-shadow:
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.7),
+    inset 0 -2px 7px rgba(23, 32, 26, 0.16),
+    0 8px 20px -6px rgba(23, 32, 26, 0.34);
+}
+.map-fab.nudge {
+  box-shadow:
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.42),
+    inset 0 -3px 9px rgba(0, 0, 0, 0.2),
+    0 10px 24px -6px rgba(217, 102, 43, 0.6);
+}
+
+/* ── Centred ──────────────────────────────────────────────────────────
+   Every label sits in the middle of the thing you press. */
+.btn, .btn.card-btn { text-align: center; }
+.chip, .age-chip { justify-content: center; }
+.radio-card { text-align: center; justify-items: center; }
+.radio-card i { grid-column: 1; }
+.set-row { text-align: center; justify-content: center; }
+.set-row .who { text-align: center; }
+
+@media (prefers-reduced-transparency: reduce) {
+  .btn.ghost, .btn.moss-on-dark { backdrop-filter: none; }
+  .btn.ghost { background-color: var(--card); }
+}
+
+/* A chip's left padding is tight so an avatar can sit near the edge. On a
+   chip with no avatar that same padding pushes the label off-centre, which
+   is what made these read as left-aligned. */
+.chip { padding: 8px 18px; text-align: center; }
+.chip:has(.ava) { padding-left: 8px; }
+.chip > span, .chip > div { text-align: center; }
+
+/* Filled pills take a stronger sheen than paper ones: a saturated face
+   carries a highlight without washing out, and it is what makes them read
+   as lit glass rather than a printed rectangle. */
+.btn.moss::before, .btn.ember::before,
+.chip.selected::before, .age-chip.selected::before, .radio-card.selected::before {
+  background: linear-gradient(180deg,
+    rgba(255, 255, 255, 0.34) 0%,
+    rgba(255, 255, 255, 0.13) 58%,
+    rgba(255, 255, 255, 0) 100%);
+  height: 62%;
+}
+/* A hairline of the surface's own colour along the very top — the edge of a
+   piece of glass catching the light rather than a border drawn on it. */
+.btn.moss, .btn.ember { border-color: transparent; }
+.btn.moss::after, .btn.ember::after {
+  content: '';
+  position: absolute; inset: 0;
+  border-radius: inherit;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-bottom-color: rgba(0, 0, 0, 0.14);
+  pointer-events: none;
+  z-index: 2;
+}
