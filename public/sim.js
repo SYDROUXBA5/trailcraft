@@ -257,7 +257,7 @@ export class ScentSim {
          residence time above: parcels from the same piece of ground reach
          very different distances, and the far ones are both fainter and much
          rarer, which is how a plume actually ends. */
-      s.str = Math.exp(-age / (lifeMs * linger)) * (1 - s.phase * 0.78) * pocket * dwellBoost;
+      s.str = Math.exp(-age / (lifeMs * linger)) * (1 - s.phase * 0.72) * pocket * dwellBoost;
     }
 
     /* The end pool. Two deliberate differences from the trail plume:
