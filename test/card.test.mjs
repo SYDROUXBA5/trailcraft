@@ -4,7 +4,7 @@
 
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { encodeTrail, decodeTrail, maxDeviation } from '../public/card.js';
+import { encodeTrail, decodeTrail, maxDeviation , cardUrl, cardFromText } from '../public/card.js';
 import { simplify, dist, pathLen } from '../public/geo.js';
 
 let pass = 0;
@@ -190,6 +190,39 @@ await t('relay cards: a plan carries its countdown, a walked card comes back, ol
   // Absurd values collapse safely instead of propagating.
   const silly = await encodeTrail({ points: pts, waypoints: [], kind: 1, ageMin: 99999 });
   assert.equal((await decodeTrail(silly)).ageMin, 1440, 'countdown is clamped to a day');
+});
+
+await t('a card in a QR is a link, so the phone camera opens the app not Google', async () => {
+  const pts = [{ lat: 51.2094, lon: -2.6449, t: 1_700_000_000_000 },
+               { lat: 51.2103, lon: -2.6441, t: 1_700_000_060_000 }];
+  const card = await encodeTrail({ points: pts, waypoints: [], from: 'Remi' });
+
+  const url = cardUrl(card, 'https://sydrouxba5.github.io/trailcraft/');
+  assert.ok(url.startsWith('https://'), 'a camera app will treat this as a link');
+  assert.ok(url.includes('#c='), 'and the card rides in the fragment, never sent to a server');
+
+  // Both forms scan: a link from a camera, a bare card from an older phone.
+  assert.equal(cardFromText(url), card, 'the link gives the card back exactly');
+  assert.equal(cardFromText(card), card, 'a bare card passes straight through');
+  assert.equal(cardFromText(`  ${url}  `), card, 'whitespace from a scanner is trimmed');
+  const back = await decodeTrail(cardFromText(url));
+  assert.equal(back.from, 'Remi');
+  assert.equal(back.points.length, 2);
+
+  // A page address that already had a hash or query does not grow a second one.
+  assert.equal(cardUrl(card, 'https://x.dev/app/#scrHome').split('#').length, 2,
+    'exactly one fragment, whatever the page address was');
+
+  // Opened from disk there is no address to hang it on, so send the card bare
+  // rather than a file:// link the other phone could never open.
+  assert.equal(cardUrl(card, 'file:///Users/remidroux/Desktop/Trailcraft.html'), card);
+  assert.equal(cardUrl(card, ''), card);
+});
+
+await t('the link wrapper still leaves a long trail inside one QR', async () => {
+  const card = await encodeTrail({ points: recorded(), waypoints: [] });
+  const url = cardUrl(card, 'https://sydrouxba5.github.io/trailcraft/');
+  assert.ok(url.length < 1800, `link length ${url.length} must still fit a scannable QR`);
 });
 
 console.log(`\n${pass} passed total`);

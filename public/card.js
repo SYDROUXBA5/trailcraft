@@ -209,3 +209,31 @@ export function maxDeviation(original, decoded) {
   }
   return worst;
 }
+
+/* ── Getting a card into the other phone ──────────────────────────────
+   A bare `TC1.…` string is not a URL, so a phone's own camera app offers it
+   to a search engine instead of to this app — which is exactly what a person
+   does when they see a QR code in a car park. Wrapped as a link, the camera
+   opens Trailcraft and the card lands where it belongs.
+
+   The card rides in the FRAGMENT. Browsers never send a fragment to the
+   server, so the trail still never leaves the two phones — the request that
+   loads the app carries the address and nothing else. */
+
+/** A card as a link the receiving phone's camera will honour. Falls back to
+    the bare card when there is no web address to hang it on (the single-file
+    build opened from disk), because a `file://` link means nothing to
+    another phone. */
+export function cardUrl(card, base) {
+  const root = String(base || '').replace(/[#?].*$/, '');
+  if (!/^https?:\/\//i.test(root)) return card;
+  return `${root}#c=${card}`;
+}
+
+/** Either form back to a card string: a bare `TC1.…`, or a link carrying one.
+    Anything else is returned untouched, for decodeTrail to reject by name. */
+export function cardFromText(text) {
+  const s = String(text || '').trim();
+  const at = s.indexOf('#c=');
+  return at >= 0 ? s.slice(at + 3).trim() : s;
+}
