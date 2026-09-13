@@ -46,6 +46,18 @@ export const PEAK_SECS = 7;
     60 fps on a phone, which is where this actually has to run. */
 const PER_POINT = 7;
 
+/* The end of the trail is not a point — it is a POOL. The runner does not
+   vanish at the last footprint: in this sport they stand there waiting to be
+   found, and a standing person is a continuous source. Contamination
+   accumulates, so the end grows a disc of scent that is wider and hotter the
+   longer the dwell — the pool dogs famously overshoot into. */
+const POOL_PARTS = 26;
+/** Dwell seconds → pool radius in metres. Diffusive growth: fast at first,
+    then slowing, capped where a real search-area stops growing. */
+export function poolRadius(dwellS) {
+  return Math.min(26, 2 + 2.4 * Math.sqrt(Math.max(0, dwellS) / 60));
+}
+
 /**
  * Where a scent particle released at `origin` ends up after `secs` airborne.
  * Pure — this is the part worth testing.
@@ -70,7 +82,7 @@ export function driftFrom(T, origin, secs, wx, st, steps = 5) {
 }
 
 export class ScentSim {
-  constructor() { this.parts = []; this.trail = []; }
+  constructor() { this.parts = []; this.trail = []; this.pool = []; }
 
   /** Seed one particle set from a laid trail. Each keeps the point it came from
       and the moment that point was walked — its ground source never moves. */
@@ -102,8 +114,32 @@ export class ScentSim {
       }
       this.trail.push(p);
     }
+    this.reseedPool();
     return this;
   }
+
+  /** The pool belongs to whichever point is currently the end, so laying live
+      moves it along: each appended fix rebuilds it at the new end. Cheap —
+      a few dozen objects, at most once per GPS fix. */
+  reseedPool() {
+    this.pool.length = 0;
+    const end = this.trail[this.trail.length - 1];
+    if (!end) return;
+    for (let k = 0; k < POOL_PARTS; k++) {
+      this.pool.push({
+        lat: end.lat, lon: end.lon, hlat: end.lat, hlon: end.lon,
+        born: end.t,
+        phase: (k + Math.random()) / POOL_PARTS,
+        seed: Math.random() * 6.28318,
+        ang: Math.random() * 360,             // where on the disc it sits
+        rad: Math.sqrt(Math.random()),        // sqrt → uniform over the disc
+        str: 0,
+      });
+    }
+  }
+
+  /** Everything the renderer should draw: the trail plume plus the end pool. */
+  drawable() { return this.pool.length ? this.parts.concat(this.pool) : this.parts; }
 
   /**
    * Move every particle to where it should be at wall-clock time `now`.
@@ -159,6 +195,27 @@ export class ScentSim {
       const linger = 1 + drain * slack * 0.9;
       const pocket = mix > 1.25 ? 0.55 + 0.45 * (0.5 + 0.5 * Math.sin(s.seed * 13.7)) : 1;
       s.str = Math.exp(-age / (lifeMs * linger)) * (1 - s.phase * 0.72) * pocket;
+    }
+
+    /* The end pool. Two deliberate differences from the trail plume:
+       - it does NOT fade with trail age — the source is still standing there,
+         feeding it, the whole time;
+       - it ACCUMULATES: ~10 minutes of standing reaches two-thirds of full
+         contamination, and the disc keeps widening as sqrt(dwell). */
+    const end = this.trail[this.trail.length - 1];
+    if (end) {
+      const dwellS = (now - end.t) / 1000;
+      const build = 1 - Math.exp(-Math.max(0, dwellS) / 600);
+      const poolR = poolRadius(dwellS);
+      for (const s of this.pool) {
+        if (dwellS <= 0) { s.str = 0; continue; }
+        const g = project({ lat: end.lat, lon: end.lon }, s.ang, s.rad * poolR);
+        s.hlat = g.lat; s.hlon = g.lon;
+        const d = driftFrom(T, g, s.phase * AIRBORNE / mix, wx, st);
+        s.lat = d.lat; s.lon = d.lon;
+        // Up to ~1.5× a fresh trail particle — the hottest thing on the map.
+        s.str = (0.55 + 0.95 * build) * (1 - s.phase * 0.45);
+      }
     }
     return this.parts;
   }
