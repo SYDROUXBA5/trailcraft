@@ -168,7 +168,18 @@
 
 <!-- ── Layer guidance: her phone walks her along the plan ──────────── -->
 <section id="scrWalk" class="screen glass" hidden>
-  <div class="hud-pill"><span id="walkText">Walk to the green start dot</span></div>
+  <div class="nav-banner" id="navBanner">
+    <div class="nav-dist"><b id="navDist">&mdash;</b><i id="navUnit">m</i></div>
+    <div class="nav-say">
+      <span id="navInstr">Walk to the green start dot</span>
+      <span class="nav-sub" id="navSub"></span>
+    </div>
+  </div>
+  <button class="map-fab" id="btnRecentre" hidden aria-label="Re-centre on me">
+    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path
+      d="M12 2v3M12 19v3M2 12h3M19 12h3M12 7.5a4.5 4.5 0 100 9 4.5 4.5 0 000-9z"
+      fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+  </button>
   <div class="glass-bottom">
     <button class="btn big moss" id="btnInPlace">I&rsquo;m in place</button>
     <button class="btn ghost" id="walkCancel">Cancel</button>

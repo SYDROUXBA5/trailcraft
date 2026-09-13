@@ -392,3 +392,56 @@ export function departure(prev, fix, opts = {}) {
   if (!st.atStart && fix.walked >= runM) { st.atStart = true; st.offAt = fix.firstT ?? fix.t; }
   return st;
 }
+
+/* ── Following a route ────────────────────────────────────────────────
+   A trail you are walking is a route, and a route needs three things a
+   recorded line does not: where you are ON it, what is left of it, and
+   which way you are facing. */
+
+/** Where you are along a line: nearest point, which segment, how far in,
+    and how far there is left to walk. Distances in metres. */
+export function progressAlong(line, p) {
+  if (!line || line.length < 2 || !p) return null;
+  const o = line[0];
+  const P = enu(o, p);
+  const pts = line.map(q => enu(o, q));
+  let best = { d: Infinity, i: 1, t: 0, x: pts[0].x, y: pts[0].y };
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i - 1], b = pts[i];
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const L2 = dx * dx + dy * dy;
+    const t = L2 ? Math.max(0, Math.min(1, ((P.x - a.x) * dx + (P.y - a.y) * dy) / L2)) : 0;
+    const x = a.x + t * dx, y = a.y + t * dy;
+    const d = Math.hypot(P.x - x, P.y - y);
+    if (d < best.d) best = { d, i, t, x, y };
+  }
+  const seg = (i) => Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
+  let along = 0;
+  for (let i = 1; i < best.i; i++) along += seg(i);
+  along += Math.hypot(best.x - pts[best.i - 1].x, best.y - pts[best.i - 1].y);
+  let total = 0;
+  for (let i = 1; i < pts.length; i++) total += seg(i);
+  return { off: best.d, i: best.i, t: best.t, along, remaining: Math.max(0, total - along), total };
+}
+
+/** A route cut where you are standing: behind you, and ahead of you.
+    Navigation dims the first and lights the second — seeing that split is
+    how you know the phone has actually found you on the line. */
+export function splitLine(line, p) {
+  const pr = progressAlong(line, p);
+  if (!pr) return [[], line ? [...line] : []];
+  const a = line[pr.i - 1], b = line[pr.i];
+  const here = { lat: a.lat + (b.lat - a.lat) * pr.t, lon: a.lon + (b.lon - a.lon) * pr.t };
+  return [[...line.slice(0, pr.i), here], [here, ...line.slice(pr.i)]];
+}
+
+/** A heading that does not flicker. Raw GPS course jumps by tens of degrees
+    between fixes; a person walking does not. Blends across the 0/360 seam,
+    so facing north never spins the map the long way round. */
+export function smoothBearing(prev, next, alpha = 0.3) {
+  if (!Number.isFinite(next)) return Number.isFinite(prev) ? prev : null;
+  const wrap = (d) => ((d % 360) + 360) % 360;
+  if (!Number.isFinite(prev)) return wrap(next);
+  const delta = ((next - prev + 540) % 360) - 180;
+  return wrap(prev + delta * alpha);
+}
