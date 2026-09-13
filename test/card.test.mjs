@@ -162,4 +162,34 @@ await t('the vendored decoder loads as a classic script would', () => {
   assert.equal(typeof jsQR, 'function', 'global jsQR exists outside CommonJS');
 });
 
+
+await t('relay cards: a plan carries its countdown, a walked card comes back, old cards read as plain trails', async () => {
+  const t0 = Date.UTC(2026, 8, 13, 9, 0, 0);
+  const pts = [];
+  for (let i = 0; i < 20; i++) pts.push({ lat: 51.2094 + i * 1e-4, lon: -2.6449, t: t0 + i * 45000 });
+
+  // The plan the handler draws: kind 1, with the chosen ageing riding along.
+  const plan = await encodeTrail({ points: pts, waypoints: [], drawn: true, from: 'Rémi', kind: 1, ageMin: 10 });
+  const gotPlan = await decodeTrail(plan);
+  assert.equal(gotPlan.kind, 1, 'a plan says it is a plan');
+  assert.equal(gotPlan.ageMin, 10, 'and carries the countdown');
+  assert.ok(gotPlan.drawn, 'a plan is drawn, and says so');
+
+  // The walked trail coming back: kind 2, no countdown needed.
+  const walked = await encodeTrail({ points: pts, waypoints: [], from: 'Sophie', kind: 2 });
+  const gotWalked = await decodeTrail(walked);
+  assert.equal(gotWalked.kind, 2);
+  assert.equal(gotWalked.ageMin, null, 'no countdown on a walked card');
+
+  // A pre-relay card (no kind, no age) reads exactly as before.
+  const plain = await encodeTrail({ points: pts, waypoints: [], from: 'Rémi' });
+  const gotPlain = await decodeTrail(plain);
+  assert.equal(gotPlain.kind, 0, 'old cards are plain trails');
+  assert.equal(gotPlain.ageMin, null);
+
+  // Absurd values collapse safely instead of propagating.
+  const silly = await encodeTrail({ points: pts, waypoints: [], kind: 1, ageMin: 99999 });
+  assert.equal((await decodeTrail(silly)).ageMin, 1440, 'countdown is clamped to a day');
+});
+
 console.log(`\n${pass} passed total`);

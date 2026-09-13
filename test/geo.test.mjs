@@ -3,7 +3,7 @@ import {
   dist, project, pathLen, cardinal, driftMetres, driftPolygon, meanOffset, filterFixes,
   densify, timestamps,
   crossTrackSigned, signedOffsets, meanSigned, sideOfDrift, sideAgreement, lineCorrect,
-  dwellFold, foldFixes,
+  dwellFold, foldFixes, departure,
 } from '../public/geo.js';
 
 let pass = 0;
@@ -338,6 +338,47 @@ t('foldFixes: standing still becomes dwell on the last point, not lost fixes', (
   assert.equal(kept[0].dwellS, 0, 'walked-through points carry no dwell');
   assert.equal(kept[1]._lastSeen, undefined, 'bookkeeping does not leak into the data');
   assert.equal(dwellFold(kept[2], at(30.5, 141), 25, 2.5), 'dwell', 'the predicate agrees with the fold');
+});
+
+t('departure: the clock starts when she leaves, not when she wobbles', () => {
+  // Standing at the start, GPS wandering 8 m either side of it.
+  let st = null;
+  for (const d of [6, 18, 9, 22, 11, 30, 14]) st = departure(st, { d, t: 1000, walked: 3, firstT: 1000 });
+  assert.equal(st.atStart, true, 'she is armed — she was inside 25 m');
+  assert.equal(st.offAt, 0, 'a wobble out to 30 m is not a departure');
+
+  // Now she walks away.
+  st = departure(st, { d: 44, t: 5000, walked: 44, firstT: 1000 });
+  assert.equal(st.offAt, 5000, 'the clock starts at the fix that cleared 40 m');
+
+  // And it happens exactly once, even as she carries on.
+  st = departure(st, { d: 300, t: 9000, walked: 300, firstT: 1000 });
+  assert.equal(st.offAt, 5000, 'the departure does not move once it has happened');
+});
+
+t('departure: a start she never stood near still starts the clock', () => {
+  // Every fix 50 m from the drawn A — trees, a wall, or an A drawn a bit out.
+  // Without the fallback the countdown would never begin and the whole
+  // session would be silently ruined.
+  let st = null;
+  for (const [d, walked, tt] of [[50, 0, 1000], [52, 20, 3000], [61, 45, 5000], [80, 70, 7000]]) {
+    st = departure(st, { d, t: tt, walked, firstT: 1000 });
+  }
+  assert.equal(st.offAt, 1000, 'she is taken to have left at her first fix');
+
+  // Short of the fallback distance it stays silent rather than guessing.
+  let q = null;
+  for (const [d, walked, tt] of [[50, 0, 1000], [55, 30, 3000]]) {
+    q = departure(q, { d, t: tt, walked, firstT: 1000 });
+  }
+  assert.equal(q.offAt, 0, '30 m of walking is not yet evidence of a departure');
+});
+
+t('departure: the countdown reads from the moment she left', () => {
+  const st = departure({ atStart: true, offAt: 0 }, { d: 90, t: 60000, walked: 90, firstT: 0 });
+  const ageMin = 20;
+  assert.equal(st.offAt + ageMin * 60000 - 60000, 20 * 60000, 'zero is 20 min after she left');
+  assert.ok(st.offAt + ageMin * 60000 > 60000, 'and it is in the future the moment it starts');
 });
 
 console.log(`\n${pass} passed total\n`);

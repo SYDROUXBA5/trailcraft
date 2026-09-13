@@ -9,7 +9,7 @@
 import {
   pathLen, cardinal, dist, dwellFold, bearing,
   scentField, plumePolygon, densify, timestamps,
-  signedOffsets, meanSigned, sideOfDrift, sideAgreement, lineCorrect,
+  signedOffsets, meanSigned, sideOfDrift, sideAgreement, lineCorrect, departure,
 } from './geo.js';
 import { FLAT, buildTerrain, stability, regime } from './field.js';
 import { predictedOffsets } from './sim.js';
@@ -17,7 +17,7 @@ import { encodeTrail, decodeTrail } from './card.js';
 import { createStore, migrateV1, TARGETS, targetById, verbs, uid } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-13c';
+const BUILD = '2026-09-13d';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { accCap: 25, stillCap: 2.5, exagg: 2.4, mbToken: (window.MB_TOKEN || '') };
@@ -95,14 +95,14 @@ const avaHtml = (ent, cls = '') => {
 /* ── Screens ──────────────────────────────────────────────────────── */
 const SCREENS = ['scrOnboardHandler', 'scrOnboardDog', 'scrTutorial', 'scrHome', 'scrLay',
   'scrConfirm', 'scrShare', 'scrContam', 'scrPick', 'scrScan', 'scrRun', 'scrResult',
-  'scrShowMap', 'scrSessions', 'scrSettings'];
+  'scrShowMap', 'scrSessions', 'scrSettings', 'scrDraw', 'scrCountdown', 'scrWalk', 'scrWait'];
 
 function go(id) {
   stopScan();
   for (const s of SCREENS) $(s).hidden = s !== id;
   if (id === 'scrHome') renderHome();
   // The map only needs to be right when something transparent sits over it.
-  if (['scrLay', 'scrConfirm', 'scrContam', 'scrRun', 'scrShowMap'].includes(id)) map?.resize();
+  if (['scrLay', 'scrConfirm', 'scrContam', 'scrRun', 'scrShowMap', 'scrDraw', 'scrWalk'].includes(id)) map?.resize();
 }
 
 /* ── Map ──────────────────────────────────────────────────────────── */
@@ -501,6 +501,7 @@ function startLay() {
   rec.kind = t.kind === 'person' ? 'lay' : 'hide';
   rec.pts = []; rec.wps = []; rec.hides = []; rec.dropped = 0;
   $('hideTools').hidden = t.kind !== 'hide';
+  $('btnDrawPlan').hidden = t.kind === 'hide';
   $('btnLayStart').hidden = t.kind === 'hide';
   $('btnLayStop').hidden = true;
   $('layDot').hidden = true;
@@ -560,6 +561,7 @@ function onFix(pos) {
   rec.pts.push(pt);
   if (rec.kind === 'lay') setSrc('runner', lineOf(rec.pts));
   if (rec.kind === 'run') setSrc('dog', lineOf(rec.pts));
+  if (rec.kind === 'walk') setSrc('dog', lineOf(rec.pts));
   if (rec.pts.length === 1) map.easeTo({ center: [lon, lat], zoom: 17 });
 }
 
@@ -684,10 +686,15 @@ function miniMapSvg(pts) {
 
 function renderShare(s) {
   const isHide = targetById(s.targetId).kind === 'hide';
-  const v = verbs(targetById(s.targetId));
-  $('shareTitle').textContent = isHide ? 'Hide set' : 'Trail laid';
+  const isPlan = !!s.data.plan;
+  $('shareTitle').textContent = isHide ? 'Hide set' : isPlan ? 'Trail planned' : 'Trail laid';
   $('btnRunHere').textContent = isHide ? 'Search it on this phone' : 'Run it on this phone';
   $('btnContam').hidden = isHide;
+  $('btnOff').hidden = !isPlan;
+  if (isPlan) {
+    $('btnOff').textContent = s.data.offAt
+      ? 'Open the countdown' : `${cap(layerName(s))} is off — start the countdown`;
+  }
 
   const wx = s.data.weather;
   const laid = new Date(s.startedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -702,17 +709,24 @@ function renderShare(s) {
     $('shareQrCard').hidden = false;
     $('shareMini').innerHTML = miniMapSvg(s.data.trail);
     const mins = fmtDur(s.data.trail[s.data.trail.length - 1].t - s.data.trail[0].t);
-    $('shareMeta').textContent = `${fmtKm(pathLen(s.data.trail))} · ${mins} · laid ${laid}`
-      + (wx?.wind_speed != null ? ` · wind ${(wx.wind_speed * 3.6).toFixed(0)} km/h ${cardinal(wx.wind_direction)}` : '');
+    $('shareMeta').textContent = isPlan
+      ? `${fmtKm(pathLen(s.data.trail))} plan · dog starts +${s.data.ageMin ?? 10} min`
+        + (wx?.wind_speed != null ? ` · wind ${(wx.wind_speed * 3.6).toFixed(0)} km/h ${cardinal(wx.wind_direction)}` : '')
+      : `${fmtKm(pathLen(s.data.trail))} · ${mins} · laid ${laid}`
+        + (wx?.wind_speed != null ? ` · wind ${(wx.wind_speed * 3.6).toFixed(0)} km/h ${cardinal(wx.wind_direction)}` : '');
     renderShareQr(s);
   }
 }
+
+const layerName = (s) => S.layers.find(l => l.id === s.layerId)?.name ?? 'the layer';
 
 async function renderShareQr(s) {
   const from = (S.layers.find(l => l.id === s.layerId)?.name) || S.handler?.name || '';
   try {
     const card = await encodeTrail({
-      points: s.data.trail, waypoints: s.data.waypoints || [], drawn: !!s.data.drawn, from,
+      points: s.data.trail, waypoints: s.data.waypoints || [],
+      drawn: !!s.data.drawn || !!s.data.plan, from,
+      ...(s.data.plan ? { kind: 1, ageMin: s.data.ageMin ?? 10 } : {}),
     }, {});
     const qr = window.qrcode?.(0, 'M');
     if (!qr) throw new Error('QR library missing — hard refresh once online');
@@ -720,7 +734,9 @@ async function renderShareQr(s) {
     qr.make();
     $('shareQr').innerHTML = qr.createSvgTag({ cellSize: 4, margin: 0, scalable: true });
     const who = S.layers.find(l => l.id !== s.layerId)?.name;
-    $('shareQrCaption').textContent = `The other phone scans this — the trail travels inside the code, no signal needed`;
+    $('shareQrCaption').textContent = s.data.plan
+      ? `${layerName(s)} scans this — her phone walks her along the line, corner by corner`
+      : `The other phone scans this — the trail travels inside the code, no signal needed`;
   } catch (err) {
     $('shareQr').innerHTML = '';
     $('shareQrCaption').textContent = err.message;
@@ -788,6 +804,235 @@ function saveContam() {
   toast(`Contamination trail saved — ${who}, ${fmtWhen(laidAt)}`);
   go('scrShare');
   renderShare(pendingSession);
+}
+
+
+/* ── The relay: draw → guide → countdown on both → walked card back ─
+   The handler draws the trail with a finger, A to B. The layer scans the
+   plan and their phone walks them along it, recording where they REALLY
+   walked. The countdown — the trail’s age — starts the moment the layer
+   leaves the departure point, on both phones. When the dog finds them, the
+   walked trail comes back as a second card and the verdict is graded
+   against the truth on the ground, not the sketch. */
+
+const draw = { pts: [], ageMin: 10 };
+
+function openDraw() {
+  clearMap();
+  draw.pts = [];
+  draw.ageMin = 10;
+  $('ageRow').querySelectorAll('.age-chip').forEach(b =>
+    b.classList.toggle('selected', b.dataset.age === '10'));
+  map.getCanvas().style.cursor = 'crosshair';
+  map.on('click', onDrawTap);
+  paintDraw();
+  go('scrDraw');
+}
+function onDrawTap(e) {
+  const pt = { lat: e.lngLat.lat, lon: e.lngLat.lng };
+  const prev = draw.pts[draw.pts.length - 1];
+  if (prev && dist(prev, pt) > 5000) return toast('That corner is km away — zoom in');
+  draw.pts.push(pt);
+  navigator.vibrate?.(15);
+  paintDraw();
+}
+function paintDraw() {
+  setSrc('runner', lineOf(draw.pts));
+  setSrc('wps', pointsOf(draw.pts.map((pt, i) => ({ ...pt, kind: i === 0 ? 'A' : String(i + 1) })), 'kind'));
+  if (draw.pts.length) setSrc('start', pointsOf([draw.pts[0]]));
+  const n = draw.pts.length;
+  $('drawText').textContent = n < 2
+    ? (n === 0 ? 'Tap the map at each corner — A to B' : 'Now tap where it goes next')
+    : `${n} corners · ${fmtKm(pathLen(draw.pts))}`;
+  $('drawSave').disabled = n < 2;
+}
+function closeDraw() {
+  map.off('click', onDrawTap);
+  map.getCanvas().style.cursor = '';
+}
+function saveDrawPlan() {
+  if (draw.pts.length < 2) return;
+  closeDraw();
+  // densify + a provisional walking clock: the REAL clock arrives with the
+  // walked card. The provisional one keeps the card format honest.
+  const planPts = timestamps(densify(draw.pts, 5), Date.now(), 1.3);
+  const sess = {
+    id: uid(), handlerId: S.handler.id, dogId: null,
+    layerId: S.layer?.id ?? null, targetId: 'person', startedAt: Date.now(),
+    summary: `${fmtKm(pathLen(planPts))} trail planned, not walked yet.`,
+    data: { plan: true, ageMin: draw.ageMin, corners: draw.pts, trail: planPts,
+            waypoints: [], weather: null, contamination: [] },
+  };
+  db.addSession(sess);
+  snap();
+  pendingSession = sess;
+  go('scrShare');
+  renderShare(sess);
+  fetchWeather(planPts[0].lat, planPts[0].lon, Date.now())
+    .then(wx => {
+      db.updateSession(sess.id, { data: { ...sess.data, weather: wx } });
+      pendingSession = db.sessions().find(x => x.id === sess.id);
+      snap();
+      if (!$('scrShare').hidden) renderShare(pendingSession);
+    })
+    .catch(() => { /* offline — joins later */ });
+}
+
+/* ── Handler countdown ── */
+const CD = { sid: null, tick: 0 };
+
+function openCountdown(s) {
+  CD.sid = s.id;
+  clearInterval(CD.tick);
+  CD.tick = setInterval(paintCountdown, 500);
+  $('cdSub').textContent = `${S.dog?.name ?? 'The dog'} starts when it hits zero. ` +
+    `Counting from the moment you marked ${layerName(s)} off.`;
+  paintCountdown();
+  go('scrCountdown');
+}
+function paintCountdown() {
+  const s = db.sessions().find(x => x.id === CD.sid);
+  if (!s) { clearInterval(CD.tick); return; }
+  const left = (s.data.offAt + (s.data.ageMin ?? 10) * 60000) - Date.now();
+  const clock = $('cdClock');
+  if (left <= 0) {
+    clock.textContent = '0:00';
+    clock.classList.add('ready');
+    $('cdLabel').textContent = 'Trail is ready';
+    $('cdStart').textContent = 'Start the dog';
+    if (!CD.buzzed) { CD.buzzed = true; navigator.vibrate?.([90, 60, 90]); }
+  } else {
+    clock.textContent = fmtDur(left);
+    clock.classList.remove('ready');
+    $('cdLabel').textContent = 'Trail ageing';
+    $('cdStart').textContent = 'Start early';
+  }
+}
+function stopCountdownUi() { clearInterval(CD.tick); CD.tick = 0; CD.buzzed = false; }
+
+/* ── The layer’s guided walk ── */
+const walk = { card: null, atStart: false, offAt: 0, done: false, tick: 0 };
+
+function startWalk(card) {
+  walk.card = card;
+  walk.atStart = false;
+  walk.offAt = 0;
+  walk.done = false;
+  rec.kind = 'walk';
+  clearMap();
+  setSrc('runner', lineOf(card.points));
+  setSrc('start', pointsOf([card.points[0]]));
+  setSrc('hides', pointsOf([card.points[card.points.length - 1]]));   // B, in ember
+  fitTo(card.points);
+  hudText = walkHud;
+  go('scrWalk');
+  startWatch('walkText').then(ok => { if (!ok) go('scrHome'); });
+  toast(`${card.from ? card.from + '’s' : 'The'} plan — walk the line, A to B`);
+}
+
+function walkHud() {
+  const A = walk.card.points[0], B = walk.card.points[walk.card.points.length - 1];
+  const last = rec.pts[rec.pts.length - 1];
+  if (!last) return 'Waiting for GPS…';
+  const dA = dist(last, A), dB = dist(last, B);
+
+  /* The countdown arms at the departure point and fires on LEAVING it —
+     which is the moment the trail starts existing, and ageing. The decision
+     itself lives in geo.js, where it can be tested without a phone. */
+  const st = departure(walk, { d: dA, t: last.t, walked: pathLen(rec.pts), firstT: rec.pts[0].t });
+  walk.atStart = st.atStart;
+  if (st.offAt && !walk.offAt) {
+    walk.offAt = st.offAt;
+    navigator.vibrate?.(60);
+    toast('Off you go — the countdown is running on both phones');
+  }
+
+  const offs = signedOffsets(walk.card.points, [last]);
+  const offLine = offs.length ? Math.abs(offs[0]) : null;
+  const bits = [];
+  if (!walk.offAt) bits.push(dA < 40 ? 'At the start — walk on' : `${Math.round(dA)} m to the start`);
+  else {
+    if (offLine != null) bits.push(offLine < 8 ? 'On the line' : `${Math.round(offLine)} m off the line`);
+    bits.push(`${Math.round(dB)} m to the end`);
+    const left = (walk.offAt + (walk.card.ageMin ?? 10) * 60000) - Date.now();
+    bits.push(left > 0 ? `dog in ${fmtDur(left)}` : 'dog is coming');
+  }
+  return bits.join(' · ');
+}
+
+async function finishWalk() {
+  const B = walk.card.points[walk.card.points.length - 1];
+  const last = rec.pts[rec.pts.length - 1];
+  if (last && dist(last, B) > 60 &&
+      !confirm(`You are ${Math.round(dist(last, B))} m from the drawn end. Finish here anyway?`)) return;
+  await stopWatch();
+  rec.pts.forEach(pt => delete pt._seen);
+  walk.done = true;
+
+  const walked = rec.pts.length >= 2 ? rec.pts : walk.card.points;
+  if (rec.pts.length < 2) toast('No GPS track of the walk — the card will carry the drawn line');
+
+  // Her own record of the walk stays on her phone.
+  db.addSession({
+    id: uid(), handlerId: S.handler.id, dogId: null, layerId: null,
+    targetId: 'person', startedAt: walked[0].t,
+    summary: `Walked ${walk.card.from ? walk.card.from + '’s' : 'a'} plan — ${fmtKm(pathLen(walked))}.`,
+    data: { trail: walked, waypoints: [], weather: null, contamination: [], walkOf: true },
+  });
+  snap();
+
+  // The card the handler scans after the find: the trail as it was REALLY walked.
+  try {
+    const cardStr = await encodeTrail({ points: walked, waypoints: [], from: S.handler?.name ?? '', kind: 2 }, {});
+    const qr = window.qrcode?.(0, 'M');
+    qr.addData(cardStr, 'Byte');
+    qr.make();
+    $('waitQr').innerHTML = qr.createSvgTag({ cellSize: 4, margin: 0, scalable: true });
+  } catch (err) {
+    $('waitQr').innerHTML = `<p style="font:600 13px sans-serif;padding:20px">${esc(err.message)}</p>`;
+  }
+  clearInterval(walk.tick);
+  walk.tick = setInterval(paintWait, 500);
+  paintWait();
+  go('scrWait');
+}
+function paintWait() {
+  const base = walk.offAt || (rec.pts[0]?.t ?? Date.now());
+  const left = (base + (walk.card?.ageMin ?? 10) * 60000) - Date.now();
+  $('waitClock').textContent = left > 0 ? fmtDur(left) : '0:00';
+  $('waitClock').classList.toggle('ready', left <= 0);
+  $('waitSub').textContent = left > 0
+    ? 'The dog starts when this hits zero. Stay put.'
+    : 'The dog is on its way. Stay exactly where you are.';
+}
+
+/* ── The walked card, back on the handler’s phone ── */
+let scanWalkedFor = null;    // session id waiting for its walked card
+
+async function applyWalked(sessionId, card) {
+  const s = db.sessions().find(x => x.id === sessionId);
+  if (!s) return false;
+  const plan = s.data.trail;
+  if (dist(card.points[0], plan[0]) > 300 &&
+      !confirm('That walk starts a long way from this plan. Use it anyway?')) return false;
+
+  db.updateSession(s.id, {
+    startedAt: card.started,
+    data: { ...s.data, planTrail: plan, trail: card.points, walked: true, walkedFrom: card.from },
+  });
+  snap();
+  let s2 = db.sessions().find(x => x.id === s.id);
+  toast(`The real walked line from ${card.from || 'the layer'} — re-grading`);
+  if (s2.data.track) {
+    const result = await computeResult(s2, s2.data.track, s2.data.trackWaypoints || [], s2.data.trackStarted, { bank: true });
+    db.updateSession(s2.id, { summary: result.sentence, data: { ...s2.data, result } });
+    snap();
+    s2 = db.sessions().find(x => x.id === s.id);
+  }
+  run.session = s2;
+  renderResult(s2);
+  go('scrResult');
+  return true;
 }
 
 /* ── Pick what to run ─────────────────────────────────────────────── */
@@ -886,7 +1131,10 @@ async function stopRun() {
     return go('scrHome');
   }
   rec.pts.forEach(p => delete p._seen);
-  const result = await computeResult(s, rec.pts, rec.wps, run.startedAt);
+  /* A plan-graded run is provisional: the drawn line is a sketch, so it
+     neither banks calibration nor gets the last word — the walked card does. */
+  const provisional = !!s.data.plan && !s.data.walked;
+  const result = await computeResult(s, rec.pts, rec.wps, run.startedAt, { bank: !provisional });
   db.updateSession(s.id, {
     dogId: S.dog?.id ?? null,
     handlerId: S.handler.id,
@@ -907,7 +1155,7 @@ function travelBrg(trail, i) {
   return dist(a, b) > 0.5 ? bearing(a, b) : null;
 }
 
-async function computeResult(s, track, wps, startedAt) {
+async function computeResult(s, track, wps, startedAt, { bank = true } = {}) {
   const t = targetById(s.targetId);
   const dogRow = S.dog;
   const dogName = dogRow?.name ?? 'The dog';
@@ -948,10 +1196,12 @@ async function computeResult(s, track, wps, startedAt) {
   const settle = 1 - Math.exp(-Math.max(0, (startedAt - s.startedAt) / 1000) / 900);
   const k = (wx?.wind_speed > 0.5 && mean != null && Math.abs(mean) > 1 && settle > 0.05)
     ? Math.abs(mean) / (wx.wind_speed * settle) : null;
-  db.addCalibration(dogRow?.id, {
-    t: startedAt, predSide, mean, wind: wx?.wind_speed ?? null,
-    stability: st?.label ?? null, k,
-  });
+  if (bank) {
+    db.addCalibration(dogRow?.id, {
+      t: startedAt, predSide, mean, wind: wx?.wind_speed ?? null,
+      stability: st?.label ?? null, k,
+    });
+  }
 
   const sideWord = mean == null ? '' : mean > 0 ? 'right' : 'left';
   const mAbs = mean == null ? 0 : Math.abs(mean);
@@ -1043,6 +1293,19 @@ function renderResult(s) {
       cell(r.regimeWord ? cap(r.regimeWord) : '—', 'regime', r.stability ? esc(r.stability) : '');
   }
   $('resStability').textContent = r.stabilityPlain ?? '';
+
+  /* A plan-graded run says so. Grading a dog against a line drawn with a
+     finger is a sketch of a verdict, and it is not allowed to look like the
+     real one — nor to teach the dog's calibration anything. */
+  const provisional = !!s.data.plan && !s.data.walked;
+  $('btnScanWalked').hidden = !provisional;
+  const note = $('resProvisional');
+  note.hidden = !s.data.plan;
+  if (s.data.plan) {
+    note.textContent = provisional
+      ? `Graded against the line you drew, not the walk itself. Nothing is banked to ${S.dog?.name ?? 'this dog'}’s calibration until you scan the layer’s walked card.`
+      : `Graded against the trail ${s.data.walkedFrom || 'the layer'} actually walked.`;
+  }
 }
 const cap = (w) => w ? w.charAt(0).toUpperCase() + w.slice(1) : w;
 
@@ -1181,7 +1444,11 @@ async function scanPhoto(file) {
   }
 }
 
-/** A scanned card becomes a session and the run starts on it right away. */
+/** A scanned card becomes a session and the run starts on it right away.
+    Three kinds arrive at this door: a PLAN, which tells this phone to walk its
+    owner along the line; a WALKED trail, which replaces the plan it came from
+    and re-grades the run against the truth on the ground; and a plain laid
+    trail, which is simply run. */
 async function handleCard(data) {
   let card;
   try { card = await decodeTrail(data); }
@@ -1190,6 +1457,24 @@ async function handleCard(data) {
     toast(err.message);
     return false;
   }
+
+  if (scanWalkedFor) {
+    if (card.kind !== 2) {
+      $('scanState').textContent = 'That is a plan, not a walked trail. Still scanning…';
+      return false;
+    }
+    const waiting = scanWalkedFor;
+    scanWalkedFor = null;
+    stopScan();
+    return applyWalked(waiting, card);
+  }
+  if (card.kind === 1) {
+    if (!card.points || card.points.length < 2) return false;
+    stopScan();
+    startWalk(card);
+    return true;
+  }
+
   const s = {
     id: uid(), handlerId: S.handler.id, dogId: null, layerId: null,
     targetId: 'person', startedAt: card.started,
@@ -1323,10 +1608,75 @@ function wire() {
   });
   $('contamSave').addEventListener('click', saveContam);
 
+  // Draw a plan
+  $('btnDrawPlan').addEventListener('click', openDraw);
+  $('ageRow').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-age]');
+    if (!b) return;
+    if (b.dataset.age === 'custom') {
+      const mins = Number(prompt('Dog starts after how many minutes?', String(draw.ageMin)));
+      if (!Number.isFinite(mins) || mins < 1 || mins > 1440) return toast('Between 1 and 1440 minutes');
+      draw.ageMin = Math.round(mins);
+      b.textContent = `${draw.ageMin} min`;
+    } else {
+      draw.ageMin = Number(b.dataset.age);
+    }
+    $('ageRow').querySelectorAll('.age-chip').forEach(c => c.classList.toggle('selected', c === b));
+  });
+  $('drawUndo').addEventListener('click', () => { draw.pts.pop(); paintDraw(); });
+  $('drawCancel').addEventListener('click', () => { closeDraw(); clearMap(); go('scrHome'); });
+  $('drawSave').addEventListener('click', saveDrawPlan);
+
+  // The countdown, on the handler's phone
+  $('btnOff').addEventListener('click', () => {
+    if (!pendingSession) return;
+    if (!pendingSession.data.offAt) {
+      db.updateSession(pendingSession.id, { data: { ...pendingSession.data, offAt: Date.now() } });
+      snap();
+      pendingSession = db.sessions().find(x => x.id === pendingSession.id);
+    }
+    openCountdown(pendingSession);
+  });
+  $('cdStart').addEventListener('click', () => {
+    const s = db.sessions().find(x => x.id === CD.sid);
+    stopCountdownUi();
+    if (s) startRun(s);
+  });
+  $('cdBack').addEventListener('click', () => {
+    stopCountdownUi();
+    const s = db.sessions().find(x => x.id === CD.sid);
+    if (s) { pendingSession = s; renderShare(s); }
+    go('scrShare');
+  });
+
+  // The layer's walk
+  $('btnInPlace').addEventListener('click', finishWalk);
+  $('walkCancel').addEventListener('click', async () => {
+    if (rec.pts.length > 1 && !confirm('Cancel this walk? The handler gets no walked card.')) return;
+    await stopWatch();
+    walk.card = null;
+    clearMap();
+    go('scrHome');
+  });
+  $('waitDone').addEventListener('click', () => {
+    clearInterval(walk.tick); walk.tick = 0;
+    clearMap();
+    go('scrHome');
+  });
+
   // Pick / scan
   $('btnScan').addEventListener('click', openScan);
+  $('btnScanWalked').addEventListener('click', () => {
+    if (!run.session) return;
+    scanWalkedFor = run.session.id;
+    openScan();
+  });
   $('btnPickBack').addEventListener('click', () => go('scrHome'));
-  $('btnScanBack').addEventListener('click', () => { stopScan(); openPick(); });
+  $('btnScanBack').addEventListener('click', () => {
+    stopScan();
+    if (scanWalkedFor) { scanWalkedFor = null; return go('scrResult'); }
+    openPick();
+  });
   $('scanFromPhoto').addEventListener('click', () => $('scanFile').click());
   $('scanFile').addEventListener('change', (e) => {
     scanPhoto(e.target.files?.[0]);

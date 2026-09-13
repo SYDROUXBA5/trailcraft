@@ -127,8 +127,65 @@
     <button class="btn big moss" id="btnLayStart">Start</button>
     <button class="btn big ember" id="btnLayStop" hidden>Stop</button>
     <p class="glass-caption" id="layCaption">Phone can go in your pocket</p>
+    <button class="btn ghost" id="btnDrawPlan">Draw it on the map instead</button>
     <button class="btn ghost" id="btnLayCancel">Cancel</button>
   </div>
+</section>
+
+<!-- ── Draw a plan: finger on the map, A to B ──────────────────────── -->
+<section id="scrDraw" class="screen glass" hidden>
+  <div class="hud-pill"><span id="drawText">Tap the map at each corner — A to B</span></div>
+  <div class="glass-bottom">
+    <div class="card">
+      <span class="label" style="margin-top:0">Dog starts after</span>
+      <div class="age-row" id="ageRow">
+        <button class="age-chip" data-age="5">5 min</button>
+        <button class="age-chip selected" data-age="10">10 min</button>
+        <button class="age-chip" data-age="20">20 min</button>
+        <button class="age-chip" data-age="custom">Custom</button>
+      </div>
+    </div>
+    <button class="btn big moss" id="drawSave" disabled>Save plan</button>
+    <div class="row-gap">
+      <button class="btn ghost" id="drawUndo">Undo</button>
+      <button class="btn ghost" id="drawCancel">Cancel</button>
+    </div>
+  </div>
+</section>
+
+<!-- ── Handler countdown: the trail ageing, big enough for full sun ── -->
+<section id="scrCountdown" class="screen tutorial" hidden>
+  <div class="tut-card center-card">
+    <span class="tut-k" id="cdLabel">Trail ageing</span>
+    <h1 class="tut-title huge" id="cdClock">--:--</h1>
+    <p class="tut-body center" id="cdSub"></p>
+  </div>
+  <div class="tut-bottom">
+    <button class="btn ember wide-btn" id="cdStart">Start early</button>
+    <button class="btn moss-on-dark" id="cdBack">Back</button>
+  </div>
+</section>
+
+<!-- ── Layer guidance: her phone walks her along the plan ──────────── -->
+<section id="scrWalk" class="screen glass" hidden>
+  <div class="hud-pill"><span id="walkText">Walk to the green start dot</span></div>
+  <div class="glass-bottom">
+    <button class="btn big moss" id="btnInPlace">I&rsquo;m in place</button>
+    <button class="btn ghost" id="walkCancel">Cancel</button>
+  </div>
+</section>
+
+<!-- ── Layer waiting at the end, dog inbound ───────────────────────── -->
+<section id="scrWait" class="screen tutorial" hidden>
+  <div class="tut-card center-card">
+    <span class="tut-k">Stay put</span>
+    <h1 class="tut-title huge" id="waitClock">--:--</h1>
+    <p class="tut-body center" id="waitSub">The dog starts when this hits zero.</p>
+    <div class="qr-plate wait-qr" id="waitQr" role="img" aria-label="Walked trail card"></div>
+    <p class="tut-body center small-note">Show this card to the handler after the find —
+      it carries the trail you actually walked.</p>
+  </div>
+  <div class="tut-bottom"><button class="btn moss-on-dark" id="waitDone">Done</button></div>
 </section>
 
 <!-- ── Confirm the line ────────────────────────────────────────────── -->
@@ -154,6 +211,7 @@
     </div>
     <button class="btn card-btn" id="btnContam" hidden>Add a contamination trail</button>
     <div class="page-bottom">
+      <button class="btn ember" id="btnOff" hidden>She&rsquo;s off — start the countdown</button>
       <button class="btn moss" id="btnRunHere">Run it on this phone</button>
       <button class="btn ghost" id="btnShareDone">Done</button>
     </div>
@@ -224,10 +282,12 @@
   <div class="page">
     <span class="label" id="resWho"></span>
     <h1 class="display" id="resSentence"></h1>
+    <p class="body small provisional" id="resProvisional" hidden></p>
     <div class="grid2" id="resGrid"></div>
     <p class="body small muted" id="resStability"></p>
     <p class="body small muted">The model explains what the dog did. It does not predict where scent is.</p>
     <div class="page-bottom">
+      <button class="btn ember" id="btnScanWalked" hidden>Scan the walked trail card</button>
       <button class="btn moss" id="btnShowMap">Show on map</button>
       <button class="btn ghost" id="btnResDone">Done</button>
     </div>
