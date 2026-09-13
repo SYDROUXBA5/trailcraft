@@ -570,4 +570,33 @@ t('flowAt: scent runs downhill, and a steeper slope moves it further', () => {
   assert.ok(drained.lon < onSteep.lon, 'stable air drains downhill harder than neutral');
 });
 
+t('ScentSim: the standing spot thickens the longer the person waits', () => {
+  /* Not just brighter — denser. Five minutes standing leaves a wisp, twenty
+     leaves a cloud, and the dog is going to the cloud. */
+  const t0 = Date.parse('2026-08-24T07:00:00Z');
+  const trail = [];
+  for (let i = 0; i < 10; i++) trail.push({ lat: WELLS.lat, lon: WELLS.lon + i * 1e-4, t: t0 + i * 60000 });
+  const wx = { wind_speed: 2, wind_direction: 270, wind_gusts: 2, humidity: 70, soil_temp: 12 };
+  const sim = new ScentSim().seed(trail);
+  const arrived = t0 + 9 * 60000;                    // the end of the walk
+
+  const cloudAt = (mins) => {
+    sim.advance(FLAT, wx, NEUTRAL, arrived + mins * 60000);
+    return sim.pool.filter(p => p.str > 0).length;
+  };
+
+  const m1 = cloudAt(1), m5 = cloudAt(5), m20 = cloudAt(20), m45 = cloudAt(45);
+  assert.ok(m1 < m5, `one minute is a wisp, five is more (${m1} → ${m5})`);
+  assert.ok(m5 < m20, `and twenty is a cloud (${m5} → ${m20})`);
+  assert.ok(m20 < m45 || m20 > sim.pool.length * 0.9, 'it keeps filling until it is full');
+  assert.ok(m20 > sim.pool.length * 0.5, `most of the pool is in the air by 20 min (${m20}/${sim.pool.length})`);
+
+  // And it is the densest thing on the map: more parcels than any equal
+  // stretch of the walked line, which is the whole point of the wait.
+  sim.advance(FLAT, wx, NEUTRAL, arrived + 20 * 60000);
+  const perTrailPoint = sim.parts.length / trail.length;
+  assert.ok(m20 > perTrailPoint * 3,
+    `the handover spot carries far more than a step of walking (${m20} vs ${perTrailPoint.toFixed(0)})`);
+});
+
 console.log(`\n${pass} passed total`);

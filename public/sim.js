@@ -61,7 +61,12 @@ const PER_POINT = 7;
    found, and a standing person is a continuous source. Contamination
    accumulates, so the end grows a disc of scent that is wider and hotter the
    longer the dwell — the pool dogs famously overshoot into. */
-const POOL_PARTS = 26;
+/* The standing spot is the single hottest thing on a trail and it was drawn
+   with 26 parcels against thousands along the line, so the one place the dog
+   is actually going read as the faintest. A person waiting to be found is a
+   source that does not move and does not stop: the cloud around them wants
+   the parcel count to match what it is. */
+const POOL_PARTS = 700;
 /** Dwell seconds → pool radius in metres. Diffusive growth: fast at first,
     then slowing, capped where a real search-area stops growing. */
 export function poolRadius(dwellS) {
@@ -185,6 +190,12 @@ export class ScentSim {
           ang: Math.random() * 360,             // where on the disc it sits
           rad: Math.sqrt(Math.random()),        // sqrt → uniform over the disc
           life: RESIDENCE(),
+          /* When this parcel joins the cloud, as a share of the pool's build.
+             Standing still does not only make the scent STRONGER, it makes
+             more of it: five minutes leaves a wisp, twenty leaves a cloud.
+             Spreading the join thresholds is what makes the pool thicken as
+             the wait goes on instead of merely brightening. */
+          join: Math.random(),
           str: 0,
         });
       }
@@ -272,6 +283,15 @@ export class ScentSim {
       const dwellS = (now - src.t) / 1000;
       if (dwellS <= 0) { s.str = 0; continue; }
       const build = 1 - Math.exp(-dwellS / 600);
+      /* Not in the air yet: this parcel joins later in the wait. Park it back
+         on the source rather than leaving it wherever it last was, or a pool
+         asked about an EARLIER moment reports the spread of a later one. */
+      if (build < (s.join ?? 0) * 0.92) {
+        s.str = 0;
+        s.hlat = src.lat; s.hlon = src.lon;
+        s.lat = src.lat; s.lon = src.lon;
+        continue;
+      }
       const poolR = poolRadius(dwellS);
       const g = project({ lat: src.lat, lon: src.lon }, s.ang, s.rad * poolR);
       s.hlat = g.lat; s.hlon = g.lon;
