@@ -322,3 +322,54 @@ input[type="range"] { width: 100%; accent-color: var(--moss); height: 40px; }
 .gps-good { color: var(--moss); }
 .gps-bad  { color: var(--ember); }
 #gpsReport { line-height: 1.5; margin-top: -4px; }
+
+/* ── Navigation ───────────────────────────────────────────────────────
+   The banner a person reads at a glance while walking: one number big
+   enough to see at arm's length in sun, the instruction under it, and the
+   clock quieter still. Moss, not the blue of every other maps app. */
+.nav-banner {
+  position: absolute;
+  top: calc(env(safe-area-inset-top, 0px) + 10px);
+  left: 10px; right: 10px;
+  display: flex; align-items: center; gap: 16px;
+  padding: 16px 20px;
+  background: var(--moss-deep);
+  color: #FFFDF8;
+  border-radius: 22px;
+  box-shadow: 0 10px 30px rgba(23, 32, 26, 0.34);
+  transition: background 240ms ease;
+}
+.nav-banner.off-line { background: #8A4318; }   /* drifting: ember, not alarm */
+
+.nav-dist { display: flex; align-items: baseline; gap: 5px; flex: 0 0 auto; }
+.nav-dist b {
+  font-family: Fraunces, Georgia, serif;
+  font-weight: 700; font-size: 44px; line-height: 1;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.nav-dist i { font-style: normal; font-size: 17px; font-weight: 600; opacity: 0.75; }
+
+.nav-say { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.nav-say > span { font-size: 16px; font-weight: 600; line-height: 1.25; }
+.nav-say .nav-sub { font-size: 13px; font-weight: 500; opacity: 0.72; }
+
+/* Re-centre: the control that gives the camera back. It only appears once
+   following has started, and nudges when the user has panned away. */
+.map-fab {
+  position: absolute; right: 12px;
+  top: calc(env(safe-area-inset-top, 0px) + 118px);
+  width: 52px; height: 52px;
+  display: grid; place-items: center;
+  border: none; border-radius: 50%;
+  background: var(--card); color: var(--moss);
+  box-shadow: 0 6px 18px rgba(23, 32, 26, 0.28);
+  cursor: pointer;
+  transition: transform 140ms ease, background 200ms ease;
+}
+.map-fab:active { transform: scale(0.94); }
+.map-fab.nudge { background: var(--ember); color: #FFFDF8; }
+
+@media (prefers-reduced-motion: reduce) {
+  .map-fab, .nav-banner { transition: none; }
+}

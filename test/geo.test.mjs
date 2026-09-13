@@ -3,7 +3,7 @@ import {
   dist, project, pathLen, cardinal, driftMetres, driftPolygon, meanOffset, filterFixes,
   densify, timestamps,
   crossTrackSigned, signedOffsets, meanSigned, sideOfDrift, sideAgreement, lineCorrect,
-  dwellFold, foldFixes, departure,
+  dwellFold, foldFixes, departure, progressAlong, splitLine, smoothBearing,
 } from '../public/geo.js';
 
 let pass = 0;
@@ -379,6 +379,54 @@ t('departure: the countdown reads from the moment she left', () => {
   const ageMin = 20;
   assert.equal(st.offAt + ageMin * 60000 - 60000, 20 * 60000, 'zero is 20 min after she left');
   assert.ok(st.offAt + ageMin * 60000 > 60000, 'and it is in the future the moment it starts');
+});
+
+t('progressAlong: how far in, how far left, and how far off', () => {
+  // 300 m north, then 400 m east — an L, 700 m of walking.
+  const L = [{ lat: 51.20, lon: -2.60 },
+             { lat: 51.20 + 300 / 111320, lon: -2.60 },
+             { lat: 51.20 + 300 / 111320, lon: -2.60 + 400 / (111320 * Math.cos(51.20 * Math.PI / 180)) }];
+  const pr = progressAlong(L, { lat: 51.20 + 150 / 111320, lon: -2.60 });
+  assert.equal(pr.i, 1, 'halfway up the first leg');
+  assert.ok(Math.abs(pr.along - 150) < 3, `150 m in, got ${pr.along.toFixed(1)}`);
+  assert.ok(Math.abs(pr.remaining - 550) < 4, `550 m left, got ${pr.remaining.toFixed(1)}`);
+  assert.ok(pr.off < 1, 'standing on the line reads as on it');
+
+  // Twenty metres to the side of the same spot.
+  const off = progressAlong(L, { lat: 51.20 + 150 / 111320, lon: -2.60 + 20 / (111320 * Math.cos(51.20 * Math.PI / 180)) });
+  assert.ok(Math.abs(off.off - 20) < 1.5, `20 m off the line, got ${off.off.toFixed(1)}`);
+  assert.ok(Math.abs(off.along - 150) < 3, 'being off to the side does not change how far along you are');
+
+  assert.equal(progressAlong([], { lat: 0, lon: 0 }), null, 'no line, no progress');
+});
+
+t('splitLine: behind and ahead meet exactly where you stand', () => {
+  const L = [{ lat: 51.20, lon: -2.60 },
+             { lat: 51.20 + 300 / 111320, lon: -2.60 },
+             { lat: 51.20 + 300 / 111320, lon: -2.59 }];
+  const me = { lat: 51.20 + 150 / 111320, lon: -2.60 };
+  const [behind, ahead] = splitLine(L, me);
+  assert.deepEqual(behind[behind.length - 1], ahead[0], 'the cut is one point, shared');
+  assert.ok(Math.abs(pathLen(behind) + pathLen(ahead) - pathLen(L)) < 1,
+    'the two halves still add up to the whole route');
+  assert.ok(pathLen(behind) > 140 && pathLen(behind) < 160, 'behind is the 150 m walked');
+  assert.equal(behind.length, 2);
+  assert.equal(ahead.length, 3, 'ahead keeps the corner it has not reached yet');
+});
+
+t('smoothBearing: crosses north the short way, never spins', () => {
+  // 350° to 10° is 20° clockwise through north, not 340° back through south.
+  const b = smoothBearing(350, 10, 0.5);
+  assert.ok(b >= 359 || b <= 1, `expected to land near 0, got ${b}`);
+
+  // It damps: one jumpy fix moves the heading a fraction of the way.
+  const damped = smoothBearing(0, 90, 0.25);
+  assert.ok(Math.abs(damped - 22.5) < 0.01, `a quarter of the turn, got ${damped}`);
+
+  assert.equal(smoothBearing(null, 42, 0.3), 42, 'the first heading is taken whole');
+  assert.equal(smoothBearing(42, null, 0.3), 42, 'a fix with no course leaves it alone');
+  assert.equal(smoothBearing(0, 370, 1), 10, 'an angle past 360 is read as the direction it means');
+  assert.equal(smoothBearing(10, 370, 1), 10, 'and a heading already pointing there does not move');
 });
 
 console.log(`\n${pass} passed total\n`);

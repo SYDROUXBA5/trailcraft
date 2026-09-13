@@ -10,6 +10,7 @@ import {
   pathLen, cardinal, dist, dwellFold, bearing,
   scentField, plumePolygon, densify, timestamps,
   signedOffsets, meanSigned, sideOfDrift, sideAgreement, lineCorrect, departure,
+  progressAlong, splitLine, smoothBearing,
 } from './geo.js';
 import { FLAT, buildTerrain, stability, regime } from './field.js';
 import { predictedOffsets } from './sim.js';
@@ -17,7 +18,7 @@ import { encodeTrail, decodeTrail } from './card.js';
 import { createStore, migrateV1, TARGETS, targetById, verbs, uid } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-13e';
+const BUILD = '2026-09-13f';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { accCap: 25, stillCap: 2.5, exagg: 2.4, mbToken: (window.MB_TOKEN || '') };
@@ -109,7 +110,8 @@ function go(id) {
 const EMPTY = { type: 'FeatureCollection', features: [] };
 let map, mapReady = false;
 let GL = mapboxgl;   // every control/bounds must come from the SAME library
-const srcData = { runner: EMPTY, dog: EMPTY, wps: EMPTY, drift: EMPTY, start: EMPTY, hides: EMPTY, contam: EMPTY };
+const srcData = { runner: EMPTY, dog: EMPTY, wps: EMPTY, drift: EMPTY, start: EMPTY, hides: EMPTY, contam: EMPTY,
+                  routeDone: EMPTY, routeAhead: EMPTY, puck: EMPTY };
 
 const SAT_STYLE = 'mapbox://styles/mapbox/standard-satellite';
 const RASTER_FALLBACK = {
@@ -135,6 +137,9 @@ function buildMap() {
     positionOptions: { enableHighAccuracy: true }, trackUserLocation: true, showAccuracyCircle: true,
   }), 'top-right');
   map.on('load', addOverlays);
+  // Touching the map means they want to look around; stop chasing them.
+  map.on('dragstart', releaseFollow);
+  map.on('zoomstart', (e) => { if (e.originalEvent) releaseFollow(); });
   setTimeout(watchForBlankMap, 9000);
   new ResizeObserver(() => map.resize()).observe($('map'));
   window.addEventListener('orientationchange', () => setTimeout(() => map.resize(), 250));
@@ -178,6 +183,24 @@ function addOverlays() {
   add({ id: 'dog-line', type: 'line', source: 'dog',
         layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: { 'line-color': '#E8793F', 'line-width': 4.5, 'line-opacity': 0.98 } });
+  /* The route you are following, in the grammar every navigation app uses:
+     a dark casing so it survives any imagery, a bright core, and the part
+     you have already walked dimmed to grey — seeing the split is how you
+     know the phone has actually found you on the line. */
+  const wide = (z15, z17, z19) => ['interpolate', ['linear'], ['zoom'], 15, z15, 17, z17, 19, z19];
+  add({ id: 'route-done', type: 'line', source: 'routeDone',
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: { 'line-color': '#7C8880', 'line-width': wide(7, 12, 20), 'line-opacity': 0.5 } });
+  add({ id: 'route-glow', type: 'line', source: 'routeAhead',
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: { 'line-color': '#17201A', 'line-width': wide(18, 30, 48), 'line-opacity': 0.28, 'line-blur': 10 } });
+  add({ id: 'route-casing', type: 'line', source: 'routeAhead',
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: { 'line-color': '#16351F', 'line-width': wide(13, 22, 36), 'line-opacity': 0.95 } });
+  add({ id: 'route-core', type: 'line', source: 'routeAhead',
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: { 'line-color': '#57C766', 'line-width': wide(8, 14, 24), 'line-opacity': 1 } });
+
   add({ id: 'hide-dots', type: 'circle', source: 'hides',
         paint: { 'circle-radius': 9, 'circle-color': '#D9662B',
                  'circle-stroke-width': 2.5, 'circle-stroke-color': '#FFFDF8' } });
@@ -194,6 +217,21 @@ function addOverlays() {
         layout: { 'text-field': ['get', 'kind'], 'text-size': 11, 'text-offset': [0, 1.4], 'text-anchor': 'top' },
         paint: { 'text-color': '#FFFDF8', 'text-halo-color': '#17201A', 'text-halo-width': 1.6 } });
 
+  /* You: an arrow, not a dot. A dot says where you are; an arrow says which
+     way you are facing, which is the half of the question you are actually
+     asking when you look down at a phone in a field. */
+  if (!map.hasImage('puck')) map.addImage('puck', puckImage(), { pixelRatio: 2 });
+  add({ id: 'puck-acc', type: 'circle', source: 'puck',
+        paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 14, 10, 19, 34],
+                 'circle-color': '#2F9E44', 'circle-opacity': 0.16,
+                 'circle-stroke-width': 1.5, 'circle-stroke-color': '#FFFDF8', 'circle-stroke-opacity': 0.45 } });
+  add({ id: 'puck-arrow', type: 'symbol', source: 'puck',
+        layout: { 'icon-image': 'puck',
+                  'icon-size': ['interpolate', ['linear'], ['zoom'], 14, 0.5, 17, 0.8, 19, 1.05],
+                  'icon-allow-overlap': true,
+                  'icon-ignore-placement': true, 'icon-rotate': ['get', 'brg'],
+                  'icon-rotation-alignment': 'map', 'icon-pitch-alignment': 'map' } });
+
   mapReady = true;
   for (const id of Object.keys(srcData)) map.getSource(id)?.setData(srcData[id]);
   map.resize();
@@ -207,6 +245,29 @@ function watchForBlankMap() {
   toast('Map style would not load — using the basic map');
   map.setStyle(RASTER_FALLBACK);
   map.once('styledata', addOverlays);
+}
+
+/** The heading arrow, drawn at load rather than fetched — one less file to
+    ship, and it stays sharp on a retina screen. Points up; the layer spins
+    it. A white collar keeps it readable on grass, tarmac and snow alike. */
+function puckImage() {
+  const S = 96, c = document.createElement('canvas');
+  c.width = c.height = S;
+  const g = c.getContext('2d');
+  const chevron = () => {
+    g.beginPath();
+    g.moveTo(S / 2, 14);                 // nose
+    g.lineTo(S - 20, S - 20);            // right shoulder
+    g.lineTo(S / 2, S - 34);             // tail notch
+    g.lineTo(20, S - 20);                // left shoulder
+    g.closePath();
+  };
+  g.shadowColor = 'rgba(0,0,0,0.45)'; g.shadowBlur = 10; g.shadowOffsetY = 2;
+  chevron(); g.fillStyle = '#FFFDF8'; g.fill();
+  g.shadowColor = 'transparent';
+  g.lineWidth = 7; g.strokeStyle = '#FFFDF8'; g.lineJoin = 'round'; chevron(); g.stroke();
+  chevron(); g.fillStyle = '#2F9E44'; g.fill();
+  return g.getImageData(0, 0, S, S);
 }
 
 const lineOf = (pts) => !pts || pts.length < 2 ? EMPTY : {
@@ -553,6 +614,76 @@ function dropHideAtFeet() {
   }, () => toast('No GPS fix — tap the map instead'), { enableHighAccuracy: true, timeout: 10000 });
 }
 
+/* ── Following ────────────────────────────────────────────────────────
+   Course-up, tilted, moving with you: the view a person expects when they
+   are walking somewhere, not the north-up chart they expect when planning.
+   It yields the moment the map is touched — looking around is not a bug —
+   and the re-centre button takes it back. */
+const nav = { follow: false, brg: null, onRoute: null, courseUp: false };
+
+/* Course-up ONLY when following a route. On a dog run the map stays
+   north-up: this app tells you the wind pushed scent to the RIGHT of the
+   line, and a map that quietly rotates makes that sentence a puzzle. */
+function startFollowing(routePts, { courseUp = false } = {}) {
+  nav.follow = true;
+  nav.brg = null;
+  nav.onRoute = routePts || null;
+  nav.courseUp = courseUp;
+  $('btnRecentre').hidden = false;
+  $('btnRecentre').classList.remove('nudge');
+  if (courseUp) map.dragRotate?.disable?.();
+}
+function stopFollowing() {
+  nav.follow = false;
+  nav.onRoute = null;
+  nav.courseUp = false;
+  $('btnRecentre').hidden = true;
+  map.dragRotate?.enable?.();
+  map.easeTo({ bearing: 0, pitch: 55, duration: 400 });
+  setSrc('puck', EMPTY);
+  setSrc('routeDone', EMPTY);
+  setSrc('routeAhead', EMPTY);
+}
+/** A drag means they want to look; stop chasing them around the screen. */
+function releaseFollow() {
+  if (!nav.follow) return;
+  nav.follow = false;
+  $('btnRecentre').classList.add('nudge');
+}
+function recentre() {
+  nav.follow = true;
+  $('btnRecentre').classList.remove('nudge');
+  const last = rec.pts[rec.pts.length - 1];
+  if (last) map.easeTo({ center: [last.lon, last.lat], zoom: 17.5, pitch: 62,
+                         bearing: nav.courseUp ? (nav.brg ?? map.getBearing()) : map.getBearing(),
+                         duration: 600 });
+}
+
+/** Paint you onto the map, and the route as walked-behind / bright-ahead. */
+function paintNav() {
+  const last = rec.pts[rec.pts.length - 1];
+  if (!last) return;
+  const prev = rec.pts.length > 1 ? rec.pts[rec.pts.length - 2] : null;
+  const raw = prev && dist(prev, last) > 1.5 ? bearing(prev, last) : null;
+  nav.brg = smoothBearing(nav.brg, raw ?? nav.brg);
+
+  setSrc('puck', { type: 'FeatureCollection', features: [{
+    type: 'Feature',
+    properties: { brg: nav.brg ?? 0 },
+    geometry: { type: 'Point', coordinates: [last.lon, last.lat] } }] });
+
+  if (nav.onRoute) {
+    const [done, ahead] = splitLine(nav.onRoute, last);
+    setSrc('routeDone', lineOf(done));
+    setSrc('routeAhead', lineOf(ahead));
+  }
+  if (nav.follow) {
+    const cam = { center: [last.lon, last.lat], zoom: 17.5, pitch: 62, duration: 900, essential: true };
+    if (nav.courseUp && nav.brg != null) cam.bearing = nav.brg;
+    map.easeTo(cam);
+  }
+}
+
 function onFix(pos) {
   const { latitude: lat, longitude: lon, accuracy: acc, altitude: alt } = pos.coords;
   if (!rec.on) return;
@@ -572,8 +703,8 @@ function onFix(pos) {
   rec.pts.push(pt);
   if (rec.kind === 'lay') setSrc('runner', lineOf(rec.pts));
   if (rec.kind === 'run') setSrc('dog', lineOf(rec.pts));
-  if (rec.kind === 'walk') setSrc('dog', lineOf(rec.pts));
-  if (rec.pts.length === 1) map.easeTo({ center: [lon, lat], zoom: 17 });
+  paintNav();
+  if (rec.pts.length === 1 && !nav.follow) map.easeTo({ center: [lon, lat], zoom: 17 });
 }
 
 async function startWatch(hudId) {
@@ -593,7 +724,7 @@ async function startWatch(hudId) {
       : e.code === 3 ? 'No fix yet — open sky helps' : 'GPS error'),
     { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 });
   clearInterval(rec.tick);
-  rec.tick = setInterval(() => { $(hudId).textContent = hudText(); }, 1000);
+  rec.tick = setInterval(() => { const el = $(hudId); const txt = hudText(); if (el) el.textContent = txt; }, 1000);
   return true;
 }
 
@@ -610,6 +741,7 @@ async function stopWatch() {
 async function layStart() {
   hudText = gpsHudText;
   if (!(await startWatch('layHudText'))) return;
+  startFollowing(null);
   $('btnLayStart').hidden = true;
   $('btnLayStop').hidden = false;
   $('layDot').hidden = false;
@@ -618,6 +750,7 @@ async function layStart() {
 }
 
 async function layStop() {
+  stopFollowing();
   if (rec.kind === 'hide') {
     map.off('click', onHideTap);
     map.getCanvas().style.cursor = '';
@@ -931,20 +1064,24 @@ function startWalk(card) {
   walk.done = false;
   rec.kind = 'walk';
   clearMap();
-  setSrc('runner', lineOf(card.points));
+  /* The route layers own this line now — drawing it as a plain trail as well
+     put two lines in the same place saying different things. */
+  setSrc('routeAhead', lineOf(card.points));
   setSrc('start', pointsOf([card.points[0]]));
   setSrc('hides', pointsOf([card.points[card.points.length - 1]]));   // B, in ember
   fitTo(card.points);
   hudText = walkHud;
+  navSay('—', '', 'Walk to the green start dot', '');
   go('scrWalk');
-  startWatch('walkText').then(ok => { if (!ok) go('scrHome'); });
+  startFollowing(card.points, { courseUp: true });
+  startWatch('navSink').then(ok => { if (!ok) { stopFollowing(); go('scrHome'); } });
   toast(`${card.from ? card.from + '’s' : 'The'} plan — walk the line, A to B`);
 }
 
 function walkHud() {
   const A = walk.card.points[0], B = walk.card.points[walk.card.points.length - 1];
   const last = rec.pts[rec.pts.length - 1];
-  if (!last) return accWarning();
+  if (!last) { navSay('—', '', accWarning(), ''); return ''; }
   const dA = dist(last, A), dB = dist(last, B);
 
   /* The countdown arms at the departure point and fires on LEAVING it —
@@ -958,25 +1095,44 @@ function walkHud() {
     toast('Off you go — the countdown is running on both phones');
   }
 
-  const offs = signedOffsets(walk.card.points, [last]);
-  const offLine = offs.length ? Math.abs(offs[0]) : null;
-  const bits = [];
-  if (!walk.offAt) bits.push(dA < 40 ? 'At the start — walk on' : `${Math.round(dA)} m to the start`);
-  else {
-    if (offLine != null) bits.push(offLine < 8 ? 'On the line' : `${Math.round(offLine)} m off the line`);
-    bits.push(`${Math.round(dB)} m to the end`);
-    const left = (walk.offAt + (walk.card.ageMin ?? 10) * 60000) - Date.now();
-    bits.push(left > 0 ? `dog in ${fmtDur(left)}` : 'dog is coming');
+  /* Before departure the destination is the START; after it, the END. The
+     big number is always the distance to whichever one you are heading for,
+     because that is the only number a walking person reads. */
+  const pr = progressAlong(walk.card.points, last);
+  const toGo = walk.offAt ? (pr ? pr.remaining : dB) : dA;
+  const [n, u] = toGo >= 1000 ? [(toGo / 1000).toFixed(1), 'km'] : [String(Math.round(toGo)), 'm'];
+
+  if (!walk.offAt) {
+    navSay(n, u, dA < 40 ? 'At the start — walk on' : 'To the start of the trail',
+      dA < 40 ? 'The clock starts when you leave' : '');
+    return '';
   }
-  return bits.join(' · ');
+  const off = pr ? pr.off : null;
+  const left = (walk.offAt + (walk.card.ageMin ?? 10) * 60000) - Date.now();
+  const clock = left > 0 ? `Dog starts in ${fmtDur(left)}` : 'The dog is on its way';
+  navSay(n, u,
+    off == null || off < 8 ? 'On the line' : `${Math.round(off)} m off the line`,
+    clock);
+  return '';
+}
+
+/** The banner: one big number, one instruction, one quiet line under it. */
+function navSay(num, unit, instr, sub) {
+  $('navDist').textContent = num;
+  $('navUnit').textContent = unit;
+  $('navInstr').textContent = instr;
+  $('navSub').textContent = sub || '';
+  $('navBanner').classList.toggle('off-line', /off the line/.test(instr));
 }
 
 async function finishWalk() {
+  if (!walk.card) { stopFollowing(); return go('scrHome'); }
   const B = walk.card.points[walk.card.points.length - 1];
   const last = rec.pts[rec.pts.length - 1];
   if (last && dist(last, B) > 60 &&
       !confirm(`You are ${Math.round(dist(last, B))} m from the drawn end. Finish here anyway?`)) return;
   await stopWatch();
+  stopFollowing();
   rec.pts.forEach(pt => delete pt._seen);
   walk.done = true;
 
@@ -1102,6 +1258,7 @@ async function startRun(s) {
   $('btnReveal').textContent = t.kind === 'person' ? 'Reveal trail' : 'Reveal hides';
   go('scrRun');
   if (!(await startWatch('runHudText'))) return go('scrHome');
+  startFollowing(null);
   $('runHudText').textContent = hudText();
   toast(t.kind === 'person' ? 'Running blind — the trail is hidden' : 'Searching');
 }
@@ -1135,6 +1292,7 @@ function addWaypoint(kind) {
 
 async function stopRun() {
   await stopWatch();
+  stopFollowing();
   const s = run.session;
   if (!s) return go('scrHome');
   if (rec.pts.length < 2) {
@@ -1646,6 +1804,7 @@ function wire() {
   $('btnLayStop').addEventListener('click', layStop);
   $('btnLayCancel').addEventListener('click', async () => {
     await stopWatch();
+    stopFollowing();
     if (rec.kind === 'hide') { map.off('click', onHideTap); map.getCanvas().style.cursor = ''; }
     clearMap();
     go('scrHome');
@@ -1712,11 +1871,14 @@ function wire() {
     go('scrShare');
   });
 
+  $('btnRecentre').addEventListener('click', recentre);
+
   // The layer's walk
   $('btnInPlace').addEventListener('click', finishWalk);
   $('walkCancel').addEventListener('click', async () => {
     if (rec.pts.length > 1 && !confirm('Cancel this walk? The handler gets no walked card.')) return;
     await stopWatch();
+    stopFollowing();
     walk.card = null;
     clearMap();
     go('scrHome');
