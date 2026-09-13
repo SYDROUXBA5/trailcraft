@@ -229,7 +229,21 @@ input[type="range"] { width: 100%; accent-color: var(--moss); height: 40px; }
 .contam-form { gap: 4px; }
 
 /* ── Share ───────────────────────────────────────────────────────── */
-.minimap { width: 100%; height: auto; background: #E7EBDD; border-radius: 12px; }
+/* The card's map: imagery underneath, the line drawn over it here. */
+.minimap {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 300 / 170;
+  background: #E7EBDD;
+  border-radius: 12px;
+  overflow: hidden;
+}
+.minimap img, .minimap svg {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  display: block;
+}
+.minimap img { object-fit: cover; }
 .qr-card { align-items: center; }
 .qr-plate { background: #fff; border-radius: 16px; padding: 14px; width: min(70vw, 300px); aspect-ratio: 1; }
 .qr-plate svg { width: 100%; height: 100%; display: block; }

@@ -12,13 +12,13 @@ import {
   signedOffsets, meanSigned, sideOfDrift, sideAgreement, lineCorrect, departure,
   progressAlong, splitLine, smoothBearing,
 } from './geo.js';
-import { FLAT, buildTerrain, stability, regime } from './field.js';
+import { FLAT, buildTerrain, stability, regime, flowAt, normOf } from './field.js';
 import { predictedOffsets, ScentSim, driftFrom, AIRBORNE } from './sim.js';
 import { encodeTrail, decodeTrail, cardUrl, cardFromText } from './card.js';
 import { createStore, migrateV1, TARGETS, targetById, verbs, uid } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-13l';
+const BUILD = '2026-09-13m';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true, mbToken: (window.MB_TOKEN || '') };
@@ -98,12 +98,17 @@ const SCREENS = ['scrOnboardHandler', 'scrOnboardDog', 'scrTutorial', 'scrHome',
   'scrConfirm', 'scrShare', 'scrContam', 'scrPick', 'scrScan', 'scrRun', 'scrResult',
   'scrShowMap', 'scrSessions', 'scrSettings', 'scrDraw', 'scrCountdown', 'scrWalk', 'scrWait'];
 
+/* The screens that are transparent chrome over the live map. */
+const MAP_SCREENS = ['scrLay', 'scrConfirm', 'scrContam', 'scrRun', 'scrShowMap', 'scrDraw', 'scrWalk'];
+
 function go(id) {
   stopScan();
   for (const s of SCREENS) $(s).hidden = s !== id;
   if (id === 'scrHome') renderHome();
   // The map only needs to be right when something transparent sits over it.
-  if (['scrLay', 'scrConfirm', 'scrContam', 'scrRun', 'scrShowMap', 'scrDraw', 'scrWalk'].includes(id)) map?.resize();
+  if (MAP_SCREENS.includes(id)) map?.resize();
+  // Nothing on the map is worth animating while a paper screen covers it.
+  else airStop();
 }
 
 /* ── Map ──────────────────────────────────────────────────────────── */
@@ -112,7 +117,7 @@ let map, mapReady = false;
 let GL = mapboxgl;   // every control/bounds must come from the SAME library
 const srcData = { runner: EMPTY, dog: EMPTY, wps: EMPTY, drift: EMPTY, start: EMPTY, hides: EMPTY, contam: EMPTY,
                   routeDone: EMPTY, routeAhead: EMPTY, puck: EMPTY, scent: EMPTY, wind: EMPTY,
-                  flow: EMPTY, flowHead: EMPTY };
+                  flow: EMPTY, flowHead: EMPTY, air: EMPTY };
 
 const SAT_STYLE = 'mapbox://styles/mapbox/standard-satellite';
 const RASTER_FALLBACK = {
@@ -166,6 +171,18 @@ function addOverlays() {
   add({ id: 'drift-edge', type: 'line', source: 'drift',
         layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: { 'line-color': '#62B6FF', 'line-width': 1.6, 'line-opacity': 0.55, 'line-dasharray': [1.5, 1.8] } });
+  /* The wind, everywhere. Not the scent — the air the scent is riding on.
+     Thin white streaks across the whole view, each one a parcel of air being
+     moved by the SAME flow field the plume is built from, so where the
+     ground turns the wind you can watch it turn. Faint on purpose: this is
+     the condition the work is happening in, not the work. */
+  add({ id: 'air-streaks', type: 'line', source: 'air',
+        layout: { 'line-cap': 'round' },
+        paint: { 'line-color': '#FFFFFF',
+                 'line-width': ['interpolate', ['linear'], ['zoom'], 13, 1, 17, 1.8, 19, 3],
+                 'line-opacity': ['*', ['get', 'a'], 0.8],
+                 'line-blur': 0.4 } });
+
   /* The air itself, drawn as scent rather than as a stain.
 
      A density field said the right thing and looked wrong: solid colour over
@@ -730,7 +747,11 @@ function plumeStart(trail, wx, T) {
   plume.T = T || FLAT;
   plume.tAt = 0; plume.tLen = 0;
   plumeTerrain(true);
-  plume.tick = setInterval(plumeFrame, 240);
+  airStart(wx, plume.T);
+  /* 400 ms, not faster. The parcels move at wind speed — metres in a second
+     — so redrawing them oftener buys nothing and costs a phone in a pocket.
+     The tracers on top are what carry the motion. */
+  plume.tick = setInterval(plumeFrame, 400);
   plumeFrame();
   tracersStart();
   $('mapLegend').hidden = false;
@@ -767,6 +788,102 @@ function plumeStop() {
   setSrc('drift', EMPTY);
   $('mapLegend').hidden = true;
 }
+/* ── The wind, over the whole map ─────────────────────────────────────
+   Separate from the plume on purpose. The plume is where the scent is; this
+   is what the air is doing everywhere, including over ground the trail never
+   touched — which is exactly what you want to know before you decide where
+   to cast a dog.
+
+   Each streak is a parcel pushed by flowAt, so with a terrain grid loaded it
+   bends round slopes and runs downhill in cold still air, rather than every
+   arrow on screen pointing the same way the forecast does. */
+/* A streak is the path a parcel of air took over the last TAIL_SPAN seconds.
+   Sampling it per frame made it 0.26 m long at a walking-pace wind — true,
+   and invisible. Sampling every AIR_STEP seconds over AIR_TAIL samples gives
+   a streak that is still exactly the real path, just long enough to read. */
+const AIR_N = 320, AIR_LIFE = 26, AIR_STEP = 1.5, AIR_TAIL = 10;
+const air = { on: false, wx: null, st: null, T: FLAT, pts: [], raf: 0, last: 0 };
+
+function airStart(wx, T) {
+  if (!wx || !settings.plume) return airStop();
+  air.wx = wx;
+  air.st = stability(wx.soil_temp, wx.temp);
+  if (T) air.T = T;
+  if (air.on) return;
+  air.on = true;
+  air.pts = [];
+  air.last = performance.now();
+  air.raf = requestAnimationFrame(airFrame);
+}
+function airStop() {
+  air.on = false;
+  cancelAnimationFrame(air.raf); air.raf = 0;
+  air.pts = [];
+  setSrc('air', EMPTY);
+}
+
+/** Somewhere on SCREEN, at a random point in its life so the field is full
+    on the first frame instead of arriving as one wave.
+
+    Screen space, not a lat/lon box: the map is pitched, so its bounding box
+    reaches to the horizon and scattering parcels across it put almost all of
+    them kilometres away, leaving a handful of streaks on an empty view. */
+function airSpawn(fresh = false) {
+  const c = map.getCanvas();
+  const ll = map.unproject([Math.random() * c.clientWidth, Math.random() * c.clientHeight]);
+  return {
+    lat: ll.lat, lon: ll.lng,
+    age: fresh ? 0 : Math.random() * AIR_LIFE,
+    tail: [], since: 0,
+  };
+}
+
+function airFrame(now) {
+  if (!air.on || !map) return;
+  const dt = Math.min(0.1, (now - air.last) / 1000);
+  air.last = now;
+  const c = map.getCanvas();
+  const W = c.clientWidth, H = c.clientHeight;
+  const inView = (p) => {
+    const q = map.project([p.lon, p.lat]);
+    return q.x > -60 && q.x < W + 60 && q.y > -60 && q.y < H + 60;
+  };
+
+  while (air.pts.length < AIR_N) air.pts.push(airSpawn());
+
+  const feats = [];
+  const mLat = 1 / 111320;
+  for (const p of air.pts) {
+    p.age += dt;
+    if (p.age > AIR_LIFE || !inView(p)) { Object.assign(p, airSpawn(true)); continue; }
+
+    const n = normOf(air.T, p.lat, p.lon);
+    const f = flowAt(air.T, n.x, n.y, air.wx, air.st);
+    // u is eastward, v northward, both m/s — real speed, not a flourish.
+    p.lon += f.u * dt * mLat / Math.cos(p.lat * Math.PI / 180);
+    p.lat += f.v * dt * mLat;
+
+    p.since += dt;
+    if (p.since >= AIR_STEP || !p.tail.length) {
+      p.since = 0;
+      p.tail.push([p.lon, p.lat]);
+      if (p.tail.length > AIR_TAIL) p.tail.shift();
+    }
+    if (p.tail.length < 2) continue;
+
+    // Fade in as it appears and out as it goes, so nothing pops.
+    const t = p.age / AIR_LIFE;
+    feats.push({
+      type: 'Feature',
+      properties: { a: Math.min(1, Math.min(t * 5, (1 - t) * 4)) },
+      // The head is where it is NOW, not where it was at the last sample.
+      geometry: { type: 'LineString', coordinates: [...p.tail, [p.lon, p.lat]] },
+    });
+  }
+  setSrc('air', { type: 'FeatureCollection', features: feats });
+  air.raf = requestAnimationFrame(airFrame);
+}
+
 /* ── Wind tracers ─────────────────────────────────────────────────────
    Few enough to move every frame, which is the whole point of them: the
    heatmap can only be redrawn a few times a second, and a plume that never
@@ -879,6 +996,7 @@ function plumeFrame() {
   })) });
   paintFlow();
   plumeTerrain();
+  air.T = plume.T;
 }
 
 /* ── Following ────────────────────────────────────────────────────────
@@ -1091,21 +1209,89 @@ function discardLay() {
 }
 
 /* ── Share ────────────────────────────────────────────────────────── */
-function miniMapSvg(pts) {
+/* ── The card's little map ────────────────────────────────────────────
+   A line floating on a blank panel says nothing about WHERE the trail was,
+   which is half of what a record is for. The ground goes behind it.
+
+   The picture is a Mapbox static image of the AREA, and the line is drawn
+   over it here on the phone. That ordering is the point: Mapbox is asked for
+   a square of countryside, exactly as the live map already asks it for
+   tiles, and the trail itself never leaves the phone. Handing the path to
+   their overlay API would have been one line of code and would have posted
+   the trail to a server. */
+const MINI_W = 300, MINI_H = 170;
+
+/** Web Mercator, normalised to [0,1] — the projection the static image uses,
+    so the line lands where the ground actually is. */
+function merc(p) {
+  const lat = Math.max(-85, Math.min(85, p.lat)) * Math.PI / 180;
+  return {
+    x: (p.lon + 180) / 360,
+    y: (1 - Math.log(Math.tan(lat) + 1 / Math.cos(lat)) / Math.PI) / 2,
+  };
+}
+
+/** Centre and zoom that fit these points in the card, with a margin. */
+function miniView(pts) {
+  const m = pts.map(merc);
+  const x1 = Math.min(...m.map(p => p.x)), x2 = Math.max(...m.map(p => p.x));
+  const y1 = Math.min(...m.map(p => p.y)), y2 = Math.max(...m.map(p => p.y));
+  const cx = (x1 + x2) / 2, cy = (y1 + y2) / 2;
+  const dx = Math.max(x2 - x1, 1e-9), dy = Math.max(y2 - y1, 1e-9);
+  // 512 px world tiles, the same as the GL map; 0.78 leaves a margin.
+  const z = Math.max(1, Math.min(18,
+    Math.floor(Math.log2(Math.min(MINI_W * 0.78 / (dx * 512), MINI_H * 0.78 / (dy * 512))) * 100) / 100));
+  const world = 512 * Math.pow(2, z);
+  const lonC = cx * 360 - 180;
+  const latC = Math.atan(Math.sinh(Math.PI * (1 - 2 * cy))) * 180 / Math.PI;
+  return {
+    z, lonC, latC,
+    at: (p) => {
+      const q = merc(p);
+      return [(q.x - cx) * world + MINI_W / 2, (q.y - cy) * world + MINI_H / 2];
+    },
+  };
+}
+
+/** The satellite square behind the line — null without a token, and the card
+    keeps its plain panel rather than showing a broken picture. */
+function miniImgUrl(view) {
+  const tok = (settings.mbToken || '').trim();
+  if (!/^pk\./.test(tok)) return null;
+  return `https://api.mapbox.com/styles/v1/mapbox/satellite-streets-v12/static/`
+    + `${view.lonC.toFixed(6)},${view.latC.toFixed(6)},${view.z},0/`
+    + `${MINI_W}x${MINI_H}@2x?access_token=${encodeURIComponent(tok)}`;
+}
+
+function miniMapSvg(pts, view) {
   if (!pts || pts.length < 2) return '';
-  const lats = pts.map(p => p.lat), lons = pts.map(p => p.lon);
-  const mnLa = Math.min(...lats), mxLa = Math.max(...lats);
-  const mnLo = Math.min(...lons), mxLo = Math.max(...lons);
-  const cos = Math.cos(((mnLa + mxLa) / 2) * Math.PI / 180);
-  const spanX = Math.max(1e-6, (mxLo - mnLo) * cos), spanY = Math.max(1e-6, mxLa - mnLa);
-  const scale = Math.min(272 / spanX, 142 / spanY);
-  const X = (p) => 14 + ((p.lon - mnLo) * cos - (spanX - 272 / scale) / 2 * 0) * scale + (272 - spanX * scale) / 2;
-  const Y = (p) => 14 + (mxLa - p.lat) * scale + (142 - spanY * scale) / 2;
-  const d = pts.map((p, i) => `${i ? 'L' : 'M'}${X(p).toFixed(1)},${Y(p).toFixed(1)}`).join(' ');
-  const a = pts[0], b = pts[pts.length - 1];
-  return `<path d="${d}" fill="none" stroke="#2F9E44" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
-    <circle cx="${X(a).toFixed(1)}" cy="${Y(a).toFixed(1)}" r="5" fill="#2F4A3A"/>
-    <circle cx="${X(b).toFixed(1)}" cy="${Y(b).toFixed(1)}" r="5" fill="#D9662B"/>`;
+  const v = view || miniView(pts);
+  const d = pts.map((p, i) => {
+    const [x, y] = v.at(p);
+    return `${i ? 'L' : 'M'}${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
+  const [ax, ay] = v.at(pts[0]);
+  const [bx, by] = v.at(pts[pts.length - 1]);
+  // A dark casing so the line survives whatever the imagery happens to be.
+  return `<path d="${d}" fill="none" stroke="#17201A" stroke-width="6.5" stroke-opacity="0.5"
+      stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="${d}" fill="none" stroke="#F5D14A" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="${ax.toFixed(1)}" cy="${ay.toFixed(1)}" r="5.5" fill="#2F9E44" stroke="#FFFDF8" stroke-width="2"/>
+    <circle cx="${bx.toFixed(1)}" cy="${by.toFixed(1)}" r="5.5" fill="#D9662B" stroke="#FFFDF8" stroke-width="2"/>`;
+}
+
+/** Put the ground behind the line, if there is a token and a signal. */
+function paintMini(pts) {
+  const img = $('shareMiniImg');
+  if (!pts || pts.length < 2) { img.hidden = true; $('shareMini').innerHTML = ''; return; }
+  const view = miniView(pts);
+  $('shareMini').innerHTML = miniMapSvg(pts, view);
+  const url = miniImgUrl(view);
+  img.hidden = true;
+  if (!url) return;
+  img.onload = () => { img.hidden = false; };
+  img.onerror = () => { img.hidden = true; };   // offline: the panel, not a broken frame
+  img.src = url;
 }
 
 function renderShare(s) {
@@ -1126,6 +1312,7 @@ function renderShare(s) {
   const wx = s.data.weather;
   const laid = new Date(s.startedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   if (isHide) {
+    $('shareMiniImg').hidden = true;
     $('shareMini').innerHTML = (s.data.hides || []).map((h, i) =>
       `<circle cx="${40 + i * 40}" cy="85" r="7" fill="#D9662B"/>`).join('');
     $('shareMeta').textContent = `${s.data.hides.length} hide${s.data.hides.length === 1 ? '' : 's'} · set ${laid}`
@@ -1134,7 +1321,7 @@ function renderShare(s) {
     $('shareQrCard').hidden = true;
   } else {
     $('shareQrCard').hidden = false;
-    $('shareMini').innerHTML = miniMapSvg(s.data.trail);
+    paintMini(s.data.trail);
     const mins = fmtDur(s.data.trail[s.data.trail.length - 1].t - s.data.trail[0].t);
     $('shareMeta').textContent = isPlan
       ? `${fmtKm(pathLen(s.data.trail))} plan · dog starts +${s.data.ageMin ?? 10} min`
@@ -1542,6 +1729,10 @@ async function startRun(s) {
   go('scrRun');
   if (!(await startWatch('runHudText'))) return go('scrHome');
   startFollowing(null);
+  /* Wind, even on a blind run: it says nothing about where the trail is, and
+     it is the first thing you want before deciding where to cast. */
+  airStart(s.data.weather);
+  terrainFor(s.data.trail || s.data.hides || []).then(T => { air.T = T; }).catch(() => {});
   $('runHudText').textContent = hudText();
   toast(t.kind === 'person' ? 'Running blind — the trail is hidden' : 'Searching');
 }
@@ -1581,6 +1772,7 @@ async function stopRun() {
   await stopWatch();
   stopFollowing();
   plumeStop();
+  airStop();
   const s = run.session;
   if (!s) return go('scrHome');
   if (rec.pts.length < 2) {
