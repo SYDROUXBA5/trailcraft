@@ -316,3 +316,9 @@ input[type="range"] { width: 100%; accent-color: var(--moss); height: 40px; }
   margin: -6px 0 14px;
   line-height: 1.45;
 }
+
+/* A GPS verdict is either reassurance or an instruction. Colour says which
+   before the sentence is read. */
+.gps-good { color: var(--moss); }
+.gps-bad  { color: var(--ember); }
+#gpsReport { line-height: 1.5; margin-top: -4px; }
