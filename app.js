@@ -7,7 +7,7 @@
    without. Weather: Open-Meteo, the one public API with soil temperature. */
 
 import {
-  pathLen, cardinal, dist, dwellFold, bearing,
+  pathLen, cardinal, dist, dwellFold, bearing, project,
   scentField, plumePolygon, densify, timestamps,
   signedOffsets, meanSigned, sideOfDrift, sideAgreement, lineCorrect, departure,
   progressAlong, splitLine, smoothBearing,
@@ -18,7 +18,7 @@ import { encodeTrail, decodeTrail, cardUrl, cardFromText } from './card.js';
 import { createStore, migrateV1, TARGETS, targetById, verbs, uid } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-13q';
+const BUILD = '2026-09-13r';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true, mbToken: (window.MB_TOKEN || '') };
@@ -117,7 +117,7 @@ let map, mapReady = false;
 let GL = mapboxgl;   // every control/bounds must come from the SAME library
 const srcData = { runner: EMPTY, dog: EMPTY, wps: EMPTY, drift: EMPTY, start: EMPTY, hides: EMPTY, contam: EMPTY,
                   routeDone: EMPTY, routeAhead: EMPTY, puck: EMPTY, scent: EMPTY, wind: EMPTY,
-                  flow: EMPTY, flowHead: EMPTY, air: EMPTY };
+                  flow: EMPTY, flowHead: EMPTY, air: EMPTY, acc: EMPTY };
 
 const SAT_STYLE = 'mapbox://styles/mapbox/standard-satellite';
 const RASTER_FALLBACK = {
@@ -288,10 +288,13 @@ function addOverlays() {
                   'icon-allow-overlap': true, 'icon-ignore-placement': true,
                   'icon-rotate': ['get', 'brg'], 'icon-rotation-alignment': 'map' },
         paint: { 'icon-opacity': 0.8 } });
-  add({ id: 'puck-acc', type: 'circle', source: 'puck',
-        paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 14, 10, 19, 34],
-                 'circle-color': '#2F9E44', 'circle-opacity': 0.16,
-                 'circle-stroke-width': 1.5, 'circle-stroke-color': '#FFFDF8', 'circle-stroke-opacity': 0.45 } });
+  /* The accuracy ring is drawn in METRES, not pixels, so it means something:
+     it is the circle the phone says you are somewhere inside. A ring you can
+     see is the difference between "the map is wrong" and "the fix is loose". */
+  add({ id: 'puck-acc-fill', type: 'fill', source: 'acc',
+        paint: { 'fill-color': '#2F9E44', 'fill-opacity': 0.13 } });
+  add({ id: 'puck-acc-edge', type: 'line', source: 'acc',
+        paint: { 'line-color': '#FFFDF8', 'line-width': 1.4, 'line-opacity': 0.5 } });
   add({ id: 'puck-arrow', type: 'symbol', source: 'puck',
         layout: { 'icon-image': 'puck',
                   'icon-size': ['interpolate', ['linear'], ['zoom'], 14, 0.5, 17, 0.8, 19, 1.05],
@@ -331,6 +334,62 @@ function flowHeadImage() {
   return g.getImageData(0, 0, S, S);
 }
 
+/** A circle on the ground, in metres. */
+function circlePoly(centre, radiusM, n = 48) {
+  if (!centre || !(radiusM > 0)) return EMPTY;
+  const ring = [];
+  for (let i = 0; i <= n; i++) {
+    const q = project(centre, (i / n) * 360, radiusM);
+    ring.push([q.lon, q.lat]);
+  }
+  return { type: 'FeatureCollection', features: [{
+    type: 'Feature', geometry: { type: 'Polygon', coordinates: [ring] } }] };
+}
+
+/** Put you on the map: the arrow, and the circle you are somewhere inside. */
+function paintMe(lat, lon, acc, brg = null) {
+  setSrc('puck', { type: 'FeatureCollection', features: [{
+    type: 'Feature',
+    properties: { brg: brg ?? 0 },
+    geometry: { type: 'Point', coordinates: [lon, lat] } }] });
+  setSrc('acc', Number.isFinite(acc) && acc > 1 ? circlePoly({ lat, lon }, acc) : EMPTY);
+}
+
+/* ── Finding you ──────────────────────────────────────────────────────
+   The first fix a phone gives is the worst fix of the session. The radio
+   wakes, answers from whatever it has — often a cached or mast-derived
+   position — and then tightens over the next several seconds as it acquires
+   satellites. Asking once and centring on the answer is what puts the map
+   beside you instead of on you.
+
+   So this keeps a short high-accuracy watch open and re-centres every time a
+   TIGHTER fix arrives, never a looser one, until the fix is as good as a
+   phone gets or the window closes. */
+const locate = { watch: 0, timer: 0, best: Infinity };
+
+function locateMe({ zoom = 17.5, settleMs = 12000, good = 8 } = {}) {
+  locateStop();
+  if (!navigator.geolocation || !window.isSecureContext) return;
+  locate.best = Infinity;
+  locate.watch = navigator.geolocation.watchPosition((p) => {
+    if (rec.on) return locateStop();          // the recording watch owns the map now
+    const acc = p.coords.accuracy ?? 9999;
+    if (acc > locate.best) return;            // never move to a worse answer
+    locate.best = acc;
+    const { latitude: lat, longitude: lon } = p.coords;
+    paintMe(lat, lon, acc);
+    map.easeTo({ center: [lon, lat], zoom, duration: 700, essential: true });
+    if (acc <= good) locateStop();            // as tight as it gets: stop burning the radio
+  }, () => { /* the HUD and the GPS check say why */ },
+     { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 });
+  clearTimeout(locate.timer);
+  locate.timer = setTimeout(locateStop, settleMs);
+}
+function locateStop() {
+  if (locate.watch) navigator.geolocation?.clearWatch(locate.watch);
+  clearTimeout(locate.timer);
+  locate.watch = 0; locate.timer = 0;
+}
 function puckImage() {
   const S = 96, c = document.createElement('canvas');
   c.width = c.height = S;
@@ -669,10 +728,8 @@ function startLay() {
   } else {
     $('btnLayStop').textContent = 'Stop';
   }
-  // Centre on the handler without waiting for a recording to begin.
-  navigator.geolocation?.getCurrentPosition(
-    p => map.easeTo({ center: [p.coords.longitude, p.coords.latitude], zoom: 16 }),
-    () => {}, { enableHighAccuracy: true, timeout: 8000 });
+  // On the handler, and staying on them as the fix tightens.
+  locateMe();
 }
 
 function onHideTap(e) {
@@ -1074,10 +1131,7 @@ function paintNav() {
   const raw = prev && dist(prev, last) > 1.5 ? bearing(prev, last) : null;
   nav.brg = smoothBearing(nav.brg, raw ?? nav.brg);
 
-  setSrc('puck', { type: 'FeatureCollection', features: [{
-    type: 'Feature',
-    properties: { brg: nav.brg ?? 0 },
-    geometry: { type: 'Point', coordinates: [last.lon, last.lat] } }] });
+  paintMe(last.lat, last.lon, last.acc, nav.brg ?? 0);
 
   if (nav.onRoute) {
     const [done, ahead] = splitLine(nav.onRoute, last);
@@ -1135,6 +1189,7 @@ async function startWatch(hudId) {
       return false;
     }
   } catch { /* Permissions API optional */ }
+  locateStop();
   rec.on = true; rec.pts = []; rec.dropped = 0; rec.started = Date.now();
   try { rec.lock = await navigator.wakeLock?.request('screen'); } catch { /* not fatal */ }
   rec.watch = navigator.geolocation.watchPosition(onFix,
@@ -1455,6 +1510,10 @@ const draw = { pts: [], ageMin: 10 };
 
 function openDraw() {
   clearMap();
+  /* Corners are tapped by finger, so the map has to be on the handler before
+     the first tap — drawing from wherever the map happened to be sitting puts
+     the whole trail in the wrong field. */
+  locateMe({ zoom: 17 });
   draw.pts = [];
   draw.ageMin = 10;
   $('ageRow').querySelectorAll('.age-chip').forEach(b =>
