@@ -18,7 +18,7 @@ import { encodeTrail, decodeTrail, cardUrl, cardFromText } from './card.js';
 import { createStore, migrateV1, TARGETS, targetById, verbs, uid } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-13n';
+const BUILD = '2026-09-13o';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true, mbToken: (window.MB_TOKEN || '') };
