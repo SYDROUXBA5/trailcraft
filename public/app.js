@@ -13,12 +13,12 @@ import {
   progressAlong, splitLine, smoothBearing,
 } from './geo.js';
 import { FLAT, buildTerrain, stability, regime, flowAt, normOf } from './field.js';
-import { predictedOffsets, ScentSim, driftFrom, AIRBORNE } from './sim.js';
+import { predictedOffsets, ScentSim, driftFrom, stepByFlow, AIRBORNE } from './sim.js';
 import { encodeTrail, decodeTrail, cardUrl, cardFromText } from './card.js';
 import { createStore, migrateV1, TARGETS, targetById, verbs, uid } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-13o';
+const BUILD = '2026-09-13p';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true, mbToken: (window.MB_TOKEN || '') };
@@ -852,16 +852,18 @@ function airFrame(now) {
   while (air.pts.length < AIR_N) air.pts.push(airSpawn());
 
   const feats = [];
-  const mLat = 1 / 111320;
   for (const p of air.pts) {
     p.age += dt;
     if (p.age > AIR_LIFE || !inView(p)) { Object.assign(p, airSpawn(true)); continue; }
 
     const n = normOf(air.T, p.lat, p.lon);
     const f = flowAt(air.T, n.x, n.y, air.wx, air.st);
-    // u is eastward, v northward, both m/s — real speed, not a flourish.
-    p.lon += f.u * dt * mLat / Math.cos(p.lat * Math.PI / 180);
-    p.lat += f.v * dt * mLat;
+    /* Through the same mover the scent uses, at the full flow rate — the air
+       itself is not held back by the ground the way scent at nose height is.
+       Doing this arithmetic here by hand is what had the streaks running
+       north while the plume ran south. */
+    const next = stepByFlow(p, f, dt, 1);
+    p.lat = next.lat; p.lon = next.lon;
 
     p.since += dt;
     if (p.since >= AIR_STEP || !p.tail.length) {

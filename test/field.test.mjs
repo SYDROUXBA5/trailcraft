@@ -10,8 +10,9 @@ import {
   FLAT, buildTerrain, normOf, sample, stability, synoptic, flowAt,
   scentLife, solarPosition, insolation, regime, lerpDir, wxAt,
 } from '../public/field.js';
-import { driftFrom, predictedOffsets, ScentSim, NOSE, AIRBORNE, RESIDENCE } from '../public/sim.js';
-import { dist, scentOffset } from '../public/geo.js';
+import { driftFrom, predictedOffsets, ScentSim, NOSE, AIRBORNE, RESIDENCE,
+         stepByFlow, flowBearing } from '../public/sim.js';
+import { dist, scentOffset, bearing } from '../public/geo.js';
 
 let pass = 0;
 const t = (name, fn) => { fn(); pass++; console.log(`  ok  ${name}`); };
@@ -597,6 +598,48 @@ t('ScentSim: the standing spot thickens the longer the person waits', () => {
   const perTrailPoint = sim.parts.length / trail.length;
   assert.ok(m20 > perTrailPoint * 3,
     `the handover spot carries far more than a step of walking (${m20} vs ${perTrailPoint.toFixed(0)})`);
+});
+
+t('wind and scent leave a point on the SAME bearing', () => {
+  /* flowAt returns v SOUTHWARD. Treating it as northward silently inverts the
+     north-south component, and on the map that looks like the wind streaks
+     and the plume disagreeing about where the air is going — which is exactly
+     what it looked like. Both movers go through stepByFlow so there is one
+     place to get this right. */
+  const apart = (a, b) => Math.abs(((a - b + 540) % 360) - 180);
+
+  for (const from of [0, 45, 90, 135, 180, 225, 270, 315]) {
+    const wx = { wind_speed: 4, wind_direction: from, temp: 12, soil_temp: 11, humidity: 70 };
+    const n = normOf(FLAT, WELLS.lat, WELLS.lon);
+    const f = flowAt(FLAT, n.x, n.y, wx, NEUTRAL);
+
+    const air = stepByFlow(WELLS, f, 30, 1);              // the wind itself
+    const scent = driftFrom(FLAT, WELLS, 30, wx, NEUTRAL); // scent at nose height
+
+    const bAir = bearing(WELLS, air), bScent = bearing(WELLS, scent);
+    assert.ok(apart(bAir, bScent) < 1,
+      `wind ${bAir.toFixed(0)}° vs scent ${bScent.toFixed(0)}° for wind from ${from}°`);
+
+    // And both go where the weather says: TOWARD, not from.
+    assert.ok(apart(bAir, (from + 180) % 360) < 1,
+      `wind from ${from}° must blow toward ${(from + 180) % 360}°, got ${bAir.toFixed(0)}°`);
+
+    // The air outruns the scent: the ground holds scent back at nose height.
+    assert.ok(dist(WELLS, air) > dist(WELLS, scent) * 2,
+      'air moves at the full flow rate, scent at a fraction of it');
+  }
+});
+
+t('flowBearing: the sign convention, stated once', () => {
+  // v is SOUTHWARD, so a positive v must read as heading south (180°).
+  assert.equal(Math.round(flowBearing({ u: 0, v: 1 })), 180, 'positive v is south');
+  assert.equal(Math.round(flowBearing({ u: 0, v: -1 })), 0, 'negative v is north');
+  assert.equal(Math.round(flowBearing({ u: 1, v: 0 })), 90, 'positive u is east');
+  assert.equal(Math.round(flowBearing({ u: -1, v: 0 })), 270, 'negative u is west');
+
+  // And it matches what synoptic() produces for a plain wind.
+  assert.equal(Math.round(flowBearing(synoptic(5, 270))), 90, 'a westerly blows east');
+  assert.equal(Math.round(flowBearing(synoptic(5, 0))), 180, 'a northerly blows south');
 });
 
 console.log(`\n${pass} passed total`);
