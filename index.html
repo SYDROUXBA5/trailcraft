@@ -3,372 +3,295 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
-<meta name="theme-color" content="#0E100A">
+<meta name="theme-color" content="#F4EFE6">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <title>Trailcraft</title>
 <link rel="manifest" href="manifest.webmanifest">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=Public+Sans:wght@400;500;600;700&display=swap">
 <link rel="stylesheet" href="https://api.mapbox.com/mapbox-gl-js/v3.14.0/mapbox-gl.css">
 <link rel="stylesheet" href="app.css">
 </head>
 <body>
 
+<!-- The map lives underneath everything. Paper screens cover it entirely;
+     the field screens (lay, run, confirm) are transparent chrome over it. -->
 <div id="map"></div>
-<canvas id="windCanvas" class="wind-canvas" hidden></canvas>
-<canvas id="scentCanvas" class="scent-canvas" hidden></canvas>
-
-<!-- ── Replay ────────────────────────────────────────────────────────
-     One clock drives the trails, the plume, the wind and the verdict, so
-     they cannot disagree with each other. -->
-<section id="replay" class="replay" hidden>
-  <div id="rpBuild" class="rp-build" hidden>Reading terrain…</div>
-
-  <div id="rpLayers" class="rp-panel rp-layers"></div>
-
-  <div id="rpVerdict" class="rp-panel rp-verdict off" hidden></div>
-
-  <div class="rp-foot">
-    <div id="rpRegime" class="rp-panel rp-regime"></div>
-    <div id="rpInst" class="rp-panel rp-inst"></div>
-    <div class="rp-panel rp-bar">
-      <button id="rpPlay" aria-label="Play">▶</button>
-      <div class="rp-clock"><b id="rpClock">--:--</b><i id="rpElapsed">0:00</i></div>
-      <input id="rpScrub" type="range" min="0" max="1000" step="1" value="0" aria-label="Session time">
-      <span id="rpStage" class="rp-stage"></span>
-      <button id="rpClose" class="rp-close">Close</button>
-    </div>
-    <p id="rpTerrain" class="rp-terrain"></p>
-  </div>
-</section>
-
-<!-- GPS quality: always visible while recording. This is the number both
-     incumbent apps hide, and it is the one handlers actually need. -->
-<div id="hud" class="hud" hidden>
-  <div class="hud-row">
-    <span id="fixDot" class="dot"></span>
-    <span id="fixText" class="hud-label">Waiting for fix</span>
-    <span id="fixAcc" class="hud-acc">—</span>
-  </div>
-  <div class="hud-stats">
-    <div><b id="statDist">0</b><i>m</i></div>
-    <div><b id="statTime">0:00</b><i>elapsed</i></div>
-    <div><b id="statPts">0</b><i>points</i></div>
-    <div><b id="statDrop">0</b><i>rejected</i></div>
-  </div>
-</div>
-
-<!-- Wind, always on the map. It used to live inside the bottom sheet, which is
-     the one place it is no use: that sheet is collapsed whenever you actually
-     need to see the ground. -->
-<div id="windBadge" class="windbadge" hidden>
-  <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true">
-    <g id="wbArrow" transform="rotate(0 11 11)">
-      <path d="M11 2 L15.5 18 L11 14.6 L6.5 18 Z" fill="#ffffff"/>
-    </g>
-  </svg>
-  <div class="wb-read">
-    <b><span id="wbSpeed">—</span><s>m/s</s></b>
-    <i id="wbSub">from —</i>
-  </div>
-</div>
-
-<!-- An empty plume and a broken app look identical on screen. When the model says
-     there is nothing left to work, it has to say so out loud. -->
-<div id="scentState" class="scentstate" hidden></div>
-
-<!-- Counting a trail down while it ages. The plume keeps building behind it, so
-     the wait is the thing you are actually watching. -->
-<div id="ageChip" class="agechip" hidden></div>
 
 <div id="toast" class="toast" hidden></div>
 
-<!-- ── Record controls ───────────────────────────────────────────── -->
-<section id="sheetRecord" class="sheet">
-  <!-- The sheet owns half a phone screen. In a field you need the map more than
-       the controls, so it drops out of the way and leaves a handle behind. -->
-  <button class="grab-btn" id="sheetToggle" aria-expanded="true" aria-controls="sheetRecord">
-    <span class="grab"></span>
-    <span class="grab-label" id="sheetLabel">Hide controls</span>
-  </button>
-
-  <!-- A tokenless install works, but on the basic map — and a 2-second toast
-       is not enough signposting for the one action unlocking satellite & 3D. -->
-  <button id="tokenNudge" class="tokennudge" hidden>Street map only — <b>add map token</b></button>
-
-  <div class="maprow">
-    <button class="chip" data-style="satellite" aria-pressed="true">Satellite</button>
-    <button class="chip" data-style="outdoors" aria-pressed="false">Outdoors</button>
-    <button class="chip" id="windToggle" aria-pressed="false">Wind</button>
-    <button class="chip" id="scentToggle" aria-pressed="true">Scent</button>
-  </div>
-  <p id="windRead" class="windread" hidden></p>
-
-  <div class="mode-row" id="modeRow">
-    <button class="mode" data-mode="runner" aria-pressed="true">
-      <span class="mode-name">Runner</span><span class="mode-sub">lay the trail</span>
-    </button>
-    <button class="mode" data-mode="dog" aria-pressed="false">
-      <span class="mode-name">Dog</span><span class="mode-sub">work the trail</span>
-    </button>
-  </div>
-
-  <div id="trailPicker" class="picker" hidden>
-    <label for="trailSelect">Working which trail?</label>
-    <select id="trailSelect"></select>
-  </div>
-
-  <!-- Which dog is on the line. Only appears with two or more registered dogs —
-       with one there is nothing to choose, and the session is attributed anyway. -->
-  <div id="dogPicker" class="picker" hidden>
-    <label>Which dog?</label>
-    <div id="dogChips" class="dog-chips"></div>
-  </div>
-
-  <button id="btnRecord" class="record">
-    <span class="record-ring"></span><span id="recordLabel">Start</span>
-  </button>
-
-  <button id="btnDraw" class="draw-open">Draw a trail instead
-    <em>for a trail nobody recorded — tap it onto the map</em>
-  </button>
-
-  <div id="waypoints" class="waypoints" hidden>
-    <button class="wp" data-wp="indication">Indication</button>
-    <button class="wp" data-wp="lost">Lost it</button>
-    <button class="wp" data-wp="refound">Re-found</button>
-    <button class="wp" data-wp="article">Article</button>
-    <button class="wp" data-wp="reward">Reward</button>
-    <button class="wp" data-wp="note">Mark</button>
-  </div>
-
-  <nav class="tabs">
-    <button data-view="map" class="active">Map</button>
-    <button data-view="sessions">Sessions</button>
-    <button data-view="team">Team</button>
-    <button data-view="settings">Settings</button>
-  </nav>
-</section>
-
-<!-- ── Draw a trail ──────────────────────────────────────────────────
-     The person who lays a trail usually has no phone running, and an instructor
-     setting one for a student wants to plan it first. A drawn line carries no
-     clock, so this asks for the two things a walked track gives free: when it
-     was laid, and how fast it was walked. -->
-<section id="drawSheet" class="sheet draw-sheet" hidden>
-  <button class="grab-btn" id="drawToggle" aria-expanded="true" aria-controls="drawSheet">
-    <span class="grab"></span>
-    <span class="grab-label" id="drawLabel">Hide controls</span>
-  </button>
-  <h2 class="draw-title">Draw the trail</h2>
-  <p class="hint" id="drawHint">Tap the map at each corner of the line that was walked.</p>
-
-  <div class="draw-stats">
-    <div><b id="drawPts">0</b><i>corners</i></div>
-    <div><b id="drawLen">0</b><i>metres</i></div>
-    <div><b id="drawDur">0:00</b><i>walk time</i></div>
-  </div>
-
-  <!-- The instructor's read, live while tapping: legs coloured by wind regime,
-       objectives the design earns, and its weakest aspect. -->
-  <div id="drawRead" class="draw-read" hidden>
-    <div class="leg-legend" aria-hidden="true">
-      <span><i class="lg cross"></i>crosswind</span>
-      <span><i class="lg tail"></i>downwind</span>
-      <span><i class="lg head"></i>into wind</span>
+<!-- ── Onboarding: handler ─────────────────────────────────────────── -->
+<section id="scrOnboardHandler" class="screen paper" hidden>
+  <div class="page">
+    <span class="label">Step 1 of 3</span>
+    <h1 class="display">You, the handler</h1>
+    <p class="body muted">Trailcraft records what your dog does with a scent.
+      It starts with who is holding the line. Other handlers can be added later.</p>
+    <div class="photo-row">
+      <button class="photo-pick" id="obHandlerPhoto" aria-label="Add a photo"><span class="ava big" id="obHandlerAva"></span></button>
+      <button class="btn ghost small" id="obHandlerPhoto2">Add a photo</button>
     </div>
-    <div id="drawChips" class="card-meta"></div>
-    <p id="drawAdvice" class="hint"></p>
-  </div>
-
-  <div class="field">
-    <label for="drawWhen">Laid at</label>
-    <input id="drawWhen" type="datetime-local">
-  </div>
-  <div class="field">
-    <label for="drawPace">Walking pace <b id="drawPaceVal">1.3</b> m/s</label>
-    <input id="drawPace" type="range" min="0.6" max="3" step="0.1" value="1.3">
-  </div>
-
-  <div class="row-btns">
-    <button class="ghost" id="drawUndo">Undo</button>
-    <button class="ghost" id="drawClear">Clear</button>
-    <button class="ghost" id="drawCancel">Cancel</button>
-  </div>
-  <button id="drawSave" class="record">Save trail</button>
-</section>
-
-<!-- ── The scent engine, explained ───────────────────────────────────
-     A client-facing demo: synthetic hillside, the app's REAL physics. The
-     white dashes are the laid trail; the amber is where the scent actually
-     sits; the streaks are the air moving over the ground. -->
-<!-- The demo is its own self-contained page (the original dark instrument,
-     verbatim) hosted in a frame so its styling and the app's never touch. -->
-<section id="viewEngine" class="panel eng-panel" hidden>
-  <header class="panel-head eng-head">
-    <h1>The scent engine</h1>
-    <button class="ghost" data-close>Close</button>
-  </header>
-  <iframe id="engFrame" class="eng-frame" title="Trailcraft scent engine demo"></iframe>
-</section>
-
-<!-- ── Trail Card: share ─────────────────────────────────────────────
-     A trail as a single QR — instructor's phone to student's phone in a
-     car park with zero bars. The data IS the code; no server touches it. -->
-<section id="cardModal" class="panel" hidden>
-  <header class="panel-head">
-    <h1>Trail Card</h1>
-    <button class="ghost" data-close>Close</button>
-  </header>
-  <div class="detail card-share">
-    <div id="cardQr" class="qr-plate" role="img" aria-label="Trail Card QR code"></div>
-    <p id="cardMeta" class="hint"></p>
-    <p class="hint">The other phone opens Trailcraft → Sessions → Scan card.
-      The trail travels inside the code itself — no signal needed.</p>
-  </div>
-</section>
-
-<!-- ── Trail Card: scan ────────────────────────────────────────────── -->
-<section id="scanModal" class="panel" hidden>
-  <header class="panel-head">
-    <h1>Scan a Trail Card</h1>
-    <button class="ghost" data-close>Close</button>
-  </header>
-  <div class="detail">
-    <video id="scanVideo" class="scan-video" playsinline muted hidden></video>
-    <p id="scanState" class="hint">Point the camera at a Trail Card.</p>
-    <div class="row-btns">
-      <button class="ghost" id="scanFromPhoto">From a photo instead</button>
+    <label class="field-label" for="obHandlerName">Name</label>
+    <input id="obHandlerName" type="text" placeholder="First name is enough" autocomplete="given-name">
+    <div class="page-bottom">
+      <button class="btn moss" id="obHandlerNext">Next: your dog</button>
     </div>
-    <input id="scanFile" type="file" accept="image/*" hidden>
   </div>
 </section>
 
-<!-- ── Sessions ──────────────────────────────────────────────────── -->
-<section id="viewSessions" class="panel" hidden>
-  <header class="panel-head">
-    <h1>Sessions</h1>
-    <button class="ghost" id="btnScanCard">Scan card</button>
-    <button class="ghost" data-close>Close</button>
-  </header>
-  <div id="sessFilter" class="filter-row" hidden></div>
-  <div id="sessionList" class="list"></div>
+<!-- ── Onboarding: dog ─────────────────────────────────────────────── -->
+<section id="scrOnboardDog" class="screen paper" hidden>
+  <div class="page">
+    <span class="label">Step 2 of 3</span>
+    <h1 class="display" id="obDogTitle">Your dog</h1>
+    <p class="body muted" id="obDogSub">You can add more dogs later from the home screen.</p>
+    <div class="photo-row">
+      <button class="photo-pick" id="obDogPhoto" aria-label="Add a photo"><span class="ava big" id="obDogAva"></span></button>
+      <button class="btn ghost small" id="obDogPhoto2">Add a photo</button>
+    </div>
+    <label class="field-label" for="obDogName">Name</label>
+    <input id="obDogName" type="text" placeholder="Dog's name">
+    <span class="label" style="margin-top:20px">Trail level</span>
+    <div class="radio-cards" id="obDogLevel">
+      <button class="radio-card selected" data-level="Hot"><b>Hot</b><i>fresh trails, minutes old</i><span class="radio-dot"></span></button>
+      <button class="radio-card" data-level="Warm"><b>Warm</b><i>up to an hour or so</i><span class="radio-dot"></span></button>
+      <button class="radio-card" data-level="Cold"><b>Cold</b><i>hours old, real work</i><span class="radio-dot"></span></button>
+    </div>
+    <label class="field-label" for="obDogLine" style="margin-top:20px">Line length, metres</label>
+    <input id="obDogLine" type="number" inputmode="decimal" value="10" min="0" max="40" step="0.5">
+    <p class="body muted small">Your phone records where you are, not where the dog is.
+      The line length corrects for that.</p>
+    <div class="page-bottom">
+      <button class="btn moss" id="obDogNext">Next: how it works</button>
+    </div>
+  </div>
 </section>
 
-<!-- ── Team ──────────────────────────────────────────────────────────
-     The handler and the dogs, with each dog's record by trail class. The
-     classes are computed from real timestamps, so this page is earned, not
-     self-reported — the legend states the cut-offs out loud. -->
-<section id="viewTeam" class="panel" hidden>
-  <header class="panel-head">
-    <h1>Team</h1>
-    <button class="ghost" id="btnEditTeam">Edit</button>
-    <button class="ghost" data-close>Close</button>
-  </header>
-  <div id="teamBody" class="detail"></div>
+<!-- ── Tutorial: five cards on deep moss ───────────────────────────── -->
+<section id="scrTutorial" class="screen tutorial" hidden>
+  <div class="tut-top">
+    <div class="tut-dots" id="tutDots"></div>
+    <button class="tut-skip" id="tutSkip">Skip</button>
+  </div>
+  <div class="tut-card">
+    <span class="tut-k" id="tutK">01</span>
+    <h1 class="tut-title" id="tutTitle"></h1>
+    <p class="tut-body" id="tutBody"></p>
+  </div>
+  <div class="tut-bottom">
+    <button class="btn moss-on-dark" id="tutNext">Next</button>
+  </div>
 </section>
 
-<!-- ── Team setup ────────────────────────────────────────────────────
-     First thing on first launch: who is holding the line, and who is on it.
-     Also the editor, later. Skippable — a registration wall in a field would
-     be absurd, and the app records fine without one. -->
-<section id="viewSetup" class="panel" hidden>
-  <header class="panel-head">
-    <h1 id="setupTitle">Your team</h1>
-    <button class="ghost" id="setupSkip">Later</button>
-  </header>
-  <div class="detail">
-    <h2 class="sec">Handler</h2>
-    <div class="handler-row">
-      <button class="avatar-btn" id="handlerPhotoBtn" aria-label="Handler photo">
-        <span id="handlerAvatar" class="avatar big">?</span>
-        <em>photo</em>
-      </button>
-      <div class="field grow">
-        <label for="handlerName">Your name</label>
-        <input id="handlerName" type="text" placeholder="e.g. Rémi" autocomplete="name">
+<!-- ── Home ────────────────────────────────────────────────────────── -->
+<section id="scrHome" class="screen paper" hidden>
+  <div class="page home">
+    <div class="home-head">
+      <div>
+        <span class="greet" id="homeGreet">Morning</span>
+        <h1 class="display big">Trailcraft</h1>
       </div>
+      <button class="ava-btn" id="homeSettings" aria-label="Settings"><span class="ava" id="homeAva"></span></button>
     </div>
 
-    <h2 class="sec">Dogs</h2>
-    <div id="dogRows"></div>
-    <button class="ghost wide" id="btnAddDog">+ Add a dog</button>
+    <span class="label">Handler</span>
+    <div class="chip-row" id="rowHandlers"></div>
 
-    <button id="setupSave" class="record">Save team</button>
-    <p class="hint">Stays on this phone, like everything else here. Each dog's
-      trails are then kept under its own name — hot, warm and cold — from the
-      real time between laying and running.</p>
+    <span class="label" id="lblDogs">Dogs</span>
+    <div class="chip-row" id="rowDogs"></div>
+
+    <span class="label">Looking for</span>
+    <div class="chip-row" id="rowTargets"></div>
+
+    <span class="label" id="lblSetter">Who lays the trail</span>
+    <div class="chip-row" id="rowLayers"></div>
+
+    <button class="btn big moss" id="btnLay"><b id="btnLayLabel">Lay a trail</b><i id="btnLaySub"></i></button>
+    <button class="btn big ember" id="btnRun"><b id="btnRunLabel">Run a trail</b><i id="btnRunSub"></i></button>
+
+    <span class="label">Recent</span>
+    <div id="recentList" class="recent"></div>
   </div>
 </section>
 
-<!-- ── Session detail ────────────────────────────────────────────── -->
-<section id="viewDetail" class="panel" hidden>
-  <header class="panel-head">
-    <h1 id="detailTitle">Trail</h1>
-    <button class="ghost" data-close>Close</button>
-  </header>
-  <div id="detailBody" class="detail"></div>
+<!-- ── Lay / Set a hide: full-screen map ───────────────────────────── -->
+<section id="scrLay" class="screen glass" hidden>
+  <div class="hud-pill" id="layHud"><span class="rec-dot" id="layDot" hidden></span><span id="layHudText">Ready</span></div>
+  <div class="glass-bottom">
+    <div class="row-gap" id="hideTools" hidden>
+      <button class="btn card-btn" id="btnDropHide">Drop hide at my feet</button>
+      <p class="glass-caption">…or tap the map where each hide sits</p>
+    </div>
+    <button class="btn big moss" id="btnLayStart">Start</button>
+    <button class="btn big ember" id="btnLayStop" hidden>Stop</button>
+    <p class="glass-caption" id="layCaption">Phone can go in your pocket</p>
+    <button class="btn ghost" id="btnLayCancel">Cancel</button>
+  </div>
 </section>
 
-<!-- ── Settings ──────────────────────────────────────────────────── -->
-<section id="viewSettings" class="panel" hidden>
-  <header class="panel-head">
-    <h1>Settings</h1>
-    <button class="ghost" data-close>Close</button>
-  </header>
-  <div class="detail">
-    <p class="hint">Handler and dogs moved to the <b>Team</b> tab.</p>
+<!-- ── Confirm the line ────────────────────────────────────────────── -->
+<section id="scrConfirm" class="screen glass" hidden>
+  <div class="hud-pill"><span id="confirmText"></span></div>
+  <div class="glass-bottom">
+    <button class="btn big moss" id="btnConfirm">Confirm</button>
+    <button class="btn ghost" id="btnDiscard">Discard</button>
+  </div>
+</section>
 
-    <h2 class="sec">GPS filter</h2>
-    <p class="hint">The reason tracks look like scribbles when you stand still is
-      unfiltered GPS noise. These two settings suppress it.</p>
-    <div class="field">
-      <label for="accCap">Reject fixes worse than <b id="accCapVal">25</b> m</label>
+<!-- ── Trail laid / hide set: share ────────────────────────────────── -->
+<section id="scrShare" class="screen paper" hidden>
+  <div class="page">
+    <h1 class="display" id="shareTitle">Trail laid</h1>
+    <div class="card">
+      <svg id="shareMini" class="minimap" viewBox="0 0 300 170" aria-hidden="true"></svg>
+      <p class="body small center" id="shareMeta"></p>
+    </div>
+    <div class="card qr-card" id="shareQrCard">
+      <div id="shareQr" class="qr-plate" role="img" aria-label="Trail Card QR code"></div>
+      <p class="body small center muted" id="shareQrCaption">Scan this with the other phone</p>
+    </div>
+    <button class="btn card-btn" id="btnContam" hidden>Add a contamination trail</button>
+    <div class="page-bottom">
+      <button class="btn moss" id="btnRunHere">Run it on this phone</button>
+      <button class="btn ghost" id="btnShareDone">Done</button>
+    </div>
+  </div>
+</section>
+
+<!-- ── Contamination trails (person target only) ───────────────────── -->
+<section id="scrContam" class="screen glass" hidden>
+  <div class="hud-pill"><span id="contamText">Tap the corners of the extra trail</span></div>
+  <div class="glass-bottom">
+    <div class="contam-form card">
+      <label class="field-label" for="contamWho">Who walked it</label>
+      <select id="contamWho"></select>
+      <label class="field-label" for="contamWhen">When</label>
+      <input id="contamWhen" type="datetime-local">
+    </div>
+    <div class="row-gap">
+      <button class="btn ghost" id="contamUndo">Undo</button>
+      <button class="btn ghost" id="contamCancel">Cancel</button>
+      <button class="btn moss" id="contamSave" disabled>Save trail</button>
+    </div>
+  </div>
+</section>
+
+<!-- ── Pick what to run ────────────────────────────────────────────── -->
+<section id="scrPick" class="screen paper" hidden>
+  <div class="page">
+    <h1 class="display" id="pickTitle">Run a trail</h1>
+    <button class="btn big moss" id="btnScan"><b>Scan a card</b><i>from the layer's phone</i></button>
+    <span class="label" id="pickLabel">Laid on this phone</span>
+    <div id="pickList" class="recent"></div>
+    <div class="page-bottom"><button class="btn ghost" id="btnPickBack">Back</button></div>
+  </div>
+</section>
+
+<!-- ── Scan ────────────────────────────────────────────────────────── -->
+<section id="scrScan" class="screen paper" hidden>
+  <div class="page">
+    <h1 class="display">Scan a card</h1>
+    <video id="scanVideo" class="scan-video" playsinline muted hidden></video>
+    <p class="body muted" id="scanState">Point the camera at a Trail Card.</p>
+    <button class="btn card-btn" id="scanFromPhoto">From a photo instead</button>
+    <input id="scanFile" type="file" accept="image/*" hidden>
+    <div class="page-bottom"><button class="btn ghost" id="btnScanBack">Back</button></div>
+  </div>
+</section>
+
+<!-- ── Run / Search ────────────────────────────────────────────────── -->
+<section id="scrRun" class="screen glass" hidden>
+  <div class="hud-pill" id="runHud"><span class="rec-dot"></span><span id="runHudText"></span></div>
+  <div class="glass-bottom">
+    <div class="wp-row" id="wpRow">
+      <button class="wp-pill" data-wp="Indication">Indication</button>
+      <button class="wp-pill" data-wp="Lost it">Lost it</button>
+      <button class="wp-pill" data-wp="Re-found">Re-found</button>
+      <button class="wp-pill" data-wp="Article">Article</button>
+      <button class="wp-pill" data-wp="Reward">Reward</button>
+    </div>
+    <div class="row-gap">
+      <button class="btn ghost" id="btnReveal">Reveal trail</button>
+      <button class="btn big ember grow" id="btnRunStop">Stop</button>
+    </div>
+  </div>
+</section>
+
+<!-- ── Result card ─────────────────────────────────────────────────── -->
+<section id="scrResult" class="screen paper" hidden>
+  <div class="page">
+    <span class="label" id="resWho"></span>
+    <h1 class="display" id="resSentence"></h1>
+    <div class="grid2" id="resGrid"></div>
+    <p class="body small muted" id="resStability"></p>
+    <p class="body small muted">The model explains what the dog did. It does not predict where scent is.</p>
+    <div class="page-bottom">
+      <button class="btn moss" id="btnShowMap">Show on map</button>
+      <button class="btn ghost" id="btnResDone">Done</button>
+    </div>
+  </div>
+</section>
+
+<!-- ── Result on the map: the one place the plume band appears ─────── -->
+<section id="scrShowMap" class="screen glass" hidden>
+  <div class="hud-pill"><span id="showMapText"></span></div>
+  <div class="glass-bottom">
+    <button class="btn ghost" id="btnShowMapBack">Back to the card</button>
+  </div>
+</section>
+
+<!-- ── Sessions ────────────────────────────────────────────────────── -->
+<section id="scrSessions" class="screen paper" hidden>
+  <div class="page">
+    <h1 class="display">Sessions</h1>
+    <div id="sessionList" class="recent"></div>
+    <div class="page-bottom"><button class="btn ghost" id="btnSessBack">Back</button></div>
+  </div>
+</section>
+
+<!-- ── Settings ────────────────────────────────────────────────────── -->
+<section id="scrSettings" class="screen paper" hidden>
+  <div class="page">
+    <div class="home-head">
+      <h1 class="display">Settings</h1>
+      <button class="btn ghost small" id="btnSetDone">Done</button>
+    </div>
+    <span class="label">Handlers and their dogs</span>
+    <div id="setPeople"></div>
+    <span class="label">People who lay trails or set hides</span>
+    <div id="setLayers"></div>
+    <span class="label">All sessions</span>
+    <button class="btn card-btn" id="btnAllSessions">Open the session list</button>
+    <span class="label">Help</span>
+    <button class="btn card-btn" id="btnTutorial">Show the tutorial again</button>
+    <details class="advanced">
+      <summary class="label">Advanced</summary>
+      <label class="field-label">Reject GPS fixes worse than <b id="accCapVal">25</b> m</label>
       <input id="accCap" type="range" min="8" max="60" step="1" value="25">
-    </div>
-    <div class="field">
-      <label for="stillCap">Ignore movement under <b id="stillCapVal">2.5</b> m</label>
+      <label class="field-label">Ignore movement under <b id="stillCapVal">2.5</b> m</label>
       <input id="stillCap" type="range" min="0" max="10" step="0.5" value="2.5">
-    </div>
-
-    <h2 class="sec">Map</h2>
-    <div class="field">
-      <label for="exagg">Terrain exaggeration <b id="exaggVal">1.6</b>×</label>
-      <input id="exagg" type="range" min="1" max="5" step="0.1" value="2.4">
-    </div>
-    <div class="field">
-      <label for="mbToken">Mapbox token <span class="opt">optional</span></label>
+      <label class="field-label" for="mbToken">Mapbox token</label>
       <input id="mbToken" type="text" placeholder="pk.eyJ1…">
-      <p class="hint">Free tier is 25,000 monthly users. Restrict this token to your own URLs in your Mapbox account — public tokens ship inside the page.</p>
-    </div>
-
-    <h2 class="sec">The engine</h2>
-    <button class="record" id="btnEngine">How the scent engine works</button>
-    <p class="hint">An interactive hillside running the app's real physics —
-      made for showing a client why the dog works where it works.</p>
-
-    <h2 class="sec">Data</h2>
-    <div class="row-btns">
-      <button class="ghost" id="btnExportAll">Export all as JSON</button>
-      <button class="danger" id="btnWipe">Delete everything</button>
-    </div>
-    <p class="hint" id="storageNote"></p>
+      <p class="body small muted">Satellite and 3D need this once per phone.</p>
+    </details>
+    <span class="label">Your data</span>
+    <p class="body small muted">Everything lives on this phone. Nothing is uploaded.</p>
+    <button class="btn card-btn" id="btnExportAll">Export everything as JSON</button>
+    <button class="btn danger" id="btnWipe">Wipe this phone</button>
+    <p class="body small muted center" id="buildNote"></p>
   </div>
 </section>
 
 <script src="https://api.mapbox.com/mapbox-gl-js/v3.14.0/mapbox-gl.js"></script>
-<!-- mapbox-gl v3 validates its token against the API even for styles that
-     never touch Mapbox, so a tokenless install cannot render ANY map with it.
-     MapLibre (the token-free fork) carries the street-map fallback; mapbox-gl
-     takes over as soon as a token exists. -->
+<!-- MapLibre carries the tokenless street-map fallback; mapbox-gl takes over
+     as soon as a token exists. -->
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.min.css">
 <script src="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.min.js"></script>
-<!-- The Mapbox token lives OUTSIDE the repository (token.js is gitignored):
-     GitHub's push protection blocks any push containing it, public though it
-     is. On GitHub Pages this file 404s harmlessly and the token arrives once
-     via a #mbt= link or the Settings field, then persists on the device. -->
+<!-- The Mapbox token lives OUTSIDE the repository (token.js is gitignored). -->
 <script src="token.js"></script>
-<!-- Classic scripts on purpose: both are UMD globals (qrcode, jsQR), vendored
-     so Trail Cards work in a car park with zero signal. -->
+<!-- Vendored QR encode/decode: Trail Cards must work with zero signal. -->
 <script src="vendor/qrcode.js"></script>
 <script src="vendor/jsQR.js"></script>
 <script src="app.js" type="module"></script>
