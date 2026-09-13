@@ -17,7 +17,7 @@ import { encodeTrail, decodeTrail } from './card.js';
 import { createStore, migrateV1, TARGETS, targetById, verbs, uid } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-13d';
+const BUILD = '2026-09-13e';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { accCap: 25, stillCap: 2.5, exagg: 2.4, mbToken: (window.MB_TOKEN || '') };
@@ -490,8 +490,19 @@ const rec = { on: false, kind: null, pts: [], wps: [], hides: [], started: 0, dr
 let pendingSession = null;   // built at Confirm, shared/run afterwards
 
 function gpsHudText() {
+  if (!rec.pts.length && rec.dropped) return accWarning();
   const m = pathLen(rec.pts);
   return `Recording · ${fmtDur(Date.now() - rec.started)} · ${fmtKm(m)}`;
+}
+
+/* Fixes arriving and every one of them rejected looks, from the outside,
+   exactly like no GPS at all. Say which it is, and say the number that
+   decides it — otherwise the phone is just "broken". */
+const fmtAcc = (a) => (a >= 1000 ? `${(a / 1000).toFixed(1)} km` : `${Math.round(a)} m`);
+function accWarning() {
+  if (rec.lastAcc == null) return 'Waiting for a fix…';
+  return `GPS says ±${fmtAcc(rec.lastAcc)} — worse than the ${settings.accCap} m cap, `
+    + `so nothing is being kept. Turn on Precise Location for this app, or raise the cap in Settings.`;
 }
 
 function startLay() {
@@ -551,7 +562,7 @@ function onFix(pos) {
      stationary fix folds its seconds into the last kept point's dwell, and
      the engine emits more from it. Only device-poor fixes are dropped. */
   const verdict = dwellFold(last, pt, Number(settings.accCap), Number(settings.stillCap));
-  if (verdict === 'drop') { rec.dropped++; return; }
+  if (verdict === 'drop') { rec.dropped++; rec.lastAcc = acc; return; }
   if (verdict === 'dwell') {
     last.dwellS = (last.dwellS ?? 0) + Math.max(0, (pt.t - (last._seen ?? last.t)) / 1000);
     last._seen = pt.t;
@@ -933,7 +944,7 @@ function startWalk(card) {
 function walkHud() {
   const A = walk.card.points[0], B = walk.card.points[walk.card.points.length - 1];
   const last = rec.pts[rec.pts.length - 1];
-  if (!last) return 'Waiting for GPS…';
+  if (!last) return accWarning();
   const dA = dist(last, A), dB = dist(last, B);
 
   /* The countdown arms at the departure point and fires on LEAVING it —
@@ -1513,7 +1524,59 @@ function renderSettings() {
   $('accCap').value = settings.accCap; $('accCapVal').textContent = settings.accCap;
   $('stillCap').value = settings.stillCap; $('stillCapVal').textContent = settings.stillCap;
   $('mbToken').value = settings.mbToken;
+  $('gpsReport').hidden = true;
   $('buildNote').textContent = `${S.sessions.length} session${S.sessions.length === 1 ? '' : 's'} on this phone · Build ${BUILD}`;
+}
+
+/* ── Why the GPS is not working ───────────────────────────────────
+   Three different failures look identical from the field — the page is not
+   on https, the phone refused permission, or every fix is arriving too
+   coarse to keep. Standing in a wet field guessing between them is not a
+   thing this app should ask of anyone, so it checks and says which. */
+async function gpsCheck() {
+  const out = $('gpsReport');
+  out.hidden = false;
+  out.className = 'body small';
+  out.textContent = 'Checking…';
+
+  if (!navigator.geolocation) return gpsSay(out, 'bad', 'This browser has no GPS at all. Open Trailcraft in Safari or Chrome.');
+  if (!window.isSecureContext) {
+    return gpsSay(out, 'bad', `This page is on ${location.protocol}//${location.host}, which phones will not give GPS to. `
+      + 'Open the https address instead.');
+  }
+  try {
+    const perm = await navigator.permissions?.query({ name: 'geolocation' });
+    if (perm?.state === 'denied') {
+      return gpsSay(out, 'bad', 'This phone has blocked location for Trailcraft. '
+        + 'iPhone: Settings → Privacy & Security → Location Services → Safari Websites → While Using. '
+        + 'Then reload this page and allow it when asked.');
+    }
+  } catch { /* Permissions API is optional; the fix attempt below decides */ }
+
+  const fix = await new Promise((res) => navigator.geolocation.getCurrentPosition(
+    p => res({ ok: true, acc: p.coords.accuracy }),
+    e => res({ ok: false, code: e.code }),
+    { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 }));
+
+  if (!fix.ok) {
+    if (fix.code === 1) return gpsSay(out, 'bad', 'Location was refused. Allow it for this site, then reload.');
+    if (fix.code === 3) return gpsSay(out, 'bad', 'No fix within 20 seconds. Indoors or under heavy cover this is normal — try again outside.');
+    return gpsSay(out, 'bad', 'The phone could not get a position at all.');
+  }
+
+  const cap = Number(settings.accCap);
+  if (fix.acc > cap) {
+    return gpsSay(out, 'bad', `GPS works, but it says ±${fmtAcc(fix.acc)} and Trailcraft only keeps fixes better than ${cap} m — `
+      + 'so every one is thrown away and nothing records. That number means Precise Location is off: '
+      + 'iPhone Settings → Privacy & Security → Location Services → Safari Websites → Precise Location ON. '
+      + 'Standing still under trees can also do it; step into the open and check again.');
+  }
+  gpsSay(out, 'good', `GPS is working — ±${fmtAcc(fix.acc)}, well inside the ${cap} m cap. Nothing wrong here.`);
+}
+
+function gpsSay(el, verdict, text) {
+  el.className = `body small ${verdict === 'good' ? 'gps-good' : 'gps-bad'}`;
+  el.textContent = text;
 }
 
 /* ── Self-update ──────────────────────────────────────────────────── */
@@ -1711,6 +1774,7 @@ function wire() {
   $('btnSetDone').addEventListener('click', () => go('scrHome'));
   $('btnAllSessions').addEventListener('click', () => { renderSessions(); go('scrSessions'); });
   $('btnTutorial').addEventListener('click', () => openTutorial(true));
+  $('btnGpsCheck').addEventListener('click', gpsCheck);
   $('scrSettings').addEventListener('click', (e) => {
     const eh = e.target.closest('[data-edit-handler]');
     if (eh) return openHandlerForm({ id: eh.dataset.editHandler, returnTo: 'scrSettings' });
