@@ -47,7 +47,16 @@ export function densify(pts, spacing = 5) {
     if (d < 1e-6) continue;
     const n = Math.max(1, Math.round(d / spacing));
     const brg = bearing(a, b);
-    for (let k = 1; k <= n; k++) out.push(project(a, brg, (d * k) / n));
+    for (let k = 1; k <= n; k++) {
+      const q = project(a, brg, (d * k) / n);
+      /* Carry the clock across the new points. Scent age is what the model
+         runs on, so a position with no time is ground that emits nothing —
+         a densified trail would go back to emitting only at the original
+         fixes, in beads, which is the opposite of what densifying is for. */
+      if (Number.isFinite(a.t) && Number.isFinite(b.t)) q.t = a.t + (b.t - a.t) * (k / n);
+      if (Number.isFinite(a.dwellS)) q.dwellS = k === n ? (b.dwellS ?? 0) : 0;
+      out.push(q);
+    }
   }
   return out;
 }

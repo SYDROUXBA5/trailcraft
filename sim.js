@@ -267,7 +267,7 @@ export class ScentSim {
       this the set only ever grows, and a phone in a pocket pays to carry
       every dead particle. Four lifetimes is well past anything drawable —
       the cut is invisible on screen and the arithmetic stops climbing. */
-  prune(now, wx, st, { lives = 5, max = 4000 } = {}) {
+  prune(now, wx, st, { lives = 5, max = 6000 } = {}) {
     const cutoff = now - scentLife(wx, st) * 60000 * lives;
     if (Number.isFinite(cutoff)) {
       const keptTrail = this.trail.filter(p => p.t > cutoff);
@@ -276,12 +276,22 @@ export class ScentSim {
       if (keptTrail.length) this.trail = keptTrail;
       this.parts = this.parts.filter(s => s.born > cutoff);
     }
-    /* A budget as well as an age. Scent can stay workable for hours, so age
-       alone retires particles far slower than a live lay appends them. The
-       oldest are also the faintest, which makes them the right ones to lose
-       when the phone needs the arithmetic back — the visible plume near the
-       walker is untouched, the far tail stops being drawn. */
-    if (this.parts.length > max) this.parts = this.parts.slice(this.parts.length - max);
+    /* A budget as well as an age, because scent stays workable for hours and
+       age alone retires particles far slower than walking creates them.
+
+       Thin EVENLY rather than dropping the oldest. Cutting the head off would
+       erase the plume from the start of a long trail — and how faint that end
+       has become is a thing the physics already says, through each parcel's
+       strength. A render budget must not get a vote on it. Taking every nth
+       parcel leaves the whole line represented, just sampled less finely. */
+    if (this.parts.length > max) {
+      const stride = this.parts.length / max;
+      const kept = [];
+      for (let i = 0; kept.length < max && i < this.parts.length; i++) {
+        if (Math.floor(i / stride) === kept.length) kept.push(this.parts[i]);
+      }
+      this.parts = kept;
+    }
     return this.parts.length;
   }
 }

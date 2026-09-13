@@ -18,7 +18,7 @@ import { encodeTrail, decodeTrail, cardUrl, cardFromText } from './card.js';
 import { createStore, migrateV1, TARGETS, targetById, verbs, uid } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-13h';
+const BUILD = '2026-09-13i';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true, mbToken: (window.MB_TOKEN || '') };
@@ -165,15 +165,49 @@ function addOverlays() {
   add({ id: 'drift-edge', type: 'line', source: 'drift',
         layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: { 'line-color': '#62B6FF', 'line-width': 1.6, 'line-opacity': 0.55, 'line-dasharray': [1.5, 1.8] } });
-  /* The air itself. Each dot is one parcel of scent the model is carrying
-     downwind; the crowd of them IS the plume, and where they thin out is
-     genuinely where the model is unsure. Drawn under every line, so it never
-     hides the trail it belongs to. */
-  add({ id: 'scent-dots', type: 'circle', source: 'scent',
-        paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 14, 1.6, 17, 3.4, 19, 6],
-                 'circle-color': '#7FD4FF',
-                 'circle-opacity': ['*', ['get', 's'], 0.75],
-                 'circle-blur': 0.6 } });
+  /* The air itself — scent, drawn as scent. The model carries thousands of
+     parcels downwind; drawing them as separate dots showed the sampling
+     rather than the thing being sampled. A density field is the honest
+     picture: hot and solid where the parcels crowd together against the
+     line, fading out to nothing where they have spread so thin the model
+     can no longer tell you anything. The fade IS the uncertainty. */
+  add({ id: 'scent-heat', type: 'heatmap', source: 'scent',
+        paint: {
+          // `s` already carries concentration, not just strength — see
+          // parcelWeight. Squaring sharpens the core without inventing it.
+          'heatmap-weight': ['*', ['^', ['get', 's'], 2], 6],
+          /* Radius has to exceed the gap between parcels on screen, or the
+             sampling shows through as beads instead of the continuous sheet
+             of air it is meant to be. Intensity comes down as radius goes up,
+             or the overlap saturates everything into one flat slab. */
+          /* Low on purpose: the body of a plume must sit in the MIDDLE of the
+             ramp, not pinned at its top, or every part of it looks the same
+             and the gradient the plume exists to show is gone. */
+          'heatmap-intensity': ['interpolate', ['linear'], ['zoom'], 13, 0.22, 15, 0.28, 17, 0.36, 20, 0.48],
+          /* Only just wide enough to close the gaps between parcels. Any
+             wider and the blur eats the very gradient the plume is for. */
+          'heatmap-radius': ['interpolate', ['linear'], ['zoom'], 13, 8, 15, 14, 17, 26, 19, 46],
+          'heatmap-opacity': ['interpolate', ['linear'], ['zoom'], 13, 0.66, 17, 0.8, 20, 0.86],
+          /* One hue, and OPACITY carries the signal — not a fire ramp.
+
+             A fire ramp runs dark through orange to white-hot, which means
+             its palest colour sits at the densest air. A plume saturates
+             across most of its body, so the whole middle came out cream with
+             an orange fringe at the edge: the picture read inside-out, thin
+             air looking stronger than the air against the line.
+
+             Ember throughout, deepening and thickening with density, is the
+             honest read: solid where the scent is, thinning to nothing where
+             the model no longer knows. */
+          'heatmap-color': ['interpolate', ['linear'], ['heatmap-density'],
+            0.00, 'rgba(232, 146, 84, 0)',
+            0.12, 'rgba(232, 140, 76, 0.14)',
+            0.30, 'rgba(230, 128, 62, 0.34)',
+            0.50, 'rgba(226, 114, 50, 0.55)',
+            0.70, 'rgba(219, 100, 40, 0.72)',
+            0.86, 'rgba(209, 86, 32, 0.85)',
+            1.00, 'rgba(196, 72, 25, 0.93)'],
+        } });
 
   // Contamination trails: same family as the laid trail, visibly not it.
   add({ id: 'contam-line', type: 'line', source: 'contam',
@@ -639,7 +673,12 @@ function plumeStart(trail, wx, T) {
   plumeStop();
   if (!settings.plume || !wx) return;
   plume.sim = new ScentSim();
-  plume.sim.seed(trail || []);
+  /* Every few metres, not every GPS fix. A fix arrives when the walker moves,
+     so at a slow pace the emission points stand far enough apart to read as
+     separate puffs. Sampling the SAME line more finely does not change the
+     physics — each parcel drifts by the same rules — it just stops the
+     picture showing the sampling instead of the scent. */
+  plume.sim.seed(plumeSamples(trail));
   plume.wx = wx;
   plume.T = T || FLAT;
   plume.st = stability(wx.soil_temp, wx.temp);
@@ -647,11 +686,27 @@ function plumeStart(trail, wx, T) {
   plume.tick = setInterval(plumeFrame, 240);
   plumeFrame();
 }
+/** How finely the line is sampled for emission: a point every 3 m, and the
+    whole thing re-walked a few times so the parcels at any one spot span the
+    full range of ages rather than a handful of them. Capped, because a long
+    trail must not turn the phone into a heater. */
+function plumeSamples(trail) {
+  if (!trail || trail.length < 2) return trail || [];
+  const fine = densify(trail, 3);
+  const passes = fine.length > 700 ? 1 : fine.length > 300 ? 2 : 3;
+  const out = [];
+  for (let i = 0; i < passes; i++) out.push(...fine);
+  return out;
+}
+
 /** New ground, one fix at a time — append, never reseed, or it flickers. */
 function plumeAdd(pt) {
   if (!plume.sim) return;
-  plume.sim.append([pt]);
+  const last = plume.trail[plume.trail.length - 1];
   plume.trail.push(pt);
+  // Fill in the ground actually covered since the last fix, at the same
+  // spacing the rest of the line was sampled at.
+  plume.sim.append(last ? plumeSamples([last, pt]) : [pt]);
 }
 function plumeStop() {
   clearInterval(plume.tick); plume.tick = 0;
@@ -659,6 +714,25 @@ function plumeStop() {
   setSrc('scent', EMPTY);
   setSrc('drift', EMPTY);
 }
+/** How much scent a parcel represents where it now sits.
+
+    Strength alone is not enough, because it says how much scent is left, not
+    how thinly it is spread. A plume WIDENS as it travels: the same scent
+    occupies more and more air, so concentration falls with distance from the
+    ground it came off even while the parcel is still "strong".
+
+    Without this the picture comes out backwards. Drift saturates with time,
+    so parcels bunch up at the far edge of their travel, and a density plot
+    reads that pile-up as the hottest part of the plume — putting the brightest
+    air at the outer boundary, which is the opposite of how scent behaves.
+
+    Dividing by the spread puts it back the right way round: burning against
+    the line, fading out as it goes. */
+function parcelWeight(s) {
+  const d = dist({ lat: s.hlat, lon: s.hlon }, { lat: s.lat, lon: s.lon });
+  return Math.min(1, s.str / (1 + d / 22));
+}
+
 function plumeFrame() {
   if (!plume.sim) return;
   const now = Date.now();
@@ -667,7 +741,7 @@ function plumeFrame() {
   const live = plume.sim.drawable().filter(s => s.str >= 0.03);
   setSrc('scent', { type: 'FeatureCollection', features: live.map(s => ({
     type: 'Feature',
-    properties: { s: Math.min(1, s.str) },
+    properties: { s: parcelWeight(s) },
     geometry: { type: 'Point', coordinates: [s.lon, s.lat] },
   })) });
   // The band under the parcels: the same uncertainty, stated as an area.
