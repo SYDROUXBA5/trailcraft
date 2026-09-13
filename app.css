@@ -620,3 +620,12 @@ input[type="range"] { width: 100%; accent-color: var(--moss); height: 40px; }
    already shrink-wrapped and parked on the left. These two rules are the
    only places a title sat left of the wider line underneath it. */
 .chip.plain, .who { align-items: center; text-align: center; }
+
+/* What the wind picture is actually made of. Quiet, but present — a forecast
+   dressed as a measurement is the one thing this map must not be. */
+.legend-note {
+  margin: -3px 0 0 35px;
+  font-size: 10.5px; font-weight: 400; line-height: 1.35;
+  color: rgba(246, 242, 233, 0.62);
+  display: block;
+}

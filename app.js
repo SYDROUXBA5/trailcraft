@@ -18,7 +18,7 @@ import { encodeTrail, decodeTrail, cardUrl, cardFromText } from './card.js';
 import { createStore, migrateV1, TARGETS, targetById, verbs, uid } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-13p';
+const BUILD = '2026-09-13q';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true, mbToken: (window.MB_TOKEN || '') };
@@ -179,9 +179,9 @@ function addOverlays() {
   add({ id: 'air-streaks', type: 'line', source: 'air',
         layout: { 'line-cap': 'round' },
         paint: { 'line-color': '#FFFFFF',
-                 'line-width': ['interpolate', ['linear'], ['zoom'], 13, 1, 17, 1.8, 19, 3],
-                 'line-opacity': ['*', ['get', 'a'], 0.8],
-                 'line-blur': 0.4 } });
+                 'line-width': ['interpolate', ['linear'], ['zoom'], 13, 0.7, 17, 1.1, 19, 1.7],
+                 'line-opacity': ['*', ['get', 'a'], 0.34],
+                 'line-blur': 0.5 } });
 
   /* The air itself, drawn as scent rather than as a stain.
 
@@ -748,6 +748,7 @@ function plumeStart(trail, wx, T) {
   plume.tAt = 0; plume.tLen = 0;
   plumeTerrain(true);
   airStart(wx, plume.T);
+  legendWind(wx);
   /* 400 ms, not faster. The parcels move at wind speed — metres in a second
      — so redrawing them oftener buys nothing and costs a phone in a pocket.
      The tracers on top are what carry the motion. */
@@ -801,7 +802,10 @@ function plumeStop() {
    Sampling it per frame made it 0.26 m long at a walking-pace wind — true,
    and invisible. Sampling every AIR_STEP seconds over AIR_TAIL samples gives
    a streak that is still exactly the real path, just long enough to read. */
-const AIR_N = 320, AIR_LIFE = 26, AIR_STEP = 1.5, AIR_TAIL = 10;
+/* Few, short and faint. This is the CONDITION the work is happening in, not
+   the work: it has to be readable at a glance and then forgettable, or it
+   competes with the plume for the one thing the screen is actually for. */
+const AIR_N = 90, AIR_LIFE = 20, AIR_STEP = 1.1, AIR_TAIL = 5;
 const air = { on: false, wx: null, st: null, T: FLAT, pts: [], raf: 0, last: 0 };
 
 function airStart(wx, T) {
@@ -815,6 +819,22 @@ function airStart(wx, T) {
   air.last = performance.now();
   air.raf = requestAnimationFrame(airFrame);
 }
+/* Say what is driving the picture, and what it is not.
+
+   The streaks are not a measurement of the air in this field. They are a
+   forecast model's 10 m open-ground wind for this place and time, bent by
+   the app's own terrain model. A dog handler deciding where to cast is
+   entitled to know which parts of that are data. */
+function legendWind(wx) {
+  const el = $('legendWind');
+  if (!el) return;
+  if (!wx || wx.wind_speed == null) { el.textContent = ''; return; }
+  const kmh = (wx.wind_speed * 3.6).toFixed(0);
+  const when = wx.time ? new Date(wx.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+  el.textContent = `${kmh} km/h ${cardinal(wx.wind_direction)}${when ? ` at ${when}` : ''}`
+    + ` — 10 m open-ground forecast, not measured here`;
+}
+
 function airStop() {
   air.on = false;
   cancelAnimationFrame(air.raf); air.raf = 0;
@@ -1734,6 +1754,8 @@ async function startRun(s) {
   /* Wind, even on a blind run: it says nothing about where the trail is, and
      it is the first thing you want before deciding where to cast. */
   airStart(s.data.weather);
+  legendWind(s.data.weather);
+  $('mapLegend').hidden = !s.data.weather;
   terrainFor(s.data.trail || s.data.hides || []).then(T => { air.T = T; }).catch(() => {});
   $('runHudText').textContent = hudText();
   toast(t.kind === 'person' ? 'Running blind — the trail is hidden' : 'Searching');
