@@ -363,3 +363,32 @@ export function foldFixes(fixes, accCap, stillCap) {
   kept.forEach(p => delete p._lastSeen);
   return [kept, dropped];
 }
+
+/* ── Departure ────────────────────────────────────────────────────────
+   A relay trail starts existing at the moment the layer LEAVES the
+   departure point, so that is the moment the ageing clock starts — on both
+   phones. Deciding it is a state machine, not a threshold, and it is here
+   rather than in the screen code so it can be tested without a phone. */
+
+/** Fold one fix into the departure state. `prev` is the state so far,
+    `fix` is { d, t, walked, firstT } — metres from the drawn start, the fix
+    clock, metres of track walked so far, and the first fix's clock.
+
+    Hysteresis on purpose: armed only INSIDE `nearM`, fired only OUTSIDE
+    `awayM`, with a dead band between, so a GPS wobble while she is standing
+    at the start cannot start the clock.
+
+    The fallback matters more in a field than the hysteresis does. If no fix
+    ever lands inside `nearM` — trees, a wall, or a drawn A that was simply a
+    few metres out — the clock would otherwise never start and the session
+    would be silently ruined. So a layer who has plainly walked `runM` of line
+    is taken to have departed at their first fix. */
+export function departure(prev, fix, opts = {}) {
+  const { nearM = 25, awayM = 40, runM = 60 } = opts;
+  const st = { atStart: !!(prev && prev.atStart), offAt: (prev && prev.offAt) || 0 };
+  if (st.offAt) return st;                       // it happens once
+  if (fix.d < nearM) st.atStart = true;
+  if (st.atStart && fix.d > awayM) { st.offAt = fix.t; return st; }
+  if (!st.atStart && fix.walked >= runM) { st.atStart = true; st.offAt = fix.firstT ?? fix.t; }
+  return st;
+}

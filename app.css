@@ -283,3 +283,36 @@ input[type="range"] { width: 100%; accent-color: var(--moss); height: 40px; }
 @media (prefers-contrast: more) {
   .card, .btn, .chip, .hud-pill { border-color: var(--muted); }
 }
+
+/* ── The relay: draw, countdown, guided walk, wait ───────────────── */
+.age-row { display: flex; gap: 8px; }
+.age-chip {
+  flex: 1; min-height: 48px; border-radius: 999px;
+  background: var(--paper); border: 1.5px solid var(--border);
+  font: 700 15px var(--body); color: var(--ink); cursor: pointer;
+  font-variant-numeric: tabular-nums;
+  transition: transform 120ms var(--ease-out);
+}
+.age-chip:active { transform: scale(0.95); }
+.age-chip.selected { background: var(--moss); border-color: var(--moss); color: #fff; }
+
+/* The two countdown screens borrow the tutorial's deep moss: the biggest,
+   most legible thing a phone can show across a field in full sun. */
+.center-card { justify-content: center; align-items: center; text-align: center; }
+.tut-title.huge {
+  font-size: 84px; line-height: 1; letter-spacing: -2px;
+  font-variant-numeric: tabular-nums;
+}
+.tut-title.huge.ready { color: #F0B429; }
+.tut-body.center { text-align: center; }
+.tut-body.small-note { font-size: 14px; line-height: 1.5; opacity: 0.75; }
+.wide-btn { width: 100%; }
+.wait-qr { width: min(58vw, 240px); margin-top: 8px; }
+
+/* A verdict graded against a drawn line says so, in ember, right under the
+   sentence it qualifies — not in a footnote nobody reads. */
+.provisional {
+  color: var(--ember);
+  margin: -6px 0 14px;
+  line-height: 1.45;
+}

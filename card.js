@@ -90,6 +90,12 @@ export async function encodeTrail(session, info = {}) {
     v: 1,
     f: String(session.from || '').slice(0, 40),
     d: session.drawn ? 1 : 0,
+    /* Optional relay fields, additive on purpose: an older app ignores them
+       and still reads the line. k: 0/absent = a laid trail; 1 = a PLAN the
+       layer's phone walks them along; 2 = the WALKED trail coming back.
+       g = the chosen ageing countdown, minutes. */
+    ...(session.kind ? { k: session.kind } : {}),
+    ...(Number.isFinite(session.ageMin) ? { g: Math.max(0, Math.min(1440, Math.round(session.ageMin))) } : {}),
     a: tolUsed,               // 0 = untouched; otherwise the metric bound itself
     p: [
       deltas(pts.map(p => q(p.lat))),
@@ -159,11 +165,18 @@ export async function decodeTrail(str) {
   // bare flag — read that as the old wording's ~10 m).
   const tol = typeof payload.a === 'number' && payload.a >= 2 ? payload.a : (payload.a ? 10 : 0);
 
+  // Relay fields are read defensively: a crafted kind collapses to a plain
+  // trail, a crafted countdown to none — never to surprising behaviour.
+  const kind = payload.k === 1 || payload.k === 2 ? payload.k : 0;
+  const ageMin = Number.isFinite(payload.g) && payload.g >= 0 && payload.g <= 1440
+    ? Math.round(payload.g) : null;
+
   return {
     from: typeof payload.f === 'string' ? payload.f.slice(0, 40) : '',
     drawn: !!payload.d,
     approx: !!payload.a,
     tol,
+    kind, ageMin,
     points, waypoints,
     started: points[0].t,
     ended: points[points.length - 1].t,
