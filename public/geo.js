@@ -241,3 +241,89 @@ export function legSummary(field) {
   }
   return out.filter(l => l.n >= 4);   // ignore momentary flicker at corners
 }
+
+/* ── Signed offsets ─────────────────────────────────────────────────
+   The old meanOffset measured distance and threw the sign away, so the verdict
+   could say "9 m off" but never "9 m off on the side the wind predicted" —
+   and the side is the whole point: it is the model's one falsifiable claim.
+   Convention everywhere: + right of the direction of travel, − left. */
+
+/** Local metres of p relative to origin o: x east, y north. Good to well past
+    the few hundred metres a trail spans. */
+function enu(o, p) {
+  return {
+    x: rad(p.lon - o.lon) * Math.cos(rad(o.lat)) * R,
+    y: rad(p.lat - o.lat) * R,
+  };
+}
+
+/** Signed cross-track distance of p from segment a→b, clamped to the segment.
+    + right of travel a→b, − left, 0 on the line (or a degenerate segment). */
+export function crossTrackSigned(a, b, p) {
+  const ab = enu(a, b), ap = enu(a, p);
+  const L2 = ab.x * ab.x + ab.y * ab.y;
+  if (L2 < 1e-9) return { off: dist(a, p), signed: 0 };   // no direction, no side
+  const t = Math.max(0, Math.min(1, (ap.x * ab.x + ap.y * ab.y) / L2));
+  const dx = ap.x - t * ab.x, dy = ap.y - t * ab.y;
+  const d = Math.hypot(dx, dy);
+  // z of ab×ap: > 0 means p sits LEFT of travel (x east, y north, right-handed).
+  const cross = ab.x * ap.y - ab.y * ap.x;
+  return { off: d, signed: cross < 0 ? d : cross > 0 ? -d : 0 };
+}
+
+/** Signed offset of every track point from its nearest trail segment.
+    Needs a trail of at least two points; returns [] otherwise. */
+export function signedOffsets(trail, track) {
+  if (!trail || trail.length < 2 || !track?.length) return [];
+  return track.map((p) => {
+    let best = null;
+    for (let i = 1; i < trail.length; i++) {
+      const c = crossTrackSigned(trail[i - 1], trail[i], p);
+      if (!best || c.off < best.off) best = c;
+    }
+    return best.signed;
+  });
+}
+
+/** Mean of signed offsets — the number the result card leads with. */
+export function meanSigned(offs) {
+  if (!offs?.length) return null;
+  return offs.reduce((a, b) => a + b, 0) / offs.length;
+}
+
+/** Which side of the travel direction the drift bearing points to:
+    +1 right, −1 left, 0 within `deadDeg` of straight along or against —
+    a head- or tailwind predicts NO side, and pretending it does is a lie. */
+export function sideOfDrift(travelBrg, driftBrg, deadDeg = 12) {
+  const r = ((driftBrg - travelBrg) % 360 + 360) % 360;
+  if (r < deadDeg || r > 360 - deadDeg || Math.abs(r - 180) < deadDeg) return 0;
+  return r < 180 ? 1 : -1;
+}
+
+/** Fraction of decisive fixes that sit on the model's predicted side.
+    Fixes within `deadM` of the line say nothing about side and are ignored;
+    a prediction of no side (0) returns null rather than a fake score. */
+export function sideAgreement(offs, predictedSide, deadM = 1.5) {
+  if (!predictedSide) return null;
+  const decisive = (offs ?? []).filter(o => Math.abs(o) >= deadM);
+  if (!decisive.length) return null;
+  return decisive.filter(o => (o > 0 ? 1 : -1) === predictedSide).length / decisive.length;
+}
+
+/* ── Line-length correction ─────────────────────────────────────────
+   The phone is in the handler's hand; the dog is a line-length ahead. Grading
+   the phone's track against the trail penalises the handler for their own
+   line. Project each fix forward along the handler's heading before offsets
+   are computed. */
+export function lineCorrect(track, lineM) {
+  if (!track?.length || !(lineM > 0)) return track ? track.slice() : [];
+  let hdg = null;
+  return track.map((p, i) => {
+    const from = i > 0 ? track[i - 1] : p;
+    const to = i > 0 ? p : (track[1] ?? p);
+    if (dist(from, to) > 0.5) hdg = bearing(from, to);   // standing still keeps the last heading
+    if (hdg == null) return { ...p };                     // never moved: nothing to project along
+    const q = project(p, hdg, lineM);
+    return { ...p, lat: q.lat, lon: q.lon };
+  });
+}

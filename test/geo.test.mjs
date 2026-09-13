@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {
   dist, project, pathLen, cardinal, driftMetres, driftPolygon, meanOffset, filterFixes,
   densify, timestamps,
+  crossTrackSigned, signedOffsets, meanSigned, sideOfDrift, sideAgreement, lineCorrect,
 } from '../public/geo.js';
 
 let pass = 0;
@@ -260,6 +261,62 @@ t('timestamps: a slower pace makes a longer-lived trail', () => {
   const slow = timestamps(pts, t0, 0.8), fast = timestamps(pts, t0, 2.5);
   assert.ok(slow[slow.length - 1].t > fast[fast.length - 1].t, 'dawdling takes longer');
   assert.ok(timestamps(pts, t0, 0).every(p => Number.isFinite(p.t)), 'zero pace cannot divide by zero');
+});
+
+
+t('crossTrackSigned: right of travel is +, left is −, on the line is 0', () => {
+  const a = WELLS, b = project(a, 0, 200);         // travel due north
+  const right = project(project(a, 0, 100), 90, 12);
+  const left  = project(project(a, 0, 100), 270, 12);
+  near(crossTrackSigned(a, b, right).signed, 12, 0.2, 'east of a northbound leg is right');
+  near(crossTrackSigned(a, b, left).signed, -12, 0.2, 'west of it is left');
+  near(crossTrackSigned(a, b, project(a, 0, 60)).signed, 0, 0.2, 'on the line');
+  assert.equal(crossTrackSigned(a, a, right).signed, 0, 'a degenerate segment has no side');
+});
+
+t('signedOffsets: a dog held right of an L-shaped trail reads + all the way', () => {
+  const a = WELLS, b = project(a, 0, 300), c = project(b, 90, 300);
+  const trail = [a, b, c];
+  // Walk beside the trail, 10 m to its right, along both legs.
+  const track = [];
+  for (let m = 20; m < 300; m += 40) track.push(project(project(a, 0, m), 90, 10));
+  for (let m = 20; m < 300; m += 40) track.push(project(project(b, 90, m), 180, 10));
+  const offs = signedOffsets(trail, track);
+  assert.ok(offs.every(o => o > 0), `all right of the line: ${offs.map(o => o.toFixed(1))}`);
+  near(meanSigned(offs), 10, 1.2, 'mean signed offset');
+  assert.deepEqual(signedOffsets([a], track), [], 'one point is not a trail');
+  assert.equal(meanSigned([]), null, 'no fixes, no mean');
+});
+
+t('sideOfDrift: crosswind picks a side, head- and tailwind refuse to', () => {
+  assert.equal(sideOfDrift(0, 90), 1, 'drift east of northbound travel is right');
+  assert.equal(sideOfDrift(0, 270), -1, 'drift west is left');
+  assert.equal(sideOfDrift(0, 5), 0, 'nearly along: no side');
+  assert.equal(sideOfDrift(0, 176), 0, 'nearly against: no side');
+  assert.equal(sideOfDrift(350, 80), 1, 'wraps across north');
+});
+
+t('sideAgreement: scores decisive fixes only, and never fakes a score', () => {
+  near(sideAgreement([5, 8, 3, -4, 6], 1), 0.8, 0.01, 'four of five on the predicted side');
+  assert.equal(sideAgreement([0.4, -0.9, 1.0], 1), null, 'all inside the dead zone say nothing');
+  assert.equal(sideAgreement([5, 6], 0), null, 'no predicted side, no score');
+  near(sideAgreement([-5, -6, 2], -1), 2 / 3, 0.01, 'left predictions score too');
+});
+
+t('lineCorrect: fixes move one line-length along the heading of travel', () => {
+  const track = [0, 50, 100, 150].map(m => ({ ...project(WELLS, 0, m), t: m }));
+  const out = lineCorrect(track, 10);
+  for (let i = 0; i < track.length; i++) {
+    near(dist(track[i], out[i]), 10, 0.3, `fix ${i} projected by the line`);
+    assert.ok(out[i].lat > track[i].lat, 'projected forward, i.e. north');
+    assert.equal(out[i].t, track[i].t, 'timestamps ride along');
+  }
+  // Standing still at the end keeps the last real heading instead of inventing one.
+  const still = [...track, { ...track[3] }];
+  const out2 = lineCorrect(still, 10);
+  near(dist(still[4], out2[4]), 10, 0.3, 'stationary fix still projects');
+  assert.equal(lineCorrect(track, 0).length, 4, 'zero line is a no-op copy');
+  near(dist(lineCorrect(track, 0)[1], track[1]), 0, 0.01, 'and does not move fixes');
 });
 
 console.log(`\n${pass} passed total\n`);
