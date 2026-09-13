@@ -614,3 +614,9 @@ input[type="range"] { width: 100%; accent-color: var(--moss); height: 40px; }
   pointer-events: none;
   z-index: 2;
 }
+
+/* A flex column packs its children to the start of the cross axis, so a
+   `text-align: center` on the button never reached them — each line was
+   already shrink-wrapped and parked on the left. These two rules are the
+   only places a title sat left of the wider line underneath it. */
+.chip.plain, .who { align-items: center; text-align: center; }
