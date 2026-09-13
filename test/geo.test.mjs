@@ -429,4 +429,28 @@ t('smoothBearing: crosses north the short way, never spins', () => {
   assert.equal(smoothBearing(10, 370, 1), 10, 'and a heading already pointing there does not move');
 });
 
+t('densify: the new points carry the clock, or they emit nothing', () => {
+  /* A densified point with no time is ground the scent model cannot age, so
+     it contributes no scent at all — and a plume drawn from it beads back at
+     the original fixes instead of running continuously along the line. */
+  const a = { lat: 51.20, lon: -2.60, t: 1000 };
+  const b = { lat: 51.20 + 100 / 111320, lon: -2.60, t: 101000 };   // 100 m, 100 s
+  const out = densify([a, b], 10);
+
+  assert.ok(out.length >= 10, `expected ~11 points, got ${out.length}`);
+  assert.ok(out.every(p => Number.isFinite(p.t)), 'every point has a time');
+  for (let i = 1; i < out.length; i++) {
+    assert.ok(out[i].t > out[i - 1].t, 'and the times only ever go forward');
+  }
+  assert.equal(out[0].t, 1000, 'the first point is untouched');
+  assert.equal(out[out.length - 1].t, 101000, 'and so is the last');
+  // Halfway along 100 m at a steady pace is halfway through the 100 s.
+  const mid = out[Math.floor(out.length / 2)];
+  assert.ok(Math.abs(mid.t - 51000) < 6000, `midpoint near 51 s, got ${mid.t}`);
+
+  // A path with no clock at all still densifies; it just has no times to carry.
+  const bare = densify([{ lat: 51.20, lon: -2.60 }, { lat: 51.201, lon: -2.60 }], 20);
+  assert.ok(bare.length > 2 && bare.every(p => p.t === undefined), 'no clock in, no clock out');
+});
+
 console.log(`\n${pass} passed total\n`);

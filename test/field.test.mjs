@@ -468,13 +468,23 @@ t('ScentSim.prune: an hour of laying does not grow without bound', () => {
   const st = stability(11, 12);
   const now = t0 + 90 * 60000;
 
-  // The budget: a long lay is capped, and what survives is the RECENT ground.
+  // The budget caps the count, and thins EVENLY — the start of a long trail
+  // keeps its plume, because how faint it has become is the physics' call.
   const sim = new ScentSim().seed(leg(90, 0));
   const before = sim.parts.length;
   sim.prune(now, wx, st, { max: 200 });
   assert.ok(before > 200 && sim.parts.length === 200, `capped ${before} to ${sim.parts.length}`);
-  const oldest = Math.min(...sim.parts.map(p => p.born));
-  assert.ok(oldest > t0, 'the faint far tail is what goes, not the fresh ground');
+  assert.equal(Math.min(...sim.parts.map(p => p.born)), t0,
+    'the very first ground is still represented');
+  assert.equal(Math.max(...sim.parts.map(p => p.born)), t0 + 89 * 60000,
+    'and so is the newest');
+  // Evenly, not clumped: every tenth of the walk keeps some of its parcels.
+  const span = 89 * 60000;
+  for (let k = 0; k < 10; k++) {
+    const lo = t0 + span * (k / 10), hi = t0 + span * ((k + 1) / 10);
+    assert.ok(sim.parts.some(p => p.born >= lo && p.born <= hi),
+      `tenth ${k + 1} of the trail kept parcels`);
+  }
 
   // The end of the trail is the pool's source; pruning must never orphan it.
   assert.equal(sim.trail[sim.trail.length - 1].t, t0 + 89 * 60000, 'the trail keeps its real end');
