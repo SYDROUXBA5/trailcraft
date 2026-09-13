@@ -14,11 +14,11 @@ import {
 } from './geo.js';
 import { FLAT, buildTerrain, stability, regime } from './field.js';
 import { predictedOffsets } from './sim.js';
-import { encodeTrail, decodeTrail } from './card.js';
+import { encodeTrail, decodeTrail, cardUrl, cardFromText } from './card.js';
 import { createStore, migrateV1, TARGETS, targetById, verbs, uid } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-13f';
+const BUILD = '2026-09-13g';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { accCap: 25, stillCap: 2.5, exagg: 2.4, mbToken: (window.MB_TOKEN || '') };
@@ -874,13 +874,13 @@ async function renderShareQr(s) {
     }, {});
     const qr = window.qrcode?.(0, 'M');
     if (!qr) throw new Error('QR library missing — hard refresh once online');
-    qr.addData(card, 'Byte');
+    qr.addData(cardUrl(card, location.href), 'Byte');
     qr.make();
     $('shareQr').innerHTML = qr.createSvgTag({ cellSize: 4, margin: 0, scalable: true });
     const who = S.layers.find(l => l.id !== s.layerId)?.name;
     $('shareQrCaption').textContent = s.data.plan
-      ? `${layerName(s)} scans this — her phone walks her along the line, corner by corner`
-      : `The other phone scans this — the trail travels inside the code, no signal needed`;
+      ? `Point the other phone's camera at this — it opens Trailcraft and walks them along the line`
+      : `Point the other phone's camera at this — the trail travels inside the code, no signal needed`;
   } catch (err) {
     $('shareQr').innerHTML = '';
     $('shareQrCaption').textContent = err.message;
@@ -1152,7 +1152,7 @@ async function finishWalk() {
   try {
     const cardStr = await encodeTrail({ points: walked, waypoints: [], from: S.handler?.name ?? '', kind: 2 }, {});
     const qr = window.qrcode?.(0, 'M');
-    qr.addData(cardStr, 'Byte');
+    qr.addData(cardUrl(cardStr, location.href), 'Byte');
     qr.make();
     $('waitQr').innerHTML = qr.createSvgTag({ cellSize: 4, margin: 0, scalable: true });
   } catch (err) {
@@ -1620,22 +1620,33 @@ async function scanPhoto(file) {
     trail, which is simply run. */
 async function handleCard(data) {
   let card;
-  try { card = await decodeTrail(data); }
+  try { card = await decodeTrail(cardFromText(data)); }
   catch (err) {
     $('scanState').textContent = `${err.message} Still scanning…`;
     toast(err.message);
     return false;
   }
 
-  if (scanWalkedFor) {
-    if (card.kind !== 2) {
-      $('scanState').textContent = 'That is a plan, not a walked trail. Still scanning…';
-      return false;
-    }
-    const waiting = scanWalkedFor;
+  /* A walked trail belongs to a plan, and it can arrive either way: from the
+     button on the result card, or from the phone's camera with no context at
+     all. Find the plan it belongs to rather than quietly filing it as a new
+     trail — a walk with nothing to compare it against is not a session. */
+  if (card.kind === 2) {
+    const waiting = scanWalkedFor
+      ?? db.sessions().find(x => x.data.plan && !x.data.walked && x.data.track)?.id
+      ?? db.sessions().find(x => x.data.plan && !x.data.walked)?.id
+      ?? null;
     scanWalkedFor = null;
     stopScan();
+    if (!waiting) {
+      toast('That is a walked trail, but no plan on this phone is waiting for one');
+      return false;
+    }
     return applyWalked(waiting, card);
+  }
+  if (scanWalkedFor) {
+    $('scanState').textContent = 'That is a plan, not a walked trail. Still scanning…';
+    return false;
   }
   if (card.kind === 1) {
     if (!card.points || card.points.length < 2) return false;
@@ -1985,6 +1996,18 @@ function wire() {
   });
 }
 
+/* A link the camera app opened: the card is in the fragment, which never
+   left this phone. Take it, then strip it from the address so a reload does
+   not import the same trail twice and it stops trailing around in history. */
+async function importFromLink() {
+  const raw = location.hash || '';
+  if (!raw.startsWith('#c=')) return false;
+  const card = cardFromText(raw);
+  history.replaceState(null, '', location.pathname + location.search);
+  if (!card.startsWith('TC')) return false;
+  return handleCard(card);
+}
+
 /* ── Boot ─────────────────────────────────────────────────────────── */
 function boot() {
   snap();
@@ -1992,6 +2015,7 @@ function boot() {
   if (!S.team.length && !S.dogs.length) return openDogForm({ firstLaunch: true });
   if (!S.tutorialDone) return openTutorial(false);
   go('scrHome');
+  importFromLink();
 }
 
 buildMap();
