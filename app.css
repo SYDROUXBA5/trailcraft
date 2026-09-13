@@ -406,3 +406,61 @@ input[type="range"] { width: 100%; accent-color: var(--moss); height: 40px; }
 @media (prefers-reduced-motion: reduce) {
   .switch-row input[type="checkbox"], .switch-row input[type="checkbox"]::after { transition: none; }
 }
+
+/* ── Map legend ───────────────────────────────────────────────────────
+   A picture of a model has to say which parts of it are the model. It sits
+   on the map rather than in a help screen, because that is where the
+   question gets asked. */
+.legend {
+  position: absolute;
+  right: 10px;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 248px);
+  z-index: 6;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(18, 24, 20, 0.82);
+  backdrop-filter: blur(10px);
+  color: #F6F2E9;
+  pointer-events: none;
+  max-width: 60vw;
+}
+.legend h2 {
+  margin: 0 0 9px;
+  font-size: 10px; font-weight: 700;
+  letter-spacing: 0.14em; text-transform: uppercase;
+  color: #E7C77E;
+}
+.legend p {
+  margin: 0 0 7px;
+  display: flex; align-items: center; gap: 9px;
+  font-size: 12px; font-weight: 500; line-height: 1.2;
+}
+.legend p:last-child { margin-bottom: 0; }
+.key { flex: 0 0 auto; width: 26px; height: 12px; }
+
+/* Grain, not a block: the swatch has to look like what it labels. */
+.key-scent {
+  border-radius: 6px;
+  background:
+    radial-gradient(circle at 20% 45%, #FFE7A8 0.9px, transparent 1.1px),
+    radial-gradient(circle at 46% 25%, #F2B03C 0.9px, transparent 1.1px),
+    radial-gradient(circle at 62% 66%, #FFE7A8 0.8px, transparent 1px),
+    radial-gradient(circle at 33% 76%, #F2B03C 0.8px, transparent 1px),
+    radial-gradient(circle at 80% 38%, #C9761E 0.8px, transparent 1px),
+    radial-gradient(circle at 88% 72%, #F2B03C 0.7px, transparent 0.9px),
+    radial-gradient(ellipse at 40% 50%, rgba(233, 144, 47, 0.32), transparent 70%);
+}
+.key-route {
+  background: repeating-linear-gradient(to right,
+    #F5D14A 0 7px, transparent 7px 12px);
+  height: 4px;
+}
+.key-wind {
+  height: 10px;
+  border-top: 2px solid #F7C65A;
+  border-radius: 60% 60% 0 0 / 100% 100% 0 0;
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .legend { background: #121814; backdrop-filter: none; }
+}

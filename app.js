@@ -13,12 +13,12 @@ import {
   progressAlong, splitLine, smoothBearing,
 } from './geo.js';
 import { FLAT, buildTerrain, stability, regime } from './field.js';
-import { predictedOffsets, ScentSim } from './sim.js';
+import { predictedOffsets, ScentSim, driftFrom, AIRBORNE } from './sim.js';
 import { encodeTrail, decodeTrail, cardUrl, cardFromText } from './card.js';
 import { createStore, migrateV1, TARGETS, targetById, verbs, uid } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-13i';
+const BUILD = '2026-09-13j';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true, mbToken: (window.MB_TOKEN || '') };
@@ -111,7 +111,8 @@ const EMPTY = { type: 'FeatureCollection', features: [] };
 let map, mapReady = false;
 let GL = mapboxgl;   // every control/bounds must come from the SAME library
 const srcData = { runner: EMPTY, dog: EMPTY, wps: EMPTY, drift: EMPTY, start: EMPTY, hides: EMPTY, contam: EMPTY,
-                  routeDone: EMPTY, routeAhead: EMPTY, puck: EMPTY, scent: EMPTY };
+                  routeDone: EMPTY, routeAhead: EMPTY, puck: EMPTY, scent: EMPTY, wind: EMPTY,
+                  flow: EMPTY, flowHead: EMPTY };
 
 const SAT_STYLE = 'mapbox://styles/mapbox/standard-satellite';
 const RASTER_FALLBACK = {
@@ -165,49 +166,36 @@ function addOverlays() {
   add({ id: 'drift-edge', type: 'line', source: 'drift',
         layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: { 'line-color': '#62B6FF', 'line-width': 1.6, 'line-opacity': 0.55, 'line-dasharray': [1.5, 1.8] } });
-  /* The air itself — scent, drawn as scent. The model carries thousands of
-     parcels downwind; drawing them as separate dots showed the sampling
-     rather than the thing being sampled. A density field is the honest
-     picture: hot and solid where the parcels crowd together against the
-     line, fading out to nothing where they have spread so thin the model
-     can no longer tell you anything. The fade IS the uncertainty. */
-  add({ id: 'scent-heat', type: 'heatmap', source: 'scent',
-        paint: {
-          // `s` already carries concentration, not just strength — see
-          // parcelWeight. Squaring sharpens the core without inventing it.
-          'heatmap-weight': ['*', ['^', ['get', 's'], 2], 6],
-          /* Radius has to exceed the gap between parcels on screen, or the
-             sampling shows through as beads instead of the continuous sheet
-             of air it is meant to be. Intensity comes down as radius goes up,
-             or the overlap saturates everything into one flat slab. */
-          /* Low on purpose: the body of a plume must sit in the MIDDLE of the
-             ramp, not pinned at its top, or every part of it looks the same
-             and the gradient the plume exists to show is gone. */
-          'heatmap-intensity': ['interpolate', ['linear'], ['zoom'], 13, 0.22, 15, 0.28, 17, 0.36, 20, 0.48],
-          /* Only just wide enough to close the gaps between parcels. Any
-             wider and the blur eats the very gradient the plume is for. */
-          'heatmap-radius': ['interpolate', ['linear'], ['zoom'], 13, 8, 15, 14, 17, 26, 19, 46],
-          'heatmap-opacity': ['interpolate', ['linear'], ['zoom'], 13, 0.66, 17, 0.8, 20, 0.86],
-          /* One hue, and OPACITY carries the signal — not a fire ramp.
+  /* The air itself, drawn as scent rather than as a stain.
 
-             A fire ramp runs dark through orange to white-hot, which means
-             its palest colour sits at the densest air. A plume saturates
-             across most of its body, so the whole middle came out cream with
-             an orange fringe at the edge: the picture read inside-out, thin
-             air looking stronger than the air against the line.
+     A density field said the right thing and looked wrong: solid colour over
+     the ground claims the model knows the shape of every square metre, and it
+     hides the very terrain that decides where scent goes. Grain is the honest
+     picture — each speck is one parcel the model is carrying, thick against
+     the line and scattering out to individual specks at the edge, with the
+     ground visible the whole way through. Where you can count them is exactly
+     where the model has stopped being sure. */
+  add({ id: 'scent-glow', type: 'circle', source: 'scent',
+        paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 13, 2.2, 17, 5, 19, 9],
+                 'circle-color': '#E9902F',
+                 'circle-opacity': ['*', ['get', 's'], 0.20],
+                 'circle-blur': 1 } });
+  add({ id: 'scent-dots', type: 'circle', source: 'scent',
+        paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 13, 0.7, 17, 1.5, 19, 2.6],
+                 'circle-color': ['interpolate', ['linear'], ['get', 's'],
+                   0, '#C9761E', 0.45, '#F2B03C', 1, '#FFE7A8'],
+                 'circle-opacity': ['+', 0.25, ['*', ['get', 's'], 0.7]],
+                 'circle-blur': 0.18 } });
 
-             Ember throughout, deepening and thickening with density, is the
-             honest read: solid where the scent is, thinning to nothing where
-             the model no longer knows. */
-          'heatmap-color': ['interpolate', ['linear'], ['heatmap-density'],
-            0.00, 'rgba(232, 146, 84, 0)',
-            0.12, 'rgba(232, 140, 76, 0.14)',
-            0.30, 'rgba(230, 128, 62, 0.34)',
-            0.50, 'rgba(226, 114, 50, 0.55)',
-            0.70, 'rgba(219, 100, 40, 0.72)',
-            0.86, 'rgba(209, 86, 32, 0.85)',
-            1.00, 'rgba(196, 72, 25, 0.93)'],
-        } });
+  /* The flow itself: short arcs traced through the SAME drift the parcels
+     follow, so they are the model's streamlines rather than a decorative
+     arrow pointing whichever way the forecast says. */
+  add({ id: 'flow-casing', type: 'line', source: 'flow',
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: { 'line-color': '#2A1B08', 'line-width': 5, 'line-opacity': 0.35, 'line-blur': 1.5 } });
+  add({ id: 'flow-lines', type: 'line', source: 'flow',
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: { 'line-color': '#FFD36B', 'line-width': 2.4, 'line-opacity': 0.9 } });
 
   // Contamination trails: same family as the laid trail, visibly not it.
   add({ id: 'contam-line', type: 'line', source: 'contam',
@@ -220,7 +208,7 @@ function addOverlays() {
         paint: { 'line-color': '#17201A', 'line-width': 8, 'line-opacity': 0.55 } });
   add({ id: 'runner-line', type: 'line', source: 'runner',
         layout: { 'line-cap': 'butt', 'line-join': 'round' },
-        paint: { 'line-color': '#9FDB4F', 'line-width': 4.5, 'line-opacity': 0.98, 'line-dasharray': [2.2, 1.4] } });
+        paint: { 'line-color': '#F5D14A', 'line-width': 5, 'line-opacity': 0.98, 'line-dasharray': [2.2, 1.4] } });
   add({ id: 'dog-casing', type: 'line', source: 'dog',
         layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: { 'line-color': '#17201A', 'line-width': 8, 'line-opacity': 0.55 } });
@@ -261,10 +249,28 @@ function addOverlays() {
         layout: { 'text-field': ['get', 'kind'], 'text-size': 11, 'text-offset': [0, 1.4], 'text-anchor': 'top' },
         paint: { 'text-color': '#FFFDF8', 'text-halo-color': '#17201A', 'text-halo-width': 1.6 } });
 
+  /* The air, moving. The plume says where scent has got to; it cannot say
+     that the air is going anywhere, and a still picture of moving air
+     teaches the wrong thing. These parcels are released at the line and
+     stream downwind on the same modelled flow the plume is built from, at
+     REAL speed — so what you watch is the drift, not an impression of it. */
+  add({ id: 'wind-tracers', type: 'circle', source: 'wind',
+        paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 13, 1.1, 17, 2.4, 19, 4],
+                 'circle-color': '#FFE9C4',
+                 'circle-opacity': ['*', ['get', 'a'], 0.9],
+                 'circle-blur': 0.35 } });
+
   /* You: an arrow, not a dot. A dot says where you are; an arrow says which
      way you are facing, which is the half of the question you are actually
      asking when you look down at a phone in a field. */
   if (!map.hasImage('puck')) map.addImage('puck', puckImage(), { pixelRatio: 2 });
+  if (!map.hasImage('flowhead')) map.addImage('flowhead', flowHeadImage(), { pixelRatio: 2 });
+  add({ id: 'flow-heads', type: 'symbol', source: 'flowHead',
+        layout: { 'icon-image': 'flowhead',
+                  'icon-size': ['interpolate', ['linear'], ['zoom'], 13, 0.22, 17, 0.36, 19, 0.5],
+                  'icon-allow-overlap': true, 'icon-ignore-placement': true,
+                  'icon-rotate': ['get', 'brg'], 'icon-rotation-alignment': 'map' },
+        paint: { 'icon-opacity': 0.8 } });
   add({ id: 'puck-acc', type: 'circle', source: 'puck',
         paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 14, 10, 19, 34],
                  'circle-color': '#2F9E44', 'circle-opacity': 0.16,
@@ -294,6 +300,20 @@ function watchForBlankMap() {
 /** The heading arrow, drawn at load rather than fetched — one less file to
     ship, and it stays sharp on a retina screen. Points up; the layer spins
     it. A white collar keeps it readable on grass, tarmac and snow alike. */
+/** A small open arrowhead for the ends of the flow arcs. Points up; the
+    layer turns it to the direction the air is actually going. */
+function flowHeadImage() {
+  const S = 64, c = document.createElement('canvas');
+  c.width = c.height = S;
+  const g = c.getContext('2d');
+  g.strokeStyle = '#F7C65A';
+  g.lineWidth = 7; g.lineCap = 'round'; g.lineJoin = 'round';
+  g.beginPath();
+  g.moveTo(14, 40); g.lineTo(S / 2, 14); g.lineTo(S - 14, 40);
+  g.stroke();
+  return g.getImageData(0, 0, S, S);
+}
+
 function puckImage() {
   const S = 96, c = document.createElement('canvas');
   c.width = c.height = S;
@@ -685,6 +705,8 @@ function plumeStart(trail, wx, T) {
   plume.trail = trail ? [...trail] : [];
   plume.tick = setInterval(plumeFrame, 240);
   plumeFrame();
+  tracersStart();
+  $('mapLegend').hidden = false;
 }
 /** How finely the line is sampled for emission: a point every 3 m, and the
     whole thing re-walked a few times so the parcels at any one spot span the
@@ -692,8 +714,8 @@ function plumeStart(trail, wx, T) {
     trail must not turn the phone into a heater. */
 function plumeSamples(trail) {
   if (!trail || trail.length < 2) return trail || [];
-  const fine = densify(trail, 3);
-  const passes = fine.length > 700 ? 1 : fine.length > 300 ? 2 : 3;
+  const fine = densify(trail, 2);
+  const passes = fine.length > 900 ? 2 : fine.length > 400 ? 3 : 5;
   const out = [];
   for (let i = 0; i < passes; i++) out.push(...fine);
   return out;
@@ -709,11 +731,68 @@ function plumeAdd(pt) {
   plume.sim.append(last ? plumeSamples([last, pt]) : [pt]);
 }
 function plumeStop() {
+  tracersStop();
   clearInterval(plume.tick); plume.tick = 0;
   plume.sim = null; plume.trail = null;
   setSrc('scent', EMPTY);
+  setSrc('flow', EMPTY);
+  setSrc('flowHead', EMPTY);
   setSrc('drift', EMPTY);
+  $('mapLegend').hidden = true;
 }
+/* ── Wind tracers ─────────────────────────────────────────────────────
+   Few enough to move every frame, which is the whole point of them: the
+   heatmap can only be redrawn a few times a second, and a plume that never
+   visibly moves reads as a stain rather than as air.
+
+   They run at REAL time. Speeding them up would make a 4 km/h breeze look
+   like a gale, and the one thing this app must not do is dress its own
+   numbers up as something livelier than they are. */
+const TRACERS = 160;
+const windDots = { list: [], raf: 0, last: 0 };
+
+function tracersStart() {
+  tracersStop();
+  if (!plume.sim || !plume.wx || !plume.trail?.length) return;
+  windDots.last = performance.now();
+  windDots.raf = requestAnimationFrame(tracerFrame);
+}
+function tracersStop() {
+  cancelAnimationFrame(windDots.raf);
+  windDots.raf = 0;
+  windDots.list = [];
+  setSrc('wind', EMPTY);
+}
+/** A parcel lifting off a random piece of the line, at a random point in its
+    airborne life — so the stream is continuous from the first frame instead
+    of arriving as one pulse. */
+function tracerSpawn(fresh = false) {
+  const line = plume.trail;
+  const g = line[Math.floor(Math.random() * line.length)];
+  return { glat: g.lat, glon: g.lon, age: fresh ? 0 : Math.random() * AIRBORNE };
+}
+function tracerFrame(now) {
+  if (!plume.sim || !plume.trail?.length) return tracersStop();
+  const dt = Math.min(0.5, (now - windDots.last) / 1000);
+  windDots.last = now;
+  while (windDots.list.length < TRACERS) windDots.list.push(tracerSpawn());
+
+  const feats = [];
+  for (const p of windDots.list) {
+    p.age += dt;
+    if (p.age >= AIRBORNE) Object.assign(p, tracerSpawn(true));
+    const d = driftFrom(plume.T, { lat: p.glat, lon: p.glon }, p.age, plume.wx, plume.st, 3);
+    feats.push({
+      type: 'Feature',
+      // Brightest as it leaves the ground, gone by the time it has spread.
+      properties: { a: Math.max(0, 1 - p.age / AIRBORNE) ** 1.4 },
+      geometry: { type: 'Point', coordinates: [d.lon, d.lat] },
+    });
+  }
+  setSrc('wind', { type: 'FeatureCollection', features: feats });
+  windDots.raf = requestAnimationFrame(tracerFrame);
+}
+
 /** How much scent a parcel represents where it now sits.
 
     Strength alone is not enough, because it says how much scent is left, not
@@ -733,10 +812,37 @@ function parcelWeight(s) {
   return Math.min(1, s.str / (1 + d / 22));
 }
 
+/** Streamlines: a handful of arcs traced through the very drift the parcels
+    are following, so they show what the air is doing HERE — bending with the
+    ground — rather than repeating the forecast's single wind direction. */
+function paintFlow() {
+  const line = plume.trail;
+  if (!line || line.length < 2 || !plume.wx) { setSrc('flow', EMPTY); setSrc('flowHead', EMPTY); return; }
+  const N = Math.max(2, Math.min(6, Math.round(pathLen(line) / 140)));
+  const arcs = [], heads = [];
+  for (let a = 0; a < N; a++) {
+    const seed = line[Math.floor(((a + 0.5) / N) * (line.length - 1))];
+    if (!seed) continue;
+    const pts = [];
+    for (let k = 0; k <= 6; k++) {
+      const d = driftFrom(plume.T, seed, (k / 6) * AIRBORNE * 0.55, plume.wx, plume.st, 3);
+      pts.push([d.lon, d.lat]);
+    }
+    if (pts.length < 2) continue;
+    arcs.push({ type: 'Feature', geometry: { type: 'LineString', coordinates: pts } });
+    const [p1, p0] = [pts[pts.length - 1], pts[pts.length - 2]];
+    heads.push({ type: 'Feature',
+      properties: { brg: bearing({ lat: p0[1], lon: p0[0] }, { lat: p1[1], lon: p1[0] }) },
+      geometry: { type: 'Point', coordinates: p1 } });
+  }
+  setSrc('flow', { type: 'FeatureCollection', features: arcs });
+  setSrc('flowHead', { type: 'FeatureCollection', features: heads });
+}
+
 function plumeFrame() {
   if (!plume.sim) return;
   const now = Date.now();
-  plume.sim.prune(now, plume.wx, plume.st);
+  plume.sim.prune(now, plume.wx, plume.st, { max: 9000 });
   plume.sim.advance(plume.T, plume.wx, plume.st, now);
   const live = plume.sim.drawable().filter(s => s.str >= 0.03);
   setSrc('scent', { type: 'FeatureCollection', features: live.map(s => ({
@@ -744,11 +850,7 @@ function plumeFrame() {
     properties: { s: parcelWeight(s) },
     geometry: { type: 'Point', coordinates: [s.lon, s.lat] },
   })) });
-  // The band under the parcels: the same uncertainty, stated as an area.
-  if (plume.trail && plume.trail.length >= 2) {
-    const f = scentField(plume.trail, plume.wx, now);
-    if (f.length) setSrc('drift', plumePolygon(f));
-  }
+  paintFlow();
 }
 
 /* ── Following ────────────────────────────────────────────────────────
