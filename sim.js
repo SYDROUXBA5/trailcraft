@@ -77,23 +77,39 @@ export function poolRadius(dwellS) {
  * Where a scent particle released at `origin` ends up after `secs` airborne.
  * Pure — this is the part worth testing.
  */
+/** The compass bearing a flow vector moves along.
+
+    flowAt returns u EASTWARD and v SOUTHWARD. That second one is the trap:
+    treat v as northward and the north-south component silently inverts, which
+    on a map looks like the wind and the scent disagreeing about where they
+    are going. Every mover goes through here so there is one place to get it
+    right, and one place to test. */
+export function flowBearing(f) {
+  return (Math.atan2(f.u, -f.v) * 180 / Math.PI + 360) % 360;
+}
+
+/** Move a point along a flow vector for `secs`.
+    `carry` is the share of the flow that actually moves the thing: air moves
+    at the full rate, scent at nose height is held back by ground friction. */
+export function stepByFlow(p, f, secs, carry = 1) {
+  const sp = Math.hypot(f.u, f.v);
+  if (!(secs > 0) || sp < 1e-6) return { lat: p.lat, lon: p.lon };
+  return project(p, flowBearing(f), sp * secs * carry);
+}
+
 export function driftFrom(T, origin, secs, wx, st, steps = 5) {
-  let { lat, lon } = origin;
-  if (!(secs > 0)) return { lat, lon };
+  let pt = { lat: origin.lat, lon: origin.lon };
+  if (!(secs > 0)) return pt;
   const dt = secs / steps;
   const f = { u: 0, v: 0 };
 
   for (let i = 0; i < steps; i++) {
-    const p = normOf(T, lat, lon);
-    flowAt(T, p.x, p.y, wx, st, f);
-    const sp = Math.hypot(f.u, f.v);
-    if (sp < 1e-6) break;
-    // u is eastward, v is southward — so the compass bearing it moves along is
-    // measured from north, with south being +v.
-    const brg = (Math.atan2(f.u, -f.v) * 180 / Math.PI + 360) % 360;
-    ({ lat, lon } = project({ lat, lon }, brg, sp * dt * NOSE));
+    const n = normOf(T, pt.lat, pt.lon);
+    flowAt(T, n.x, n.y, wx, st, f);
+    if (Math.hypot(f.u, f.v) < 1e-6) break;
+    pt = stepByFlow(pt, f, dt, NOSE);
   }
-  return { lat, lon };
+  return pt;
 }
 
 export class ScentSim {
