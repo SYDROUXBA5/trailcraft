@@ -498,3 +498,17 @@ export function fmtTemp(c, imperial = false) {
 
 /** The bare unit word, for a form field's suffix. */
 export const unitShort = (imperial) => (imperial ? 'ft' : 'm');
+
+/** The same clock, anchored at the END instead of the start.
+
+    A trail that has just been laid FINISHES now: its beginning is the oldest
+    ground on it, and whoever laid it is standing at the far end. Anchoring a
+    drawn line at the start instead puts most of it in the future, where it
+    has no scent yet at all — and a plume drawn from that creeps into
+    existence along the line at walking pace, which is not something scent
+    has ever done. */
+export function timestampsEndingAt(pts, endMs, paceMs = 1.3) {
+  if (!pts || !pts.length) return [];
+  const secs = pathLen(pts) / Math.max(0.1, paceMs);
+  return timestamps(pts, endMs - secs * 1000, paceMs);
+}

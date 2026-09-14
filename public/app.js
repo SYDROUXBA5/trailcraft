@@ -11,6 +11,7 @@ import {
   fmtDist, fmtShort, fmtSpeed, fmtTemp, unitShort,
   scentField, plumePolygon, densify, timestamps,
   signedOffsets, meanSigned, sideOfDrift, sideAgreement, lineCorrect, departure,
+  timestampsEndingAt,
   progressAlong, splitLine, smoothBearing,
 } from './geo.js';
 import { FLAT, buildTerrain, stability, regime, flowAt, normOf } from './field.js';
@@ -20,7 +21,7 @@ import { createStore, migrateV1, TARGETS, targetById, verbs, uid,
          dogStats, ageBand, AGE_BANDS } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-14d';
+const BUILD = '2026-09-14e';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true, imperial: false, mbToken: (window.MB_TOKEN || '') };
@@ -113,9 +114,14 @@ function go(id) {
   for (const s of SCREENS) $(s).hidden = s !== id;
   if (id === 'scrHome') renderHome();
   // The map only needs to be right when something transparent sits over it.
-  if (MAP_SCREENS.includes(id)) map?.resize();
-  // Nothing on the map is worth animating while a paper screen covers it.
-  else airStop();
+  if (MAP_SCREENS.includes(id)) {
+    map?.resize();
+    weatherPanelFor(run.session ?? pendingSession);
+  } else {
+    // Nothing on the map is worth animating while a paper screen covers it.
+    airStop();
+    hideWeather();
+  }
 }
 
 /* ── Map ──────────────────────────────────────────────────────────── */
@@ -816,14 +822,13 @@ function plumeStart(trail, wx, T) {
   plume.tAt = 0; plume.tLen = 0;
   plumeTerrain(true);
   airStart(wx, plume.T);
-  legendWind(wx);
+  showWeather(wx);
   /* 400 ms, not faster. The parcels move at wind speed — metres in a second
      — so redrawing them oftener buys nothing and costs a phone in a pocket.
      The tracers on top are what carry the motion. */
   plume.tick = setInterval(plumeFrame, 400);
   plumeFrame();
   tracersStart();
-  $('mapLegend').hidden = false;
 }
 /** How finely the line is sampled for emission: a point every 3 m, and the
     whole thing re-walked a few times so the parcels at any one spot span the
@@ -855,7 +860,6 @@ function plumeStop() {
   setSrc('flow', EMPTY);
   setSrc('flowHead', EMPTY);
   setSrc('drift', EMPTY);
-  $('mapLegend').hidden = true;
 }
 /* ── The wind, over the whole map ─────────────────────────────────────
    Separate from the plume on purpose. The plume is where the scent is; this
@@ -893,14 +897,66 @@ function airStart(wx, T) {
    forecast model's 10 m open-ground wind for this place and time, bent by
    the app's own terrain model. A dog handler deciding where to cast is
    entitled to know which parts of that are data. */
-function legendWind(wx) {
-  const el = $('legendWind');
-  if (!el) return;
-  if (!wx || wx.wind_speed == null) { el.textContent = ''; return; }
-  const spd = fmtWind(wx.wind_speed);
-  const when = wx.time ? new Date(wx.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
-  el.textContent = `${spd} ${cardinal(wx.wind_direction)}${when ? ` at ${when}` : ''}`
-    + ` — 10 m open-ground forecast, not measured here`;
+/* ── The air, on screen ───────────────────────────────────────────────
+   Wind direction, wind speed and temperature, on every map screen, because
+   all three change what a dog can do and none of them are guessable from
+   looking at a map.
+
+   The arrow points where the air is GOING. A weather service reports the
+   direction wind comes FROM, which is right on a chart and a trap on a map:
+   a handler reads an arrow as "that way". */
+function showWeather(wx) {
+  const p = $('wxPanel');
+  if (!p) return;
+  if (!wx || wx.wind_speed == null) { p.hidden = true; return; }
+  p.hidden = false;
+  $('wxSpeed').textContent = fmtWind(wx.wind_speed);
+  /* The arrow says where the air is GOING; the words say where it is coming
+     FROM, which is how every forecast reports it. Both are on screen because
+     either alone gets misread — an arrow with a bare "SSW" beside it is a
+     handler guessing which of the two they are looking at. */
+  $('wxDir').textContent = `from ${cardinal(wx.wind_direction)}`;
+  $('wxTemp').textContent = fmtTemp(wx.temp, imp());
+  // The glyph points north, so the rotation IS the bearing it indicates.
+  $('wxArrow').style.transform = Number.isFinite(wx.wind_direction)
+    ? `rotate(${(wx.wind_direction + 180) % 360}deg)` : '';
+  $('wxNote').textContent = wx.time
+    ? `10 m forecast, ${new Date(wx.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+    : '10 m forecast';
+}
+const hideWeather = () => { const p = $('wxPanel'); if (p) p.hidden = true; };
+
+/* "At all times on the map" means the panel cannot wait for a session to
+   carry weather with it — drawing a line, or just looking around, has no
+   session yet. So the app keeps one reading for where it currently is and
+   refreshes it every quarter hour, which is far finer than a forecast
+   actually changes. A session's own weather still wins where there is one:
+   looking at a trail from last week should show last week's air. */
+const wxNow = { at: 0, wx: null, asking: false };
+
+async function weatherHere() {
+  if (wxNow.wx && Date.now() - wxNow.at < 15 * 60000) return wxNow.wx;
+  if (wxNow.asking) return wxNow.wx;
+  wxNow.asking = true;
+  try {
+    const pos = await new Promise((res, rej) => navigator.geolocation
+      ? navigator.geolocation.getCurrentPosition(res, rej,
+          { enableHighAccuracy: false, maximumAge: 300000, timeout: 12000 })
+      : rej(new Error('no gps')));
+    const wx = await fetchWeather(pos.coords.latitude, pos.coords.longitude, Date.now());
+    wxNow.wx = wx; wxNow.at = Date.now();
+    return wx;
+  } catch { return wxNow.wx; }          // offline or blocked: the panel stays away
+  finally { wxNow.asking = false; }
+}
+
+/** Show whatever is most true for this screen: the session's air if it has
+    any, otherwise the air here now. */
+function weatherPanelFor(session) {
+  const own = session?.data?.weather;
+  if (own) return showWeather(own);
+  if (wxNow.wx) showWeather(wxNow.wx);        // something now, rather than nothing
+  weatherHere().then(wx => { if (wx) showWeather(wx); });
 }
 
 function airStop() {
@@ -1580,12 +1636,18 @@ function closeDraw() {
 function saveDrawPlan() {
   if (draw.pts.length < 2) return;
   closeDraw();
-  // densify + a provisional walking clock: the REAL clock arrives with the
-  // walked card. The provisional one keeps the card format honest.
-  const planPts = timestamps(densify(draw.pts, 5), Date.now(), 1.3);
+  /* Densify, then a provisional walking clock anchored at the END: a trail
+     that has just been drawn is a trail that has just been LAID, finishing
+     where the layer now stands. Anchored at the start instead, most of the
+     line sat in the future — ground carrying no scent yet — so the plume
+     crept along it at walking pace instead of simply being there.
+
+     These times are provisional either way; the real ones arrive with the
+     walked card. */
+  const planPts = timestampsEndingAt(densify(draw.pts, 5), Date.now(), 1.3);
   const sess = {
     id: uid(), handlerId: S.handler.id, dogId: null,
-    layerId: S.layer?.id ?? null, targetId: 'person', startedAt: Date.now(),
+    layerId: S.layer?.id ?? null, targetId: 'person', startedAt: planPts[0].t,
     summary: `${fmtKm(pathLen(planPts))} trail planned, not walked yet.`,
     data: { plan: true, ageMin: draw.ageMin, corners: draw.pts, trail: planPts,
             waypoints: [], weather: null, contamination: [] },
@@ -1845,8 +1907,7 @@ async function startRun(s) {
   /* Wind, even on a blind run: it says nothing about where the trail is, and
      it is the first thing you want before deciding where to cast. */
   airStart(s.data.weather);
-  legendWind(s.data.weather);
-  $('mapLegend').hidden = !s.data.weather;
+  showWeather(s.data.weather);
   terrainFor(s.data.trail || s.data.hides || []).then(T => { air.T = T; }).catch(() => {});
   $('runHudText').textContent = hudText();
   toast(t.kind === 'person' ? 'Running blind — the trail is hidden' : 'Searching');
@@ -2099,6 +2160,7 @@ function showOnMap(from = 'scrResult') {
       if (field.length) setSrc('drift', plumePolygon(field));
       // ...and the air itself, moving, as it was when the dog worked it.
       plumeStart(s.data.trail, wx);
+      showWeather(wx);
     }
   } else {
     setSrc('hides', pointsOf(s.data.hides));

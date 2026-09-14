@@ -4,7 +4,7 @@ import {
   densify, timestamps,
   crossTrackSigned, signedOffsets, meanSigned, sideOfDrift, sideAgreement, lineCorrect,
   dwellFold, foldFixes, departure, progressAlong, splitLine, smoothBearing,
-  fmtDist, fmtShort, fmtSpeed, fmtTemp,
+  fmtDist, fmtShort, fmtSpeed, fmtTemp, timestampsEndingAt,
 } from '../public/geo.js';
 
 let pass = 0;
@@ -487,6 +487,33 @@ t('units: the model stays in metres, the edge speaks the handler\u2019s language
     assert.equal(f(null), '—');
     assert.equal(f(undefined, true), '—');
   }
+});
+
+t('timestampsEndingAt: a drawn trail has just been laid, not just begun', () => {
+  /* Anchored at the start, most of a drawn line sits in the FUTURE — ground
+     with no scent on it yet — so the plume materialises along the trail at
+     walking pace. Anchored at the end, the whole line is already laid, the
+     start is its oldest ground, and the layer is standing at the far end. */
+  const now = 1_700_000_000_000;
+  const line = densify([{ lat: 51.20, lon: -2.60 },
+                        { lat: 51.20 + 500 / 111320, lon: -2.60 }], 5);
+  const pts = timestampsEndingAt(line, now, 1.3);
+
+  assert.equal(pts.length, line.length);
+  assert.ok(pts.every(p => p.t <= now), 'not one point is in the future');
+  assert.ok(Math.abs(pts[pts.length - 1].t - now) < 1500, 'the trail finishes now');
+
+  // 500 m at 1.3 m/s is about 385 s of walking, and the start is that old.
+  const spanS = (pts[pts.length - 1].t - pts[0].t) / 1000;
+  assert.ok(Math.abs(spanS - 385) < 20, `the walk took about 385 s, got ${spanS.toFixed(0)}`);
+  assert.ok(pts[0].t < pts[Math.floor(pts.length / 2)].t, 'and it ages from the start');
+
+  // Compare against the old behaviour, which is what caused the creep.
+  const fromStart = timestamps(line, now, 1.3);
+  assert.ok(fromStart.filter(p => p.t > now).length > line.length * 0.9,
+    'anchored at the start, almost the whole line would be in the future');
+
+  assert.deepEqual(timestampsEndingAt([], now), []);
 });
 
 console.log(`\n${pass} passed total\n`);
