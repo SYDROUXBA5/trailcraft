@@ -136,8 +136,7 @@
     </div>
     <button class="btn big moss" id="btnLayStart">Start</button>
     <button class="btn big ember" id="btnLayStop" hidden>Stop</button>
-    <p class="glass-caption" id="layCaption">Phone can go in your pocket</p>
-    <button class="btn ghost" id="btnDrawPlan">Draw it on the map instead</button>
+    <p class="glass-caption" id="layCaption">Draw the line with your finger</p>
     <button class="btn ghost" id="btnLayCancel">Cancel</button>
   </div>
 </section>
@@ -149,10 +148,14 @@
     <div class="card">
       <span class="label" style="margin-top:0">Dog starts after</span>
       <div class="age-row" id="ageRow">
+        <button class="age-chip" data-age="0">Now</button>
         <button class="age-chip" data-age="5">5 min</button>
         <button class="age-chip selected" data-age="10">10 min</button>
-        <button class="age-chip" data-age="20">20 min</button>
         <button class="age-chip" data-age="custom">Custom</button>
+      </div>
+      <div class="age-custom" id="ageCustom" hidden>
+        <input id="ageMins" type="number" inputmode="numeric" min="0" max="1440" step="1" placeholder="minutes">
+        <button class="btn small moss" id="ageSet">Set</button>
       </div>
     </div>
     <button class="btn big moss" id="drawSave" disabled>Save plan</button>

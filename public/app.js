@@ -20,7 +20,7 @@ import { createStore, migrateV1, TARGETS, targetById, verbs, uid,
          dogStats, ageBand, AGE_BANDS } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-14b';
+const BUILD = '2026-09-14c';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true, imperial: false, mbToken: (window.MB_TOKEN || '') };
@@ -720,13 +720,13 @@ function startLay() {
   rec.kind = t.kind === 'person' ? 'lay' : 'hide';
   rec.pts = []; rec.wps = []; rec.hides = []; rec.dropped = 0;
   $('hideTools').hidden = t.kind !== 'hide';
-  $('btnDrawPlan').hidden = t.kind === 'hide';
   $('btnLayStart').hidden = t.kind === 'hide';
   $('btnLayStop').hidden = true;
   $('layDot').hidden = true;
   $('layHudText').textContent = t.kind === 'hide' ? 'Place each hide' : 'Ready';
   $('layCaption').textContent = t.kind === 'hide'
-    ? 'Each hide is stamped with the time you place it' : 'Phone can go in your pocket';
+    ? 'Each hide is stamped with the time you place it'
+    : 'Tap Start, then draw the line with your finger';
   go('scrLay');
   if (t.kind === 'hide') {
     map.getCanvas().style.cursor = 'crosshair';
@@ -1386,7 +1386,10 @@ function renderShare(s) {
   $('btnContam').hidden = isHide;
   /* A plan is a drawn sketch with no walked times behind it — modelling scent
      off it would dress a guess as a measurement. */
-  $('btnSharePlume').hidden = isHide || isPlan || !s.data.weather;
+  /* A drawn plan has no walked times behind it, so no plume. Once the walked
+     card is in, it has real ones — and that is exactly when it is worth
+     looking at. */
+  $('btnSharePlume').hidden = isHide || (isPlan && !s.data.walked) || !s.data.weather;
   $('btnOff').hidden = !isPlan;
   if (isPlan) {
     $('btnOff').textContent = s.data.offAt
@@ -1408,13 +1411,18 @@ function renderShare(s) {
     paintMini(s.data.trail);
     const mins = fmtDur(s.data.trail[s.data.trail.length - 1].t - s.data.trail[0].t);
     $('shareMeta').textContent = isPlan
-      ? `${fmtKm(pathLen(s.data.trail))} plan · dog starts +${s.data.ageMin ?? 10} min`
+      ? `${fmtKm(pathLen(s.data.trail))} plan · ${ageWords(s.data.ageMin)}`
         + (wx?.wind_speed != null ? ` · wind ${fmtWind(wx.wind_speed)} ${cardinal(wx.wind_direction)}` : '')
       : `${fmtKm(pathLen(s.data.trail))} · ${mins} · laid ${laid}`
         + (wx?.wind_speed != null ? ` · wind ${fmtWind(wx.wind_speed)} ${cardinal(wx.wind_direction)}` : '');
     renderShareQr(s);
   }
 }
+
+/** How the wait reads in a sentence. Zero is not "+0 min". */
+const ageWords = (m) => (m == null ? 'dog starts +10 min'
+  : m <= 0 ? 'dog starts as soon as they are clear'
+  : `dog starts +${m} min`);
 
 const layerName = (s) => S.layers.find(l => l.id === s.layerId)?.name ?? 'the layer';
 
@@ -1515,6 +1523,18 @@ function saveContam() {
 
 const draw = { pts: [], ageMin: 10 };
 
+/** The ageing choice, and the one chip whose label changes. */
+function paintAge() {
+  $('ageRow').querySelectorAll('.age-chip').forEach(b => {
+    const custom = b.dataset.age === 'custom';
+    const mine = custom
+      ? ![0, 5, 10].includes(draw.ageMin)
+      : Number(b.dataset.age) === draw.ageMin;
+    b.classList.toggle('selected', mine);
+    if (custom) b.textContent = mine ? `${draw.ageMin} min` : 'Custom';
+  });
+}
+
 function openDraw() {
   clearMap();
   /* Corners are tapped by finger, so the map has to be on the handler before
@@ -1523,8 +1543,9 @@ function openDraw() {
   locateMe({ zoom: 17 });
   draw.pts = [];
   draw.ageMin = 10;
-  $('ageRow').querySelectorAll('.age-chip').forEach(b =>
-    b.classList.toggle('selected', b.dataset.age === '10'));
+  $('ageCustom').hidden = true;
+  $('ageMins').value = '';
+  paintAge();
   map.getCanvas().style.cursor = 'crosshair';
   map.on('click', onDrawTap);
   paintDraw();
@@ -2474,7 +2495,15 @@ function wire() {
   $('btnRun').addEventListener('click', () => { if (S.dog) openPick(); else toast('Add a dog first'); });
 
   // Lay
-  $('btnLayStart').addEventListener('click', layStart);
+  /* Start means "begin laying", and for a person trail that is drawing the
+     line with a finger — the layer walks it afterwards, guided by their own
+     phone, and their GPS is the one that records what was really walked.
+     Two buttons here only ever asked the handler a question they had already
+     answered on the home screen. */
+  $('btnLayStart').addEventListener('click', () => {
+    if (S.target.kind === 'person') return openDraw();
+    layStart();
+  });
   $('btnLayStop').addEventListener('click', layStop);
   $('btnLayCancel').addEventListener('click', async () => {
     await stopWatch();
@@ -2505,21 +2534,34 @@ function wire() {
   });
   $('contamSave').addEventListener('click', saveContam);
 
-  // Draw a plan
-  $('btnDrawPlan').addEventListener('click', openDraw);
+  // Draw a plan — reached from Start on the lay screen.
+  /* Custom opens a field in the card, not a system prompt. window.prompt is
+     blocked outright in a home-screen web app on iOS, which is exactly where
+     this runs — the button looked like it did nothing because it could not
+     do anything. */
   $('ageRow').addEventListener('click', (e) => {
     const b = e.target.closest('[data-age]');
     if (!b) return;
     if (b.dataset.age === 'custom') {
-      const mins = Number(prompt('Dog starts after how many minutes?', String(draw.ageMin)));
-      if (!Number.isFinite(mins) || mins < 1 || mins > 1440) return toast('Between 1 and 1440 minutes');
-      draw.ageMin = Math.round(mins);
-      b.textContent = `${draw.ageMin} min`;
-    } else {
-      draw.ageMin = Number(b.dataset.age);
+      $('ageCustom').hidden = false;
+      $('ageMins').value = String(draw.ageMin);
+      $('ageMins').focus();
+      $('ageMins').select?.();
+      return;
     }
-    $('ageRow').querySelectorAll('.age-chip').forEach(c => c.classList.toggle('selected', c === b));
+    draw.ageMin = Number(b.dataset.age);
+    $('ageCustom').hidden = true;
+    paintAge();
   });
+  const setCustomAge = () => {
+    const mins = Number($('ageMins').value);
+    if (!Number.isFinite(mins) || mins < 0 || mins > 1440) return toast('Between 0 and 1440 minutes');
+    draw.ageMin = Math.round(mins);
+    $('ageCustom').hidden = true;
+    paintAge();
+  };
+  $('ageSet').addEventListener('click', setCustomAge);
+  $('ageMins').addEventListener('keydown', (e) => { if (e.key === 'Enter') setCustomAge(); });
   $('drawUndo').addEventListener('click', () => { draw.pts.pop(); paintDraw(); });
   $('drawCancel').addEventListener('click', () => { closeDraw(); clearMap(); go('scrHome'); });
   $('drawSave').addEventListener('click', saveDrawPlan);
