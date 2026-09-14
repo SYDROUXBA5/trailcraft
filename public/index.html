@@ -327,6 +327,36 @@
   </div>
 </section>
 
+<!-- ── One dog's record ────────────────────────────────────────────── -->
+<section id="scrDog" class="screen paper" hidden>
+  <div class="page">
+    <div class="dog-head">
+      <span id="dogAva"></span>
+      <div>
+        <h1 class="display" id="dogName"></h1>
+        <p class="body muted" id="dogSub"></p>
+      </div>
+    </div>
+
+    <span class="label">Work so far</span>
+    <div class="grid2" id="dogGrid"></div>
+
+    <span class="label">Trail age at the start</span>
+    <div class="card" id="dogBands"></div>
+
+    <span class="label">What the model has learned</span>
+    <div class="card"><p class="body" id="dogCal"></p></div>
+
+    <span class="label">Recent runs</span>
+    <div id="dogRuns" class="recent"></div>
+
+    <div class="page-bottom">
+      <button class="btn moss" id="dogEdit">Edit this dog</button>
+      <button class="btn ghost" id="dogBack">Done</button>
+    </div>
+  </div>
+</section>
+
 <!-- ── Sessions ────────────────────────────────────────────────────── -->
 <section id="scrSessions" class="screen paper" hidden>
   <div class="page">
@@ -349,6 +379,12 @@
     <div id="setLayers"></div>
     <span class="label">All sessions</span>
     <button class="btn card-btn" id="btnAllSessions">Open the session list</button>
+    <span class="label">Units</span>
+    <div class="radio-cards" id="unitRow">
+      <button class="radio-card selected" data-units="metric"><b>Metric</b><i>metres, kilometres, km/h, °C</i><span class="radio-dot"></span></button>
+      <button class="radio-card" data-units="imperial"><b>Imperial</b><i>feet, yards, miles, mph, °F</i><span class="radio-dot"></span></button>
+    </div>
+
     <span class="label">Help</span>
     <button class="btn card-btn" id="btnTutorial">Show the tutorial again</button>
     <button class="btn card-btn" id="btnGpsCheck">Check GPS on this phone</button>

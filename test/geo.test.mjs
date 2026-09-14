@@ -4,6 +4,7 @@ import {
   densify, timestamps,
   crossTrackSigned, signedOffsets, meanSigned, sideOfDrift, sideAgreement, lineCorrect,
   dwellFold, foldFixes, departure, progressAlong, splitLine, smoothBearing,
+  fmtDist, fmtShort, fmtSpeed, fmtTemp,
 } from '../public/geo.js';
 
 let pass = 0;
@@ -451,6 +452,41 @@ t('densify: the new points carry the clock, or they emit nothing', () => {
   // A path with no clock at all still densifies; it just has no times to carry.
   const bare = densify([{ lat: 51.20, lon: -2.60 }, { lat: 51.201, lon: -2.60 }], 20);
   assert.ok(bare.length > 2 && bare.every(p => p.t === undefined), 'no clock in, no clock out');
+});
+
+t('units: the model stays in metres, the edge speaks the handler\u2019s language', () => {
+  // Metric: the unit changes with the scale, because a 4 km trail in metres
+  // is a number nobody reads.
+  assert.equal(fmtDist(274), '274 m');
+  assert.equal(fmtDist(1240), '1.2 km');
+  assert.equal(fmtDist(14800), '15 km', 'past ten, the decimal is noise');
+
+  // Imperial: yards up close, miles once it is a distance you would drive.
+  assert.equal(fmtDist(274, true), '300 yd');
+  assert.equal(fmtDist(1609.34, true), '1.0 mi');
+  assert.equal(fmtDist(100, true), '109 yd');
+  assert.equal(fmtDist(332, true), '363 yd', 'a third of a kilometre is yards you can pace, not "0.2 mi"');
+  assert.equal(fmtDist(700, true), '766 yd');
+  assert.equal(fmtDist(805, true), '0.5 mi', 'half a mile is where it switches');
+  assert.equal(fmtDist(24140, true), '15 mi');
+
+  // Short measures never change unit: they are read against each other.
+  assert.equal(fmtShort(9.2, false, 1), '9.2 m');
+  assert.equal(fmtShort(9.2, true, 1), '30.2 ft');
+  assert.equal(fmtShort(10, true), '33 ft');
+
+  // Wind comes out of the forecast in m/s.
+  assert.equal(fmtSpeed(2.2), '8 km/h');
+  assert.equal(fmtSpeed(2.2, true), '5 mph');
+
+  assert.equal(fmtTemp(12), '12 \u00b0C');
+  assert.equal(fmtTemp(12, true), '54 \u00b0F');
+
+  // Nothing is ever rendered as NaN.
+  for (const f of [fmtDist, fmtShort, fmtSpeed, fmtTemp]) {
+    assert.equal(f(null), '—');
+    assert.equal(f(undefined, true), '—');
+  }
 });
 
 console.log(`\n${pass} passed total\n`);

@@ -209,3 +209,85 @@ export function migrateV1(backend, store) {
   }
   return moved;
 }
+
+/* ── What a dog has actually done ─────────────────────────────────────
+   The record exists so a handler can answer "is this dog getting better?"
+   without scrolling. That means counting, not opinion: how many trails, how
+   far, how old were they, and what the model has learned from watching.
+
+   Pure, so it can be checked without a phone. */
+
+/* A trail's age at the moment the dog started it decides what KIND of trail
+   it was, and those are the words the sport already uses. The boundaries are
+   stated here rather than implied, because a handler is entitled to know
+   what counts as cold. */
+export const AGE_BANDS = [
+  { key: 'hot',  label: 'Hot',  under: 30,   blurb: 'under 30 min' },
+  { key: 'warm', label: 'Warm', under: 120,  blurb: '30 min – 2 h' },
+  { key: 'cold', label: 'Cold', under: Infinity, blurb: 'over 2 h' },
+];
+
+export function ageBand(mins) {
+  if (!Number.isFinite(mins) || mins < 0) return null;
+  return AGE_BANDS.find(b => mins < b.under) ?? AGE_BANDS[AGE_BANDS.length - 1];
+}
+
+/** Everything worth showing about one dog's work. `sessions` is newest-first,
+    as the store keeps them. Only RUN sessions count — a trail that was laid
+    and never worked says nothing about the dog. */
+export function dogStats(dogId, sessions, calibration = []) {
+  const runs = (sessions || []).filter(s => s.dogId === dogId && s.data && s.data.track);
+  const out = {
+    runs: runs.length,
+    metres: 0,
+    longest: 0,
+    firstAt: null,
+    lastAt: null,
+    bands: { hot: 0, warm: 0, cold: 0 },
+    unknownAge: 0,
+    targets: {},
+    graded: 0,
+    meanOffset: null,
+    sideAgree: null,
+    calRows: (calibration || []).filter(r => Number.isFinite(r?.k) && r.k > 0).length,
+  };
+  if (!runs.length) return out;
+
+  const offs = [], sides = [];
+  for (const s of runs) {
+    const len = pathLenOf(s.data.track);
+    out.metres += len;
+    out.longest = Math.max(out.longest, len);
+    const at = s.data.trackStarted ?? s.startedAt;
+    out.firstAt = out.firstAt == null ? at : Math.min(out.firstAt, at);
+    out.lastAt = out.lastAt == null ? at : Math.max(out.lastAt, at);
+
+    const band = ageBand(s.data.result?.ageMin);
+    if (band) out.bands[band.key]++; else out.unknownAge++;
+
+    const t = s.targetId || 'person';
+    out.targets[t] = (out.targets[t] || 0) + 1;
+
+    const r = s.data.result;
+    if (r && Number.isFinite(r.mean)) { offs.push(Math.abs(r.mean)); out.graded++; }
+    if (r && typeof r.sideAgreement === 'number') sides.push(r.sideAgreement);
+  }
+  if (offs.length) out.meanOffset = offs.reduce((a, b) => a + b, 0) / offs.length;
+  if (sides.length) out.sideAgree = sides.reduce((a, b) => a + b, 0) / sides.length;
+  return out;
+}
+
+/* store.js must not depend on geo.js — the store is about rows, not geometry —
+   so the one length it needs is computed here, on the same sphere. */
+function pathLenOf(pts) {
+  if (!pts || pts.length < 2) return 0;
+  const R = 6371000, rad = (d) => d * Math.PI / 180;
+  let sum = 0;
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i - 1], b = pts[i];
+    const dLat = rad(b.lat - a.lat);
+    const dLon = rad(b.lon - a.lon) * Math.cos(rad((a.lat + b.lat) / 2));
+    sum += Math.hypot(dLat, dLon) * R;
+  }
+  return sum;
+}

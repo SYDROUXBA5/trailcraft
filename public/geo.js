@@ -454,3 +454,47 @@ export function smoothBearing(prev, next, alpha = 0.3) {
   const delta = ((next - prev + 540) % 360) - 180;
   return wrap(prev + delta * alpha);
 }
+
+/* ── Units ────────────────────────────────────────────────────────────
+   The model works in metres and metres per second and always will —
+   converting at the edge, once, is what keeps the arithmetic honest. These
+   are the edge.
+
+   `imperial` is one flag rather than a per-quantity choice: a handler who
+   thinks in yards does not want their wind in km/h. */
+
+const FT = 3.280839895, YD = 1.0936133, MI = 0.000621371192;
+
+/** A trail's length: the long form, where the unit changes with the scale. */
+export function fmtDist(m, imperial = false) {
+  if (!Number.isFinite(m)) return '—';
+  if (imperial) {
+    const mi = m * MI;
+    /* Yards hold until half a mile. A 350 m trail is 380 yards of work and
+       "0.2 mi" tells a handler nothing — the switch belongs where the number
+       stops being something you can pace out. */
+    return mi >= 0.5 ? `${mi.toFixed(mi >= 10 ? 0 : 1)} mi` : `${Math.round(m * YD)} yd`;
+  }
+  return m >= 1000 ? `${(m / 1000).toFixed(m >= 10000 ? 0 : 1)} km` : `${Math.round(m)} m`;
+}
+
+/** A short measurement — an offset, a line, an accuracy. Never changes unit,
+    because the number is being compared against other numbers like it. */
+export function fmtShort(m, imperial = false, dp = 0) {
+  if (!Number.isFinite(m)) return '—';
+  return imperial ? `${(m * FT).toFixed(dp)} ft` : `${m.toFixed(dp)} m`;
+}
+
+/** Wind, from the metres per second the forecast is asked for. */
+export function fmtSpeed(ms, imperial = false) {
+  if (!Number.isFinite(ms)) return '—';
+  return imperial ? `${(ms * 2.236936).toFixed(0)} mph` : `${(ms * 3.6).toFixed(0)} km/h`;
+}
+
+export function fmtTemp(c, imperial = false) {
+  if (!Number.isFinite(c)) return '—';
+  return imperial ? `${Math.round(c * 9 / 5 + 32)} °F` : `${Math.round(c)} °C`;
+}
+
+/** The bare unit word, for a form field's suffix. */
+export const unitShort = (imperial) => (imperial ? 'ft' : 'm');

@@ -629,3 +629,21 @@ input[type="range"] { width: 100%; accent-color: var(--moss); height: 40px; }
   color: rgba(246, 242, 233, 0.62);
   display: block;
 }
+
+/* ── A dog's record ───────────────────────────────────────────────────
+   Counting, laid out so the shape of the training is visible at a glance. */
+.dog-head { display: flex; align-items: center; gap: 16px; margin-bottom: 4px; }
+.dog-head .display { margin: 0; }
+.dog-head .body { margin: 4px 0 0; }
+
+.band { margin-bottom: 12px; }
+.band:last-child { margin-bottom: 0; }
+.band-top { display: flex; align-items: baseline; gap: 8px; margin-bottom: 5px; }
+.band-top b { font-size: 15px; font-weight: 700; }
+.band-top i { font-style: normal; font-size: 12px; color: var(--muted); flex: 1; }
+.band-top span { font-variant-numeric: tabular-nums; font-weight: 700; font-size: 15px; }
+.band-rail { height: 8px; border-radius: 4px; background: var(--paper); overflow: hidden; }
+.band-fill { display: block; height: 100%; border-radius: 4px; }
+.band-hot  { background: #D9662B; }
+.band-warm { background: #E0A33C; }
+.band-cold { background: #4E7FA8; }

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { createStore, migrateV1, TARGETS, targetById, verbs, uid } from '../public/store.js';
+import { createStore, migrateV1, TARGETS, targetById, verbs, uid,
+         dogStats, ageBand, AGE_BANDS } from '../public/store.js';
 
 let pass = 0;
 const t = (name, fn) => { fn(); pass++; console.log(`  ok  ${name}`); };
@@ -137,6 +138,75 @@ t('calibration: silent under five runs, then the median speaks, clamped', () => 
   assert.ok(db.dogDrift('bo') != null, 'null k rows are kept but never counted');
   assert.equal(db.dogDrift('nell'), null, 'another dog starts from zero');
   assert.equal(db.calibration('bo').length, 6, 'rows are all retained');
+});
+
+t('ageBand: the words the sport uses, with the boundaries stated', () => {
+  assert.equal(ageBand(5).key, 'hot');
+  assert.equal(ageBand(29).key, 'hot');
+  assert.equal(ageBand(30).key, 'warm', '30 minutes is where hot ends');
+  assert.equal(ageBand(119).key, 'warm');
+  assert.equal(ageBand(120).key, 'cold', 'two hours in is cold work');
+  assert.equal(ageBand(600).key, 'cold');
+  assert.equal(ageBand(null), null, 'an ungraded run is not quietly filed as hot');
+  assert.equal(ageBand(-5), null);
+  assert.equal(AGE_BANDS.length, 3);
+});
+
+t('dogStats: counts the work, and only the work the dog actually did', () => {
+  const t0 = Date.parse('2026-08-01T09:00:00Z');
+  const leg = (n, dLat) => Array.from({ length: n }, (_, i) => ({
+    lat: 51.2 + i * dLat, lon: -2.64, t: t0 + i * 1000,
+  }));
+  // ~100 m and ~300 m of dog track.
+  const short = leg(11, 0.00009), long = leg(31, 0.00009);
+
+  const sessions = [
+    { id: 'e', dogId: 'bo', targetId: 'person', startedAt: t0 + 5e6,
+      data: { track: long, trackStarted: t0 + 5e6, result: { ageMin: 240, mean: -6, sideAgreement: 0.5 } } },
+    { id: 'd', dogId: 'bo', targetId: 'narcotics', startedAt: t0 + 4e6,
+      data: { track: short, trackStarted: t0 + 4e6, result: { ageMin: 45, mean: 4 } } },
+    { id: 'c', dogId: 'bo', targetId: 'person', startedAt: t0 + 3e6,
+      data: { track: short, trackStarted: t0 + 3e6, result: { ageMin: 10, mean: 8, sideAgreement: 1 } } },
+    // Laid but never run: says nothing about the dog.
+    { id: 'b', dogId: null, targetId: 'person', startedAt: t0 + 2e6, data: { trail: long } },
+    // Another dog's run.
+    { id: 'a', dogId: 'nell', targetId: 'person', startedAt: t0 + 1e6,
+      data: { track: long, trackStarted: t0 + 1e6, result: { ageMin: 20, mean: 3 } } },
+  ];
+
+  const st = dogStats('bo', sessions, [{ k: 2.1 }, { k: 1.8 }, { k: null }]);
+  assert.equal(st.runs, 3, 'only Bo\u2019s worked trails');
+  assert.ok(st.metres > 480 && st.metres < 520, `total distance ${st.metres.toFixed(0)} m`);
+  assert.ok(st.longest > 260 && st.longest < 320, `longest ${st.longest.toFixed(0)} m`);
+  assert.equal(st.firstAt, t0 + 3e6, 'the first trail is the earliest RUN');
+  assert.equal(st.lastAt, t0 + 5e6);
+  assert.deepEqual(st.bands, { hot: 1, warm: 1, cold: 1 });
+  assert.equal(st.targets.person, 2);
+  assert.equal(st.targets.narcotics, 1);
+  assert.equal(st.graded, 3);
+  assert.ok(Math.abs(st.meanOffset - 6) < 0.01, 'mean offset is the average SIZE, not the average side');
+  assert.ok(Math.abs(st.sideAgree - 0.75) < 0.01);
+  assert.equal(st.calRows, 2, 'null-k calibration rows are kept but not counted');
+
+  // A dog that has never run reads as zero, not as broken.
+  const none = dogStats('ghost', sessions);
+  assert.equal(none.runs, 0);
+  assert.equal(none.metres, 0);
+  assert.equal(none.firstAt, null);
+  assert.equal(none.meanOffset, null);
+  assert.deepEqual(none.bands, { hot: 0, warm: 0, cold: 0 });
+  assert.deepEqual(dogStats('bo', null).bands, { hot: 0, warm: 0, cold: 0 });
+});
+
+t('dogStats: a run graded without an age is counted, never mis-filed', () => {
+  const t0 = Date.parse('2026-08-01T09:00:00Z');
+  const track = [{ lat: 51.2, lon: -2.64, t: t0 }, { lat: 51.2009, lon: -2.64, t: t0 + 60000 }];
+  const st = dogStats('bo', [
+    { id: '1', dogId: 'bo', targetId: 'person', startedAt: t0, data: { track, result: { mean: 5 } } },
+  ]);
+  assert.equal(st.runs, 1);
+  assert.equal(st.unknownAge, 1, 'it shows up as unknown rather than joining a band it is not in');
+  assert.deepEqual(st.bands, { hot: 0, warm: 0, cold: 0 });
 });
 
 console.log(`\n${pass} passed total\n`);
