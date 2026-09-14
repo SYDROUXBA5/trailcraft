@@ -421,215 +421,6 @@ input[type="range"] { width: 100%; accent-color: var(--moss); height: 40px; }
   .switch-row input[type="checkbox"], .switch-row input[type="checkbox"]::after { transition: none; }
 }
 
-/* ── Map legend ───────────────────────────────────────────────────────
-   A picture of a model has to say which parts of it are the model. It sits
-   on the map rather than in a help screen, because that is where the
-   question gets asked. */
-.legend {
-  position: absolute;
-  right: 10px;
-  bottom: calc(env(safe-area-inset-bottom, 0px) + 248px);
-  z-index: 6;
-  padding: 12px 14px;
-  border-radius: 14px;
-  background: rgba(18, 24, 20, 0.82);
-  backdrop-filter: blur(10px);
-  color: #F6F2E9;
-  pointer-events: none;
-  max-width: 60vw;
-}
-.legend h2 {
-  margin: 0 0 9px;
-  font-size: 10px; font-weight: 700;
-  letter-spacing: 0.14em; text-transform: uppercase;
-  color: #E7C77E;
-}
-.legend p {
-  margin: 0 0 7px;
-  display: flex; align-items: center; gap: 9px;
-  font-size: 12px; font-weight: 500; line-height: 1.2;
-}
-.legend p:last-child { margin-bottom: 0; }
-.key { flex: 0 0 auto; width: 26px; height: 12px; }
-
-/* Grain, not a block: the swatch has to look like what it labels. */
-.key-scent {
-  border-radius: 6px;
-  background:
-    radial-gradient(circle at 20% 45%, #FFE7A8 0.9px, transparent 1.1px),
-    radial-gradient(circle at 46% 25%, #F2B03C 0.9px, transparent 1.1px),
-    radial-gradient(circle at 62% 66%, #FFE7A8 0.8px, transparent 1px),
-    radial-gradient(circle at 33% 76%, #F2B03C 0.8px, transparent 1px),
-    radial-gradient(circle at 80% 38%, #C9761E 0.8px, transparent 1px),
-    radial-gradient(circle at 88% 72%, #F2B03C 0.7px, transparent 0.9px),
-    radial-gradient(ellipse at 40% 50%, rgba(233, 144, 47, 0.32), transparent 70%);
-}
-.key-route {
-  background: repeating-linear-gradient(to right,
-    #F5D14A 0 7px, transparent 7px 12px);
-  height: 4px;
-}
-.key-wind {
-  height: 10px;
-  border-top: 2px solid #F7C65A;
-  border-radius: 60% 60% 0 0 / 100% 100% 0 0;
-}
-
-@media (prefers-reduced-transparency: reduce) {
-  .legend { background: #121814; backdrop-filter: none; }
-}
-
-/* ── Liquid glass ─────────────────────────────────────────────────────
-   The same palette, given a surface. A pill reads as a real object when
-   three things agree: light catches its top edge, the face falls away
-   underneath, and it throws its own colour onto the paper below it. That
-   last one is what makes the moss and ember buttons feel lit rather than
-   printed — the glow under them is their own colour, not a grey shadow.
-
-   Nothing here changes a hue. --moss and --ember are exactly what they were;
-   they are just no longer flat fills. */
-
-.btn, .chip, .age-chip, .radio-card {
-  position: relative;
-  isolation: isolate;
-  overflow: hidden;
-  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.20) 0%,
-                                            rgba(255, 255, 255, 0.04) 46%,
-                                            rgba(0, 0, 0, 0.10) 100%);
-  box-shadow:
-    inset 0 1.5px 0 rgba(255, 255, 255, 0.55),     /* the lit top edge */
-    inset 0 -2px 7px rgba(23, 32, 26, 0.16),       /* the face falling away */
-    0 1px 2px rgba(23, 32, 26, 0.10),
-    0 9px 20px -10px rgba(23, 32, 26, 0.32);
-}
-
-/* The specular sheen: a bright wash over the top half, clipped to the pill. */
-.btn::before, .chip::before, .age-chip::before, .radio-card::before {
-  content: '';
-  position: absolute;
-  left: 0; right: 0; top: 0; height: 54%;
-  border-radius: inherit;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.42), rgba(255, 255, 255, 0));
-  pointer-events: none;
-  z-index: 0;
-}
-/* Content sits above the sheen, never under it. */
-.btn > *, .chip > *, .age-chip > *, .radio-card > * { position: relative; z-index: 1; }
-
-/* Filled buttons throw their own colour down onto the paper. */
-.btn.moss, .chip.selected, .age-chip.selected, .radio-card.selected {
-  box-shadow:
-    inset 0 1.5px 0 rgba(255, 255, 255, 0.38),
-    inset 0 -3px 9px rgba(0, 0, 0, 0.22),
-    0 2px 4px rgba(30, 51, 40, 0.22),
-    0 12px 26px -8px rgba(47, 74, 58, 0.55);
-}
-.btn.ember {
-  box-shadow:
-    inset 0 1.5px 0 rgba(255, 255, 255, 0.42),
-    inset 0 -3px 9px rgba(0, 0, 0, 0.20),
-    0 2px 4px rgba(140, 62, 22, 0.22),
-    0 12px 26px -8px rgba(217, 102, 43, 0.55);
-}
-
-/* Ghost stays glass rather than losing its surface to `background: transparent`. */
-.btn.ghost {
-  background-color: rgba(255, 253, 248, 0.55);
-  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0.06));
-  backdrop-filter: blur(8px);
-}
-.glass .btn.ghost { background-color: rgba(255, 253, 248, 0.9); }
-
-.btn.moss-on-dark {
-  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0.02));
-  backdrop-filter: blur(8px);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3), 0 8px 22px -10px rgba(0, 0, 0, 0.6);
-}
-
-/* Pressed: the light rolls off the top edge as the face tips away. */
-.btn:active, .chip:active, .age-chip:active, .radio-card:active {
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.28),
-    inset 0 3px 10px rgba(23, 32, 26, 0.22),
-    0 2px 6px -2px rgba(23, 32, 26, 0.28);
-}
-.btn:active::before, .chip:active::before,
-.age-chip:active::before, .radio-card:active::before { opacity: 0.55; }
-
-.map-fab {
-  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0.05));
-  box-shadow:
-    inset 0 1.5px 0 rgba(255, 255, 255, 0.7),
-    inset 0 -2px 7px rgba(23, 32, 26, 0.16),
-    0 8px 20px -6px rgba(23, 32, 26, 0.34);
-}
-.map-fab.nudge {
-  box-shadow:
-    inset 0 1.5px 0 rgba(255, 255, 255, 0.42),
-    inset 0 -3px 9px rgba(0, 0, 0, 0.2),
-    0 10px 24px -6px rgba(217, 102, 43, 0.6);
-}
-
-/* ── Centred ──────────────────────────────────────────────────────────
-   Every label sits in the middle of the thing you press. */
-.btn, .btn.card-btn { text-align: center; }
-.chip, .age-chip { justify-content: center; }
-.radio-card { text-align: center; justify-items: center; }
-.radio-card i { grid-column: 1; }
-.set-row { text-align: center; justify-content: center; }
-.set-row .who { text-align: center; }
-
-@media (prefers-reduced-transparency: reduce) {
-  .btn.ghost, .btn.moss-on-dark { backdrop-filter: none; }
-  .btn.ghost { background-color: var(--card); }
-}
-
-/* A chip's left padding is tight so an avatar can sit near the edge. On a
-   chip with no avatar that same padding pushes the label off-centre, which
-   is what made these read as left-aligned. */
-.chip { padding: 8px 18px; text-align: center; }
-.chip:has(.ava) { padding-left: 8px; }
-.chip > span, .chip > div { text-align: center; }
-
-/* Filled pills take a stronger sheen than paper ones: a saturated face
-   carries a highlight without washing out, and it is what makes them read
-   as lit glass rather than a printed rectangle. */
-.btn.moss::before, .btn.ember::before,
-.chip.selected::before, .age-chip.selected::before, .radio-card.selected::before {
-  background: linear-gradient(180deg,
-    rgba(255, 255, 255, 0.34) 0%,
-    rgba(255, 255, 255, 0.13) 58%,
-    rgba(255, 255, 255, 0) 100%);
-  height: 62%;
-}
-/* A hairline of the surface's own colour along the very top — the edge of a
-   piece of glass catching the light rather than a border drawn on it. */
-.btn.moss, .btn.ember { border-color: transparent; }
-.btn.moss::after, .btn.ember::after {
-  content: '';
-  position: absolute; inset: 0;
-  border-radius: inherit;
-  border: 1px solid rgba(255, 255, 255, 0.22);
-  border-bottom-color: rgba(0, 0, 0, 0.14);
-  pointer-events: none;
-  z-index: 2;
-}
-
-/* A flex column packs its children to the start of the cross axis, so a
-   `text-align: center` on the button never reached them — each line was
-   already shrink-wrapped and parked on the left. These two rules are the
-   only places a title sat left of the wider line underneath it. */
-.chip.plain, .who { align-items: center; text-align: center; }
-
-/* What the wind picture is actually made of. Quiet, but present — a forecast
-   dressed as a measurement is the one thing this map must not be. */
-.legend-note {
-  margin: -3px 0 0 35px;
-  font-size: 10.5px; font-weight: 400; line-height: 1.35;
-  color: rgba(246, 242, 233, 0.62);
-  display: block;
-}
-
 /* ── A dog's record ───────────────────────────────────────────────────
    Counting, laid out so the shape of the training is visible at a glance. */
 .dog-head { display: flex; align-items: center; gap: 16px; margin-bottom: 4px; }
@@ -670,7 +461,6 @@ input[type="range"] { width: 100%; accent-color: var(--moss); height: 40px; }
 /* Small text goes the other way: a touch of positive tracking is what keeps
    a 10–12px label legible at arm's length in sun. */
 .label { letter-spacing: 0.06em; }
-.legend h2 { letter-spacing: 0.14em; }
 
 /* Custom ageing: a field in the card, because a system prompt is blocked
    outright in a home-screen web app on iOS. */
@@ -680,3 +470,60 @@ input[type="range"] { width: 100%; accent-color: var(--moss); height: 40px; }
   text-align: center; font-variant-numeric: tabular-nums;
 }
 .age-custom .btn.small { flex: 0 0 auto; min-height: 48px; padding: 8px 20px; }
+
+/* ── The air, top left ────────────────────────────────────────────────
+   On the map at all times: which way the wind is going, how hard, how warm.
+   Glass, because it floats over the ground rather than sitting on it — the
+   imagery reads through it and it never becomes the subject.
+
+   The arrow points where the air is GOING, the same direction the streaks
+   run. A wind arrow that points where the wind comes FROM is correct
+   meteorology and a trap on a map. */
+.wx-panel {
+  position: fixed;
+  top: calc(var(--safe-t) + 14px);
+  left: 12px;
+  z-index: 7;
+  display: flex; flex-direction: column; gap: 3px;
+  padding: 10px 14px 9px;
+  border-radius: 18px;
+  color: #F6F2E9;
+  pointer-events: none;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.03) 46%, rgba(0, 0, 0, 0.12)),
+    rgba(20, 27, 22, 0.62);
+  backdrop-filter: blur(16px) saturate(150%);
+  -webkit-backdrop-filter: blur(16px) saturate(150%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.34),
+    inset 0 -2px 8px rgba(0, 0, 0, 0.22),
+    0 10px 26px -10px rgba(0, 0, 0, 0.6);
+}
+.wx-row { display: flex; align-items: center; gap: 9px; }
+.wx-arrow {
+  display: grid; place-items: center;
+  width: 26px; height: 26px; flex: 0 0 auto;
+  border-radius: 50%;
+  color: #FFE9C4;
+  background: rgba(255, 233, 196, 0.13);
+  box-shadow: inset 0 0 0 1px rgba(255, 233, 196, 0.22);
+  transition: transform 700ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+.wx-main { display: flex; align-items: baseline; gap: 6px; }
+.wx-main b { font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+.wx-main i { font-style: normal; font-size: 13px; font-weight: 600; opacity: 0.8; }
+.wx-sub { padding-left: 35px; gap: 8px; }
+.wx-sub b { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; opacity: 0.92; }
+.wx-sub i { font-style: normal; font-size: 10.5px; font-weight: 400; opacity: 0.55; }
+
+/* The walk screen puts a full-width banner across the top; the air drops
+   below it rather than fighting it. */
+#scrWalk:not([hidden]) ~ .wx-panel,
+body:has(#scrWalk:not([hidden])) .wx-panel { top: calc(var(--safe-t) + 104px); }
+
+@media (prefers-reduced-transparency: reduce) {
+  .wx-panel { background: #141B16; backdrop-filter: none; -webkit-backdrop-filter: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .wx-arrow { transition: none; }
+}

@@ -22,14 +22,21 @@
 
 <div id="toast" class="toast" hidden></div>
 
-<!-- Reads over the map on every screen that draws scent. A picture of a model
-     has to say which parts of it are the model. -->
-<div id="mapLegend" class="legend" hidden>
-  <h2>Scent dispersion</h2>
-  <p><span class="key key-scent"></span>Estimated scent</p>
-  <p><span class="key key-route"></span>Walked route</p>
-  <p><span class="key key-wind"></span>Wind direction</p>
-  <p class="legend-note" id="legendWind"></p>
+<!-- The air, over every map screen. Three things a handler reads before
+     deciding anything: which way it is going, how hard, and how warm. -->
+<div id="wxPanel" class="wx-panel" hidden>
+  <div class="wx-row">
+    <span class="wx-arrow" id="wxArrow" aria-hidden="true">
+      <svg viewBox="0 0 24 24" width="20" height="20">
+        <path d="M12 21 L12 3 M12 3 L7 9 M12 3 L17 9" fill="none"
+              stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </span>
+    <span class="wx-main"><b id="wxSpeed">—</b><i id="wxDir"></i></span>
+  </div>
+  <div class="wx-row wx-sub">
+    <b id="wxTemp">—</b><i id="wxNote">10 m forecast</i>
+  </div>
 </div>
 
 <!-- ── Onboarding: handler ─────────────────────────────────────────── -->
