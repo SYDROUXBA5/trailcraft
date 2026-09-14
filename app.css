@@ -671,3 +671,12 @@ input[type="range"] { width: 100%; accent-color: var(--moss); height: 40px; }
    a 10–12px label legible at arm's length in sun. */
 .label { letter-spacing: 0.06em; }
 .legend h2 { letter-spacing: 0.14em; }
+
+/* Custom ageing: a field in the card, because a system prompt is blocked
+   outright in a home-screen web app on iOS. */
+.age-custom { display: flex; gap: 8px; align-items: center; margin-top: 10px; }
+.age-custom input {
+  flex: 1; min-height: 48px; min-width: 0;
+  text-align: center; font-variant-numeric: tabular-nums;
+}
+.age-custom .btn.small { flex: 0 0 auto; min-height: 48px; padding: 8px 20px; }
