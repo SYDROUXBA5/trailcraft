@@ -8,6 +8,7 @@
 
 import {
   pathLen, cardinal, dist, dwellFold, bearing, project,
+  fmtDist, fmtShort, fmtSpeed, fmtTemp, unitShort,
   scentField, plumePolygon, densify, timestamps,
   signedOffsets, meanSigned, sideOfDrift, sideAgreement, lineCorrect, departure,
   progressAlong, splitLine, smoothBearing,
@@ -15,13 +16,14 @@ import {
 import { FLAT, buildTerrain, stability, regime, flowAt, normOf } from './field.js';
 import { predictedOffsets, ScentSim, driftFrom, stepByFlow, AIRBORNE } from './sim.js';
 import { encodeTrail, decodeTrail, cardUrl, cardFromText } from './card.js';
-import { createStore, migrateV1, TARGETS, targetById, verbs, uid } from './store.js';
+import { createStore, migrateV1, TARGETS, targetById, verbs, uid,
+         dogStats, ageBand, AGE_BANDS } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-13r';
+const BUILD = '2026-09-14a';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
-const DEFAULTS = { accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true, mbToken: (window.MB_TOKEN || '') };
+const DEFAULTS = { accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true, imperial: false, mbToken: (window.MB_TOKEN || '') };
 const loadJson = (k, f) => { try { return JSON.parse(localStorage.getItem(k)) ?? f; } catch { return f; } };
 let settings = { ...DEFAULTS, ...loadJson('tc.settings', {}) };
 const saveSettings = () => localStorage.setItem('tc.settings', JSON.stringify(settings));
@@ -50,7 +52,12 @@ const fmtDur = (ms) => {
   const s = Math.max(0, Math.round(ms / 1000));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 };
-const fmtKm = (m) => m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.round(m)} m`;
+/* One place asks which units, so nothing on screen can disagree with
+   anything else on screen. The model never sees these. */
+const imp = () => !!settings.imperial;
+const fmtKm = (m) => fmtDist(m, imp());
+const fmtM = (m, dp = 0) => fmtShort(m, imp(), dp);
+const fmtWind = (ms) => fmtSpeed(ms, imp());
 const fmtWhen = (t) => new Date(t).toLocaleString([], { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 
 const toast = (msg) => {
@@ -96,7 +103,7 @@ const avaHtml = (ent, cls = '') => {
 /* ── Screens ──────────────────────────────────────────────────────── */
 const SCREENS = ['scrOnboardHandler', 'scrOnboardDog', 'scrTutorial', 'scrHome', 'scrLay',
   'scrConfirm', 'scrShare', 'scrContam', 'scrPick', 'scrScan', 'scrRun', 'scrResult',
-  'scrShowMap', 'scrSessions', 'scrSettings', 'scrDraw', 'scrCountdown', 'scrWalk', 'scrWait'];
+  'scrShowMap', 'scrSessions', 'scrSettings', 'scrDraw', 'scrCountdown', 'scrWalk', 'scrWait', 'scrDog'];
 
 /* The screens that are transparent chrome over the live map. */
 const MAP_SCREENS = ['scrLay', 'scrConfirm', 'scrContam', 'scrRun', 'scrShowMap', 'scrDraw', 'scrWalk'];
@@ -699,7 +706,7 @@ function gpsHudText() {
 /* Fixes arriving and every one of them rejected looks, from the outside,
    exactly like no GPS at all. Say which it is, and say the number that
    decides it — otherwise the phone is just "broken". */
-const fmtAcc = (a) => (a >= 1000 ? `${(a / 1000).toFixed(1)} km` : `${Math.round(a)} m`);
+const fmtAcc = (a) => fmtDist(a, imp());
 function accWarning() {
   if (rec.lastAcc == null) return 'Waiting for a fix…';
   return `GPS says ±${fmtAcc(rec.lastAcc)} — worse than the ${settings.accCap} m cap, `
@@ -886,9 +893,9 @@ function legendWind(wx) {
   const el = $('legendWind');
   if (!el) return;
   if (!wx || wx.wind_speed == null) { el.textContent = ''; return; }
-  const kmh = (wx.wind_speed * 3.6).toFixed(0);
+  const spd = fmtWind(wx.wind_speed);
   const when = wx.time ? new Date(wx.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
-  el.textContent = `${kmh} km/h ${cardinal(wx.wind_direction)}${when ? ` at ${when}` : ''}`
+  el.textContent = `${spd} ${cardinal(wx.wind_direction)}${when ? ` at ${when}` : ''}`
     + ` — 10 m open-ground forecast, not measured here`;
 }
 
@@ -1393,7 +1400,7 @@ function renderShare(s) {
     $('shareMini').innerHTML = (s.data.hides || []).map((h, i) =>
       `<circle cx="${40 + i * 40}" cy="85" r="7" fill="#D9662B"/>`).join('');
     $('shareMeta').textContent = `${s.data.hides.length} hide${s.data.hides.length === 1 ? '' : 's'} · set ${laid}`
-      + (wx?.wind_speed != null ? ` · wind ${(wx.wind_speed * 3.6).toFixed(0)} km/h ${cardinal(wx.wind_direction)}` : '');
+      + (wx?.wind_speed != null ? ` · wind ${fmtWind(wx.wind_speed)} ${cardinal(wx.wind_direction)}` : '');
     /* Hide cards are not in the QR codec yet — single-phone hides for now. */
     $('shareQrCard').hidden = true;
   } else {
@@ -1402,9 +1409,9 @@ function renderShare(s) {
     const mins = fmtDur(s.data.trail[s.data.trail.length - 1].t - s.data.trail[0].t);
     $('shareMeta').textContent = isPlan
       ? `${fmtKm(pathLen(s.data.trail))} plan · dog starts +${s.data.ageMin ?? 10} min`
-        + (wx?.wind_speed != null ? ` · wind ${(wx.wind_speed * 3.6).toFixed(0)} km/h ${cardinal(wx.wind_direction)}` : '')
+        + (wx?.wind_speed != null ? ` · wind ${fmtWind(wx.wind_speed)} ${cardinal(wx.wind_direction)}` : '')
       : `${fmtKm(pathLen(s.data.trail))} · ${mins} · laid ${laid}`
-        + (wx?.wind_speed != null ? ` · wind ${(wx.wind_speed * 3.6).toFixed(0)} km/h ${cardinal(wx.wind_direction)}` : '');
+        + (wx?.wind_speed != null ? ` · wind ${fmtWind(wx.wind_speed)} ${cardinal(wx.wind_direction)}` : '');
     renderShareQr(s);
   }
 }
@@ -1662,7 +1669,7 @@ function walkHud() {
   const left = (walk.offAt + (walk.card.ageMin ?? 10) * 60000) - Date.now();
   const clock = left > 0 ? `Dog starts in ${fmtDur(left)}` : 'The dog is on its way';
   navSay(n, u,
-    off == null || off < 8 ? 'On the line' : `${Math.round(off)} m off the line`,
+    off == null || off < 8 ? 'On the line' : `${fmtM(off)} off the line`,
     clock);
   return '';
 }
@@ -1681,7 +1688,7 @@ async function finishWalk() {
   const B = walk.card.points[walk.card.points.length - 1];
   const last = rec.pts[rec.pts.length - 1];
   if (last && dist(last, B) > 60 &&
-      !confirm(`You are ${Math.round(dist(last, B))} m from the drawn end. Finish here anyway?`)) return;
+      !confirm(`You are ${fmtM(dist(last, B))} from the drawn end. Finish here anyway?`)) return;
   await stopWatch();
   stopFollowing();
   rec.pts.forEach(pt => delete pt._seen);
@@ -1942,7 +1949,7 @@ async function computeResult(s, track, wps, startedAt, { bank = true } = {}) {
   let sentence;
   if (mean == null) sentence = `${dogName} ran, but the track could not be graded.`;
   else if (mAbs < 3) sentence = `${dogName} held the line — under 3 m from it on average.`;
-  else sentence = `${dogName} worked about ${Math.round(mAbs)} m to the ${sideWord} of the line.`;
+  else sentence = `${dogName} worked about ${fmtM(mAbs)} to the ${sideWord} of the line.`;
 
   if (predSide !== 0) {
     sentence += ` The wind pushed scent ${predSide > 0 ? 'right' : 'left'}.`;
@@ -2018,7 +2025,7 @@ function renderResult(s) {
       : r.agree == null ? (r.side ? cap(r.side) : '—')
         : `${cap(r.side ?? '—')} <span class="${r.agree >= 0.6 ? 'ok' : 'no'}">${r.agree >= 0.6 ? '✓' : '✗'}</span>`;
     $('resGrid').innerHTML =
-      cell(r.mean != null ? `${Math.abs(r.mean).toFixed(1)} m` : '—', 'mean offset') +
+      cell(r.mean != null ? fmtM(Math.abs(r.mean), 1) : '—', 'mean offset') +
       cell(sideCell, 'side agrees') +
       cell(`${r.ageMin} min`, 'trail age at start') +
       // Regime and stability share a cell but NEVER a number.
@@ -2242,6 +2249,77 @@ async function handleCard(data) {
   return true;
 }
 
+/* ── One dog's record ─────────────────────────────────────────────────
+   The question this answers is "is this dog getting better?", and it answers
+   it by counting rather than by opinion. Everything here is derived from the
+   sessions already on the phone — nothing new is stored, so it cannot drift
+   out of step with the runs it describes. */
+let dogCardId = null;
+
+function openDogCard(id) {
+  const d = db.dogs.byId(id);
+  if (!d) return;
+  dogCardId = id;
+  snap();
+  const st = dogStats(id, S.sessions, db.calibration(id));
+
+  /* innerHTML into a wrapper, never outerHTML on the thing itself: replacing
+     an element by its own outerHTML throws away the id the next render needs
+     to find it, and the failure only shows on the SECOND open. */
+  $('dogAva').innerHTML = avaHtml(d, 'big');
+  $('dogName').textContent = d.name;
+  $('dogSub').textContent = `${d.level} trails · ${fmtM(d.lineM)} line`
+    + (st.firstAt ? ` · first ran ${new Date(st.firstAt).toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' })}` : '');
+
+  const cell = (big, small) => `<div class="cell"><b>${big}</b><span>${esc(small)}</span></div>`;
+  $('dogGrid').innerHTML = st.runs
+    ? cell(st.runs, st.runs === 1 ? 'trail run' : 'trails run')
+      + cell(fmtKm(st.metres), 'worked in total')
+      + cell(fmtKm(st.longest), 'longest single run')
+      + cell(st.lastAt ? ageWord(Date.now() - st.lastAt) + ' ago' : '—', 'last run')
+    : cell('0', 'trails run') + cell('—', 'worked in total')
+      + cell('—', 'longest single run') + cell('—', 'last run');
+
+  /* A bar rather than three numbers: the shape of a dog's training is the
+     point, and the shape is what you are looking for. */
+  const total = AGE_BANDS.reduce((n, b) => n + st.bands[b.key], 0);
+  $('dogBands').innerHTML = total
+    ? AGE_BANDS.map(b => {
+        const n = st.bands[b.key];
+        const pct = Math.round((n / total) * 100);
+        return `<div class="band">
+          <div class="band-top"><b>${b.label}</b><i>${b.blurb}</i><span>${n}</span></div>
+          <div class="band-rail"><span class="band-fill band-${b.key}" style="width:${pct}%"></span></div>
+        </div>`;
+      }).join('') + (st.unknownAge
+        ? `<p class="body small muted">${st.unknownAge} run${st.unknownAge === 1 ? '' : 's'} had no weather, so no age was worked out.</p>`
+        : '')
+    : `<p class="body small muted">No graded runs yet. The bands fill in as ${esc(d.name)} works trails.</p>`;
+
+  /* The calibration is the only number here the dog earned rather than the
+     handler. It stays silent until it has evidence — five runs — because a
+     figure from two is a guess wearing a decimal point. */
+  const k = db.dogDrift(id);
+  $('dogCal').innerHTML = k != null
+    ? `From ${st.calRows} graded run${st.calRows === 1 ? '' : 's'}, ${esc(d.name)} works about
+       <b>${fmtM(k, 1)} off the line for every hour</b> the trail has aged.
+       That figure now shapes the plume drawn for ${esc(d.name)}, and nobody else.`
+    : `Not enough evidence yet — ${st.calRows} of 5 graded runs.
+       Until then the plume uses the general model rather than ${esc(d.name)}\u2019s own drift.`;
+
+  const runs = S.sessions.filter(x => x.dogId === id && x.data?.track).slice(0, 8);
+  $('dogRuns').innerHTML = runs.length ? runs.map(x => {
+    const band = ageBand(x.data.result?.ageMin);
+    return `<div class="card" data-open-session="${x.id}">
+      <div class="meta"><span>${fmtWhen(x.data.trackStarted ?? x.startedAt)}</span>
+        <span>${band ? band.label : targetById(x.targetId).label}</span></div>
+      <div class="story">${esc(x.summary || '')}</div>
+    </div>`;
+  }).join('') : `<div class="card"><p class="body muted">Nothing run yet.</p></div>`;
+
+  go('scrDog');
+}
+
 /* ── Settings ─────────────────────────────────────────────────────── */
 function renderSettings() {
   snap();
@@ -2249,7 +2327,7 @@ function renderSettings() {
     const team = S.dogs.filter(d => d.handlerId === h.id);
     return `<div class="card set-card">
       <button class="set-row" data-edit-handler="${h.id}">${avaHtml(h)}<span class="who"><b>${esc(h.name)}</b></span></button>
-      ${team.map(d => `<button class="set-row" data-edit-dog="${d.id}">${avaHtml(d)}<span class="who"><b>${esc(d.name)}</b><i>${esc(d.level)} · ${d.lineM} m line</i></span></button>`).join('')}
+      ${team.map(d => `<button class="set-row" data-dog-card="${d.id}">${avaHtml(d)}<span class="who"><b>${esc(d.name)}</b><i>${esc(d.level)} · ${fmtM(d.lineM)} line</i></span></button>`).join('')}
       <button class="btn ghost small" data-add-dog-for="${h.id}">Add a dog for ${esc(h.name)}</button>
     </div>`;
   }).join('') + `<button class="btn ghost small" id="setAddHandler">Add handler</button>`;
@@ -2260,7 +2338,11 @@ function renderSettings() {
     + `<button class="btn ghost small" id="setAddLayer">Add person</button>`;
 
   $('plumeOn').checked = settings.plume !== false;
+  $('unitRow').querySelectorAll('[data-units]').forEach(b =>
+    b.classList.toggle('selected', (b.dataset.units === 'imperial') === imp()));
   $('accCap').value = settings.accCap; $('accCapVal').textContent = settings.accCap;
+  const ll = document.querySelector('label[for="obDogLine"]');
+  if (ll) ll.textContent = `Line length, ${imp() ? 'feet' : 'metres'}`;
   $('stillCap').value = settings.stillCap; $('stillCapVal').textContent = settings.stillCap;
   $('mbToken').value = settings.mbToken;
   $('gpsReport').hidden = true;
@@ -2367,7 +2449,18 @@ function wire() {
     if (h) { db.kv.set('lastHandlerId', h.dataset.handler); return renderHome(); }
     if (e.target.closest('[data-add-handler]')) return openHandlerForm({ returnTo: 'scrHome' });
     const d = e.target.closest('[data-dog]');
-    if (d) { db.kv.set('lastDogId', d.dataset.dog); return renderHome(); }
+    if (d) {
+      /* Tapping another dog picks it; tapping the one already picked opens
+         its record. Selecting has to stay a single tap — it is the thing
+         done most — so the card hangs off the tap that currently does
+         nothing at all.
+
+         The test is what the chip LOOKS like, not what a snapshot says it
+         should be: the handler is answering the screen in front of them. */
+      if (d.classList.contains('selected')) return openDogCard(d.dataset.dog);
+      db.kv.set('lastDogId', d.dataset.dog);
+      return renderHome();
+    }
     if (e.target.closest('[data-add-dog]')) return openDogForm({ returnTo: 'scrHome' });
     const t = e.target.closest('[data-target]');
     if (t) { db.kv.set('lastTargetId', t.dataset.target); return renderHome(); }
@@ -2511,6 +2604,16 @@ function wire() {
   $('btnResDone').addEventListener('click', () => { clearMap(); go('scrHome'); });
 
   // Sessions
+  $('dogBack').addEventListener('click', () => go('scrHome'));
+  $('dogEdit').addEventListener('click', () => {
+    const d = db.dogs.byId(dogCardId);
+    if (d) openDogForm({ id: d.id, handlerId: d.handlerId, returnTo: 'scrHome' });
+  });
+  $('dogRuns').addEventListener('click', (e) => {
+    const open = e.target.closest('[data-open-session]');
+    if (open) openSession(open.dataset.openSession);
+  });
+
   $('btnSessBack').addEventListener('click', () => { renderSettings(); go('scrSettings'); });
   $('sessionList').addEventListener('click', (e) => {
     const open = e.target.closest('[data-open-session]');
@@ -2525,11 +2628,8 @@ function wire() {
   $('scrSettings').addEventListener('click', (e) => {
     const eh = e.target.closest('[data-edit-handler]');
     if (eh) return openHandlerForm({ id: eh.dataset.editHandler, returnTo: 'scrSettings' });
-    const ed = e.target.closest('[data-edit-dog]');
-    if (ed) {
-      const dog = db.dogs.byId(ed.dataset.editDog);
-      return openDogForm({ id: dog.id, handlerId: dog.handlerId, returnTo: 'scrSettings' });
-    }
+    const dc = e.target.closest('[data-dog-card]');
+    if (dc) return openDogCard(dc.dataset.dogCard);
     const ad = e.target.closest('[data-add-dog-for]');
     if (ad) return openDogForm({ handlerId: ad.dataset.addDogFor, returnTo: 'scrSettings' });
     const el = e.target.closest('[data-edit-layer]');
@@ -2545,6 +2645,13 @@ function wire() {
       if (fmtId) $(fmtId).textContent = $(id).value;
     });
   };
+  $('unitRow').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-units]');
+    if (!b) return;
+    settings.imperial = b.dataset.units === 'imperial';
+    saveSettings();
+    renderSettings();
+  });
   $('plumeOn').addEventListener('change', () => {
     settings.plume = $('plumeOn').checked;
     saveSettings();
