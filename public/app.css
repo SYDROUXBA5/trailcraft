@@ -17,8 +17,8 @@
   --safe-b: env(safe-area-inset-bottom, 0px);
   --safe-t: env(safe-area-inset-top, 0px);
 
-  --display: "Fraunces", Georgia, "Times New Roman", serif;
-  --body: "Public Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --display: "Roboto", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --body: "Roboto", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
 }
@@ -357,8 +357,8 @@ input[type="range"] { width: 100%; accent-color: var(--moss); height: 40px; }
 
 .nav-dist { display: flex; align-items: baseline; gap: 5px; flex: 0 0 auto; }
 .nav-dist b {
-  font-family: Fraunces, Georgia, serif;
-  font-weight: 700; font-size: 44px; line-height: 1;
+  font-family: var(--display);
+  font-weight: 800; font-size: 44px; line-height: 1;
   letter-spacing: -0.02em;
   font-variant-numeric: tabular-nums;
 }
@@ -647,3 +647,27 @@ input[type="range"] { width: 100%; accent-color: var(--moss); height: 40px; }
 .band-hot  { background: #D9662B; }
 .band-warm { background: #E0A33C; }
 .band-cold { background: #4E7FA8; }
+
+/* ── Roboto ───────────────────────────────────────────────────────────
+   One family now does both roles, so the hierarchy has to come from weight
+   and spacing rather than from a change of voice.
+
+   A serif carries presence in its shapes; Roboto does not, so the display
+   sizes take more weight to hold the same authority. And tracking is
+   size-specific — letters read too far apart as they grow, so the larger
+   the type, the tighter it is set. A single letter-spacing across a scale
+   is always wrong somewhere. */
+.display { font-weight: 800; letter-spacing: -0.022em; }
+.display.big { letter-spacing: -0.03em; }
+.tut-title { font-weight: 800; letter-spacing: -0.03em; }
+.tut-title.huge { font-weight: 900; letter-spacing: -0.045em; }
+.grid2 b { font-weight: 800; letter-spacing: -0.022em; }
+.btn.big b { font-weight: 700; letter-spacing: -0.015em; }
+.chip.plain b { font-weight: 700; letter-spacing: -0.008em; }
+.nav-dist b { font-weight: 800; letter-spacing: -0.028em; }
+.band-top b { font-weight: 700; }
+
+/* Small text goes the other way: a touch of positive tracking is what keeps
+   a 10–12px label legible at arm's length in sun. */
+.label { letter-spacing: 0.06em; }
+.legend h2 { letter-spacing: 0.14em; }
