@@ -30,7 +30,7 @@ export const targetById = (id) => TARGETS.find(t => t.id === id) ?? TARGETS[0];
 /** Verbs for the two big buttons and the session sentence. */
 export const verbs = (t) => t.kind === 'person'
   ? { lay: 'Lay a trail', laySub: 'walks it', run: 'Run a trail',
-      runSub: 'Scan a trail card, or pick one laid on this phone', setter: 'Who lays the trail' }
+      runSub: 'Pick one laid on this phone', setter: 'Who lays the trail' }
   : { lay: 'Set a hide', laySub: 'places it', run: 'Search',
       runSub: 'Scan a hide card, or pick one set on this phone', setter: 'Who sets the hide' };
 

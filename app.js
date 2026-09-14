@@ -20,7 +20,7 @@ import { createStore, migrateV1, TARGETS, targetById, verbs, uid,
          dogStats, ageBand, AGE_BANDS } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-14c';
+const BUILD = '2026-09-14d';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true, imperial: false, mbToken: (window.MB_TOKEN || '') };
@@ -679,6 +679,10 @@ function renderHome() {
     : `${setter} places it, ${handler.name} searches with ${dog?.name ?? 'the dog'}`;
   $('btnRunLabel').textContent = v.run;
   $('btnRunSub').textContent = v.runSub;
+  /* Scanning has its own button because it is how the OTHER phone joins in,
+     and burying it under "Run a trail" made the layer hunt for it. Hides have
+     no card format yet, so it only shows where it can do something. */
+  $('btnScanHome').hidden = target.kind !== 'person';
 
   const recent = S.sessions.slice(0, 6);
   $('recentList').innerHTML = recent.length ? recent.map(sessionCard).join('')
@@ -2145,7 +2149,10 @@ function stopScan() {
   if (v) { v.srcObject = null; v.hidden = true; }
 }
 
-async function openScan() {
+let scanCameFrom = 'scrPick';
+
+async function openScan(from = 'scrPick') {
+  scanCameFrom = from;
   go('scrScan');
   const gen = ++scan.gen;
   $('scanState').textContent = 'Point the camera at a Trail Card.';
@@ -2607,16 +2614,18 @@ function wire() {
   });
 
   // Pick / scan
-  $('btnScan').addEventListener('click', openScan);
+  $('btnScan').addEventListener('click', () => openScan('scrPick'));
   $('btnScanWalked').addEventListener('click', () => {
     if (!run.session) return;
     scanWalkedFor = run.session.id;
-    openScan();
+    openScan('scrResult');
   });
   $('btnPickBack').addEventListener('click', () => go('scrHome'));
+  $('btnScanHome').addEventListener('click', () => openScan('scrHome'));
   $('btnScanBack').addEventListener('click', () => {
     stopScan();
     if (scanWalkedFor) { scanWalkedFor = null; return go('scrResult'); }
+    if (scanCameFrom === 'scrHome') return go('scrHome');
     openPick();
   });
   $('scanFromPhoto').addEventListener('click', () => $('scanFile').click());
