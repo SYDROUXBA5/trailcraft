@@ -5,6 +5,7 @@ import {
   crossTrackSigned, signedOffsets, meanSigned, sideOfDrift, sideAgreement, lineCorrect,
   dwellFold, foldFixes, departure, progressAlong, splitLine, smoothBearing,
   fmtDist, fmtShort, fmtSpeed, fmtTemp, timestampsEndingAt,
+  fmtWeight, kgToShown, shownToKg,
 } from '../public/geo.js';
 
 let pass = 0;
@@ -514,6 +515,19 @@ t('timestampsEndingAt: a drawn trail has just been laid, not just begun', () => 
     'anchored at the start, almost the whole line would be in the future');
 
   assert.deepEqual(timestampsEndingAt([], now), []);
+});
+
+t('weight: kept in kilograms, shown in whichever the handler reads', () => {
+  assert.equal(fmtWeight(30), '30.0 kg');
+  assert.equal(fmtWeight(30, true), '66.1 lb');
+  assert.equal(fmtWeight(0), '—', 'an unrecorded weight is not zero kilograms');
+  assert.equal(fmtWeight(null, true), '—');
+
+  // A number typed in pounds comes back as the same number in pounds.
+  const kg = shownToKg(66.1, true);
+  assert.ok(Math.abs(kgToShown(kg, true) - 66.1) < 0.01);
+  assert.equal(kgToShown(30, false), 30, 'metric is stored exactly as typed');
+  assert.equal(shownToKg(null, true), null);
 });
 
 console.log(`\n${pass} passed total\n`);

@@ -69,6 +69,25 @@
     </div>
     <label class="field-label" for="obDogName">Name</label>
     <input id="obDogName" type="text" placeholder="Dog's name">
+    <label class="field-label" for="obDogBreed">Breed</label>
+    <input id="obDogBreed" type="text" placeholder="Malinois, Spaniel, crossbreed…">
+
+    <span class="label" style="margin-top:20px">Sex</span>
+    <div class="age-row" id="obDogSex">
+      <button type="button" class="age-chip" data-sex="Male">Male</button>
+      <button type="button" class="age-chip" data-sex="Female">Female</button>
+    </div>
+
+    <label class="field-label" for="obDogDob" style="margin-top:20px">Date of birth</label>
+    <input id="obDogDob" type="date">
+    <p class="body muted small">The age looks after itself once this is in.</p>
+
+    <label class="field-label" for="obDogWeight">Weight, <b id="obDogWeightUnit">kg</b></label>
+    <input id="obDogWeight" type="number" inputmode="decimal" step="0.1" min="0" max="200">
+
+    <label class="field-label" for="obDogChip">Microchip</label>
+    <input id="obDogChip" type="text" inputmode="numeric" placeholder="Optional">
+
     <span class="label" style="margin-top:20px">Trail level</span>
     <div class="radio-cards" id="obDogLevel">
       <button class="radio-card selected" data-level="Hot"><b>Hot</b><i>fresh trails, minutes old</i><span class="radio-dot"></span></button>
@@ -351,6 +370,9 @@
       </div>
     </div>
 
+    <span class="label">About</span>
+    <div class="card" id="dogAbout"></div>
+
     <span class="label">Work so far</span>
     <div class="grid2" id="dogGrid"></div>
 
@@ -360,7 +382,7 @@
     <span class="label">What the model has learned</span>
     <div class="card"><p class="body" id="dogCal"></p></div>
 
-    <span class="label">Recent runs</span>
+    <span class="label" id="dogRunsLabel">Every trail</span>
     <div id="dogRuns" class="recent"></div>
 
     <div class="page-bottom">

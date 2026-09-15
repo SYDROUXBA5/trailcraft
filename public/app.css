@@ -611,3 +611,17 @@ body:has(#scrWalk:not([hidden])) { --top-row: calc(var(--safe-t) + 104px); }
 .chip .who { justify-content: center; min-width: 0; }
 .chip .who b { font-weight: 700; line-height: 1.2; }
 .chip .ava { flex: 0 0 auto; }
+
+/* ── A dog's facts ────────────────────────────────────────────────────
+   Label left, value right, hairline between. Rows only appear when they
+   have something in them — a record padded with dashes reads as a form
+   nobody filled in. */
+.fact {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 16px;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--border);
+}
+.fact:last-child { border-bottom: 0; padding-bottom: 0; }
+.fact:first-child { padding-top: 0; }
+.fact span { font-size: 14px; color: var(--muted); flex: 0 0 auto; }
+.fact b { font-size: 15px; font-weight: 700; text-align: right; }

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createStore, migrateV1, TARGETS, targetById, verbs, uid,
-         dogStats, ageBand, AGE_BANDS } from '../public/store.js';
+         dogStats, ageBand, AGE_BANDS, dogAge } from '../public/store.js';
 
 let pass = 0;
 const t = (name, fn) => { fn(); pass++; console.log(`  ok  ${name}`); };
@@ -207,6 +207,21 @@ t('dogStats: a run graded without an age is counted, never mis-filed', () => {
   assert.equal(st.runs, 1);
   assert.equal(st.unknownAge, 1, 'it shows up as unknown rather than joining a band it is not in');
   assert.deepEqual(st.bands, { hot: 0, warm: 0, cold: 0 });
+});
+
+t('dogAge: counted from a birthday, so it is never stale', () => {
+  const on = (y, m, d) => Date.UTC(y, m - 1, d, 12);
+  const now = on(2026, 9, 15);
+  assert.equal(dogAge(on(2023, 9, 15), now).text, '3 yr');
+  assert.equal(dogAge(on(2023, 5, 15), now).text, '3 yr 4 mo');
+  assert.equal(dogAge(on(2026, 3, 20), now).text, '5 mo', 'a day short of six months is five');
+  assert.equal(dogAge(on(2026, 9, 1), now).text, 'under a month');
+  assert.equal(dogAge(on(2023, 5, 15), now).totalMonths, 40);
+
+  // Nothing to show beats something wrong.
+  assert.equal(dogAge(null, now), null);
+  assert.equal(dogAge(undefined, now), null);
+  assert.equal(dogAge(on(2027, 1, 1), now), null, 'a birthday in the future is not an age');
 });
 
 console.log(`\n${pass} passed total\n`);
