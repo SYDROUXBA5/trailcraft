@@ -21,7 +21,7 @@ import { createStore, migrateV1, TARGETS, targetById, verbs, uid,
          dogStats, ageBand, AGE_BANDS, LEVELS, levelById } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-15b';
+const BUILD = '2026-09-15c';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true, imperial: false, mbToken: (window.MB_TOKEN || '') };
@@ -618,8 +618,8 @@ function saveDogForm() {
 /* ── Tutorial: five cards a handler would say to another handler ──── */
 const TUT_CARDS = [
   { k: '01', title: 'Two people, one dog.', body: 'Someone walks a trail and waits at the end. You run the dog along it. Trailcraft records both, and the weather that day.' },
-  { k: '02', title: 'Lay it with the phone in your pocket.', body: 'Press Start, walk, press Stop. The recording keeps going with the screen locked. Standing still does not scribble the line.' },
-  { k: '03', title: 'Hand it over with a card.', body: 'The trail becomes a code on the screen. The handler scans it and their phone knows the trail, when it was laid, and the wind at the time. No signal needed.' },
+  { k: '02', title: 'Draw the line with your finger.', body: 'Tap the corners, A to B, then pick how long it ages before the dog starts. Now, 5, 10, or any number you type.' },
+  { k: '03', title: 'The other phone walks it.', body: 'They scan the code and their phone guides them down your line. The clock starts when they leave, on both phones, and they hand back the trail they really walked. No signal needed.' },
   { k: '04', title: 'Run blind.', body: 'While the dog works, the trail stays hidden. Mark what you see: an indication, a loss, a re-find, an article. Your line length is already accounted for.' },
   { k: '05', title: 'Then read one sentence.', body: '"Bo worked 9 m right of the line. The wind pushed scent right." The model explains what the dog did. It never claims to know where scent is.' },
 ];
