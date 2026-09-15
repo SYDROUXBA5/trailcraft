@@ -543,3 +543,71 @@ body:has(#scrWalk:not([hidden])) { --top-row: calc(var(--safe-t) + 104px); }
    belongs under it, not beside it competing for the same width. */
 #hideTools { flex-direction: column; align-items: stretch; gap: 6px; }
 #hideTools .btn { flex: none; }
+
+/* ── Trail age ────────────────────────────────────────────────────────
+   Cold, warm, hot: the three temperatures of the work, in the order a
+   handler climbs them. Colour carries the meaning before the word is read —
+   blue for ground that has had hours to settle, orange for an hour or so,
+   red for a trail still warm under the grass. */
+.chip.lvl { padding: 8px 18px 8px 10px; }
+.chip.lvl .lvl-mark {
+  display: grid; place-items: center;
+  width: 34px; height: 34px; flex: 0 0 auto; margin-right: 9px;
+  border-radius: 50%;
+  background: rgba(23, 32, 26, 0.06);
+  box-shadow: inset 0 0 0 1px rgba(23, 32, 26, 0.08);
+}
+.chip.lvl-cold .lvl-mark { color: #3D7FA8; }
+.chip.lvl-warm .lvl-mark { color: #D0821F; }
+.chip.lvl-hot  .lvl-mark { color: #BE3F2E; }
+
+/* Selected: the pill takes the colour, and throws it onto the paper below. */
+.chip.lvl.selected { color: #fff; border-color: transparent; }
+.chip.lvl.selected .lvl-mark {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.18);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.26);
+}
+.chip.lvl.selected .sub { color: rgba(255, 255, 255, 0.78); }
+
+.chip.lvl-cold.selected {
+  background: #3D7FA8;
+  box-shadow:
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.4), inset 0 -3px 9px rgba(0, 0, 0, 0.2),
+    0 2px 4px rgba(24, 62, 86, 0.24), 0 12px 26px -8px rgba(61, 127, 168, 0.6);
+}
+.chip.lvl-warm.selected {
+  background: #D0821F;
+  box-shadow:
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.42), inset 0 -3px 9px rgba(0, 0, 0, 0.2),
+    0 2px 4px rgba(120, 74, 16, 0.24), 0 12px 26px -8px rgba(208, 130, 31, 0.6);
+}
+.chip.lvl-hot.selected {
+  background: #BE3F2E;
+  box-shadow:
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.4), inset 0 -3px 9px rgba(0, 0, 0, 0.22),
+    0 2px 4px rgba(110, 34, 24, 0.24), 0 12px 26px -8px rgba(190, 63, 46, 0.6);
+}
+
+/* ── Chips, refined ───────────────────────────────────────────────────
+   They were carrying the glass treatment but not showing it: a flat face
+   with a hint of gloss reads as a rounded rectangle, not as a lit object.
+   A brighter specular over the top half, a real rim, and a floor shadow are
+   what make it a thing sitting on paper. */
+.chip::before { height: 58%; background: linear-gradient(180deg,
+  rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0.08) 70%, rgba(255, 255, 255, 0)); }
+.chip.selected::before { background: linear-gradient(180deg,
+  rgba(255, 255, 255, 0.32), rgba(255, 255, 255, 0.1) 62%, rgba(255, 255, 255, 0)); }
+.chip::after {
+  content: ''; position: absolute; inset: 0; border-radius: inherit;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-bottom-color: rgba(23, 32, 26, 0.10);
+  pointer-events: none; z-index: 2;
+}
+.chip.selected::after { border-color: rgba(255, 255, 255, 0.24); border-bottom-color: rgba(0, 0, 0, 0.16); }
+.chip.ghost::after { border-color: transparent; }
+
+/* Names sit on the pill's centre line, whatever is beside them. */
+.chip .who { justify-content: center; min-width: 0; }
+.chip .who b { font-weight: 700; line-height: 1.2; }
+.chip .ava { flex: 0 0 auto; }
