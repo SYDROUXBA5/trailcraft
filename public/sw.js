@@ -1,6 +1,6 @@
 /* Offline shell. Trails happen where there is no signal, so the app itself must
    survive with none. Map tiles cache opportunistically as you pan an area. */
-const V = 'trailcraft-v35';
+const V = 'trailcraft-v36';
 /* Every module the app cannot start without. app.js is an ES module and its
    imports are separate requests — listing only app.js precaches a shell that
    cannot boot, which shows up as a working app that dies the first time it is

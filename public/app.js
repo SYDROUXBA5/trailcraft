@@ -21,7 +21,7 @@ import { createStore, migrateV1, TARGETS, targetById, verbs, uid,
          dogStats, ageBand, AGE_BANDS } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-14e';
+const BUILD = '2026-09-15a';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true, imperial: false, mbToken: (window.MB_TOKEN || '') };
@@ -152,9 +152,10 @@ function buildMap() {
     center: [-2.6449, 51.2094], zoom: 15, pitch: 55, maxPitch: 85,
     attributionControl: { compact: true },
   });
-  map.addControl(new GL.GeolocateControl({
-    positionOptions: { enableHighAccuracy: true }, trackUserLocation: true, showAccuracyCircle: true,
-  }), 'top-right');
+  /* No GeolocateControl. The arrow puck already shows where you are with the
+     real accuracy ring around it, and the re-centre button brings the camera
+     back — a third control doing the same job only took the top right corner
+     that messages now need. */
   map.on('load', addOverlays);
   // Touching the map means they want to look around; stop chasing them.
   map.on('dragstart', releaseFollow);
