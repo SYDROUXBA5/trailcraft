@@ -512,3 +512,12 @@ export function timestampsEndingAt(pts, endMs, paceMs = 1.3) {
   const secs = pathLen(pts) / Math.max(0.1, paceMs);
   return timestamps(pts, endMs - secs * 1000, paceMs);
 }
+
+/* Weight, kept in kilograms and shown in whichever the handler reads. */
+const LB = 2.20462262;
+export const kgToShown = (kg, imperial) => (Number.isFinite(kg) ? (imperial ? kg * LB : kg) : null);
+export const shownToKg = (v, imperial) => (Number.isFinite(v) ? (imperial ? v / LB : v) : null);
+export function fmtWeight(kg, imperial = false) {
+  if (!Number.isFinite(kg) || kg <= 0) return '—';
+  return imperial ? `${(kg * LB).toFixed(1)} lb` : `${kg.toFixed(1)} kg`;
+}

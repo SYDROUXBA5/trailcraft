@@ -312,3 +312,22 @@ function pathLenOf(pts) {
   }
   return sum;
 }
+
+/** A dog's age from its date of birth, so the record stays right without
+    anyone remembering to update it. Returns null for a missing or future
+    date rather than a number nobody should trust. */
+export function dogAge(dobMs, nowMs = Date.now()) {
+  if (!Number.isFinite(dobMs) || dobMs > nowMs) return null;
+  const d = new Date(dobMs), n = new Date(nowMs);
+  let months = (n.getFullYear() - d.getFullYear()) * 12 + (n.getMonth() - d.getMonth());
+  if (n.getDate() < d.getDate()) months -= 1;
+  if (months < 0) return null;
+  const years = Math.floor(months / 12), rem = months % 12;
+  return {
+    years, months: rem, totalMonths: months,
+    text: months === 0 ? 'under a month'
+      : years === 0 ? `${rem} mo`
+      : rem === 0 ? `${years} yr`
+      : `${years} yr ${rem} mo`,
+  };
+}

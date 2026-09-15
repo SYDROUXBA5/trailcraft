@@ -8,7 +8,7 @@
 
 import {
   pathLen, cardinal, dist, dwellFold, bearing, project,
-  fmtDist, fmtShort, fmtSpeed, fmtTemp, unitShort,
+  fmtDist, fmtShort, fmtSpeed, fmtTemp, unitShort, fmtWeight, kgToShown, shownToKg,
   scentField, plumePolygon, densify, timestamps,
   signedOffsets, meanSigned, sideOfDrift, sideAgreement, lineCorrect, departure,
   timestampsEndingAt,
@@ -18,10 +18,10 @@ import { FLAT, buildTerrain, stability, regime, flowAt, normOf } from './field.j
 import { predictedOffsets, ScentSim, driftFrom, stepByFlow, AIRBORNE } from './sim.js';
 import { encodeTrail, decodeTrail, cardUrl, cardFromText } from './card.js';
 import { createStore, migrateV1, TARGETS, targetById, verbs, uid,
-         dogStats, ageBand, AGE_BANDS, LEVELS, levelById } from './store.js';
+         dogStats, ageBand, AGE_BANDS, LEVELS, levelById, dogAge } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-15c';
+const BUILD = '2026-09-15d';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true, imperial: false, mbToken: (window.MB_TOKEN || '') };
@@ -576,13 +576,23 @@ function saveHandlerForm() {
 }
 
 let obDogLevel = 'Hot';
+let obDogSex = null;
 function openDogForm({ id = null, handlerId = null, returnTo = null, firstLaunch = false } = {}) {
   obMode = { type: 'dog', id, handlerId: handlerId ?? S.handler?.id, returnTo, firstLaunch };
   const existing = id ? db.dogs.byId(id) : null;
   obPhoto = existing?.photo ?? null;
   obDogLevel = existing?.level ?? 'Hot';
+  obDogSex = existing?.sex ?? null;
   $('obDogName').value = existing?.name ?? '';
+  $('obDogBreed').value = existing?.breed ?? '';
+  $('obDogChip').value = existing?.chip ?? '';
+  // A date input speaks ISO and nothing else, whatever the phone displays.
+  $('obDogDob').value = existing?.dob ? new Date(existing.dob).toISOString().slice(0, 10) : '';
+  $('obDogWeightUnit').textContent = imp() ? 'lb' : 'kg';
+  const shown = kgToShown(existing?.weightKg, imp());
+  $('obDogWeight').value = shown ? shown.toFixed(1) : '';
   $('obDogLine').value = existing?.lineM ?? 10;
+  paintDogSex();
   $('scrOnboardDog').querySelector('.label').textContent = firstLaunch ? 'Step 2 of 3' : 'Dog';
   $('obDogTitle').textContent = firstLaunch ? 'Your dog' : (existing ? existing.name : 'A new dog');
   $('obDogSub').hidden = !firstLaunch;
@@ -592,6 +602,10 @@ function openDogForm({ id = null, handlerId = null, returnTo = null, firstLaunch
   go('scrOnboardDog');
 }
 
+function paintDogSex() {
+  $('obDogSex').querySelectorAll('[data-sex]').forEach(b =>
+    b.classList.toggle('selected', b.dataset.sex === obDogSex));
+}
 function paintDogLevel() {
   $('obDogLevel').querySelectorAll('.radio-card').forEach(b =>
     b.classList.toggle('selected', b.dataset.level === obDogLevel));
@@ -608,7 +622,19 @@ function saveDogForm() {
   if (!name) return toast("The dog needs a name");
   const lineM = Math.max(0, parseFloat(String($('obDogLine').value).replace(',', '.')) || 0);
   const id = obMode.id ?? uid();
-  db.dogs.upsert({ id, handlerId: obMode.handlerId, name, photo: obPhoto, level: obDogLevel, lineM });
+  const dobStr = $('obDogDob').value;
+  const wShown = parseFloat(String($('obDogWeight').value).replace(',', '.'));
+  /* Weight is stored in kilograms whatever the handler types in, so switching
+     units later re-reads the same dog rather than a heavier one. */
+  const weightKg = Number.isFinite(wShown) && wShown > 0 ? shownToKg(wShown, imp()) : null;
+  db.dogs.upsert({
+    id, handlerId: obMode.handlerId, name, photo: obPhoto, level: obDogLevel, lineM,
+    breed: $('obDogBreed').value.trim() || null,
+    sex: obDogSex,
+    dob: dobStr ? Date.parse(`${dobStr}T12:00:00`) : null,
+    weightKg,
+    chip: $('obDogChip').value.trim() || null,
+  });
   db.kv.set('lastDogId', id);
   snap();
   if (obMode.firstLaunch) return openTutorial(false);
@@ -2413,8 +2439,24 @@ function openDogCard(id) {
      to find it, and the failure only shows on the SECOND open. */
   $('dogAva').innerHTML = avaHtml(d, 'big');
   $('dogName').textContent = d.name;
-  $('dogSub').textContent = `${d.level} trails · ${fmtM(d.lineM)} line`
-    + (st.firstAt ? ` · first ran ${new Date(st.firstAt).toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' })}` : '');
+  const age = dogAge(d.dob);
+  $('dogSub').textContent = [d.breed, d.sex, age?.text].filter(Boolean).join(' · ')
+    || 'Tap Edit to fill in the details';
+
+  /* Everything that identifies the dog, in one place. A row is only here if
+     it has something in it — an empty record padded with dashes reads as a
+     form that was never filled in rather than a dog that was never measured. */
+  const fact = (k, v) => v ? `<div class="fact"><span>${esc(k)}</span><b>${esc(v)}</b></div>` : '';
+  $('dogAbout').innerHTML =
+    fact('Breed', d.breed)
+    + fact('Sex', d.sex)
+    + fact('Age', age ? `${age.text}  ·  born ${new Date(d.dob).toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' })}` : null)
+    + fact('Weight', Number.isFinite(d.weightKg) && d.weightKg > 0 ? fmtWeight(d.weightKg, imp()) : null)
+    + fact('Microchip', d.chip)
+    + fact('Trail level', `${d.level} — ${levelById(d.level).sub}`)
+    + fact('Line length', fmtM(d.lineM))
+    + fact('First ran', st.firstAt ? new Date(st.firstAt).toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' }) : null)
+    || `<p class="body muted">Nothing recorded yet. Tap <b>Edit this dog</b> to add breed, age and weight.</p>`;
 
   const cell = (big, small) => `<div class="cell"><b>${big}</b><span>${esc(small)}</span></div>`;
   $('dogGrid').innerHTML = st.runs
@@ -2452,12 +2494,17 @@ function openDogCard(id) {
     : `Not enough evidence yet — ${st.calRows} of 5 graded runs.
        Until then the plume uses the general model rather than ${esc(d.name)}\u2019s own drift.`;
 
-  const runs = S.sessions.filter(x => x.dogId === id && x.data?.track).slice(0, 8);
+  /* Every trail, not a recent handful. This is the record — the reason to
+     keep one is being able to look back further than you can remember. */
+  const runs = S.sessions.filter(x => x.dogId === id && x.data?.track);
+  $('dogRunsLabel').textContent = runs.length
+    ? `Every trail · ${runs.length}` : 'Every trail';
   $('dogRuns').innerHTML = runs.length ? runs.map(x => {
     const band = ageBand(x.data.result?.ageMin);
+    const len = fmtKm(pathLen(x.data.track || []));
     return `<div class="card" data-open-session="${x.id}">
       <div class="meta"><span>${fmtWhen(x.data.trackStarted ?? x.startedAt)}</span>
-        <span>${band ? band.label : targetById(x.targetId).label}</span></div>
+        <span>${band ? `${band.label} · ` : ''}${len}</span></div>
       <div class="story">${esc(x.summary || '')}</div>
     </div>`;
   }).join('') : `<div class="card"><p class="body muted">Nothing run yet.</p></div>`;
@@ -2574,6 +2621,10 @@ function wire() {
   $('obHandlerNext').addEventListener('click', saveHandlerForm);
   $('obDogPhoto').addEventListener('click', () => photoTo('obDogAva'));
   $('obDogPhoto2').addEventListener('click', () => photoTo('obDogAva'));
+  $('obDogSex').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-sex]');
+    if (b) { obDogSex = obDogSex === b.dataset.sex ? null : b.dataset.sex; paintDogSex(); }
+  });
   $('obDogLevel').addEventListener('click', (e) => {
     const b = e.target.closest('[data-level]');
     if (b) { obDogLevel = b.dataset.level; paintDogLevel(); }
