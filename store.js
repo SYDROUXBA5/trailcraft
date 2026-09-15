@@ -114,6 +114,9 @@ export function createStore(backend) {
         handlers: hs, handler, dogs: dogs.all(), team, dog,
         layers: layers.all(), layer,
         target: targetById(kv.get('lastTargetId')),
+        /* Seeded from the dog's usual standard, then it is the handler's to
+           change for the day — a hot dog can be given a cold trail. */
+        level: levelById(kv.get('lastLevel') ?? dog?.level),
         sessions: store.sessions(),
         tutorialDone: !!kv.get('tutorialDone'),
       };
@@ -221,6 +224,24 @@ export function migrateV1(backend, store) {
    it was, and those are the words the sport already uses. The boundaries are
    stated here rather than implied, because a handler is entitled to know
    what counts as cold. */
+/* ── Trail age, chosen before the work ────────────────────────────────
+   What KIND of trail this is going to be. It applies to a person only —
+   a hide has no walk behind it to age, it simply sits there from the moment
+   it is placed.
+
+   Coldest first, because that is the order a handler thinks in when they are
+   deciding how hard to make the day: how far up from the easy end am I
+   going? The ages match AGE_BANDS, so what you set out to do and what the
+   record says you did are the same words. */
+export const LEVELS = [
+  { id: 'cold', label: 'Cold', sub: 'hours old',    minutes: 180 },
+  { id: 'warm', label: 'Warm', sub: 'up to an hour', minutes: 45 },
+  { id: 'hot',  label: 'Hot',  sub: 'minutes old',   minutes: 10 },
+];
+
+export const levelById = (id) =>
+  LEVELS.find(l => l.id === String(id || '').toLowerCase()) ?? LEVELS[2];
+
 export const AGE_BANDS = [
   { key: 'hot',  label: 'Hot',  under: 30,   blurb: 'under 30 min' },
   { key: 'warm', label: 'Warm', under: 120,  blurb: '30 min – 2 h' },

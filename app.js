@@ -18,10 +18,10 @@ import { FLAT, buildTerrain, stability, regime, flowAt, normOf } from './field.j
 import { predictedOffsets, ScentSim, driftFrom, stepByFlow, AIRBORNE } from './sim.js';
 import { encodeTrail, decodeTrail, cardUrl, cardFromText } from './card.js';
 import { createStore, migrateV1, TARGETS, targetById, verbs, uid,
-         dogStats, ageBand, AGE_BANDS } from './store.js';
+         dogStats, ageBand, AGE_BANDS, LEVELS, levelById } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-15a';
+const BUILD = '2026-09-15b';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true, imperial: false, mbToken: (window.MB_TOKEN || '') };
@@ -651,6 +651,38 @@ const greeting = () => {
   return h < 12 ? 'Morning' : h < 18 ? 'Afternoon' : 'Evening';
 };
 
+/* A mark for each trail age. Drawn here as plain shapes so they carry the
+   meaning without a font or an image file: frost for cold, a low sun for
+   warm, a flame for hot. */
+const LEVEL_ICON = {
+  cold: `<svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true" fill="none"
+      stroke="currentColor" stroke-width="2" stroke-linecap="round">
+      <path d="M12 3v18M4.5 7.5l15 9M19.5 7.5l-15 9"/>
+      <path d="M12 6.6 9.9 4.8M12 6.6l2.1-1.8M12 17.4l-2.1 1.8M12 17.4l2.1 1.8"/></svg>`,
+  warm: `<svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true" fill="none"
+      stroke="currentColor" stroke-width="2" stroke-linecap="round">
+      <circle cx="12" cy="13" r="4"/>
+      <path d="M12 4.5v2M4.8 13h2M17.2 13h2M6.9 7.9l1.4 1.4M17.1 7.9l-1.4 1.4"/></svg>`,
+  hot:  `<svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true" fill="none"
+      stroke="currentColor" stroke-width="2" stroke-linejoin="round">
+      <path d="M12 3c3.2 3.4 5.5 6.2 5.5 9.4a5.5 5.5 0 0 1-11 0C6.5 9.2 8.8 6.4 12 3z"/>
+      <path d="M12 20a2.6 2.6 0 0 1-2.6-2.6c0-1.6 1.2-2.6 2.6-4.3 1.4 1.7 2.6 2.7 2.6 4.3A2.6 2.6 0 0 1 12 20z"/></svg>`,
+};
+
+/** Bring the chosen chip into view. These rows scroll sideways, and a
+    selection sitting off the right-hand edge is a decision the handler
+    cannot see they have made. */
+function showSelectedChip(row) {
+  if (!row || row.hidden) return;
+  const sel = row.querySelector('.selected');
+  if (!sel) return;
+  /* Measured, not computed from offsetLeft: the row is not a positioned
+     parent, so a chip's offsetLeft is relative to something further up and
+     the arithmetic lands in the wrong place. Rects are always the truth. */
+  const box = row.getBoundingClientRect(), chip = sel.getBoundingClientRect();
+  row.scrollLeft += (chip.left + chip.width / 2) - (box.left + box.width / 2);
+}
+
 function renderHome() {
   snap();
   const { handler, handlers, team, dog, layers, layer, target } = S;
@@ -672,18 +704,40 @@ function renderHome() {
   $('rowTargets').innerHTML = TARGETS.map(t =>
     `<button class="chip plain${t.id === target.id ? ' selected' : ''}" data-target="${t.id}"><b>${esc(t.label)}</b><i>${esc(t.sub)}</i></button>`).join('');
 
+  /* Trail age belongs to a person and only to a person: a hide has no walk
+     behind it to age — it sits there from the moment it is placed. */
+  const isPerson = target.kind === 'person';
+  $('lblLevel').hidden = !isPerson;
+  $('rowLevels').hidden = !isPerson;
+  if (isPerson) {
+    $('rowLevels').innerHTML = LEVELS.map(l =>
+      `<button class="chip lvl lvl-${l.id}${l.id === S.level.id ? ' selected' : ''}" data-trail-level="${l.id}">
+        <span class="lvl-mark">${LEVEL_ICON[l.id]}</span>
+        <span class="who"><b>${esc(l.label)}</b><i class="sub">${esc(l.sub)}</i></span>
+      </button>`).join('');
+  }
+
   $('lblSetter').textContent = v.setter;
+  /* No "Just me" for a person. You cannot be the handler and the one being
+     searched for at the same time — somebody else has to walk away and be
+     found. A hide is different: you can place that yourself. */
   $('rowLayers').innerHTML =
-    `<button class="chip${!layer ? ' selected' : ''}" data-layer=""><span class="who">Just me<i class="sub">single phone</i></span></button>`
+    (isPerson ? '' : `<button class="chip${!layer ? ' selected' : ''}" data-layer=""><span class="who"><b>Just me</b><i class="sub">single phone</i></span></button>`)
     + layers.map(l =>
-      `<button class="chip${l.id === layer?.id ? ' selected' : ''}" data-layer="${l.id}">${avaHtml(l)}${esc(l.name)}</button>`).join('')
+      `<button class="chip${l.id === layer?.id ? ' selected' : ''}" data-layer="${l.id}">${avaHtml(l)}<span class="who"><b>${esc(l.name)}</b></span></button>`).join('')
     + `<button class="chip ghost" data-add-layer>+ Add person</button>`;
 
   const setter = layer ? layer.name : handler.name;
   $('btnLayLabel').textContent = v.lay;
-  $('btnLaySub').textContent = target.kind === 'person'
-    ? `${setter} walks it, ${handler.name} runs ${dog?.name ?? 'the dog'}`
-    : `${setter} places it, ${handler.name} searches with ${dog?.name ?? 'the dog'}`;
+  $('btnLaySub').textContent = !isPerson
+    ? `${setter} places it, ${handler.name} searches with ${dog?.name ?? 'the dog'}`
+    : layer
+      ? `${layer.name} walks it, ${handler.name} runs ${dog?.name ?? 'the dog'}`
+      : 'Choose who lays it — it cannot be you';
+  for (const id of ['rowHandlers', 'rowDogs', 'rowTargets', 'rowLevels', 'rowLayers']) {
+    showSelectedChip($(id));
+  }
+
   $('btnRunLabel').textContent = v.run;
   $('btnRunSub').textContent = v.runSub;
   /* Scanning has its own button because it is how the OTHER phone joins in,
@@ -2555,13 +2609,23 @@ function wire() {
     if (e.target.closest('[data-add-dog]')) return openDogForm({ returnTo: 'scrHome' });
     const t = e.target.closest('[data-target]');
     if (t) { db.kv.set('lastTargetId', t.dataset.target); return renderHome(); }
+    const lv = e.target.closest('[data-trail-level]');
+    if (lv) { db.kv.set('lastLevel', lv.dataset.trailLevel); return renderHome(); }
     const l = e.target.closest('[data-layer]');
     if (l) { db.kv.set('lastLayerId', l.dataset.layer || null); return renderHome(); }
     if (e.target.closest('[data-add-layer]')) return openLayerForm({ returnTo: 'scrHome' });
     const open = e.target.closest('[data-open-session]');
     if (open) return openSession(open.dataset.openSession);
   });
-  $('btnLay').addEventListener('click', () => { if (S.dog) startLay(); else toast('Add a dog first'); });
+  $('btnLay').addEventListener('click', () => {
+    if (!S.dog) return toast('Add a dog first');
+    /* A person trail needs a person. You cannot be the handler and the one
+       being found — somebody has to walk away and wait to be reached. */
+    if (S.target.kind === 'person' && !S.layer) {
+      return toast('Choose who lays the trail — it cannot be you');
+    }
+    startLay();
+  });
   $('btnRun').addEventListener('click', () => { if (S.dog) openPick(); else toast('Add a dog first'); });
 
   // Lay
