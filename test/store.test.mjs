@@ -224,4 +224,34 @@ t('dogAge: counted from a birthday, so it is never stale', () => {
   assert.equal(dogAge(on(2027, 1, 1), now), null, 'a birthday in the future is not an age');
 });
 
+t('store: every change is announced, and a deletion leaves a tombstone', () => {
+  const db = createStore(fakeBackend());
+  const heard = [];
+  const stop = db.onChange((table, rec) => heard.push([table, rec.id, !!rec.deleted]));
+
+  const bo = db.dogs.upsert({ id: 'bo', handlerId: 'h', name: 'Bo', level: 'Hot', lineM: 10 });
+  assert.ok(Number.isFinite(bo.updatedAt), 'a saved row carries the moment it was saved');
+  db.addSession({ id: 's1', startedAt: 1, summary: 'x', data: {} });
+  db.updateSession('s1', { summary: 'y' });
+  db.deleteSession('s1');
+  db.dogs.remove('bo');
+
+  assert.deepEqual(heard, [
+    ['dogs', 'bo', false], ['sessions', 's1', false], ['sessions', 's1', false],
+    ['sessions', 's1', true], ['dogs', 'bo', true],
+  ]);
+
+  // The app sees nothing deleted; the sync layer still sees the tombstone.
+  assert.equal(db.dogs.all().length, 0);
+  assert.equal(db.dogs.byId('bo'), null);
+  assert.equal(db.dogs.raw().filter(r => r.deleted).length, 1);
+  assert.equal(db.sessions().length, 0);
+  assert.equal(db.rawSessions()[0].deleted, true);
+  assert.equal(db.updateSession('s1', { summary: 'z' }), null, 'a deleted session cannot be edited back to life');
+
+  stop();
+  db.dogs.upsert({ id: 'nell', handlerId: 'h', name: 'Nell' });
+  assert.equal(heard.length, 5, 'unsubscribing actually stops the calls');
+});
+
 console.log(`\n${pass} passed total\n`);

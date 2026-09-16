@@ -1,0 +1,25 @@
+rules_version = '2';
+
+// Trailcraft — who may read and write what.
+//
+// Every record lives under users/{uid}/..., and only the signed-in owner of
+// that uid can touch it. There is no shared data, no admin path and no public
+// read. Anything not matched below is refused.
+//
+// Paste this into Firebase console → Firestore Database → Rules → Publish.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    match /users/{uid}/{table}/{recordId} {
+      allow read, write: if request.auth != null
+                         && request.auth.uid == uid
+                         && table in ['handlers', 'dogs', 'layers', 'sessions', 'calibration'];
+    }
+
+    // Everything else, including the users/{uid} document itself.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

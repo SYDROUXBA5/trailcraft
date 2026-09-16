@@ -1,6 +1,6 @@
 /* Offline shell. Trails happen where there is no signal, so the app itself must
    survive with none. Map tiles cache opportunistically as you pan an area. */
-const V = 'trailcraft-v40';
+const V = 'trailcraft-v41';
 /* Every module the app cannot start without. app.js is an ES module and its
    imports are separate requests — listing only app.js precaches a shell that
    cannot boot, which shows up as a working app that dies the first time it is
@@ -12,6 +12,7 @@ const V = 'trailcraft-v40';
 const SHELL = [
   './', 'index.html', 'app.css', 'manifest.webmanifest', 'token.js',
   'app.js', 'geo.js', 'field.js', 'sim.js', 'card.js', 'store.js',
+  'sync-core.js', 'sync.js', 'firebase-config.js',
   'vendor/qrcode.js', 'vendor/jsQR.js', 'build.txt',
 ];
 const VENDOR = [
@@ -34,7 +35,9 @@ self.addEventListener('activate', (e) => {
 });
 
 const cacheable = (url) =>
-  /mapbox|openstreetmap|jsdelivr|fonts\.(googleapis|gstatic)\.com/.test(url.hostname);
+  /mapbox|openstreetmap|jsdelivr|fonts\.(googleapis|gstatic)\.com/.test(url.hostname)
+  // The Firebase SDK, so signing in never stands between a handler and a trail offline.
+  || (url.hostname === 'www.gstatic.com' && url.pathname.startsWith('/firebasejs/'));
 
 self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET') return;

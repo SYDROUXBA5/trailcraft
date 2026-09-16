@@ -10,7 +10,7 @@
    exist in index.html, and nothing is allowed to drift again. */
 
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 
 let pass = 0;
 const t = (name, fn) => { fn(); pass++; console.log(`  ok  ${name}`); };
@@ -60,6 +60,24 @@ t('nothing calls window.prompt — it is blocked in a home-screen web app', () =
     }
   });
   assert.deepEqual(bad, [], `prompt() cannot be used here: ${bad.join(', ')}`);
+});
+
+t('every module the app imports is cached for offline use', () => {
+  /* A module missing from the service worker's shell is invisible online and
+     fatal offline: the import fails and the app never starts — in a field,
+     with no signal, which is the one place this app has to work. */
+  const sw = readFileSync(new URL('../public/sw.js', import.meta.url), 'utf8');
+  const shell = sw.slice(sw.indexOf('const SHELL'), sw.indexOf('];', sw.indexOf('const SHELL')));
+  const cached = new Set([...shell.matchAll(/'([\w./-]+\.js)'/g)].map(m => m[1]));
+
+  const pub = new URL('../public/', import.meta.url);
+  const imported = new Set(['app.js']);
+  for (const f of readdirSync(pub).filter(n => n.endsWith('.js'))) {
+    const src = readFileSync(new URL(f, pub), 'utf8');
+    for (const m of src.matchAll(/from '\.\/([\w-]+\.js)'/g)) imported.add(m[1]);
+  }
+  const missing = [...imported].filter(m => !cached.has(m));
+  assert.deepEqual(missing, [], `imported but not cached offline: ${missing.join(', ')}`);
 });
 
 console.log(`\n${pass} passed total\n`);
