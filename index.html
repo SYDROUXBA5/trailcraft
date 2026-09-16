@@ -3,7 +3,19 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
-<meta name="theme-color" content="#F4EFE6">
+<meta name="theme-color" content="#F4EFE6" id="themeColor">
+<script>
+  /* Before the first paint, so a phone set to dark never flashes white.
+     app.js is a module and runs late; this cannot wait for it. */
+  try {
+    var t = (JSON.parse(localStorage.getItem('tc.settings') || '{}').theme) || 'system';
+    var dark = t === 'dark' || (t === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
+    // Always the RESOLVED theme, so every dark rule keys off one attribute
+    // whether dark was chosen or inherited from the phone.
+    document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+    document.getElementById('themeColor').content = dark ? '#0F1411' : '#F4EFE6';
+  } catch (e) {}
+</script>
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <title>Trailcraft</title>
@@ -260,6 +272,7 @@
         <svg id="shareMini" viewBox="0 0 300 170" aria-hidden="true"></svg>
       </div>
       <p class="body small center" id="shareMeta"></p>
+      <div class="where" id="shareWhere"></div>
     </div>
     <div class="card qr-card" id="shareQrCard">
       <div id="shareQr" class="qr-plate" role="img" aria-label="Trail Card QR code"></div>
@@ -414,10 +427,36 @@
     <div id="setLayers"></div>
     <span class="label">All sessions</span>
     <button class="btn card-btn" id="btnAllSessions">Open the session list</button>
+    <span class="label">Appearance</span>
+    <div class="check-list" id="appearanceSettings" data-setting="theme">
+      <button type="button" class="check-row" data-value="system"><span class="check-text"><b>Device default</b><i data-theme-example="system"></i></span><span class="check-mark" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span></button>
+      <button type="button" class="check-row" data-value="light"><span class="check-text"><b>Light</b><i data-theme-example="light"></i></span><span class="check-mark" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span></button>
+      <button type="button" class="check-row" data-value="dark"><span class="check-text"><b>Dark</b><i data-theme-example="dark"></i></span><span class="check-mark" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span></button>
+    </div>
+
     <span class="label">Units</span>
-    <div class="radio-cards" id="unitRow">
-      <button class="radio-card selected" data-units="metric"><b>Metric</b><i>metres, kilometres, km/h, °C</i><span class="radio-dot"></span></button>
-      <button class="radio-card" data-units="imperial"><b>Imperial</b><i>feet, yards, miles, mph, °F</i><span class="radio-dot"></span></button>
+    <div id="unitSettings">
+      <div class="unit-group">
+        <span class="unit-head">Distance &amp; wind</span>
+        <div class="check-list" data-setting="distUnits">
+          <button type="button" class="check-row" data-value="metric"><span class="check-text"><b>Metric</b><i data-example="metric"></i></span><span class="check-mark" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span></button>
+          <button type="button" class="check-row" data-value="imperial"><span class="check-text"><b>Imperial</b><i data-example="imperial"></i></span><span class="check-mark" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span></button>
+        </div>
+      </div>
+      <div class="unit-group">
+        <span class="unit-head">Temperature</span>
+        <div class="check-list" data-setting="tempUnits">
+          <button type="button" class="check-row" data-value="c"><span class="check-text"><b>Celsius</b><i data-example="c"></i></span><span class="check-mark" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span></button>
+          <button type="button" class="check-row" data-value="f"><span class="check-text"><b>Fahrenheit</b><i data-example="f"></i></span><span class="check-mark" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span></button>
+        </div>
+      </div>
+      <div class="unit-group">
+        <span class="unit-head">Coordinates</span>
+        <div class="check-list" data-setting="coordFormat">
+          <button type="button" class="check-row" data-value="dd"><span class="check-text"><b>Decimal degrees</b><i data-example="dd"></i></span><span class="check-mark" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span></button>
+          <button type="button" class="check-row" data-value="dms"><span class="check-text"><b>Degrees, minutes, seconds</b><i data-example="dms"></i></span><span class="check-mark" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span></button>
+        </div>
+      </div>
     </div>
 
     <span class="label">Help</span>

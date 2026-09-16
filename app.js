@@ -8,7 +8,7 @@
 
 import {
   pathLen, cardinal, dist, dwellFold, bearing, project,
-  fmtDist, fmtShort, fmtSpeed, fmtTemp, unitShort, fmtWeight, kgToShown, shownToKg,
+  fmtDist, fmtShort, fmtSpeed, fmtTemp, unitShort, fmtWeight, kgToShown, shownToKg, fmtCoord,
   scentField, plumePolygon, densify, timestamps,
   signedOffsets, meanSigned, sideOfDrift, sideAgreement, lineCorrect, departure,
   timestampsEndingAt,
@@ -21,12 +21,24 @@ import { createStore, migrateV1, TARGETS, targetById, verbs, uid,
          dogStats, ageBand, AGE_BANDS, LEVELS, levelById, dogAge } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-15d';
+const BUILD = '2026-09-16a';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
-const DEFAULTS = { accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true, imperial: false, mbToken: (window.MB_TOKEN || '') };
+const DEFAULTS = { accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true,
+  distUnits: 'metric', tempUnits: 'c', coordFormat: 'dd', theme: 'system', mbToken: (window.MB_TOKEN || '') };
 const loadJson = (k, f) => { try { return JSON.parse(localStorage.getItem(k)) ?? f; } catch { return f; } };
 let settings = { ...DEFAULTS, ...loadJson('tc.settings', {}) };
+/* One "imperial" switch became three separate choices. A phone that already
+   chose imperial keeps both halves of what that meant — feet and miles AND
+   Fahrenheit — rather than waking up half-converted. */
+{
+  const raw = loadJson('tc.settings', {});
+  if (raw.distUnits == null && typeof raw.imperial === 'boolean') {
+    settings.distUnits = raw.imperial ? 'imperial' : 'metric';
+    settings.tempUnits = raw.imperial ? 'f' : 'c';
+  }
+  delete settings.imperial;
+}
 const saveSettings = () => localStorage.setItem('tc.settings', JSON.stringify(settings));
 
 /* A device can be handed its Mapbox token in the app's own link (#mbt=pk.xxx),
@@ -55,7 +67,10 @@ const fmtDur = (ms) => {
 };
 /* One place asks which units, so nothing on screen can disagree with
    anything else on screen. The model never sees these. */
-const imp = () => !!settings.imperial;
+const imp = () => settings.distUnits === 'imperial';
+const fahr = () => settings.tempUnits === 'f';
+/** A place, in whichever form the handler reads and passes on. */
+const fmtPlace = (lat, lon) => fmtCoord(lat, lon, settings.coordFormat);
 const fmtKm = (m) => fmtDist(m, imp());
 const fmtM = (m, dp = 0) => fmtShort(m, imp(), dp);
 const fmtWind = (ms) => fmtSpeed(ms, imp());
@@ -997,7 +1012,7 @@ function showWeather(wx) {
      either alone gets misread — an arrow with a bare "SSW" beside it is a
      handler guessing which of the two they are looking at. */
   $('wxDir').textContent = `from ${cardinal(wx.wind_direction)}`;
-  $('wxTemp').textContent = fmtTemp(wx.temp, imp());
+  $('wxTemp').textContent = fmtTemp(wx.temp, fahr());
   // The glyph points north, so the rotation IS the bearing it indicates.
   $('wxArrow').style.transform = Number.isFinite(wx.wind_direction)
     ? `rotate(${(wx.wind_direction + 180) % 360}deg)` : '';
@@ -1520,6 +1535,7 @@ function paintMini(pts) {
 }
 
 function renderShare(s) {
+  paintWhere(s);
   const isHide = targetById(s.targetId).kind === 'hide';
   const isPlan = !!s.data.plan;
   $('shareTitle').textContent = isHide ? 'Hide set' : isPlan ? 'Trail planned' : 'Trail laid';
@@ -1564,6 +1580,26 @@ function renderShare(s) {
 const ageWords = (m) => (m == null ? 'dog starts +10 min'
   : m <= 0 ? 'dog starts as soon as they are clear'
   : `dog starts +${m} min`);
+
+/** Where the trail starts, or where each hide is — in the handler's chosen
+    format, and one tap puts it on the clipboard to send to whoever needs it. */
+function paintWhere(s) {
+  const el = $('shareWhere');
+  if (!el) return;
+  const rows = [];
+  if (s.data?.hides?.length) {
+    s.data.hides.forEach((h, i) => rows.push({ k: `Hide ${i + 1}`, lat: h.lat, lon: h.lon }));
+  } else if (s.data?.trail?.length) {
+    const t = s.data.trail;
+    rows.push({ k: 'Start', lat: t[0].lat, lon: t[0].lon });
+    rows.push({ k: 'End', lat: t[t.length - 1].lat, lon: t[t.length - 1].lon });
+  }
+  el.innerHTML = rows.map(r => {
+    const text = fmtPlace(r.lat, r.lon);
+    return `<button type="button" class="where-row" data-copy="${esc(text)}">
+      <span>${esc(r.k)}</span><b>${esc(text)}</b></button>`;
+  }).join('');
+}
 
 const layerName = (s) => S.layers.find(l => l.id === s.layerId)?.name ?? 'the layer';
 
@@ -2530,8 +2566,8 @@ function renderSettings() {
     + `<button class="btn ghost small" id="setAddLayer">Add person</button>`;
 
   $('plumeOn').checked = settings.plume !== false;
-  $('unitRow').querySelectorAll('[data-units]').forEach(b =>
-    b.classList.toggle('selected', (b.dataset.units === 'imperial') === imp()));
+  paintUnitSettings();
+  paintAppearance();
   $('accCap').value = settings.accCap; $('accCapVal').textContent = settings.accCap;
   const ll = document.querySelector('label[for="obDogLine"]');
   if (ll) ll.textContent = `Line length, ${imp() ? 'feet' : 'metres'}`;
@@ -2590,6 +2626,72 @@ async function gpsCheck() {
 function gpsSay(el, verdict, text) {
   el.className = `body small ${verdict === 'good' ? 'gps-good' : 'gps-bad'}`;
   el.textContent = text;
+}
+
+/* ── Appearance ───────────────────────────────────────────────────────
+   Device default follows the phone, including when the phone changes its
+   mind at sunset. The attribute is always the RESOLVED theme, so a dark
+   phone on "Device default" gets exactly the same dark as choosing Dark. */
+const darkQuery = matchMedia('(prefers-color-scheme: dark)');
+const resolvedTheme = () => settings.theme === 'dark' ? 'dark'
+  : settings.theme === 'light' ? 'light'
+  : (darkQuery.matches ? 'dark' : 'light');
+
+function applyTheme() {
+  const t = resolvedTheme();
+  document.documentElement.dataset.theme = t;
+  $('themeColor')?.setAttribute('content', t === 'dark' ? '#0F1411' : '#F4EFE6');
+  paintAppearance();
+}
+darkQuery.addEventListener?.('change', () => { if (settings.theme === 'system') applyTheme(); });
+
+function paintAppearance() {
+  const list = $('appearanceSettings');
+  if (!list) return;
+  const phone = darkQuery.matches ? 'dark' : 'light';
+  const example = {
+    system: `Follows your phone — ${phone} right now`,
+    light: 'Paper and moss, best in bright sun',
+    dark: 'Night field, easier on the eyes at dawn and dusk',
+  };
+  list.querySelectorAll('.check-row').forEach(row => {
+    const on = row.dataset.value === settings.theme;
+    row.classList.toggle('on', on);
+    row.setAttribute('aria-pressed', String(on));
+    const ex = row.querySelector('[data-theme-example]');
+    if (ex) ex.textContent = example[row.dataset.value] ?? '';
+  });
+}
+
+/* ── Units ────────────────────────────────────────────────────────────
+   Three separate choices, because they are three separate habits: plenty of
+   handlers think in miles and Celsius at once, and a coordinate format is
+   about whoever the location is being sent to.
+
+   Each option shows the app's own numbers in that form, so the choice is
+   made by looking rather than by knowing what "DMS" stands for. */
+function paintUnitSettings() {
+  const lastStart = S.sessions.find(x => x.data?.trail?.length)?.data.trail[0];
+  const here = lastStart ?? { lat: 51.2094, lon: -2.6449 };
+  const example = {
+    metric: `${fmtDist(1240, false)} trail · ${fmtShort(9.2, false, 1)} off the line · ${fmtSpeed(3.3, false)} wind`,
+    imperial: `${fmtDist(1240, true)} trail · ${fmtShort(9.2, true, 1)} off the line · ${fmtSpeed(3.3, true)} wind`,
+    c: `${fmtTemp(19, false)} air · ${fmtTemp(11, false)} soil`,
+    f: `${fmtTemp(19, true)} air · ${fmtTemp(11, true)} soil`,
+    dd: fmtCoord(here.lat, here.lon, 'dd'),
+    dms: fmtCoord(here.lat, here.lon, 'dms'),
+  };
+  $('unitSettings').querySelectorAll('[data-setting]').forEach(list => {
+    const chosen = settings[list.dataset.setting];
+    list.querySelectorAll('.check-row').forEach(row => {
+      const on = row.dataset.value === chosen;
+      row.classList.toggle('on', on);
+      row.setAttribute('aria-pressed', String(on));
+    });
+  });
+  $('unitSettings').querySelectorAll('[data-example]').forEach(el => {
+    el.textContent = example[el.dataset.example] ?? '';
+  });
 }
 
 /* ── Self-update ──────────────────────────────────────────────────── */
@@ -2706,6 +2808,16 @@ function wire() {
 
   // Share
   $('btnContam').addEventListener('click', () => pendingSession && openContam(pendingSession));
+  $('shareWhere').addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-copy]');
+    if (!b) return;
+    try {
+      await navigator.clipboard.writeText(b.dataset.copy);
+      toast('Copied');
+    } catch {
+      toast(b.dataset.copy);          // no clipboard: at least show it big enough to read out
+    }
+  });
   $('btnRunHere').addEventListener('click', () => pendingSession && startRun(pendingSession));
   $('btnShareDone').addEventListener('click', () => { clearMap(); go('scrHome'); });
 
@@ -2874,12 +2986,20 @@ function wire() {
       if (fmtId) $(fmtId).textContent = $(id).value;
     });
   };
-  $('unitRow').addEventListener('click', (e) => {
-    const b = e.target.closest('[data-units]');
-    if (!b) return;
-    settings.imperial = b.dataset.units === 'imperial';
+  $('appearanceSettings').addEventListener('click', (e) => {
+    const row = e.target.closest('.check-row');
+    if (!row) return;
+    settings.theme = row.dataset.value;
     saveSettings();
-    renderSettings();
+    applyTheme();
+  });
+  $('unitSettings').addEventListener('click', (e) => {
+    const row = e.target.closest('.check-row');
+    const list = row?.closest('[data-setting]');
+    if (!row || !list) return;
+    settings[list.dataset.setting] = row.dataset.value;
+    saveSettings();
+    paintUnitSettings();
   });
   $('plumeOn').addEventListener('change', () => {
     settings.plume = $('plumeOn').checked;
@@ -2925,6 +3045,7 @@ async function importFromLink() {
 
 /* ── Boot ─────────────────────────────────────────────────────────── */
 function boot() {
+  applyTheme();          // the head script already painted it; this keeps it in step
   snap();
   if (!S.handler) return openHandlerForm({ firstLaunch: true });
   if (!S.team.length && !S.dogs.length) return openDogForm({ firstLaunch: true });
