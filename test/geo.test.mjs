@@ -5,7 +5,7 @@ import {
   crossTrackSigned, signedOffsets, meanSigned, sideOfDrift, sideAgreement, lineCorrect,
   dwellFold, foldFixes, departure, progressAlong, splitLine, smoothBearing,
   fmtDist, fmtShort, fmtSpeed, fmtTemp, timestampsEndingAt,
-  fmtWeight, kgToShown, shownToKg,
+  fmtWeight, kgToShown, shownToKg, fmtCoord,
 } from '../public/geo.js';
 
 let pass = 0;
@@ -528,6 +528,25 @@ t('weight: kept in kilograms, shown in whichever the handler reads', () => {
   assert.ok(Math.abs(kgToShown(kg, true) - 66.1) < 0.01);
   assert.equal(kgToShown(30, false), 30, 'metric is stored exactly as typed');
   assert.equal(shownToKg(null, true), null);
+});
+
+t('fmtCoord: decimal or degrees-minutes-seconds, both pasteable', () => {
+  // Wells: five decimals is about a metre, as honest as a phone gets.
+  assert.equal(fmtCoord(51.2094, -2.6449, 'dd'), '51.20940, -2.64490');
+  assert.equal(fmtCoord(51.2094, -2.6449, 'dms'), `51°12'33.8"N 2°38'41.6"W`);
+
+  // Hemispheres follow the sign, and the sign is dropped from the numbers.
+  assert.equal(fmtCoord(-33.8568, 151.2153, 'dms'), `33°51'24.5"S 151°12'55.1"E`);
+
+  // Rounding carries rather than printing an impossible 60 seconds.
+  const edge = fmtCoord(51.99999999, 0.5, 'dms');
+  assert.ok(edge.startsWith(`52°00'00.0"N`), `carried to the next degree, got ${edge}`);
+  assert.ok(!/60\.0"/.test(edge), 'never 60 seconds');
+
+  // Nothing to show beats a wrong place.
+  assert.equal(fmtCoord(null, 0), '—');
+  assert.equal(fmtCoord(91, 0), '—');
+  assert.equal(fmtCoord(0, 181, 'dms'), '—');
 });
 
 console.log(`\n${pass} passed total\n`);

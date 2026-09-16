@@ -521,3 +521,31 @@ export function fmtWeight(kg, imperial = false) {
   if (!Number.isFinite(kg) || kg <= 0) return '—';
   return imperial ? `${(kg * LB).toFixed(1)} lb` : `${kg.toFixed(1)} kg`;
 }
+
+/* ── Coordinates ──────────────────────────────────────────────────────
+   Five decimal places is about a metre, which is already better than a
+   phone knows where it is. A sixth would claim a precision the fix does
+   not have.
+
+   Degrees-minutes-seconds uses plain ' and " rather than the typographic
+   prime marks: those paste straight into any map app or a text message,
+   and a coordinate is mostly something you give to someone else. */
+function dmsPart(v, pos, neg) {
+  const hemi = v < 0 ? neg : pos;
+  const a = Math.abs(v);
+  let d = Math.floor(a);
+  let m = Math.floor((a - d) * 60);
+  let s = Math.round(((a - d) * 60 - m) * 60 * 10) / 10;
+  // Rounding can carry: 59.96" is a whole minute, not 60.0".
+  if (s >= 60) { s -= 60; m += 1; }
+  if (m >= 60) { m -= 60; d += 1; }
+  return `${d}°${String(m).padStart(2, '0')}'${s.toFixed(1).padStart(4, '0')}"${hemi}`;
+}
+
+export function fmtCoord(lat, lon, format = 'dd') {
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)
+      || Math.abs(lat) > 90 || Math.abs(lon) > 180) return '—';
+  return format === 'dms'
+    ? `${dmsPart(lat, 'N', 'S')} ${dmsPart(lon, 'E', 'W')}`
+    : `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
+}
