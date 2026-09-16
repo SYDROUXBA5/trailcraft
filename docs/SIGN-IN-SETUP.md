@@ -93,3 +93,26 @@ Test in a normal Safari tab first — that path uses a popup and is not
 affected. If the Home Screen app is the problem, tell me: the fix is to serve
 Firebase's sign-in helper from your own domain, and it depends on how your
 GitHub Pages site is set up, so it is worth doing only if it actually bites.
+
+---
+
+## Live sharing — two more switches
+
+Sharing a run live (the "Share live" button on the run screen) uses the same
+Firebase project. It works as soon as you are signed in, with two things set
+up once:
+
+1. **Rules.** `firestore.rules` in this repo has grown a `live` section.
+   Firestore → **Rules** → paste the whole file again → **Publish**.
+2. **Clean-up.** A live run is readable for 24 hours after it ends, then it
+   should be deleted. Firestore → **Time-to-live (TTL)** → **Create policy**,
+   twice:
+   - Collection group `live`, timestamp field `expiresAt`
+   - Collection group `chunks`, timestamp field `expiresAt`
+
+   Without these the links still stop working after 24 hours (the rules
+   refuse them) — the data would just sit there, unreadable, until deleted.
+
+What a viewer sees: the laid trail and the dog's track as it happens, on a
+plain web page, no app and no account needed. The link is 20 random
+characters — nobody can guess it, and nothing is ever listed.

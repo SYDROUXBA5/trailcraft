@@ -1,25 +1,30 @@
 rules_version = '2';
-
-// Trailcraft — who may read and write what.
-//
-// Every record lives under users/{uid}/..., and only the signed-in owner of
-// that uid can touch it. There is no shared data, no admin path and no public
-// read. Anything not matched below is refused.
-//
-// Paste this into Firebase console → Firestore Database → Rules → Publish.
-
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    // A handler's own records: readable and writable by that account only.
     match /users/{uid}/{table}/{recordId} {
       allow read, write: if request.auth != null
                          && request.auth.uid == uid
                          && table in ['handlers', 'dogs', 'layers', 'sessions', 'calibration'];
     }
 
-    // Everything else, including the users/{uid} document itself.
-    match /{document=**} {
-      allow read, write: if false;
+    // A live run. The id is the key: anyone holding the link can read it
+    // until it expires (24 h after the run ends); only the account that
+    // started it can write to it. Nothing here is ever listed.
+    match /live/{liveId} {
+      allow read: if resource.data.expiresAt > request.time.toMillis();
+      allow create: if request.auth != null && request.resource.data.uid == request.auth.uid;
+      allow update: if request.auth != null && resource.data.uid == request.auth.uid;
+      allow delete: if false;
+
+      match /chunks/{chunk} {
+        allow read: if get(/databases/$(database)/documents/live/$(liveId)).data.expiresAt > request.time.toMillis();
+        allow write: if request.auth != null
+                     && get(/databases/$(database)/documents/live/$(liveId)).data.uid == request.auth.uid;
+      }
     }
+
+    match /{document=**} { allow read, write: if false; }
   }
 }

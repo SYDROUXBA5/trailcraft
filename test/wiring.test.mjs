@@ -78,6 +78,14 @@ t('every module the app imports is cached for offline use', () => {
   }
   const missing = [...imported].filter(m => !cached.has(m));
   assert.deepEqual(missing, [], `imported but not cached offline: ${missing.join(', ')}`);
+
+  /* The Desktop single-file copy inlines a fixed list of modules. One that
+     app.js imports but the list forgets is a ReferenceError on open — which
+     is how the Desktop copy shipped broken for a day after sign-in landed. */
+  const build = readFileSync(new URL('../scripts/build-single.mjs', import.meta.url), 'utf8');
+  const bundled = new Set([...build.match(/const MODULES = \[([^\]]+)\]/)[1].matchAll(/'([\w-]+)'/g)].map(m => `${m[1]}.js`));
+  const forgotten = [...imported].filter(m => m !== 'app.js' && !bundled.has(m));
+  assert.deepEqual(forgotten, [], `imported but left out of the single-file build: ${forgotten.join(', ')}`);
 });
 
 t('a ::before or ::after placed absolutely stays inside its own element', () => {
