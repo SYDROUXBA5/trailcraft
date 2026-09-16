@@ -334,7 +334,10 @@
 <section id="scrRun" class="screen glass" hidden>
   <div class="hud-pill" id="runHud"><span class="rec-dot"></span><span id="runHudText"></span></div>
   <div class="glass-bottom">
-    <div class="live-row"><button class="btn small moss-on-dark live-btn" id="btnLive" hidden>Share live</button></div>
+    <div class="live-row">
+      <button class="btn small moss-on-dark live-btn coach-btn" id="btnCoach" hidden>Coach</button>
+      <button class="btn small moss-on-dark live-btn" id="btnLive" hidden>Share live</button>
+    </div>
     <div class="wp-row" id="wpRow">
       <button class="wp-pill" data-wp="Indication">Indication</button>
       <button class="wp-pill" data-wp="Lost it">Lost it</button>
@@ -346,6 +349,10 @@
       <button class="btn ghost" id="btnReveal">Reveal trail</button>
       <button class="btn big ember grow" id="btnRunStop">Stop</button>
     </div>
+  </div>
+  <div class="coach-sheet" id="coachSheet" hidden>
+    <div class="home-head"><span class="label" style="margin-top:0">Coach</span><button class="btn ghost small" id="btnCoachDone">Done</button></div>
+    <div id="coachSheetBody"></div>
   </div>
 </section>
 
@@ -541,6 +548,44 @@
           <button type="button" class="check-row" data-value="dd"><span class="check-text"><b>Decimal degrees</b><i data-example="dd"></i></span><span class="check-mark" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span></button>
           <button type="button" class="check-row" data-value="dms"><span class="check-text"><b>Degrees, minutes, seconds</b><i data-example="dms"></i></span><span class="check-mark" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span></button>
         </div>
+      </div>
+    </div>
+
+    <span class="label">Coach</span>
+    <div class="card coach-card" id="coachHome">
+      <div id="coachControls">
+        <label class="switch-row" for="coachOn">
+          <span>Tell me when the dog leaves the trail<i>Sound and a voice, hands-free — train without a second person</i></span>
+          <input id="coachOn" type="checkbox">
+        </label>
+        <span class="unit-head">How far off counts</span>
+        <div class="age-row" id="coachTolRow">
+          <button type="button" class="age-chip" data-tol="0">10 m</button>
+          <button type="button" class="age-chip" data-tol="1">20 m</button>
+          <button type="button" class="age-chip" data-tol="2">30 m</button>
+          <button type="button" class="age-chip" data-tol="3">50 m</button>
+        </div>
+        <label class="switch-row" for="coachScent">
+          <span>Follow the scent, not just the line<i>Downwind, the corridor opens to where the scent has drifted — a dog working there is not off</i></span>
+          <input id="coachScent" type="checkbox">
+        </label>
+        <label class="switch-row" for="coachVoice">
+          <span>Say it out loud<i>“Off the trail, 25 metres to the right”</i></span>
+          <input id="coachVoice" type="checkbox">
+        </label>
+        <label class="switch-row" for="coachSound">
+          <span>Sound<i>A tick at the edge, a firm tone when off, a chime when back</i></span>
+          <input id="coachSound" type="checkbox">
+        </label>
+        <label class="switch-row" for="coachVibrate" id="coachVibrateRow" hidden>
+          <span>Vibrate<i>A short buzz with each call</i></span>
+          <input id="coachVibrate" type="checkbox">
+        </label>
+        <label class="switch-row" for="coachShow">
+          <span>Show the distance on screen<i>Off keeps the run blind — the coach still speaks</i></span>
+          <input id="coachShow" type="checkbox">
+        </label>
+        <p class="body small muted" id="coachNote"></p>
       </div>
     </div>
 

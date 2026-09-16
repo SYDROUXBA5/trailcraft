@@ -829,7 +829,8 @@ body:has(#scrWalk:not([hidden])) { --top-row: calc(var(--safe-t) + 104px); }
 /* ── Sharing ──────────────────────────────────────────────────────────
    The live button sits on the run screen's glass, out of the way of the
    marks; it turns ember while the run is being followed. */
-.live-row { display: flex; justify-content: flex-end; }
+.live-row { display: flex; justify-content: space-between; gap: 8px; }
+.live-row .btn:only-child { margin-left: auto; }
 .btn.live-btn { width: auto; min-height: 40px; padding: 6px 16px; font-size: 13.5px; }
 .btn.live-btn.on { background: var(--ember); border-color: var(--ember); color: #fff; }
 
@@ -839,3 +840,25 @@ body:has(#scrWalk:not([hidden])) { --top-row: calc(var(--safe-t) + 104px); }
 .facts + .facts { margin-top: 10px; }
 .facts .body { margin-top: 8px; }
 #scrLive .btn.ghost { background: var(--card); }
+
+/* ── The coach ────────────────────────────────────────────────────────
+   Its pill sits on the run screen's glass and turns ember while the dog is
+   off the trail, as does the HUD. The in-run sheet borrows the Settings
+   controls themselves (the node moves), so there is one truth. */
+.btn.live-btn.on { background: rgba(255, 255, 255, 0.22); }
+.btn.live-btn.alert { background: var(--ember); border-color: var(--ember); color: #fff; }
+.hud-pill.off { background: var(--ember); border-color: var(--ember); color: #fff; box-shadow: 0 6px 18px rgba(217, 102, 43, 0.45); }
+.hud-pill.off .rec-dot { background: #fff; }
+.coach-sheet {
+  position: fixed; left: 12px; right: 12px; bottom: calc(var(--safe-b) + 12px);
+  max-width: 536px; margin: 0 auto; max-height: 72vh; overflow-y: auto;
+  background: var(--card); border: 1px solid var(--border); border-radius: var(--r);
+  padding: 14px 16px 16px; box-shadow: 0 18px 40px -12px rgba(23, 32, 26, 0.45);
+}
+.coach-sheet .home-head { margin-bottom: 4px; }
+.coach-card { padding-top: 4px; padding-bottom: 12px; }
+#coachControls .switch-row:last-of-type { border-bottom: 0; }
+#coachControls .unit-head { display: block; margin: 12px 0 8px; }
+#coachControls .age-row { margin-bottom: 4px; }
+#coachControls .age-chip { min-height: 44px; font-size: 14px; }
+#coachNote { margin-top: 10px; }

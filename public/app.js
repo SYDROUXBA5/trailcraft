@@ -22,14 +22,15 @@ import { sync, onSync, initSync, signInWithGoogle, signInWithApple, signOut,
 import { trailModel, encodeShared, decodeShared, sharedUrl, toGpx, fileBase,
          detailSections, headline, notes, liveMeta, liveModel } from './share.js';
 import { buildPdf, jpegSize } from './pdf.js';
+import { coachStep, initialCoach, coachPhrase, coachLine, TOL_OPTIONS, COACH_DEFAULTS } from './coach.js';
 import { createStore, migrateV1, TARGETS, targetById, verbs, uid,
          dogStats, ageBand, AGE_BANDS, LEVELS, levelById, dogAge } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-16d';
+const BUILD = '2026-09-16e';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
-const DEFAULTS = { accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true,
+const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true,
   distUnits: 'metric', tempUnits: 'c', coordFormat: 'dd', theme: 'system', mbToken: (window.MB_TOKEN || '') };
 const loadJson = (k, f) => { try { return JSON.parse(localStorage.getItem(k)) ?? f; } catch { return f; } };
 let settings = { ...DEFAULTS, ...loadJson('tc.settings', {}) };
@@ -1334,6 +1335,7 @@ function onFix(pos) {
   if (rec.kind === 'lay') setSrc('runner', lineOf(rec.pts));
   if (rec.kind === 'run') setSrc('dog', lineOf(rec.pts));
   paintNav();
+  if (rec.kind === 'run') coachOnFix(pt);
   if (rec.kind === 'lay') {
     if (rec.pts.length === 1) {
       /* The plume needs real weather, and the first fix is the first moment
@@ -2010,6 +2012,7 @@ async function startRun(s) {
   clearMap();
   liveState = null;
   paintLiveBtn();
+  coachStart(s);
 
   if (t.kind === 'person') {
     // Only the start of the trail. The line itself stays hidden: run blind.
@@ -2023,7 +2026,8 @@ async function startRun(s) {
   hudText = () => {
     const dogName = S.dog?.name ?? 'Dog';
     const age = ageWord(Date.now() - s.startedAt);
-    return `${dogName} · ${fmtDur(Date.now() - rec.started)} · ${t.kind === 'person' ? 'trail' : 'hide'} ${age} old`;
+    const base = `${dogName} · ${fmtDur(Date.now() - rec.started)} · ${t.kind === 'person' ? 'trail' : 'hide'} ${age} old`;
+    return coach.line ? `${base} · ${coach.line}` : base;
   };
   $('btnReveal').textContent = t.kind === 'person' ? 'Reveal trail' : 'Reveal hides';
   go('scrRun');
@@ -2071,6 +2075,7 @@ function addWaypoint(kind) {
 
 async function stopRun() {
   await stopWatch();
+  coachStop();
   stopFollowing();
   plumeStop();
   airStop();
@@ -2622,6 +2627,202 @@ function closeLive() {
   boot();
 }
 
+/* ── The coach ────────────────────────────────────────────────────────
+   Decisions come from coach.js. This is the part that has a browser: the
+   run's trail and scent field, the sounds, the voice, the pill and the HUD. */
+const coach = { on: false, trail: null, field: [], plan: false, state: null, reading: null,
+                status: 'on', line: '', tick: 0, sounds: null, unlocked: false };
+
+/** Tones as WAV files played through <audio>, not the Web Audio API: on an
+    iPhone a media element plays through the ring/silent switch, and a coach
+    that goes quiet because the switch is on silent is no coach. */
+function wavUrl(notes) {
+  const rate = 22050;
+  const total = notes.reduce((n, x) => n + Math.round(x.ms * rate / 1000), 0);
+  const pcm = new Int16Array(total);
+  let at = 0;
+  for (const x of notes) {
+    const len = Math.round(x.ms * rate / 1000), fade = rate * 0.008;
+    for (let i = 0; i < len; i++) {
+      const env = Math.min(1, i / fade, (len - i) / fade);
+      pcm[at + i] = Math.sin(2 * Math.PI * x.f * i / rate) * env * (x.gain ?? 0.5) * 32767;
+    }
+    at += len;
+  }
+  const buf = new ArrayBuffer(44 + pcm.length * 2);
+  const v = new DataView(buf);
+  const tag = (o, t) => [...t].forEach((c, i) => v.setUint8(o + i, c.charCodeAt(0)));
+  tag(0, 'RIFF'); v.setUint32(4, 36 + pcm.length * 2, true); tag(8, 'WAVE');
+  tag(12, 'fmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, rate, true); v.setUint32(28, rate * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+  tag(36, 'data'); v.setUint32(40, pcm.length * 2, true);
+  new Int16Array(buf, 44).set(pcm);
+  return URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }));
+}
+
+const SOUNDS = {
+  edge: [{ f: 880, ms: 70, gain: 0.35 }, { f: 0, ms: 70 }, { f: 880, ms: 70, gain: 0.35 }],
+  off:  [{ f: 660, ms: 140, gain: 0.6 }, { f: 0, ms: 50 }, { f: 520, ms: 180, gain: 0.6 }, { f: 0, ms: 50 }, { f: 520, ms: 180, gain: 0.6 }],
+  back: [{ f: 523, ms: 110, gain: 0.5 }, { f: 0, ms: 30 }, { f: 784, ms: 220, gain: 0.5 }],
+};
+const BUZZ = { edge: [40], off: [120, 80, 120, 80, 220], still: [120, 80, 120, 80, 220], back: [60, 60, 60] };
+
+/** Runs inside the first touch on the page: every sound is started once,
+    muted, which is what lets it play later without a touch. */
+function audioUnlock() {
+  if (coach.unlocked) return;
+  coach.unlocked = true;
+  try {
+    coach.sounds = Object.fromEntries(Object.entries(SOUNDS).map(([k, notes]) => {
+      const a = new Audio(wavUrl(notes));
+      a.preload = 'auto';
+      a.muted = true;
+      a.play().then(() => { a.pause(); a.currentTime = 0; a.muted = false; }).catch(() => { a.muted = false; });
+      return [k, a];
+    }));
+  } catch { coach.sounds = null; }
+  try {
+    if ('speechSynthesis' in window) {
+      const u = new SpeechSynthesisUtterance(' ');
+      u.volume = 0;
+      speechSynthesis.speak(u);
+    }
+  } catch { /* no voice on this phone */ }
+}
+
+function coachSpeak(text) {
+  if (!('speechSynthesis' in window)) return;
+  try {
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = navigator.language || 'en-GB';
+    u.rate = 1.05;
+    speechSynthesis.speak(u);
+  } catch { /* nothing to do */ }
+}
+
+function coachDeliver(alert) {
+  const kind = alert.kind === 'still' ? 'off' : alert.kind;
+  if (settings.coachSound && coach.sounds?.[kind]) {
+    const a = coach.sounds[kind];
+    try { a.currentTime = 0; a.play().catch(() => {}); } catch { /* not primed */ }
+  }
+  if (settings.coachVibrate && navigator.vibrate) navigator.vibrate(BUZZ[alert.kind] || [80]);
+  if (settings.coachVoice && alert.kind !== 'edge') {
+    // After the tone, so the two do not talk over each other.
+    setTimeout(() => coachSpeak(coachPhrase(alert, { imperial: imp() })), settings.coachSound ? 450 : 0);
+  }
+}
+
+const coachInput = (fix) => ({
+  fix, heading: nav.brg, lineM: S.dog?.lineM ?? 0, trail: coach.trail,
+  field: settings.coachScent ? coach.field : [], tolM: Number(settings.coachTol) || 20,
+  scent: !!settings.coachScent, plan: coach.plan, now: Date.now(),
+});
+
+function coachStart(s) {
+  coachStop();
+  const t = targetById(s.targetId);
+  coach.trail = t.kind === 'person' && s.data.trail?.length > 1 ? s.data.trail : null;
+  coach.plan = !!s.data.plan && !s.data.walked;
+  coach.state = initialCoach();
+  coach.reading = null; coach.status = 'on'; coach.line = '';
+  const wx = s.data.weather;
+  coach.field = wx && coach.trail ? scentField(coach.trail, wx, run.startedAt, db.dogDrift(s.dogId) ?? undefined) : [];
+  coachSync();
+}
+
+/** Bring the running coach in line with the settings, without losing its place. */
+function coachSync() {
+  const want = !!(settings.coachOn && coach.trail && rec.kind === 'run');
+  if (want && !coach.on) {
+    coach.on = true;
+    coach.state ??= initialCoach();
+    clearInterval(coach.tick);
+    coach.tick = setInterval(() => { if (rec.on) coachApply(coachStep(coach.state, coachInput(null))); }, 1000);
+  } else if (!want && coach.on) {
+    coach.on = false;
+    clearInterval(coach.tick); coach.tick = 0;
+    coach.status = 'on'; coach.line = '';
+  }
+  paintCoachHud();
+}
+
+function coachOnFix(pt) {
+  if (!coach.on) return;
+  coachApply(coachStep(coach.state, coachInput(pt)));
+}
+
+function coachApply(r) {
+  coach.state = r.state;
+  coach.reading = r.reading;
+  coach.status = r.state.status;
+  coach.line = !r.reading ? ''
+    : settings.coachShow ? coachLine(r.reading, coach.status, { imperial: imp() })
+    : coach.status === 'off' ? 'Off the trail' : '';
+  if (r.alert) coachDeliver(r.alert);
+  paintCoachHud();
+}
+
+function coachStop() {
+  clearInterval(coach.tick); coach.tick = 0;
+  coach.on = false; coach.trail = null; coach.field = []; coach.state = null;
+  coach.reading = null; coach.status = 'on'; coach.line = '';
+  try { speechSynthesis?.cancel(); } catch { /* fine */ }
+  // The run screen stays up while the result is worked out: leave it calm.
+  $('runHud').classList.remove('off');
+  const el = $('runHudText'); if (el && rec.kind === 'run') el.textContent = hudText();
+  const b = $('btnCoach'); b.hidden = true; b.classList.remove('alert');
+}
+
+/** The corridor as the handler reads it: the option's round number. */
+function tolLabel(m = settings.coachTol) {
+  const opts = TOL_OPTIONS[imp() ? 'imperial' : 'metric'];
+  const i = opts.reduce((b, v, k) => (Math.abs(v - m) < Math.abs(opts[b] - m) ? k : b), 0);
+  return imp() ? `${[30, 60, 100, 150][i]} ft` : `${opts[i]} m`;
+}
+
+function paintCoachHud() {
+  const el = $('runHudText');
+  if (el && rec.kind === 'run' && rec.on) el.textContent = hudText();
+  $('runHud').classList.toggle('off', coach.on && coach.status === 'off');
+  const b = $('btnCoach');
+  b.hidden = !coach.trail;
+  b.classList.toggle('on', coach.on);
+  b.classList.toggle('alert', coach.on && coach.status === 'off');
+  b.textContent = !coach.on ? 'Coach off' : coach.status === 'off' ? 'Off the trail' : `Coach · ${tolLabel()}`;
+}
+
+function paintCoachControls() {
+  const opts = TOL_OPTIONS[imp() ? 'imperial' : 'metric'];
+  // A value from the other unit system snaps to the nearest round option here.
+  const near = opts.reduce((b, v) => (Math.abs(v - settings.coachTol) < Math.abs(b - settings.coachTol) ? v : b), opts[0]);
+  if (Math.abs(near - settings.coachTol) > 0.01) { settings.coachTol = near; saveSettings(); }
+  for (const id of ['coachOn', 'coachScent', 'coachVoice', 'coachSound', 'coachVibrate', 'coachShow']) {
+    $(id).checked = settings[id] !== false;
+  }
+  $('coachControls').querySelectorAll('[data-tol]').forEach((chip, i) => {
+    chip.textContent = imp() ? `${[30, 60, 100, 150][i]} ft` : `${opts[i]} m`;
+    chip.classList.toggle('selected', opts[i] === settings.coachTol);
+  });
+  const canBuzz = typeof navigator.vibrate === 'function';
+  $('coachVibrateRow').hidden = !canBuzz;
+  $('coachNote').textContent = canBuzz
+    ? 'Turn the volume up. Calls come at most every ten seconds, and never for GPS noise.'
+    : 'iPhones do not let a web app vibrate, so the coach uses sound and voice. Turn the volume up — the tones play even with the ring/silent switch on silent. Calls come at most every ten seconds, and never for GPS noise.';
+}
+
+/* The in-run sheet shows the very same controls: the node moves. */
+function openCoachSheet() {
+  paintCoachControls();
+  $('coachSheetBody').append($('coachControls'));
+  $('coachSheet').hidden = false;
+}
+function closeCoachSheet() {
+  $('coachHome').append($('coachControls'));
+  $('coachSheet').hidden = true;
+}
+
 /* ── Sessions & result reopening ──────────────────────────────────── */
 function openSession(id) {
   const s = db.sessions().find(x => x.id === id);
@@ -2894,6 +3095,7 @@ function renderSettings() {
     + `<button class="btn ghost small" id="setAddLayer">Add person</button>`;
 
   $('plumeOn').checked = settings.plume !== false;
+  paintCoachControls();
   paintUnitSettings();
   paintAppearance();
   renderAccount();
@@ -3322,6 +3524,25 @@ function wire() {
   // Run
   $('btnReveal').addEventListener('click', toggleReveal);
   $('btnRunStop').addEventListener('click', stopRun);
+  $('btnCoach').addEventListener('click', openCoachSheet);
+  $('btnCoachDone').addEventListener('click', closeCoachSheet);
+  $('coachControls').addEventListener('change', (e) => {
+    const box = e.target.closest('input[type="checkbox"]');
+    if (!box) return;
+    settings[box.id] = box.checked;
+    saveSettings();
+    coachSync();
+  });
+  $('coachControls').addEventListener('click', (e) => {
+    const chip = e.target.closest('[data-tol]');
+    if (!chip) return;
+    settings.coachTol = TOL_OPTIONS[imp() ? 'imperial' : 'metric'][Number(chip.dataset.tol)];
+    saveSettings();
+    paintCoachControls();
+    paintCoachHud();
+  });
+  // Sound and speech are only allowed after a touch: the first one anywhere unlocks them.
+  document.addEventListener('pointerdown', audioUnlock, { once: true });
   $('wpRow').addEventListener('click', (e) => {
     const b = e.target.closest('[data-wp]');
     if (b) addWaypoint(b.dataset.wp);
@@ -3423,6 +3644,7 @@ function wire() {
     settings[list.dataset.setting] = row.dataset.value;
     saveSettings();
     paintUnitSettings();
+    paintCoachControls();
   });
   $('plumeOn').addEventListener('change', () => {
     settings.plume = $('plumeOn').checked;
