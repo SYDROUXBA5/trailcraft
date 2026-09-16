@@ -10,7 +10,7 @@
    it cannot load — offline, blocked, not set up — the app does not notice. */
 
 import { firebaseConfig, appleSignInEnabled } from './firebase-config.js';
-import { mergeRecords, mergeCalibration, toCloud, fromCloud, approxBytes, DOC_LIMIT } from './sync-core.js';
+import { mergeRecords, mergeCalibration, toCloud, fromCloud, approxBytes, DOC_LIMIT, packPoints, unpackPoints } from './sync-core.js';
 
 const SDK = 'https://www.gstatic.com/firebasejs/12.3.0';
 const TABLES = ['handlers', 'dogs', 'layers', 'sessions'];
@@ -54,11 +54,12 @@ async function loadFirebase() {
 }
 
 /** Called once at boot. Does nothing at all until a config exists. */
+let ready = Promise.resolve();   // settles once Firestore exists; live viewers wait on it
 export async function initSync(store) {
   db = store;
   if (!firebaseConfig) { sync.status = 'off'; emit(); return; }
   sync.status = 'loading'; emit();
-  try {
+  ready = (async () => {
     const f = await loadFirebase();
     const app = f.initializeApp(firebaseConfig);
     auth = f.getAuth(app);
@@ -68,6 +69,9 @@ export async function initSync(store) {
     // A redirect sign-in comes back through a full page load and lands here.
     await f.getRedirectResult(auth).catch((e) => { sync.error = plain(e); });
     f.onAuthStateChanged(auth, onUser);
+  })();
+  try {
+    await ready;
   } catch {
     sync.status = 'error';
     sync.error = 'Sign-in could not load — check your connection and reopen the app';
@@ -192,4 +196,103 @@ function mirror(uid, table, rec) {
   fb.setDoc(userDoc(uid, table, rec.id), payload)
     .then(() => { sync.lastSync = Date.now(); sync.status = 'synced'; emit(); })
     .catch((e) => { sync.error = plain(e); emit(); });
+}
+
+/* ── Live: a run, followed from anywhere while it happens ─────────────
+   One document per run at live/{id}, with the trail and the team, and a
+   chunk document per minute of dog track under it — a viewer's listener
+   then receives a minute's worth of points when it changes, not the whole
+   run every ten seconds. The id is 120 random bits: the link is the key.
+   A run stays readable for 24 hours after it ends (the rules check
+   expiresAt), and a TTL policy in Firestore deletes it after that. */
+
+const LIVE_TTL = 24 * 3600e3;
+const CHUNK_MS = 60e3;
+let live = null;   // { id, startedAt, chunks: Map<n, signature>, expiresAt, wpsN }
+
+const liveId = () => {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+  const bytes = new Uint8Array(20);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, b => alphabet[b % 64]).join('');   // 256 = 4 × 64: no bias
+};
+
+/** Publish a run. `meta` is share.js's liveMeta(): the trail, not the run. */
+export async function startLive(meta) {
+  if (!fs || !sync.user) throw new Error('Sign in to share live');
+  const f = await loadFirebase();
+  const id = liveId();
+  const expiresAt = Date.now() + LIVE_TTL;
+  await f.setDoc(f.doc(fs, 'live', id), {
+    ...toCloud(meta), uid: sync.user.uid, expiresAt, ended: false, createdAt: Date.now(), at: Date.now(),
+  });
+  live = { id, startedAt: meta.startedAt, chunks: new Map(), expiresAt, wpsN: -1 };
+  return id;
+}
+
+export const liveNow = () => live?.id ?? null;
+
+/** Send what has changed: the minute-chunks with new points (or a standing
+    spot whose wait grew), and the marks when there is a new one. Not
+    awaited — Firestore queues it offline and the handler is never kept. */
+export function pushLive(pts, wps = []) {
+  if (!live || !fs) return;
+  const groups = new Map();
+  for (const p of pts) {
+    const n = Math.max(0, Math.floor(((p.t ?? live.startedAt) - live.startedAt) / CHUNK_MS));
+    if (!groups.has(n)) groups.set(n, []);
+    groups.get(n).push(p);
+  }
+  for (const [n, g] of groups) {
+    const sig = `${g.length}|${Math.round(g[g.length - 1].dwellS ?? 0)}`;
+    if (live.chunks.get(n) === sig) continue;
+    live.chunks.set(n, sig);
+    const clean = g.map(p => ({ lat: p.lat, lon: p.lon, t: p.t, alt: p.alt ?? null, dwellS: p.dwellS || 0 }));
+    fb.setDoc(fb.doc(fs, 'live', live.id, 'chunks', String(n)),
+      { n, expiresAt: live.startedAt + 36 * 3600e3, ...packPoints(clean) }).catch(() => {});
+  }
+  if (wps.length !== live.wpsN) {
+    live.wpsN = wps.length;
+    fb.setDoc(fb.doc(fs, 'live', live.id), { wps: packPoints(wps), at: Date.now() }, { merge: true }).catch(() => {});
+  }
+}
+
+/** The run is over: the last points, the verdict, and 24 more hours to read it. */
+export async function endLive({ result = null, track = [], wps = [] } = {}) {
+  if (!live) return;
+  pushLive(track, wps);
+  const id = live.id;
+  live = null;
+  await fb.setDoc(fb.doc(fs, 'live', id), {
+    ended: true, endedAt: Date.now(), expiresAt: Date.now() + LIVE_TTL, at: Date.now(),
+    result: result ? toCloud(result) : null,
+  }, { merge: true });
+}
+
+/** Follow a run. `cb` gets { meta, chunks } on every change, or { error }.
+    No sign-in needed: the rules let anyone with the id read until it expires. */
+export async function watchLive(id, cb) {
+  if (!firebaseConfig) { cb({ error: 'Live links need the cloud switched on in this app' }); return () => {}; }
+  try { await ready; } catch { /* reported below */ }
+  if (!fs) { cb({ error: 'Could not connect — check your signal and try the link again' }); return () => {}; }
+  const f = fb;
+  let meta = null;
+  const chunks = new Map();
+  const push = () => {
+    if (!meta) return;
+    cb({ meta, chunks: [...chunks.entries()].sort((a, b) => Number(a[0]) - Number(b[0])).map(e => e[1]) });
+  };
+  const offDoc = f.onSnapshot(f.doc(fs, 'live', id), (snap) => {
+    if (!snap.exists()) { cb({ error: 'This live link has expired, or never existed' }); return; }
+    meta = fromCloud(snap.data());
+    push();
+  }, (e) => cb({ error: e?.code?.includes('permission') ? 'This live link has expired' : (plain(e) || 'Could not follow this run') }));
+  const offChunks = f.onSnapshot(f.collection(fs, 'live', id, 'chunks'), (qs) => {
+    qs.docChanges().forEach(ch => {
+      if (ch.type === 'removed') chunks.delete(ch.doc.id);
+      else chunks.set(ch.doc.id, unpackPoints(ch.doc.data()));
+    });
+    push();
+  }, () => { /* the document listener reports the reason */ });
+  return () => { offDoc(); offChunks(); };
 }

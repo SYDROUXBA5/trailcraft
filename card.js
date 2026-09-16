@@ -26,12 +26,12 @@ const MAX_PTS = 120;
 
 /* ── byte plumbing ────────────────────────────────────────────────── */
 
-async function through(bytes, stream) {
+export async function through(bytes, stream) {
   const out = new Blob([bytes]).stream().pipeThrough(stream);
   return new Uint8Array(await new Response(out).arrayBuffer());
 }
 
-const b64url = (bytes) => {
+export const b64url = (bytes) => {
   let s = '';
   for (let i = 0; i < bytes.length; i += 0x8000) {
     s += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
@@ -39,7 +39,7 @@ const b64url = (bytes) => {
   return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 };
 
-const unb64url = (s) => {
+export const unb64url = (s) => {
   const raw = atob(s.replace(/-/g, '+').replace(/_/g, '/'));
   return Uint8Array.from(raw, c => c.charCodeAt(0));
 };
@@ -52,7 +52,7 @@ const absolutes = (ds) => { let a = 0; return ds.map(d => (a += d)); };
 
 /* iOS below 16.4 has no CompressionStream — name the real cause instead of
    letting a ReferenceError masquerade as a damaged card. */
-function needStreams() {
+export function needStreams() {
   if (typeof CompressionStream === 'undefined' || typeof DecompressionStream === 'undefined') {
     throw new Error('Trail Cards need iOS 16.4 or newer');
   }

@@ -280,6 +280,7 @@
     </div>
     <button class="btn card-btn" id="btnSharePlume">Watch the scent on the map</button>
     <button class="btn card-btn" id="btnContam" hidden>Add a contamination trail</button>
+    <button class="btn card-btn" id="btnShareMore">Send as a link or a file</button>
     <div class="page-bottom">
       <button class="btn ember" id="btnOff" hidden>She&rsquo;s off — start the countdown</button>
       <button class="btn moss" id="btnRunHere">Run it on this phone</button>
@@ -333,6 +334,7 @@
 <section id="scrRun" class="screen glass" hidden>
   <div class="hud-pill" id="runHud"><span class="rec-dot"></span><span id="runHudText"></span></div>
   <div class="glass-bottom">
+    <div class="live-row"><button class="btn small moss-on-dark live-btn" id="btnLive" hidden>Share live</button></div>
     <div class="wp-row" id="wpRow">
       <button class="wp-pill" data-wp="Indication">Indication</button>
       <button class="wp-pill" data-wp="Lost it">Lost it</button>
@@ -359,6 +361,7 @@
     <div class="page-bottom">
       <button class="btn ember" id="btnScanWalked" hidden>Scan the walked trail card</button>
       <button class="btn moss" id="btnShowMap">Show on map</button>
+      <button class="btn" id="btnShareOut">Share this run</button>
       <button class="btn ghost" id="btnResDone">Done</button>
     </div>
   </div>
@@ -406,6 +409,58 @@
 </section>
 
 <!-- ── Sessions ────────────────────────────────────────────────────── -->
+<!-- ── Share beyond this phone: a link, a GPX file, a PDF report ────── -->
+<section id="scrShareOut" class="screen paper" hidden>
+  <div class="page">
+    <span class="label">Share</span>
+    <h1 class="display" id="shareOutTitle"></h1>
+    <p class="body small muted" id="shareOutMeta"></p>
+    <button class="btn big moss" id="btnSendLink"><b>Send a link</b><i>Opens on any phone — no app, no account</i></button>
+    <input type="text" id="shareLinkOut" readonly hidden aria-label="The link to copy">
+    <button class="btn big" id="btnSaveGpx"><b>Save as GPX</b><i>The trail and the run, for any mapping app</i></button>
+    <button class="btn big" id="btnSavePdf"><b>Trail report (PDF)</b><i>Every detail on one page, to print or send</i></button>
+    <p class="body small muted">The whole trail travels inside the link itself. Nothing is stored anywhere, so it works with no signal on the other end — and it cannot be taken back once sent.</p>
+    <div class="page-bottom"><button class="btn ghost" id="btnShareOutBack">Back</button></div>
+  </div>
+</section>
+
+<!-- ── A trail someone sent: opened from its link ───────────────────── -->
+<section id="scrShared" class="screen paper" hidden>
+  <div class="page">
+    <span class="label">Shared from Trailcraft</span>
+    <h1 class="display" id="sharedHead"></h1>
+    <p class="body small muted" id="sharedMeta"></p>
+    <div class="card">
+      <div class="minimap">
+        <img id="sharedMiniImg" alt="" hidden>
+        <svg id="sharedMini" viewBox="0 0 300 170" aria-hidden="true"></svg>
+      </div>
+    </div>
+    <div class="card" id="sharedDetails"></div>
+    <p class="body small muted" id="sharedNotes"></p>
+    <div class="page-bottom">
+      <button class="btn moss" id="btnSharedMap">Show on map</button>
+      <div class="row-gap">
+        <button class="btn grow" id="btnSharedGpx">Save as GPX</button>
+        <button class="btn grow" id="btnSharedPdf">Report (PDF)</button>
+      </div>
+      <button class="btn ghost" id="btnSharedClose">Close</button>
+    </div>
+  </div>
+</section>
+
+<!-- ── Following a run live ─────────────────────────────────────────── -->
+<section id="scrLive" class="screen glass" hidden>
+  <div class="hud-pill"><span class="rec-dot" id="liveDot"></span><span id="liveHudText">Connecting…</span></div>
+  <div class="glass-bottom">
+    <p class="glass-caption" id="liveNote"></p>
+    <div class="row-gap">
+      <button class="btn grow" id="btnLiveDetails" hidden>Details</button>
+      <button class="btn ghost grow" id="btnLiveClose">Close</button>
+    </div>
+  </div>
+</section>
+
 <section id="scrSessions" class="screen paper" hidden>
   <div class="page">
     <h1 class="display">Sessions</h1>

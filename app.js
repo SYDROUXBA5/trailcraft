@@ -17,12 +17,16 @@ import {
 import { FLAT, buildTerrain, stability, regime, flowAt, normOf } from './field.js';
 import { predictedOffsets, ScentSim, driftFrom, stepByFlow, AIRBORNE } from './sim.js';
 import { encodeTrail, decodeTrail, cardUrl, cardFromText } from './card.js';
-import { sync, onSync, initSync, signInWithGoogle, signInWithApple, signOut } from './sync.js';
+import { sync, onSync, initSync, signInWithGoogle, signInWithApple, signOut,
+         startLive, pushLive, endLive, watchLive } from './sync.js';
+import { trailModel, encodeShared, decodeShared, sharedUrl, toGpx, fileBase,
+         detailSections, headline, notes, liveMeta, liveModel } from './share.js';
+import { buildPdf, jpegSize } from './pdf.js';
 import { createStore, migrateV1, TARGETS, targetById, verbs, uid,
          dogStats, ageBand, AGE_BANDS, LEVELS, levelById, dogAge } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-16c';
+const BUILD = '2026-09-16d';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true,
@@ -121,10 +125,10 @@ const avaHtml = (ent, cls = '') => {
 const SCREENS = ['scrOnboardHandler', 'scrOnboardDog', 'scrTutorial', 'scrHome', 'scrLay',
   'scrConfirm', 'scrShare', 'scrContam', 'scrPick', 'scrScan', 'scrRun', 'scrResult',
   'scrShowMap', 'scrSessions', 'scrSettings', 'scrDraw', 'scrCountdown', 'scrWalk', 'scrWait', 'scrDog',
-  'scrSignIn'];
+  'scrSignIn', 'scrShareOut', 'scrShared', 'scrLive'];
 
 /* The screens that are transparent chrome over the live map. */
-const MAP_SCREENS = ['scrLay', 'scrConfirm', 'scrContam', 'scrRun', 'scrShowMap', 'scrDraw', 'scrWalk'];
+const MAP_SCREENS = ['scrLay', 'scrConfirm', 'scrContam', 'scrRun', 'scrShowMap', 'scrDraw', 'scrWalk', 'scrLive'];
 
 function go(id) {
   stopScan();
@@ -1474,7 +1478,7 @@ function merc(p) {
 }
 
 /** Centre and zoom that fit these points in the card, with a margin. */
-function miniView(pts) {
+function miniView(pts, W = MINI_W, H = MINI_H) {
   const m = pts.map(merc);
   const x1 = Math.min(...m.map(p => p.x)), x2 = Math.max(...m.map(p => p.x));
   const y1 = Math.min(...m.map(p => p.y)), y2 = Math.max(...m.map(p => p.y));
@@ -1482,7 +1486,7 @@ function miniView(pts) {
   const dx = Math.max(x2 - x1, 1e-9), dy = Math.max(y2 - y1, 1e-9);
   // 512 px world tiles, the same as the GL map; 0.78 leaves a margin.
   const z = Math.max(1, Math.min(18,
-    Math.floor(Math.log2(Math.min(MINI_W * 0.78 / (dx * 512), MINI_H * 0.78 / (dy * 512))) * 100) / 100));
+    Math.floor(Math.log2(Math.min(W * 0.78 / (dx * 512), H * 0.78 / (dy * 512))) * 100) / 100));
   const world = 512 * Math.pow(2, z);
   const lonC = cx * 360 - 180;
   const latC = Math.atan(Math.sinh(Math.PI * (1 - 2 * cy))) * 180 / Math.PI;
@@ -1490,19 +1494,19 @@ function miniView(pts) {
     z, lonC, latC,
     at: (p) => {
       const q = merc(p);
-      return [(q.x - cx) * world + MINI_W / 2, (q.y - cy) * world + MINI_H / 2];
+      return [(q.x - cx) * world + W / 2, (q.y - cy) * world + H / 2];
     },
   };
 }
 
 /** The satellite square behind the line — null without a token, and the card
     keeps its plain panel rather than showing a broken picture. */
-function miniImgUrl(view) {
+function miniImgUrl(view, W = MINI_W, H = MINI_H) {
   const tok = (settings.mbToken || '').trim();
   if (!/^pk\./.test(tok)) return null;
   return `https://api.mapbox.com/styles/v1/mapbox/satellite-streets-v12/static/`
     + `${view.lonC.toFixed(6)},${view.latC.toFixed(6)},${view.z},0/`
-    + `${MINI_W}x${MINI_H}@2x?access_token=${encodeURIComponent(tok)}`;
+    + `${W}x${H}@2x?access_token=${encodeURIComponent(tok)}`;
 }
 
 function miniMapSvg(pts, view) {
@@ -2004,6 +2008,8 @@ async function startRun(s) {
   rec.kind = 'run';
   rec.wps = [];
   clearMap();
+  liveState = null;
+  paintLiveBtn();
 
   if (t.kind === 'person') {
     // Only the start of the trail. The line itself stays hidden: run blind.
@@ -2079,6 +2085,7 @@ async function stopRun() {
      neither banks calibration nor gets the last word — the walked card does. */
   const provisional = !!s.data.plan && !s.data.walked;
   const result = await computeResult(s, rec.pts, rec.wps, run.startedAt, { bank: !provisional });
+  liveEnd(result);
   db.updateSession(s.id, {
     dogId: S.dog?.id ?? null,
     handlerId: S.handler.id,
@@ -2272,7 +2279,7 @@ function showOnMap(from = 'scrResult') {
     }
     if (wx) {
       // The dog's own calibrated drift, once five runs have earned it.
-      const k = db.dogDrift(s.dogId);
+      const k = s.data.k ?? db.dogDrift(s.dogId);
       const field = k != null
         ? scentField(s.data.trail, wx, s.data.trackStarted ?? undefined, k)
         : scentField(s.data.trail, wx, s.data.trackStarted ?? undefined);
@@ -2294,6 +2301,325 @@ function showOnMap(from = 'scrResult') {
     : !wx ? 'No weather for this one, so no plume — a guessed one would be worse'
     : 'Modelled scent, ageing in real time. The width is the uncertainty, never narrowed.';
   go('scrShowMap');
+}
+
+/* ── Sharing beyond this phone ────────────────────────────────────────
+   A link with the whole trail inside it, a GPX file, a PDF report, or a
+   live view of a run — all read from one model (share.js), so they can
+   never disagree with each other or with the result card. */
+const SHARE_BASE = location.protocol === 'file:'
+  ? 'https://sydrouxba5.github.io/trailcraft/'
+  : location.href.replace(/[#?].*$/, '');
+let shareOutSession = null, shareOutFrom = 'scrResult';
+let sharedModel = null, sharedSession = null, sharedFrom = null;
+
+/** A session as the plain model the sharers read: names, not ids. */
+function modelOf(s) {
+  return trailModel(s, {
+    dog: S.dogs.find(d => d.id === s.dogId) ?? null,
+    handler: S.handlers.find(h => h.id === s.handlerId) ?? S.handler ?? null,
+    layer: S.layers.find(l => l.id === s.layerId) ?? null,
+    k: db.dogDrift(s.dogId),
+  });
+}
+const unitsForText = () => ({ imperial: imp(), fahrenheit: fahr(), coord: settings.coordFormat, when: fmtWhen });
+const metaLine = (m) => [m.dog?.name, fmtWhen(m.runAt ?? m.laidAt ?? Date.now()),
+  m.handler ? `handler ${m.handler}` : null].filter(Boolean).join(' · ');
+
+function openShareOut(s, from) {
+  shareOutSession = s;
+  shareOutFrom = from;
+  const m = modelOf(s);
+  $('shareOutTitle').textContent = m.track
+    ? `${m.dog?.name ?? 'The dog'}’s run`
+    : m.kind === 'search' ? 'The hides' : 'The laid trail';
+  $('shareOutMeta').textContent = metaLine(m);
+  $('shareLinkOut').hidden = true;
+  go('scrShareOut');
+}
+
+/** The trail as a link: the phone's share sheet if it has one, else the
+    clipboard. Sending is the user's tap in the sheet, never this code's. */
+async function sendLink(m) {
+  let code;
+  try { code = await encodeShared(m); } catch (e) { return toast(e.message); }
+  const url = sharedUrl(code, SHARE_BASE);
+  if (navigator.share) {
+    try { await navigator.share({ title: 'Trailcraft', text: headline(m), url }); return; }
+    catch (e) { if (e?.name === 'AbortError') return; }
+  }
+  try { await navigator.clipboard.writeText(url); toast('Link copied — paste it anywhere'); }
+  catch {
+    /* No share sheet and no clipboard (a desktop browser that refused it):
+       the link itself, in a box, is the one fallback that always works. */
+    const box = $('shareLinkOut');
+    box.value = url; box.hidden = false; box.focus(); box.select();
+    toast('Copy the link from the box');
+  }
+}
+
+/** A file, through the share sheet where there is one (Files, AirDrop,
+    Mail…), else a plain download. */
+async function deliverFile(bytes, name, type) {
+  const file = new File([bytes], name, { type });
+  if (navigator.canShare?.({ files: [file] })) {
+    try { await navigator.share({ files: [file], title: name }); return; }
+    catch (e) { if (e?.name === 'AbortError') return; }
+  }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(file);
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+  toast(`Saved ${name}`);
+}
+const saveGpx = (m) => deliverFile(toGpx(m), `${fileBase(m)}.gpx`, 'application/gpx+xml');
+
+/* The report's map: the same static square as the share card, larger, with
+   the lines drawn in vector over it — so the picture is only a picture. */
+const RPT_W = 600, RPT_H = 340;
+const INKC = [0.09, 0.125, 0.102];
+async function reportMap(m) {
+  const all = [m.trail, m.hides, m.track, ...m.contamination.map(c => c.points)].filter(Boolean).flat();
+  if (!all.length) return null;
+  const view = miniView(all.length > 1 ? all : [all[0], all[0]], RPT_W, RPT_H);
+  const at = (p) => { const [x, y] = view.at(p); return [x / RPT_W, y / RPT_H]; };
+  const paths = [], dots = [];
+  m.contamination.forEach(c => paths.push({ pts: c.points.map(at), stroke: [0.78, 0.72, 0.91], width: 1.8, dash: [3, 3] }));
+  // The dog's track under the trail: where they overlap, the line that was laid must still show.
+  if (m.track) paths.push({ pts: m.track.map(at), stroke: [0.91, 0.47, 0.25], casing: INKC, width: 2.2 });
+  if (m.trail) paths.push({ pts: m.trail.map(at), stroke: [0.96, 0.82, 0.29], casing: INKC, width: 2.6,
+    dash: m.plan && !m.walked ? [4, 3] : null });
+  (m.hides ?? []).forEach(h => { const [x, y] = at(h); dots.push({ x, y, fill: [0.85, 0.4, 0.17], r: 4.5 }); });
+  (m.wps ?? []).forEach(w => { const [x, y] = at(w); dots.push({ x, y, fill: [1, 1, 1], rim: INKC, r: 2.6 }); });
+  if (m.trail) {
+    const [ax, ay] = at(m.trail[0]), [bx, by] = at(m.trail[m.trail.length - 1]);
+    dots.push({ x: ax, y: ay, fill: [0.18, 0.62, 0.27], r: 4.5 }, { x: bx, y: by, fill: [0.85, 0.4, 0.17], r: 4.5 });
+  }
+  const pic = await staticJpeg(view).catch(() => null);   // offline, no token: paper instead
+  return { aspect: RPT_W / RPT_H, ...(pic ?? {}), paths, dots };
+}
+async function staticJpeg(view) {
+  const url = miniImgUrl(view, RPT_W, RPT_H);
+  if (!url) return null;
+  /* The map server answers with a JPEG, which goes into the file exactly as
+     it came. Anything else is drawn through a canvas and re-encoded. */
+  const res = await fetch(url);
+  if (!res.ok) return null;
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  const size = jpegSize(bytes);
+  if (size) return { jpeg: bytes, jpegW: size.w, jpegH: size.h };
+  const img = new Image();
+  img.crossOrigin = 'anonymous';
+  await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = url; });
+  const c = document.createElement('canvas');
+  c.width = img.naturalWidth; c.height = img.naturalHeight;
+  c.getContext('2d').drawImage(img, 0, 0);
+  const blob = await new Promise((res, rej) => c.toBlob(b => (b ? res(b) : rej(new Error('no picture'))), 'image/jpeg', 0.84));
+  return { jpeg: new Uint8Array(await blob.arrayBuffer()), jpegW: c.width, jpegH: c.height };
+}
+
+async function savePdf(m) {
+  toast('Making the report…');
+  const search = m.kind === 'search';
+  const map = await reportMap(m);
+  const bytes = buildPdf({
+    title: `${search ? 'Search' : 'Trail'} report${m.dog?.name ? ` — ${m.dog.name}` : ''}`,
+    eyebrow: `Trailcraft · ${search ? 'search' : 'trail'} report`,
+    headline: headline(m),
+    meta: metaLine(m),
+    map,
+    sections: detailSections(m, unitsForText()),
+    notes: notes(m),
+    footer: 'Trailcraft · sydrouxba5.github.io/trailcraft',
+    date: m.runAt ?? m.laidAt ?? Date.now(),
+  });
+  return deliverFile(bytes, `${fileBase(m)}.pdf`, 'application/pdf');
+}
+
+/* ── A trail someone sent ─────────────────────────────────────────── */
+
+/** The model dressed as a session, so the map screen can show it exactly
+    as it shows this phone's own. */
+function sessionFromModel(m) {
+  return {
+    id: 'shared', targetId: m.kind === 'search' ? 'article' : 'person',
+    startedAt: m.laidAt ?? Date.now(), dogId: null, handlerId: null, layerId: null, summary: headline(m),
+    data: {
+      trail: m.trail ?? undefined, hides: m.hides ?? undefined, contamination: m.contamination ?? [],
+      weather: m.wx ?? null, track: m.track ?? undefined, trackWaypoints: m.wps ?? [],
+      trackStarted: m.runAt ?? undefined, result: m.result ?? undefined, plan: m.plan, walked: m.walked, k: m.k,
+    },
+  };
+}
+
+function paintSharedMini(m) {
+  const img = $('sharedMiniImg'), svg = $('sharedMini');
+  const all = [m.trail, m.hides, m.track].filter(Boolean).flat();
+  if (!all.length) { img.hidden = true; svg.innerHTML = ''; return; }
+  const view = miniView(all.length > 1 ? all : [all[0], all[0]]);
+  const line = (pts, color, w, dashed) => {
+    if (!pts || pts.length < 2) return '';
+    const d = pts.map((p, i) => { const [x, y] = view.at(p); return `${i ? 'L' : 'M'}${x.toFixed(1)},${y.toFixed(1)}`; }).join(' ');
+    return `<path d="${d}" fill="none" stroke="#17201A" stroke-width="${w + 3}" stroke-opacity="0.5" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="${d}" fill="none" stroke="${color}" stroke-width="${w}"${dashed ? ' stroke-dasharray="5 3"' : ''} stroke-linecap="round" stroke-linejoin="round"/>`;
+  };
+  const dot = (p, fill) => { const [x, y] = view.at(p); return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="5.5" fill="${fill}" stroke="#FFFDF8" stroke-width="2"/>`; };
+  // The dog's track under the trail, so the line that was laid always shows.
+  svg.innerHTML = line(m.track, '#E8793F', 2.6) + line(m.trail, '#F5D14A', 3.2, m.plan && !m.walked)
+    + (m.hides ?? []).map(h => dot(h, '#D9662B')).join('')
+    + (m.trail ? dot(m.trail[0], '#2F9E44') + dot(m.trail[m.trail.length - 1], '#D9662B') : '');
+  const url = miniImgUrl(view);
+  img.hidden = true;
+  if (!url) return;
+  img.onload = () => { img.hidden = false; };
+  img.onerror = () => { img.hidden = true; };
+  img.src = url;
+}
+
+function openShared(m, from = null) {
+  sharedModel = m;
+  sharedSession = sessionFromModel(m);
+  sharedFrom = from;
+  run.session = null;
+  $('sharedHead').textContent = headline(m);
+  $('sharedMeta').textContent = metaLine(m);
+  paintSharedMini(m);
+  $('sharedDetails').innerHTML = detailSections(m, unitsForText()).map(sec =>
+    `<div class="facts"><span class="label">${esc(sec.title)}</span>`
+    + sec.rows.map(([k, v]) => `<div class="fact"><span>${esc(k)}</span><b>${esc(v)}</b></div>`).join('')
+    + (sec.note ? `<p class="body small muted">${esc(sec.note)}</p>` : '') + '</div>').join('');
+  $('sharedNotes').textContent = notes(m).join(' ');
+  go('scrShared');
+}
+
+function closeShared() {
+  if (sharedFrom === 'scrLive') return go('scrLive');
+  sharedModel = null; sharedSession = null; pendingSession = null;
+  plumeStop(); clearMap();
+  boot();
+}
+
+/** A link in the address: a shared trail or a live run. Handled before the
+    app's own boot, because whoever opened it may have no records at all. */
+function openFromHash() {
+  const h = location.hash || '';
+  const clear = () => history.replaceState(null, '', location.pathname + location.search);
+  if (h.startsWith('#t=')) {
+    clear();
+    decodeShared(h.slice(3)).then(m => openShared(m)).catch(e => { toast(e.message); boot(); });
+    return true;
+  }
+  if (h.startsWith('#live=')) {
+    clear();
+    openLive(h.slice(6).replace(/[^A-Za-z0-9_-]/g, ''));
+    return true;
+  }
+  return false;
+}
+
+/* ── Live: publishing a run, and following one ────────────────────── */
+let liveState = null;   // this phone's own live run: { id, url, timer }
+let liveWatch = null;   // following someone else's: the unsubscribe
+const liveView = { model: null, tick: 0, fitted: false };
+
+function paintLiveBtn() {
+  const b = $('btnLive');
+  b.hidden = !sync.configured;
+  b.classList.toggle('on', !!liveState);
+  b.textContent = liveState ? '● Live — send the link again' : 'Share live';
+}
+
+async function goLive() {
+  if (!sync.user) return toast('Sign in (Settings → Account) to share a run live');
+  if (!run.session) return;
+  if (!liveState) {
+    try {
+      const id = await startLive(liveMeta(modelOf(run.session), run.startedAt));
+      liveState = { id, url: `${SHARE_BASE}#live=${id}`, timer: setInterval(() => pushLive(rec.pts, rec.wps), 10000) };
+      pushLive(rec.pts, rec.wps);
+      paintLiveBtn();
+    } catch (e) { return toast(e?.message || 'Could not go live'); }
+  }
+  const { url } = liveState;
+  if (navigator.share) {
+    try { await navigator.share({ title: 'Trailcraft — live', text: `${S.dog?.name ?? 'The dog'} is running now`, url }); return; }
+    catch (e) { if (e?.name === 'AbortError') return; }
+  }
+  try { await navigator.clipboard.writeText(url); toast('Live link copied'); } catch { toast(url); }
+}
+
+function liveEnd(result) {
+  if (!liveState) return;
+  clearInterval(liveState.timer);
+  liveState = null;
+  paintLiveBtn();
+  endLive({ result, track: rec.pts, wps: rec.wps }).catch(() => toast('The live link did not get the result — no signal'));
+}
+
+async function openLive(id) {
+  clearMap();
+  run.session = null; pendingSession = null;
+  liveView.model = null; liveView.fitted = false;
+  $('liveDot').hidden = false;
+  $('liveHudText').textContent = 'Connecting…';
+  $('liveNote').textContent = '';
+  $('btnLiveDetails').hidden = true;
+  go('scrLive');
+  clearInterval(liveView.tick);
+  liveView.tick = setInterval(paintLiveHud, 1000);
+  liveWatch = await watchLive(id, (u) => {
+    if (u.error) { $('liveDot').hidden = true; $('liveHudText').textContent = u.error; return; }
+    const m = liveModel(u.meta, u.chunks);
+    liveView.model = m;
+    pendingSession = sessionFromModel(m);
+    if (m.kind === 'search') setSrc('hides', pointsOf(m.hides || []));
+    else {
+      setSrc('runner', lineOf(m.trail));
+      if (m.trail) setSrc('start', pointsOf([m.trail[0]]));
+      if (m.contamination.length) setSrc('contam', { type: 'FeatureCollection',
+        features: m.contamination.map(c => lineOf(c.points).features[0]).filter(Boolean) });
+    }
+    setSrc('dog', lineOf(m.track));
+    setSrc('wps', pointsOf(m.wps, 'kind'));
+    $('btnLiveDetails').hidden = false;
+    const fitAll = () => fitTo(m.trail || m.hides || [], m.track || []);
+    if (!liveView.fitted) {
+      liveView.fitted = true;
+      if (mapReady) fitAll(); else map?.once('load', fitAll);
+      weatherPanelFor(pendingSession);
+    } else if (m.ended) fitAll();
+    else if (m.track && mapReady) map.easeTo({ center: [m.track[m.track.length - 1].lon, m.track[m.track.length - 1].lat], duration: 600 });
+    paintLiveHud();
+  });
+}
+
+function paintLiveHud() {
+  const m = liveView.model;
+  if (!m) return;
+  const dog = m.dog?.name ?? 'The dog';
+  const last = m.track?.[m.track.length - 1];
+  const ago = last ? Math.round((Date.now() - last.t) / 1000) : null;
+  $('liveDot').hidden = m.ended;
+  $('liveHudText').textContent = m.ended
+    ? `${dog} · finished${m.track ? ` · ${fmtKm(pathLen(m.track))}` : ''}`
+    : `${dog} · live${m.track ? ` · ${fmtKm(pathLen(m.track))}` : ''}`;
+  $('liveNote').textContent = m.ended ? headline(m)
+    : !last ? 'Waiting for the first fix…'
+    : ago < 15 ? 'Updated just now'
+    : ago < 120 ? `Updated ${ago} s ago`
+    : `Nothing from the phone for ${Math.round(ago / 60)} min`;
+}
+
+function closeLive() {
+  liveWatch?.(); liveWatch = null;
+  clearInterval(liveView.tick); liveView.tick = 0;
+  liveView.model = null;
+  pendingSession = null;
+  clearMap();
+  boot();
 }
 
 /* ── Sessions & result reopening ──────────────────────────────────── */
@@ -3007,6 +3333,21 @@ function wire() {
     if (pendingSession) { run.session = null; showOnMap('scrShare'); }
   });
   $('btnShowMapBack').addEventListener('click', () => { plumeStop(); go(mapCameFrom); });
+
+  // Sharing beyond this phone
+  $('btnShareOut').addEventListener('click', () => run.session && openShareOut(run.session, 'scrResult'));
+  $('btnShareMore').addEventListener('click', () => pendingSession && openShareOut(pendingSession, 'scrShare'));
+  $('btnShareOutBack').addEventListener('click', () => go(shareOutFrom));
+  $('btnSendLink').addEventListener('click', () => shareOutSession && sendLink(modelOf(shareOutSession)));
+  $('btnSaveGpx').addEventListener('click', () => shareOutSession && saveGpx(modelOf(shareOutSession)));
+  $('btnSavePdf').addEventListener('click', () => shareOutSession && savePdf(modelOf(shareOutSession)));
+  $('btnSharedMap').addEventListener('click', () => { if (sharedSession) { pendingSession = sharedSession; showOnMap('scrShared'); } });
+  $('btnSharedGpx').addEventListener('click', () => sharedModel && saveGpx(sharedModel));
+  $('btnSharedPdf').addEventListener('click', () => sharedModel && savePdf(sharedModel));
+  $('btnSharedClose').addEventListener('click', closeShared);
+  $('btnLive').addEventListener('click', goLive);
+  $('btnLiveDetails').addEventListener('click', () => liveView.model && openShared(liveView.model, 'scrLive'));
+  $('btnLiveClose').addEventListener('click', closeLive);
   $('btnResDone').addEventListener('click', () => { clearMap(); go('scrHome'); });
 
   // Sessions
@@ -3129,6 +3470,7 @@ async function importFromLink() {
 function boot() {
   applyTheme();          // the head script already painted it; this keeps it in step
   snap();
+  if (openFromHash()) return;   // a trail someone sent: that first, the app's own business after
   /* A brand-new phone is offered sign-in before anything else, because if
      there is an account, everything the handler set up on their last phone
      comes back and onboarding is not needed at all. Offered once: "use
@@ -3145,8 +3487,8 @@ function boot() {
 
 buildMap();
 wire();
+initSync(db);            // does nothing until a Firebase config exists; before boot so a live link can wait on it
 boot();
-initSync(db);            // does nothing until a Firebase config exists
 checkForUpdate();
 if (migrated) toast('Your team and trails came along to the new Trailcraft');
 if (!settings.mbToken) setTimeout(() =>
