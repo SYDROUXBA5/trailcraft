@@ -80,4 +80,28 @@ t('every module the app imports is cached for offline use', () => {
   assert.deepEqual(missing, [], `imported but not cached offline: ${missing.join(', ')}`);
 });
 
+t('a ::before or ::after placed absolutely stays inside its own element', () => {
+  /* An absolutely placed pseudo-element is laid out against the nearest
+     POSITIONED ancestor. If its host is not positioned it escapes: the chips'
+     glass rim (inset 0, corners inherited from a 999px pill) grew to the size
+     of the whole screen, and a dozen of them stacked into one big outline —
+     a black arc on the light theme, a white ring on the dark one. No DOM query
+     finds it, because a pseudo-element is not an element. */
+  const css = readFileSync(new URL('../public/app.css', import.meta.url), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '');
+  const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+    .map(m => ({ sels: m[1].split(',').map(s => s.trim()), body: m[2] }));
+  const positioned = new Set(rules
+    .filter(r => /position:\s*(relative|absolute|fixed|sticky)/.test(r.body))
+    .flatMap(r => r.sels));
+  const escaping = rules
+    .filter(r => /position:\s*absolute/.test(r.body))
+    .flatMap(r => r.sels)
+    .map(s => s.match(/^(.+?)::?(?:before|after)$/))
+    .filter(m => m && !positioned.has(m[1]))
+    .map(m => m[0]);
+  assert.deepEqual(escaping, [],
+    `these would be drawn against the whole screen — give the host position: relative: ${escaping.join(', ')}`);
+});
+
 console.log(`\n${pass} passed total\n`);

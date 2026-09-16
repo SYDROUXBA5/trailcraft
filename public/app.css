@@ -117,6 +117,9 @@ input[type="range"] { width: 100%; accent-color: var(--moss); height: 40px; }
 }
 .chip-row::-webkit-scrollbar { display: none; }
 .chip {
+  /* Positioned and isolated so the glass rim (::after) is drawn on this pill,
+     not stretched across the whole screen above everything else. */
+  position: relative; isolation: isolate;
   flex: none; display: inline-flex; align-items: center; gap: 8px;
   min-height: 56px; padding: 8px 18px 8px 8px; border-radius: 999px;
   background: var(--card); border: 1px solid var(--border);
