@@ -6,6 +6,7 @@
    two stay one product: same tables, same remembered choices, same wording. */
 
 import { pathLen } from './geo.js';
+import { visible, tombstone, pruneTombstones } from './sync-core.js';
 
 export const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 
@@ -50,22 +51,41 @@ export function createStore(backend) {
   };
   const write = (k, v) => backend.setItem(k, JSON.stringify(v));
 
-  const table = (key) => ({
-    all: () => read(key, []),
+  /* Anyone listening for changes — the cloud mirror, when signed in. The
+     store does not know or care what is listening; it only says what moved. */
+  const listeners = new Set();
+  const notify = (tableName, record) => { for (const fn of listeners) { try { fn(tableName, record); } catch { /* a listener never breaks a save */ } } };
+
+  /* Every row carries updatedAt, so two phones can agree which edit is newer.
+     A removal leaves a tombstone rather than an absence: an absence is
+     indistinguishable from "never synced", and the next phone would put the
+     deleted row straight back. The app only ever sees live rows. */
+  const table = (key, name) => ({
+    all: () => visible(read(key, [])),
+    raw: () => read(key, []),
     upsert(row) {
       const rows = read(key, []);
+      const stamped = { ...row, updatedAt: Date.now() };
+      delete stamped.deleted;
       const i = rows.findIndex(r => r.id === row.id);
-      if (i >= 0) rows[i] = row; else rows.push(row);
+      if (i >= 0) rows[i] = stamped; else rows.push(stamped);
       write(key, rows);
-      return row;
+      notify(name, stamped);
+      return stamped;
     },
-    remove(id) { write(key, read(key, []).filter(r => r.id !== id)); },
-    byId(id) { return read(key, []).find(r => r.id === id) ?? null; },
+    remove(id) {
+      const gone = tombstone(id);
+      write(key, pruneTombstones([...read(key, []).filter(r => r.id !== id), gone]));
+      notify(name, gone);
+    },
+    byId(id) { return visible(read(key, [])).find(r => r.id === id) ?? null; },
+    /** Replace everything — used only when the cloud's copy has been merged in. */
+    replaceAll(rows) { write(key, pruneTombstones(rows)); },
   });
 
-  const handlers = table(K.handlers);
-  const dogs = table(K.dogs);
-  const layers = table(K.layers);
+  const handlers = table(K.handlers, 'handlers');
+  const dogs = table(K.dogs, 'dogs');
+  const layers = table(K.layers, 'layers');
 
   const kv = {
     get: (k, f = null) => read(K.kv, {})[k] ?? f,
@@ -85,22 +105,36 @@ export function createStore(backend) {
     /* Sessions, newest first. {id, handlerId, dogId, layerId|null, targetId,
        startedAt, summary, data} — `data` carries the trail, track, waypoints,
        weather, hides and verdict, opaque to the store. */
-    sessions: () => read(K.sessions, []),
+    sessions: () => visible(read(K.sessions, [])),
+    rawSessions: () => read(K.sessions, []),
     addSession(s) {
       const all = read(K.sessions, []);
-      all.unshift(s);
+      const stamped = { ...s, updatedAt: Date.now() };
+      all.unshift(stamped);
       write(K.sessions, all);
-      return s;
+      notify('sessions', stamped);
+      return stamped;
     },
     updateSession(id, patch) {
       const all = read(K.sessions, []);
-      const i = all.findIndex(s => s.id === id);
+      const i = all.findIndex(s => s.id === id && !s.deleted);
       if (i < 0) return null;
-      all[i] = { ...all[i], ...patch };
+      all[i] = { ...all[i], ...patch, updatedAt: Date.now() };
       write(K.sessions, all);
+      notify('sessions', all[i]);
       return all[i];
     },
-    deleteSession(id) { write(K.sessions, read(K.sessions, []).filter(s => s.id !== id)); },
+    deleteSession(id) {
+      const gone = tombstone(id);
+      write(K.sessions, pruneTombstones([...read(K.sessions, []).filter(s => s.id !== id), gone]));
+      notify('sessions', gone);
+    },
+    /** Replace everything, newest first — used only after a cloud merge. */
+    replaceSessions(rows) {
+      const sorted = [...rows].sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0));
+      write(K.sessions, pruneTombstones(sorted));
+    },
+    onChange(fn) { listeners.add(fn); return () => listeners.delete(fn); },
 
     /** Everything the home screen needs, resolved: the active handler, their
         team, the remembered layer and target — with stale ids healed. */
@@ -133,8 +167,20 @@ export function createStore(backend) {
       const rows = kv.get(key, []);
       rows.push(row);
       kv.set(key, rows.slice(-50));
+      /* What a dog has taught the model is the one thing here that took
+         months of real trails to earn, so it is announced like any row. */
+      notify('calibration', { id: dogId, rows: rows.slice(-50), updatedAt: Date.now() });
     },
     calibration(dogId) { return kv.get(`cal:${dogId}`, []); },
+    /** Every dog's calibration, for the cloud mirror. Device preferences in kv
+        (last dog, last target) are deliberately NOT here: each phone keeps
+        its own. */
+    allCalibration() {
+      const o = read(K.kv, {});
+      return Object.keys(o).filter(k => k.startsWith('cal:'))
+        .map(k => ({ id: k.slice(4), rows: o[k] }));
+    },
+    setCalibration(dogId, rows) { kv.set(`cal:${dogId}`, (rows || []).slice(-50)); },
     /** Per-dog metres-per-(m/s) drift constant, or null while under-evidenced. */
     dogDrift(dogId) {
       const ks = kv.get(`cal:${dogId}`, []).map(r => r.k).filter(k => Number.isFinite(k) && k > 0);

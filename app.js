@@ -17,11 +17,12 @@ import {
 import { FLAT, buildTerrain, stability, regime, flowAt, normOf } from './field.js';
 import { predictedOffsets, ScentSim, driftFrom, stepByFlow, AIRBORNE } from './sim.js';
 import { encodeTrail, decodeTrail, cardUrl, cardFromText } from './card.js';
+import { sync, onSync, initSync, signInWithGoogle, signInWithApple, signOut } from './sync.js';
 import { createStore, migrateV1, TARGETS, targetById, verbs, uid,
          dogStats, ageBand, AGE_BANDS, LEVELS, levelById, dogAge } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-16a';
+const BUILD = '2026-09-16b';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true,
@@ -119,7 +120,8 @@ const avaHtml = (ent, cls = '') => {
 /* ── Screens ──────────────────────────────────────────────────────── */
 const SCREENS = ['scrOnboardHandler', 'scrOnboardDog', 'scrTutorial', 'scrHome', 'scrLay',
   'scrConfirm', 'scrShare', 'scrContam', 'scrPick', 'scrScan', 'scrRun', 'scrResult',
-  'scrShowMap', 'scrSessions', 'scrSettings', 'scrDraw', 'scrCountdown', 'scrWalk', 'scrWait', 'scrDog'];
+  'scrShowMap', 'scrSessions', 'scrSettings', 'scrDraw', 'scrCountdown', 'scrWalk', 'scrWait', 'scrDog',
+  'scrSignIn'];
 
 /* The screens that are transparent chrome over the live map. */
 const MAP_SCREENS = ['scrLay', 'scrConfirm', 'scrContam', 'scrRun', 'scrShowMap', 'scrDraw', 'scrWalk'];
@@ -2568,6 +2570,7 @@ function renderSettings() {
   $('plumeOn').checked = settings.plume !== false;
   paintUnitSettings();
   paintAppearance();
+  renderAccount();
   $('accCap').value = settings.accCap; $('accCapVal').textContent = settings.accCap;
   const ll = document.querySelector('label[for="obDogLine"]');
   if (ll) ll.textContent = `Line length, ${imp() ? 'feet' : 'metres'}`;
@@ -2693,6 +2696,68 @@ function paintUnitSettings() {
     el.textContent = example[el.dataset.example] ?? '';
   });
 }
+
+/* ── Account ──────────────────────────────────────────────────────────
+   Signing in is optional and stays optional: the app is whole without it.
+   What it adds is that the records survive the phone. */
+let signInFirstLaunch = false;
+
+function openSignIn({ firstLaunch = false } = {}) {
+  signInFirstLaunch = firstLaunch;
+  $('btnApple').hidden = !sync.apple;
+  $('btnSkipSignIn').textContent = firstLaunch ? 'Use without an account' : 'Not now';
+  $('signInError').hidden = true;
+  go('scrSignIn');
+}
+
+function when(t) {
+  const m = Math.round((Date.now() - t) / 60000);
+  return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} d ago`;
+}
+
+function renderAccount() {
+  const card = $('accountCard');
+  if (!card) return;
+  if (!sync.configured) {
+    card.innerHTML = `<p class="body">Backup and sync</p>
+      <p class="body small muted">Not switched on yet. Your trails are on this phone only.</p>`;
+  } else if (!sync.user) {
+    card.innerHTML = `<p class="body small muted">Sign in to back up your dogs and trails, and have them on any phone.</p>
+      <button type="button" class="btn moss" data-account="signin">Sign in</button>`;
+  } else {
+    const u = sync.user;
+    const dot = sync.status === 'synced' ? 'ok' : sync.status === 'error' ? 'bad' : 'busy';
+    const line = sync.status === 'synced' ? `Backed up ${when(sync.lastSync)}`
+      : sync.status === 'error' ? esc(sync.error || 'Not backed up')
+      : 'Backing up…';
+    const face = u.photo
+      ? `<img src="${esc(u.photo)}" alt="" referrerpolicy="no-referrer">`
+      : avaHtml({ name: u.name || u.email || '?' });
+    card.innerHTML = `<div class="account-who">${face}<div><b>${esc(u.name || 'Signed in')}</b><i>${esc(u.email || '')}</i></div></div>
+      <div class="sync-line"><span class="sync-dot ${dot}"></span><span>${line}</span></div>
+      <button type="button" class="btn ghost small" data-account="signout">Sign out</button>`;
+  }
+  // The privacy line says what is actually true right now.
+  const where = $('dataWhere');
+  if (where) where.textContent = sync.user
+    ? 'Everything lives on this phone, and is backed up to your account. Only you can read it.'
+    : 'Everything lives on this phone. Nothing is uploaded.';
+}
+
+onSync((st) => {
+  renderAccount();
+  const err = $('signInError');
+  if (err) { err.textContent = st.error || ''; err.hidden = !st.error || $('scrSignIn').hidden; }
+  /* Signed in from the sign-in screen and the account had records: they are
+     on the phone now, so carry on as if they had always been there. */
+  if (st.user && st.status === 'synced' && !$('scrSignIn').hidden) {
+    db.kv.set('signInAnswered', true);
+    snap();
+    if (signInFirstLaunch) return boot();
+    renderSettings();
+    go('scrSettings');
+  }
+});
 
 /* ── Self-update ──────────────────────────────────────────────────── */
 async function checkForUpdate() {
@@ -2993,6 +3058,23 @@ function wire() {
     saveSettings();
     applyTheme();
   });
+  $('btnGoogle').addEventListener('click', () => signInWithGoogle());
+  $('btnApple').addEventListener('click', () => signInWithApple());
+  $('btnSkipSignIn').addEventListener('click', () => {
+    db.kv.set('signInAnswered', true);
+    if (signInFirstLaunch) return boot();
+    go('scrSettings');
+  });
+  $('accountCard').addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-account]');
+    if (!b) return;
+    if (b.dataset.account === 'signin') return openSignIn();
+    if (b.dataset.account === 'signout') {
+      if (!confirm('Sign out? Your trails stay on this phone; they just stop backing up.')) return;
+      await signOut();
+      toast('Signed out — everything is still on this phone');
+    }
+  });
   $('unitSettings').addEventListener('click', (e) => {
     const row = e.target.closest('.check-row');
     const list = row?.closest('[data-setting]');
@@ -3047,6 +3129,13 @@ async function importFromLink() {
 function boot() {
   applyTheme();          // the head script already painted it; this keeps it in step
   snap();
+  /* A brand-new phone is offered sign-in before anything else, because if
+     there is an account, everything the handler set up on their last phone
+     comes back and onboarding is not needed at all. Offered once: "use
+     without an account" is a real answer and is remembered. */
+  if (!S.handler && sync.configured && !db.kv.get('signInAnswered')) {
+    return openSignIn({ firstLaunch: true });
+  }
   if (!S.handler) return openHandlerForm({ firstLaunch: true });
   if (!S.team.length && !S.dogs.length) return openDogForm({ firstLaunch: true });
   if (!S.tutorialDone) return openTutorial(false);
@@ -3057,6 +3146,7 @@ function boot() {
 buildMap();
 wire();
 boot();
+initSync(db);            // does nothing until a Firebase config exists
 checkForUpdate();
 if (migrated) toast('Your team and trails came along to the new Trailcraft');
 if (!settings.mbToken) setTimeout(() =>
