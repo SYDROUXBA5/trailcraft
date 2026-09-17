@@ -362,9 +362,13 @@
     <span class="label" id="resWho"></span>
     <h1 class="display" id="resSentence"></h1>
     <p class="body small provisional" id="resProvisional" hidden></p>
+    <span class="label">Recorded</span>
     <div class="grid2" id="resGrid"></div>
+    <p class="body small muted" id="resCoach"></p>
+    <span class="label" id="resModelLabel">Modelled</span>
+    <p class="body" id="resModel"></p>
     <p class="body small muted" id="resStability"></p>
-    <p class="body small muted">The model explains what the dog did. It does not predict where scent is.</p>
+    <p class="body small muted">The wind side and the scent band are estimates from a forecast, not measurements. They suggest an explanation; they do not judge the dog.</p>
     <div class="page-bottom">
       <button class="btn ember" id="btnScanWalked" hidden>Scan the walked trail card</button>
       <button class="btn moss" id="btnShowMap">Show on map</button>
@@ -402,7 +406,7 @@
     <span class="label">Trail age at the start</span>
     <div class="card" id="dogBands"></div>
 
-    <span class="label">What the model has learned</span>
+    <span class="label">Observed track patterns</span>
     <div class="card"><p class="body" id="dogCal"></p></div>
 
     <span class="label" id="dogRunsLabel">Every trail</span>
@@ -555,7 +559,7 @@
     <div class="card coach-card" id="coachHome">
       <div id="coachControls">
         <label class="switch-row" for="coachOn">
-          <span>Tell me when the dog leaves the trail<i>Sound and a voice, hands-free — train without a second person</i></span>
+          <span>Assisted run — call it when the track leaves the corridor<i>Off is a blind run: no prompts. Either way the model keeps a silent log, and the review says which kind of run it was.</i></span>
           <input id="coachOn" type="checkbox">
         </label>
         <span class="unit-head">How far off counts</span>
@@ -566,7 +570,7 @@
           <button type="button" class="age-chip" data-tol="3">50 m</button>
         </div>
         <label class="switch-row" for="coachScent">
-          <span>Follow the scent, not just the line<i>Downwind, the corridor opens to where the scent has drifted — a dog working there is not off</i></span>
+          <span>Experimental: follow the scent<i>Opens the downwind side toward the modelled scent band, by half the corridor at most. A guess, recorded on the run so the review can show what it changed.</i></span>
           <input id="coachScent" type="checkbox">
         </label>
         <label class="switch-row" for="coachVoice">

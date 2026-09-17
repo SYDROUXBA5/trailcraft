@@ -191,7 +191,11 @@ await t('details follow the reader’s units and never print a hole', () => {
   const imperial = flat(detailSections(m, { imperial: true, fahrenheit: true, coord: 'dms', when: () => 'Tue 16 Sep' }));
   assert.match(metric, /Length: \d+ m/);
   assert.match(metric, /Air: 14 °C/);
-  assert.match(metric, /Average offset: 4\.2 m to the right/);
+  assert.match(metric, /Typical distance from the line: 4\.2 m/, 'an older result with only a mean still reads');
+  assert.match(metric, /Mainly: to the right/);
+  assert.match(metric, /Forecast wind suggests drift: to the right/);
+  assert.match(metric, /Track vs forecast: same side/);
+  assert.doesNotMatch(metric, /on the scent/i);
   assert.match(metric, /Trail age at start: 25 min · Hot/);
   assert.match(metric, /Dog: Bo · Malinois · Male · 3 yr 4 mo · 29\.4 kg/);
   assert.match(imperial, /Length: \d+ yd/);
@@ -199,6 +203,28 @@ await t('details follow the reader’s units and never print a hole', () => {
   assert.match(imperial, /Start: 51°12'/);
   for (const text of [metric, imperial]) assert.doesNotMatch(text, /undefined|NaN|null|: $/m);
   assert.equal(headline(m), m.result.sentence);
+});
+
+await t('a newer result shows the median, the time per side, and whether the run was coached', async () => {
+  const s = session();
+  s.data.result = { ...s.data.result, medAbs: 3.7, shares: { left: 0.38, on: 0.41, right: 0.21 }, mainSide: 'left',
+    accMed: 4, noisy: false };
+  s.data.coach = { assisted: true, tolM: 20, scent: false, calls: 2, shadow: { tolM: 20, plain: 2, scent: 1 } };
+  const m = trailModel(s, people);
+  const text = detailSections(m, { when: () => 'x' }).flatMap(sec => sec.rows.map(r => r.join(': '))).join('\n');
+  assert.match(text, /Typical distance from the line: 3\.7 m/);
+  assert.match(text, /Time left · on · right: 38 % · 41 % · 21 %/);
+  assert.match(text, /Track vs forecast: other side/);
+  assert.match(text, /Run: assisted — the coach was on/);
+  assert.match(text, /Coach calls: 2/);
+  assert.match(text, /Had the coach been on: 2 calls with a 20 m corridor, 1 with the scent corridor/);
+  const back = await decodeShared(await encodeShared(m));
+  assert.equal(back.coach.assisted, true);
+  assert.equal(back.coach.shadow.scent, 1);
+  assert.equal(back.result.shares.on, 0.41);
+  const blind = trailModel({ ...s, data: { ...s.data, coach: { assisted: false, shadow: { tolM: 20, plain: 0, scent: 0 } } } }, people);
+  assert.match(detailSections(blind, { when: () => 'x' }).flatMap(sec => sec.rows.map(r => r.join(': '))).join('\n'), /Run: blind — no prompts/);
+  assert.match(notes(m).join(' '), /estimates from a forecast, not measurements/);
 });
 
 await t('a search lists its hides and how the dog found them', () => {

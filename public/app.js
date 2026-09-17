@@ -7,12 +7,7 @@
    without. Weather: Open-Meteo, the one public API with soil temperature. */
 
 import {
-  pathLen, cardinal, dist, dwellFold, bearing, project,
-  fmtDist, fmtShort, fmtSpeed, fmtTemp, unitShort, fmtWeight, kgToShown, shownToKg, fmtCoord,
-  scentField, plumePolygon, densify, timestamps,
-  signedOffsets, meanSigned, sideOfDrift, sideAgreement, lineCorrect, departure,
-  timestampsEndingAt,
-  progressAlong, splitLine, smoothBearing,
+  pathLen, cardinal, dist, dwellFold, bearing, project, fmtDist, fmtShort, fmtSpeed, fmtTemp, unitShort, fmtWeight, kgToShown, shownToKg, fmtCoord, scentField, plumePolygon, densify, timestamps, signedOffsets, meanSigned, sideOfDrift, sideAgreement, lineCorrect, departure, timestampsEndingAt, progressAlong, splitLine, smoothBearing, medianAbs, sideShares,
 } from './geo.js';
 import { FLAT, buildTerrain, stability, regime, flowAt, normOf } from './field.js';
 import { predictedOffsets, ScentSim, driftFrom, stepByFlow, AIRBORNE } from './sim.js';
@@ -27,7 +22,7 @@ import { createStore, migrateV1, TARGETS, targetById, verbs, uid,
          dogStats, ageBand, AGE_BANDS, LEVELS, levelById, dogAge } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-16e';
+const BUILD = '2026-09-17a';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true,
@@ -2075,6 +2070,7 @@ function addWaypoint(kind) {
 
 async function stopRun() {
   await stopWatch();
+  const coachRecord = coachSummary();
   coachStop();
   stopFollowing();
   plumeStop();
@@ -2095,7 +2091,7 @@ async function stopRun() {
     dogId: S.dog?.id ?? null,
     handlerId: S.handler.id,
     summary: result.sentence,
-    data: { ...s.data, track: rec.pts, trackStarted: run.startedAt, trackWaypoints: rec.wps, result },
+    data: { ...s.data, track: rec.pts, trackStarted: run.startedAt, trackWaypoints: rec.wps, result, coach: coachRecord },
   });
   snap();
   run.session = db.sessions().find(x => x.id === s.id);
@@ -2125,10 +2121,18 @@ async function computeResult(s, track, wps, startedAt, { bank = true } = {}) {
   if (t.kind === 'hide') return searchResult(s, track, wps, startedAt, wx, dogName, ageMin);
 
   const trail = s.data.trail;
-  // The dog is a line-length ahead of the phone. Correct before grading.
+  /* The phone's track, projected a line-length ahead: an ESTIMATE of where
+     the dog was, never a measurement. It is called the track throughout. */
   const corrected = lineCorrect(track, dogRow?.lineM ?? 0);
   const offs = signedOffsets(trail, corrected);
   const mean = meanSigned(offs);
+  const medAbs = medianAbs(offs);
+  const shares = sideShares(corrected, offs, { deadM: 3 });
+  const accs = track.map(p => p.acc).filter(Number.isFinite).sort((a, b) => a - b);
+  const accMed = accs.length ? accs[accs.length >> 1] : null;
+  // A sideways difference smaller than the GPS's own uncertainty is not readable.
+  const noisy = Number.isFinite(accMed) && Number.isFinite(medAbs) && accMed > Math.max(5, medAbs);
+  const mainSide = !shares ? null : shares.left > shares.right * 1.25 ? 'left' : shares.right > shares.left * 1.25 ? 'right' : null;
 
   // The model's predicted side, point by point, then by majority.
   let T = FLAT;
@@ -2160,24 +2164,35 @@ async function computeResult(s, track, wps, startedAt, { bank = true } = {}) {
   }
 
   const sideWord = mean == null ? '' : mean > 0 ? 'right' : 'left';
-  const mAbs = mean == null ? 0 : Math.abs(mean);
 
-  // Side first, magnitude second — that order is the point.
+  /* Two layers, kept apart. RECORDED: what the track did, in numbers the
+     GPS can actually support. MODELLED: what the forecast wind suggests —
+     an explanation offered, never a verdict on the dog. */
   let sentence;
-  if (mean == null) sentence = `${dogName} ran, but the track could not be graded.`;
-  else if (mAbs < 3) sentence = `${dogName} held the line — under 3 m from it on average.`;
-  else sentence = `${dogName} worked about ${fmtM(mAbs)} to the ${sideWord} of the line.`;
+  if (medAbs == null || !shares) sentence = `${dogName} ran, but the track could not be compared with the line.`;
+  else if (noisy) sentence = `${dogName}’s track sat about ${fmtM(medAbs)} from the line, but GPS uncertainty (±${fmtM(accMed)}) is too large to read which side.`;
+  else if (shares.on >= 0.7) sentence = `${dogName}’s track stayed within ${fmtM(3)} of the line for ${Math.round(shares.on * 100)} % of the run.`;
+  else if (mainSide) sentence = `${dogName}’s track ran mainly to the ${mainSide} of the line — typically ${fmtM(medAbs)} from it.`;
+  else sentence = `${dogName}’s track worked both sides of the line — typically ${fmtM(medAbs)} from it.`;
 
+  let modelled = '';
   if (predSide !== 0) {
-    sentence += ` The wind pushed scent ${predSide > 0 ? 'right' : 'left'}.`;
-    if (agree != null && agree >= 0.6 && mAbs >= 3) sentence += ' The dog was on the scent.';
-    else if (agree != null && agree < 0.4 && mAbs >= 3) sentence += ' The dog worked the other side — worth a second look.';
+    const predWord = predSide > 0 ? 'right' : 'left';
+    modelled = `The forecast wind suggests drift to the ${predWord}.`;
+    if (mainSide && !noisy) {
+      modelled += mainSide === predWord
+        ? ' The track sits on that side.'
+        : ' The track sits on the other side — worth reviewing the local conditions and what the dog was doing.';
+    }
   } else if (wx) {
-    sentence += ' The wind ran along the trail, so the model predicts no side.';
+    modelled = 'The forecast wind ran along the trail, so it suggests no side.';
+  } else {
+    modelled = 'No weather was recorded for this trail, so the model has nothing to suggest.';
   }
 
   return {
-    kind: 'trail', sentence, mean, side: sideWord || null, predSide, agree, ageMin,
+    kind: 'trail', sentence, modelled, mean, medAbs, shares, accMed, noisy, mainSide,
+    side: sideWord || null, predSide, agree, ageMin,
     regimeWord: reg?.word ?? null, regimeKey: reg?.key ?? null,
     stability: st?.label ?? null, stabilityPlain: st?.plain ?? null,
     wind: wx ? { speed: wx.wind_speed, from: wx.wind_direction } : null,
@@ -2221,11 +2236,23 @@ function searchResult(s, track, wps, startedAt, wx, dogName, ageMin) {
   };
 }
 
+/** A result saved before the wording changed carries only a signed mean and
+    a sentence that claimed too much. Its numbers still read; its sentence
+    is rebuilt in today's words rather than shown as it was. */
+function legacySentence(r, dogName) {
+  if (!Number.isFinite(r.mean)) return `${dogName} ran, but the track could not be compared with the line.`;
+  const a = Math.abs(r.mean);
+  return a < 3
+    ? `${dogName}’s track stayed close to the line — under ${fmtM(3)} from it on average.`
+    : `${dogName}’s track sat mainly to the ${r.side ?? (r.mean > 0 ? 'right' : 'left')} of the line — about ${fmtM(a)} from it on average.`;
+}
+
 function renderResult(s) {
   const r = s.data.result;
   const d = S.dogs.find(x => x.id === s.dogId);
   $('resWho').textContent = `${d?.name ?? ''} · ${fmtWhen(s.startedAt)}`;
-  $('resSentence').textContent = r.sentence;
+  $('resSentence').textContent = r.kind === 'trail' && !Number.isFinite(r.medAbs)
+    ? legacySentence(r, d?.name ?? 'The dog') : r.sentence;
 
   const cell = (b, i, sub = '') =>
     `<div><b>${b}</b><i>${i}</i>${sub ? `<span class="sub-line">${sub}</span>` : ''}</div>`;
@@ -2237,18 +2264,31 @@ function renderResult(s) {
       cell(`${r.ageMin} min`, 'hide age at start') +
       cell(r.approach ?? '—', 'approach vs wind');
   } else {
-    const sideCell = r.predSide === 0
-      ? '—'
-      : r.agree == null ? (r.side ? cap(r.side) : '—')
-        : `${cap(r.side ?? '—')} <span class="${r.agree >= 0.6 ? 'ok' : 'no'}">${r.agree >= 0.6 ? '✓' : '✗'}</span>`;
+    /* Older results carry only a signed mean; they still read. */
+    const typical = Number.isFinite(r.medAbs) ? r.medAbs : Number.isFinite(r.mean) ? Math.abs(r.mean) : null;
+    const pc = (x) => `${Math.round(x * 100)} %`;
+    const sideCell = r.shares
+      ? (r.mainSide ? cell(pc(r.shares[r.mainSide]), `of the time ${r.mainSide}`, `${pc(r.shares.on)} within ${fmtM(3)}`)
+                    : cell(pc(r.shares.on), 'of the time on the line', `${pc(r.shares.left)} left · ${pc(r.shares.right)} right`))
+      : cell(r.side ? cap(r.side) : '—', 'mainly');
+    /* Four recorded facts — nothing modelled sits in this grid. */
+    const tr = s.data.track ?? [];
+    const dur = tr.length > 1 && Number.isFinite(tr[0].t) ? tr[tr.length - 1].t - tr[0].t : null;
     $('resGrid').innerHTML =
-      cell(r.mean != null ? fmtM(Math.abs(r.mean), 1) : '—', 'mean offset') +
-      cell(sideCell, 'side agrees') +
+      cell(typical != null ? fmtM(typical, 1) : '—', 'typical distance from the line',
+        r.noisy && Number.isFinite(r.accMed) ? `GPS ±${fmtM(r.accMed)}` : '') +
+      sideCell +
       cell(`${r.ageMin} min`, 'trail age at start') +
-      // Regime and stability share a cell but NEVER a number.
-      cell(r.regimeWord ? cap(r.regimeWord) : '—', 'regime', r.stability ? esc(r.stability) : '');
+      cell(dur != null ? fmtDur(dur) : '—', 'run', tr.length > 1 ? fmtKm(pathLen(tr)) : '');
   }
+  const modelled = r.modelled
+    ?? (r.predSide ? `The forecast wind suggests drift to the ${r.predSide > 0 ? 'right' : 'left'}.` : '');
+  // What the model thinks moved the scent: only worth a word when it was not the wind.
+  const mover = r.regimeKey === 'drain' ? ' Cold air draining downhill, not the wind, is what the model thinks moved it.' : '';
+  $('resModel').textContent = (modelled + mover).trim();
+  $('resModelLabel').hidden = !$('resModel').textContent && !r.stabilityPlain;
   $('resStability').textContent = r.stabilityPlain ?? '';
+  $('resCoach').textContent = coachWords(s.data.coach);
 
   /* A plan-graded run says so. Grading a dog against a line drawn with a
      finger is a sketch of a verdict, and it is not allowed to look like the
@@ -2283,11 +2323,11 @@ function showOnMap(from = 'scrResult') {
         features: s.data.contamination.map(c => lineOf(c.points).features[0]).filter(Boolean) });
     }
     if (wx) {
-      // The dog's own calibrated drift, once five runs have earned it.
-      const k = s.data.k ?? db.dogDrift(s.dogId);
-      const field = k != null
-        ? scentField(s.data.trail, wx, s.data.trackStarted ?? undefined, k)
-        : scentField(s.data.trail, wx, s.data.trackStarted ?? undefined);
+      /* The general model for every dog. A per-dog drift figure is still
+         collected (dog card: "observed track patterns") but no longer fed
+         back in — a model tuned on the track it is asked to explain would
+         only learn to agree with it. */
+      const field = scentField(s.data.trail, wx, s.data.trackStarted ?? undefined);
       if (field.length) setSrc('drift', plumePolygon(field));
       // ...and the air itself, moving, as it was when the dog worked it.
       plumeStart(s.data.trail, wx);
@@ -2324,7 +2364,6 @@ function modelOf(s) {
     dog: S.dogs.find(d => d.id === s.dogId) ?? null,
     handler: S.handlers.find(h => h.id === s.handlerId) ?? S.handler ?? null,
     layer: S.layers.find(l => l.id === s.layerId) ?? null,
-    k: db.dogDrift(s.dogId),
   });
 }
 const unitsForText = () => ({ imperial: imp(), fahrenheit: fahr(), coord: settings.coordFormat, when: fmtWhen });
@@ -2631,7 +2670,60 @@ function closeLive() {
    Decisions come from coach.js. This is the part that has a browser: the
    run's trail and scent field, the sounds, the voice, the pill and the HUD. */
 const coach = { on: false, trail: null, field: [], plan: false, state: null, reading: null,
-                status: 'on', line: '', tick: 0, sounds: null, unlocked: false };
+                status: 'on', line: '', tick: 0, sounds: null, unlocked: false,
+                everOn: false, used: null, shadow: null };
+
+/* Two silent coaches run on EVERY trail run, blind or assisted: a plain
+   corridor and the experimental scent corridor. They never speak; they only
+   log what they would have called, so the review can show it — and so the
+   scent adjustment can be judged on runs it did not influence. */
+const shadowInput = (fix, scent) => ({
+  fix, heading: nav.brg, lineM: S.dog?.lineM ?? 0, trail: coach.trail,
+  field: scent ? coach.field : [], tolM: Number(settings.coachTol) || 20,
+  scent, plan: coach.plan, now: Date.now(),
+});
+function shadowStep(fix) {
+  if (!coach.shadow || !coach.trail) return;
+  for (const key of ['plain', 'scent']) {
+    const r = coachStep(coach.shadow[key], shadowInput(fix, key === 'scent'));
+    coach.shadow[key] = r.state;
+    if (r.alert && (r.alert.kind === 'off' || r.alert.kind === 'back')) {
+      coach.shadow.log[key].push({ kind: r.alert.kind, t: Date.now() - run.startedAt, metres: r.alert.metres, side: r.alert.side });
+    }
+  }
+}
+
+/** What the run's record keeps about coaching: whether it was assisted, with
+    what, how often it spoke — and what the silent coaches would have said. */
+function coachSummary() {
+  if (!coach.trail) return null;
+  const count = (log) => log.filter(a => a.kind === 'off').length;
+  return {
+    assisted: coach.everOn,
+    tolM: coach.used?.tolM ?? (Number(settings.coachTol) || 20),
+    scent: !!coach.used?.scent,
+    calls: coach.everOn ? (coach.state?.excursions ?? 0) : 0,
+    shadow: coach.shadow ? {
+      tolM: Number(settings.coachTol) || 20,
+      plain: count(coach.shadow.log.plain),
+      scent: count(coach.shadow.log.scent),
+      plainLog: coach.shadow.log.plain.slice(0, 60),
+      scentLog: coach.shadow.log.scent.slice(0, 60),
+    } : null,
+  };
+}
+
+/** The coach line on the result card. */
+function coachWords(c) {
+  if (!c) return '';
+  const n = (k) => `${k} call${k === 1 ? '' : 's'}`;
+  if (c.assisted) {
+    return `Assisted run — the coach was on with a ${fmtM(c.tolM)} corridor${c.scent ? ' and the experimental scent corridor' : ''}, and made ${n(c.calls ?? 0)}.`;
+  }
+  const sh = c.shadow;
+  if (!sh) return 'Blind run — no prompts.';
+  return `Blind run — no prompts. Had the coach been on: ${n(sh.plain)} with a ${fmtM(sh.tolM)} corridor, ${n(sh.scent)} with the scent corridor.`;
+}
 
 /** Tones as WAV files played through <audio>, not the Web Audio API: on an
     iPhone a media element plays through the ring/silent switch, and a coach
@@ -2727,8 +2819,12 @@ function coachStart(s) {
   coach.plan = !!s.data.plan && !s.data.walked;
   coach.state = initialCoach();
   coach.reading = null; coach.status = 'on'; coach.line = '';
+  coach.everOn = false; coach.used = null;
+  coach.shadow = coach.trail ? { plain: initialCoach(), scent: initialCoach(), log: { plain: [], scent: [] } } : null;
   const wx = s.data.weather;
-  coach.field = wx && coach.trail ? scentField(coach.trail, wx, run.startedAt, db.dogDrift(s.dogId) ?? undefined) : [];
+  coach.field = wx && coach.trail ? scentField(coach.trail, wx, run.startedAt) : [];
+  clearInterval(coach.shadowTick);
+  coach.shadowTick = coach.trail ? setInterval(() => { if (rec.on) shadowStep(null); }, 1000) : 0;
   coachSync();
 }
 
@@ -2737,9 +2833,14 @@ function coachSync() {
   const want = !!(settings.coachOn && coach.trail && rec.kind === 'run');
   if (want && !coach.on) {
     coach.on = true;
+    coach.everOn = true;
+    coach.used = { tolM: Number(settings.coachTol) || 20, scent: !!settings.coachScent };
     coach.state ??= initialCoach();
     clearInterval(coach.tick);
     coach.tick = setInterval(() => { if (rec.on) coachApply(coachStep(coach.state, coachInput(null))); }, 1000);
+  }
+  if (want && coach.on) {
+    coach.used = { tolM: Number(settings.coachTol) || 20, scent: !!settings.coachScent || !!coach.used?.scent };
   } else if (!want && coach.on) {
     coach.on = false;
     clearInterval(coach.tick); coach.tick = 0;
@@ -2749,6 +2850,7 @@ function coachSync() {
 }
 
 function coachOnFix(pt) {
+  shadowStep(pt);
   if (!coach.on) return;
   coachApply(coachStep(coach.state, coachInput(pt)));
 }
@@ -2765,8 +2867,8 @@ function coachApply(r) {
 }
 
 function coachStop() {
-  clearInterval(coach.tick); coach.tick = 0;
-  coach.on = false; coach.trail = null; coach.field = []; coach.state = null;
+  clearInterval(coach.tick); coach.tick = 0; clearInterval(coach.shadowTick); coach.shadowTick = 0;
+  coach.on = false; coach.trail = null; coach.field = []; coach.state = null; coach.shadow = null;
   coach.reading = null; coach.status = 'on'; coach.line = '';
   try { speechSynthesis?.cancel(); } catch { /* fine */ }
   // The run screen stays up while the result is worked out: leave it calm.
@@ -2790,7 +2892,7 @@ function paintCoachHud() {
   b.hidden = !coach.trail;
   b.classList.toggle('on', coach.on);
   b.classList.toggle('alert', coach.on && coach.status === 'off');
-  b.textContent = !coach.on ? 'Coach off' : coach.status === 'off' ? 'Off the trail' : `Coach · ${tolLabel()}`;
+  b.textContent = !coach.on ? 'Blind run' : coach.status === 'off' ? 'Off the trail' : `Coach · ${tolLabel()}`;
 }
 
 function paintCoachControls() {
@@ -2808,8 +2910,8 @@ function paintCoachControls() {
   const canBuzz = typeof navigator.vibrate === 'function';
   $('coachVibrateRow').hidden = !canBuzz;
   $('coachNote').textContent = canBuzz
-    ? 'Turn the volume up. Calls come at most every ten seconds, and never for GPS noise.'
-    : 'iPhones do not let a web app vibrate, so the coach uses sound and voice. Turn the volume up — the tones play even with the ring/silent switch on silent. Calls come at most every ten seconds, and never for GPS noise.';
+    ? 'Turn the volume up. Calls come at most every ten seconds, not for a single stray GPS fix, and twice at most while you stand still.'
+    : 'iPhones do not let a web app vibrate, so the coach uses sound and voice. Turn the volume up — the tones play even with the ring/silent switch on silent. Calls come at most every ten seconds, not for a single stray GPS fix, and twice at most while you stand still.';
 }
 
 /* The in-run sheet shows the very same controls: the node moves. */
@@ -3048,16 +3150,16 @@ function openDogCard(id) {
         : '')
     : `<p class="body small muted">No graded runs yet. The bands fill in as ${esc(d.name)} works trails.</p>`;
 
-  /* The calibration is the only number here the dog earned rather than the
-     handler. It stays silent until it has evidence — five runs — because a
-     figure from two is a guess wearing a decimal point. */
+  /* An observation of the TRACK, said as such. It is not fed back into the
+     scent model: a model tuned to the runs it is asked to explain would only
+     learn to agree with them. It stays silent until it has evidence — five
+     runs — because a figure from two is a guess wearing a decimal point. */
   const k = db.dogDrift(id);
   $('dogCal').innerHTML = k != null
-    ? `From ${st.calRows} graded run${st.calRows === 1 ? '' : 's'}, ${esc(d.name)} works about
-       <b>${fmtM(k, 1)} off the line for every hour</b> the trail has aged.
-       That figure now shapes the plume drawn for ${esc(d.name)}, and nobody else.`
-    : `Not enough evidence yet — ${st.calRows} of 5 graded runs.
-       Until then the plume uses the general model rather than ${esc(d.name)}\u2019s own drift.`;
+    ? `Across ${st.calRows} run${st.calRows === 1 ? '' : 's'} with wind, ${esc(d.name)}\u2019s track has sat about
+       <b>${fmtM(k, 1)} off the line per m/s of wind</b>, once the trail had aged.
+       An observation of the track, not a measurement of scent — it does not change the model.`
+    : `Not enough runs with wind yet to say — ${st.calRows} of 5.`;
 
   /* Every trail, not a recent handful. This is the record — the reason to
      keep one is being able to look back further than you can remember. */

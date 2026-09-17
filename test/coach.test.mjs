@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict';
 import {
   coachStep, initialCoach, corridor, dogPosition, coachPhrase, coachLine,
-  QUIET_MS, STILL_MS, PLAN_EXTRA_M,
+  QUIET_MS, STILL_MS, PLAN_EXTRA_M, SCENT_CAP, STILL_REPEATS, COACH_DEFAULTS,
 } from '../public/coach.js';
 import { scentField, project, dist } from '../public/geo.js';
 
@@ -64,11 +64,14 @@ t('off the trail: called on the second fix, repeated every ten seconds, "still" 
     if (r.alert) kinds.push([tick - now, r.alert.kind]);
     tick += 1000;
   }
-  assert.ok(kinds.length >= 3, 'repeats came');
+  assert.equal(kinds.length, STILL_REPEATS, 'called again twice, then quiet until the dog moves');
   assert.ok(kinds.every(([ms], i) => i === 0 || ms - kinds[i - 1][0] >= QUIET_MS), 'never closer than ten seconds');
-  assert.equal(kinds[0][1], 'off');
-  assert.ok(kinds.some(([, k]) => k === 'still'), '"still off" once it has gone on');
-  assert.ok(kinds.find(([, k]) => k === 'still')[0] >= STILL_MS - QUIET_MS);
+  assert.ok(kinds.every(([, k]) => k === 'off'));
+
+  // It moves again, still off, more than thirty seconds after the first call: "still off".
+  const r = coachStep(st, { fix: at(53, 31), heading: 0, trail, now: tick });
+  assert.equal(r.alert?.kind, 'still');
+  assert.ok(tick - (now - 4000) >= STILL_MS);
 });
 
 t('coming back inside the corridor is said once, then quiet', () => {
@@ -105,7 +108,9 @@ t('downwind, the corridor opens to the scent band; upwind it does not', () => {
   const field = scentField(trail, wx, NOW);
   const c = corridor(trail, field, 30, 20, true);
   assert.equal(c.driftSide, 'right');
-  assert.ok(c.right > 20 && c.right === c.band, `right side is the band: ${c.right}`);
+  assert.ok(c.band > 20, `the band is wider than the tolerance: ${c.band}`);
+  assert.equal(c.right, Math.min(c.band, 20 * SCENT_CAP), 'opened toward the band, but capped');
+  assert.ok(c.right <= 30);
   assert.equal(c.left, 20);
   assert.equal(corridor(trail, field, 30, 20, false).right, 20, 'scent-awareness off: plain corridor');
   assert.equal(corridor(trail, [], 30, 20, true).right, 20, 'no weather: plain corridor');
@@ -117,6 +122,12 @@ t('downwind, the corridor opens to the scent band; upwind it does not', () => {
   assert.ok(!right.alerts.some(a => a.kind === 'off'), `${inBand} m downwind is on the scent`);
   const left = run([at(200, 0), at(220, -inBand), at(240, -inBand)], { field, tolM: 20 });
   assert.equal(left.alerts.find(a => a.kind === 'off')?.side, 'left', 'the same distance upwind is off');
+});
+
+t('the defaults are a blind run with a plain corridor', () => {
+  assert.equal(COACH_DEFAULTS.coachOn, false);
+  assert.equal(COACH_DEFAULTS.coachScent, false);
+  assert.equal(COACH_DEFAULTS.coachShow, false);
 });
 
 t('the dog is a line-length ahead of the phone', () => {

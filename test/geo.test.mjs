@@ -1,11 +1,6 @@
 import assert from 'node:assert/strict';
 import {
-  dist, project, pathLen, cardinal, driftMetres, driftPolygon, meanOffset, filterFixes,
-  densify, timestamps,
-  crossTrackSigned, signedOffsets, meanSigned, sideOfDrift, sideAgreement, lineCorrect,
-  dwellFold, foldFixes, departure, progressAlong, splitLine, smoothBearing,
-  fmtDist, fmtShort, fmtSpeed, fmtTemp, timestampsEndingAt,
-  fmtWeight, kgToShown, shownToKg, fmtCoord,
+  dist, project, pathLen, cardinal, driftMetres, driftPolygon, meanOffset, filterFixes, densify, timestamps, crossTrackSigned, signedOffsets, meanSigned, sideOfDrift, sideAgreement, lineCorrect, dwellFold, foldFixes, departure, progressAlong, splitLine, smoothBearing, fmtDist, fmtShort, fmtSpeed, fmtTemp, timestampsEndingAt, fmtWeight, kgToShown, shownToKg, fmtCoord, medianAbs, sideShares,
 } from '../public/geo.js';
 
 let pass = 0;
@@ -547,6 +542,28 @@ t('fmtCoord: decimal or degrees-minutes-seconds, both pasteable', () => {
   assert.equal(fmtCoord(null, 0), '—');
   assert.equal(fmtCoord(91, 0), '—');
   assert.equal(fmtCoord(0, 181, 'dms'), '—');
+});
+
+t('medianAbs: a dog casting both sides cannot average to "held the line"', () => {
+  assert.equal(medianAbs([15, -15, 15, -15]), 15);
+  assert.equal(medianAbs([1, 2, 3, 100]), 2.5);
+  assert.equal(medianAbs([]), null);
+  assert.equal(medianAbs([NaN, -4]), 4);
+});
+
+t('sideShares: time-weighted, dead zone counts as on the line, a long gap is capped', () => {
+  const t0 = 1e12;
+  const track = [
+    { t: t0, dwellS: 0 }, { t: t0 + 1000, dwellS: 0 }, { t: t0 + 2000, dwellS: 8 },   // 1 s, 1 s, 1+8 s
+    { t: t0 + 3000, dwellS: 0 }, { t: t0 + 60000, dwellS: 0 },                          // 57 s gap → 10 s cap, last = 1 s
+  ];
+  const sh = sideShares(track, [10, 10, -2, -8, -8]);
+  // right: 1+1 = 2 s; on: 9 s (dwell); left: 10 (capped gap) + 1 = 11 s → total 22
+  assert.ok(Math.abs(sh.right - 2 / 22) < 1e-9);
+  assert.ok(Math.abs(sh.on - 9 / 22) < 1e-9);
+  assert.ok(Math.abs(sh.left - 11 / 22) < 1e-9);
+  assert.equal(sideShares(track, [1, 2]), null, 'lengths must match');
+  assert.equal(sideShares([], []), null);
 });
 
 console.log(`\n${pass} passed total\n`);
