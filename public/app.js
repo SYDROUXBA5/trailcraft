@@ -23,7 +23,7 @@ import { createStore, migrateV1, TARGETS, targetById, verbs, uid,
          dogStats, ageBand, AGE_BANDS, LEVELS, levelById, dogAge } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-17e';
+const BUILD = '2026-09-17f';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true,
@@ -1005,11 +1005,19 @@ function airStart(wx, T) {
    The arrow points where the air is GOING. A weather service reports the
    direction wind comes FROM, which is right on a chart and a trap on a map:
    a handler reads an arrow as "that way". */
+/* The HUD pill hangs from the panel's measured height (CSS --wx-gap), so a
+   taller panel — the compass, a longer note — can never sit on top of it. */
+function wxGap() {
+  const p = $('wxPanel');
+  document.documentElement.style.setProperty('--wx-gap', p && !p.hidden ? `${Math.round(p.offsetHeight) + 8}px` : '0px');
+}
+let wxWatch = null;
 function showWeather(wx) {
   const p = $('wxPanel');
   if (!p) return;
-  if (!wx || wx.wind_speed == null) { p.hidden = true; return; }
+  if (!wx || wx.wind_speed == null) { p.hidden = true; wxGap(); return; }
   p.hidden = false;
+  if (!wxWatch && 'ResizeObserver' in window) { wxWatch = new ResizeObserver(wxGap); wxWatch.observe(p); }
   $('wxSpeed').textContent = fmtWind(wx.wind_speed);
   /* The arrow says where the air is GOING; the words say where it is coming
      FROM, which is how every forecast reports it. Both are on screen because
@@ -1023,8 +1031,9 @@ function showWeather(wx) {
   $('wxNote').textContent = wx.time
     ? `10 m forecast, ${new Date(wx.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
     : '10 m forecast';
+  wxGap();
 }
-const hideWeather = () => { const p = $('wxPanel'); if (p) p.hidden = true; };
+const hideWeather = () => { const p = $('wxPanel'); if (p) p.hidden = true; wxGap(); };
 
 /* ── The compass ──────────────────────────────────────────────────────
    The phone's heading turns the rose so N points north where the handler

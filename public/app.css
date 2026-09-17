@@ -213,7 +213,11 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.75; cursor: p
 
 /* ── Glass screens (over the map) ────────────────────────────────── */
 .hud-pill {
-  position: fixed; top: calc(var(--top-row) + 92px); left: 50%; transform: translateX(-50%);
+  /* On a phone the pill sits just under the weather panel — the gap is the
+     panel's measured height, set from JS, so the two never touch. On a wide
+     screen there is room beside the panel, so it moves up to the top row,
+     centred in the space to the right of it (see the media query). */
+  position: fixed; top: calc(var(--top-row) + var(--wx-gap, 0px)); left: 50%; transform: translateX(-50%);
   display: flex; align-items: center; gap: 9px;
   background: var(--card); border: 1px solid var(--border); border-radius: 999px;
   padding: 12px 20px; font: 700 15px var(--body); text-align: center;
@@ -558,6 +562,9 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.75; cursor: p
 }
 
 body:has(#scrWalk:not([hidden])) { --top-row: calc(var(--safe-t) + 104px); }
+@media (min-width: 1100px) {
+  .hud-pill { top: var(--top-row); left: calc(50% + 86px); max-width: calc(100vw - 968px); }
+}
 
 /* The hide tools stack. Sharing a row with their own caption squeezed the
    button into a three-line sliver — the caption explains the button, so it
