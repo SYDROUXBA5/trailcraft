@@ -1,0 +1,17 @@
+{
+  "appId": "com.elitecanine.trailcraft",
+  "appName": "Trailcraft",
+  "webDir": "public",
+  "ios": {
+    "contentInset": "never",
+    "backgroundColor": "#F4EFE6",
+    "preferredContentMode": "mobile"
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchAutoHide": true,
+      "backgroundColor": "#F4EFE6",
+      "showSpinner": false
+    }
+  }
+}

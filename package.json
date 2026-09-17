@@ -9,7 +9,18 @@
     "cert": "sh scripts/make-cert.sh",
     "test": "node test/geo.test.mjs && node test/store.test.mjs && node test/sync.test.mjs && node test/field.test.mjs && node test/gesture.test.mjs && node test/team.test.mjs && node test/design.test.mjs && node test/card.test.mjs && node test/share.test.mjs && node test/pdf.test.mjs && node test/coach.test.mjs && node test/wiring.test.mjs && node test/build.test.mjs",
     "build": "node scripts/build-single.mjs",
-    "deploy": "npm test && git push origin main && git push -f origin `git subtree split --prefix public HEAD`:refs/heads/gh-pages"
+    "deploy": "npm test && git push origin main && git push -f origin `git subtree split --prefix public HEAD`:refs/heads/gh-pages",
+    "build:ios": "npx cap sync ios"
   },
-  "type": "module"
+  "type": "module",
+  "dependencies": {
+    "@capacitor-community/background-geolocation": "^1.2.26",
+    "@capacitor/core": "^8.5.2",
+    "@capacitor/haptics": "^8.0.2",
+    "@capacitor/ios": "^8.5.2"
+  },
+  "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
+    "@capacitor/cli": "^8.5.2"
+  }
 }
