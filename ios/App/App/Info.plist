@@ -32,6 +32,8 @@
 	<string>So recording keeps going with the phone in your pocket and the screen dark. Location is only used while you record, and it stays on this phone unless you share it.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Trailcraft records the trail you lay and the run your dog makes. Location is only used while you record, and it stays on this phone unless you share it.</string>
+	<key>NSMotionUsageDescription</key>
+	<string>To show which way you are facing on the compass, next to the wind.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>To pick a photo for a dog or a handler, or a photo of a Trail Card.</string>
 	<key>UIApplicationSceneManifest</key>
