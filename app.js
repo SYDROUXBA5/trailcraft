@@ -18,11 +18,12 @@ import { trailModel, encodeShared, decodeShared, sharedUrl, toGpx, fileBase,
          detailSections, headline, notes, liveMeta, liveModel } from './share.js';
 import { buildPdf, jpegSize } from './pdf.js';
 import { coachStep, initialCoach, coachPhrase, coachLine, TOL_OPTIONS, COACH_DEFAULTS } from './coach.js';
+import { isNative, watchBackground, canHaptic, haptic } from './native.js';
 import { createStore, migrateV1, TARGETS, targetById, verbs, uid,
          dogStats, ageBand, AGE_BANDS, LEVELS, levelById, dogAge } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-17a';
+const BUILD = '2026-09-17b';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true,
@@ -1346,6 +1347,21 @@ function onFix(pos) {
 }
 
 async function startWatch(hudId) {
+  /* Inside the iOS app the shell records in the background: the phone can
+     go in a pocket with the screen dark and every fix still arrives. */
+  if (isNative()) {
+    locateStop();
+    rec.on = true; rec.pts = []; rec.dropped = 0; rec.started = Date.now();
+    try {
+      rec.bg = await watchBackground(onFix,
+        (e) => toast(e?.code === 'NOT_AUTHORIZED' ? 'Location is off for Trailcraft — allow it in Settings' : 'GPS error'),
+        { message: 'Recording — the phone can go in your pocket' });
+    } catch { rec.bg = null; }
+    if (!rec.bg) { rec.on = false; toast('Could not start GPS'); return false; }
+    clearInterval(rec.tick);
+    rec.tick = setInterval(() => { const el = $(hudId); const txt = hudText(); if (el) el.textContent = txt; }, 1000);
+    return true;
+  }
   if (!navigator.geolocation) { toast('No GPS on this device'); return false; }
   if (!window.isSecureContext) { toast('Needs https to read GPS'); return false; }
   try {
@@ -1371,6 +1387,7 @@ let hudText = gpsHudText;
 
 async function stopWatch() {
   rec.on = false;
+  if (rec.bg) { try { await rec.bg.stop(); } catch { /* already gone */ } rec.bg = null; }
   navigator.geolocation?.clearWatch(rec.watch);
   clearInterval(rec.tick);
   try { await rec.lock?.release(); } catch { /* already gone */ }
@@ -1616,7 +1633,7 @@ async function renderShareQr(s) {
     }, {});
     const qr = window.qrcode?.(0, 'M');
     if (!qr) throw new Error('QR library missing — hard refresh once online');
-    qr.addData(cardUrl(card, location.href), 'Byte');
+    qr.addData(cardUrl(card, SHARE_BASE), 'Byte');
     qr.make();
     $('shareQr').innerHTML = qr.createSvgTag({ cellSize: 4, margin: 0, scalable: true });
     const who = S.layers.find(l => l.id !== s.layerId)?.name;
@@ -1917,7 +1934,7 @@ async function finishWalk() {
   try {
     const cardStr = await encodeTrail({ points: walked, waypoints: [], from: S.handler?.name ?? '', kind: 2 }, {});
     const qr = window.qrcode?.(0, 'M');
-    qr.addData(cardUrl(cardStr, location.href), 'Byte');
+    qr.addData(cardUrl(cardStr, SHARE_BASE), 'Byte');
     qr.make();
     $('waitQr').innerHTML = qr.createSvgTag({ cellSize: 4, margin: 0, scalable: true });
   } catch (err) {
@@ -2352,9 +2369,11 @@ function showOnMap(from = 'scrResult') {
    A link with the whole trail inside it, a GPX file, a PDF report, or a
    live view of a run — all read from one model (share.js), so they can
    never disagree with each other or with the result card. */
-const SHARE_BASE = location.protocol === 'file:'
-  ? 'https://sydrouxba5.github.io/trailcraft/'
-  : location.href.replace(/[#?].*$/, '');
+/* Links and QR codes name the public site, never this copy's own address:
+   the Desktop file is file://, the iOS app is capacitor://localhost, and a
+   card carrying either would open nothing on the other phone. */
+const PUBLIC_BASE = 'https://sydrouxba5.github.io/trailcraft/';
+const SHARE_BASE = /^https?:$/.test(location.protocol) ? location.href.replace(/[#?].*$/, '') : PUBLIC_BASE;
 let shareOutSession = null, shareOutFrom = 'scrResult';
 let sharedModel = null, sharedSession = null, sharedFrom = null;
 
@@ -2799,7 +2818,10 @@ function coachDeliver(alert) {
     const a = coach.sounds[kind];
     try { a.currentTime = 0; a.play().catch(() => {}); } catch { /* not primed */ }
   }
-  if (settings.coachVibrate && navigator.vibrate) navigator.vibrate(BUZZ[alert.kind] || [80]);
+  if (settings.coachVibrate) {
+    if (navigator.vibrate) navigator.vibrate(BUZZ[alert.kind] || [80]);
+    else haptic(alert.kind);           // the iOS app can; a web page on an iPhone cannot
+  }
   if (settings.coachVoice && alert.kind !== 'edge') {
     // After the tone, so the two do not talk over each other.
     setTimeout(() => coachSpeak(coachPhrase(alert, { imperial: imp() })), settings.coachSound ? 450 : 0);
@@ -2907,7 +2929,7 @@ function paintCoachControls() {
     chip.textContent = imp() ? `${[30, 60, 100, 150][i]} ft` : `${opts[i]} m`;
     chip.classList.toggle('selected', opts[i] === settings.coachTol);
   });
-  const canBuzz = typeof navigator.vibrate === 'function';
+  const canBuzz = typeof navigator.vibrate === 'function' || canHaptic();
   $('coachVibrateRow').hidden = !canBuzz;
   $('coachNote').textContent = canBuzz
     ? 'Turn the volume up. Calls come at most every ten seconds, not for a single stray GPS fix, and twice at most while you stand still.'
