@@ -23,7 +23,7 @@ import { createStore, migrateV1, TARGETS, targetById, verbs, uid,
          dogStats, ageBand, AGE_BANDS, LEVELS, levelById, dogAge } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-17d';
+const BUILD = '2026-09-17e';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true,
@@ -1017,14 +1017,69 @@ function showWeather(wx) {
      handler guessing which of the two they are looking at. */
   $('wxDir').textContent = `from ${cardinal(wx.wind_direction)}`;
   $('wxTemp').textContent = fmtTemp(wx.temp, fahr());
-  // The glyph points north, so the rotation IS the bearing it indicates.
-  $('wxArrow').style.transform = Number.isFinite(wx.wind_direction)
-    ? `rotate(${(wx.wind_direction + 180) % 360}deg)` : '';
+  // The arrow points where the air is GOING, in the real world once the compass is live.
+  compass.wind = Number.isFinite(wx.wind_direction) ? (wx.wind_direction + 180) % 360 : null;
+  paintRose();
   $('wxNote').textContent = wx.time
     ? `10 m forecast, ${new Date(wx.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
     : '10 m forecast';
 }
 const hideWeather = () => { const p = $('wxPanel'); if (p) p.hidden = true; };
+
+/* ── The compass ──────────────────────────────────────────────────────
+   The phone's heading turns the rose so N points north where the handler
+   stands; the wind arrow lives inside the ring, so it points where the air
+   is going in the field, not on the screen. iOS hands out a heading only
+   after a permission asked for inside a tap, so the rose is tappable and
+   the start of any recording asks too. Without a heading the rose simply
+   stays north-up, exactly as the panel was before. */
+const compass = { heading: null, on: false, asked: false, wind: null, ring: 0, arrow: 0, raf: 0 };
+
+/** The nearest way round: 350° → 10° is a 20° turn, not 340°. */
+const unwrapTo = (prev, target) => prev + ((((target - prev) % 360) + 540) % 360) - 180;
+
+function paintRose() {
+  const ring = $('wxRoseRing'), arrow = $('wxArrow'), rose = $('wxRose');
+  if (!ring || !arrow || !rose) return;
+  compass.ring = unwrapTo(compass.ring, -(compass.heading ?? 0));
+  ring.style.transform = `rotate(${compass.ring.toFixed(1)}deg)`;
+  if (compass.wind != null) {
+    compass.arrow = unwrapTo(compass.arrow, compass.wind);
+    arrow.style.transform = `rotate(${compass.arrow.toFixed(1)}deg)`;
+    arrow.style.opacity = '1';
+  } else {
+    arrow.style.opacity = '0';
+  }
+  rose.classList.toggle('live', compass.heading != null);
+}
+
+function onOrientation(e) {
+  let h = null;
+  if (Number.isFinite(e.webkitCompassHeading)) h = e.webkitCompassHeading;      // iPhone: clockwise from north
+  else if (e.absolute && Number.isFinite(e.alpha)) h = (360 - e.alpha) % 360;   // Android: alpha runs the other way
+  if (h == null) return;
+  compass.heading = smoothBearing(compass.heading, h, 0.35);
+  if (!compass.raf) compass.raf = requestAnimationFrame(() => { compass.raf = 0; paintRose(); });
+}
+
+async function headingStart(fromTap = false) {
+  if (compass.on) return;
+  const DOE = window.DeviceOrientationEvent;
+  if (!DOE) return;
+  if (typeof DOE.requestPermission === 'function') {
+    if (compass.asked && !fromTap) return;
+    compass.asked = true;
+    try {
+      if (await DOE.requestPermission() !== 'granted') {
+        if (fromTap) toast('The compass needs motion access — allow it for Trailcraft in Settings');
+        return;
+      }
+    } catch { return; }   // not inside a tap: iOS refuses quietly, the next tap asks again
+  }
+  compass.on = true;
+  window.addEventListener('deviceorientationabsolute', onOrientation);
+  window.addEventListener('deviceorientation', onOrientation);
+}
 
 /* "At all times on the map" means the panel cannot wait for a session to
    carry weather with it — drawing a line, or just looking around, has no
@@ -1348,6 +1403,7 @@ function onFix(pos) {
 }
 
 async function startWatch(hudId) {
+  headingStart();   // still inside the tap that started this, which is when iOS allows the ask
   /* Inside the iOS app the shell records in the background: the phone can
      go in a pocket with the screen dark and every fix still arrives. */
   if (isNative()) {
@@ -3730,6 +3786,7 @@ function wire() {
   $('btnCoach').addEventListener('click', openCoachSheet);
   $('btnCoachDone').addEventListener('click', closeCoachSheet);
   $('saveRetry').addEventListener('click', retrySave);
+  $('wxRose').addEventListener('click', () => headingStart(true));
   $('saveLater').addEventListener('click', () => { $('saveTrouble').hidden = true; });
   $('saveLink').addEventListener('click', () => saveTrouble?.session && sendLink(modelOf(saveTrouble.session)));
   $('saveGpx').addEventListener('click', () => saveTrouble?.session && saveGpx(modelOf(saveTrouble.session)));

@@ -50,10 +50,24 @@
      deciding anything: which way it is going, how hard, and how warm. -->
 <div id="wxPanel" class="wx-panel" hidden>
   <div class="wx-row">
-    <span class="wx-arrow" id="wxArrow" aria-hidden="true">
-      <svg viewBox="0 0 24 24" width="20" height="20">
-        <path d="M12 21 L12 3 M12 3 L7 9 M12 3 L17 9" fill="none"
-              stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+    <!-- A compass rose. The ring turns so its N points north where you stand
+         (once the phone shares its heading — tap it); the wind arrow sits
+         inside the ring, so it always points where the air is going in
+         the real world, not just on the map. -->
+    <span class="wx-rose" id="wxRose" role="button" tabindex="0" aria-label="Compass. Tap to use the phone’s heading.">
+      <svg viewBox="0 0 40 40" width="40" height="40" aria-hidden="true">
+        <g id="wxRoseRing">
+          <circle cx="20" cy="20" r="18.5" fill="none" stroke="currentColor" stroke-opacity="0.32" stroke-width="1"/>
+          <path d="M20 2.6 L17.2 9 L22.8 9 Z" fill="#FF8A5B"/>
+          <text x="20" y="15.8" text-anchor="middle" font-size="6.8" font-weight="700" font-family="Roboto, sans-serif" fill="currentColor" opacity="0.92">N</text>
+          <circle cx="20" cy="36" r="1.1" fill="currentColor" opacity="0.5"/>
+          <circle cx="4" cy="20" r="1.1" fill="currentColor" opacity="0.5"/>
+          <circle cx="36" cy="20" r="1.1" fill="currentColor" opacity="0.5"/>
+          <g id="wxArrow">
+            <path d="M20 30.5 L20 12.5 M20 12.5 L15.6 17.6 M20 12.5 L24.4 17.6" fill="none"
+                  stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+          </g>
+        </g>
       </svg>
     </span>
     <span class="wx-main"><b id="wxSpeed">—</b></span>
