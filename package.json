@@ -11,7 +11,8 @@
     "build": "node scripts/build-single.mjs",
     "deploy": "npm test && git push origin main && git push -f origin `git subtree split --prefix public HEAD`:refs/heads/gh-pages",
     "build:ios": "npx cap sync ios",
-    "build:sim": "npx cap sync ios && DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project ios/App/App.xcodeproj -scheme App -configuration Debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath build/derived -clonedSourcePackagesDirPath build/spm CODE_SIGNING_ALLOWED=NO build"
+    "build:sim": "npx cap sync ios && DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project ios/App/App.xcodeproj -scheme App -configuration Debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath build/derived -clonedSourcePackagesDirPath build/spm CODE_SIGNING_ALLOWED=NO build",
+    "build:phone": "npx cap sync ios && DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project ios/App/App.xcodeproj -scheme App -configuration Debug -destination \"id=${PHONE:-58FC6D09-76EE-566A-B921-929D8144F53E}\" -derivedDataPath build/derived-device -clonedSourcePackagesDirPath build/spm -allowProvisioningUpdates DEVELOPMENT_TEAM=D2XXMB3G43 CODE_SIGN_STYLE=Automatic build && DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun devicectl device install app --device \"${PHONE:-58FC6D09-76EE-566A-B921-929D8144F53E}\" build/derived-device/Build/Products/Debug-iphoneos/App.app"
   },
   "type": "module",
   "dependencies": {
