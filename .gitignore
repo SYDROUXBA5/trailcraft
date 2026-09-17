@@ -12,3 +12,6 @@ certs/
 node_modules/
 dist/
 public/token.js
+
+# Xcode build output and fetched Swift packages
+build/
