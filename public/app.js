@@ -23,7 +23,7 @@ import { createStore, migrateV1, TARGETS, targetById, verbs, uid,
          dogStats, ageBand, AGE_BANDS, LEVELS, levelById, dogAge } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-17b';
+const BUILD = '2026-09-17c';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true,
@@ -1444,7 +1444,7 @@ async function confirmLay() {
       ? { hides: rec.hides, weather: null }
       : { trail: rec.pts, waypoints: rec.wps, weather: null, contamination: [] },
   };
-  db.addSession(s);
+  guardSave(s, () => db.addSession(s));
   snap();
   pendingSession = s;
   plumeStop();              // the share screen is paper; the map is behind it
@@ -1789,7 +1789,7 @@ function saveDrawPlan() {
     data: { plan: true, ageMin: draw.ageMin, corners: draw.pts, trail: planPts,
             waypoints: [], weather: null, contamination: [] },
   };
-  db.addSession(sess);
+  guardSave(sess, () => db.addSession(sess));
   snap();
   pendingSession = sess;
   go('scrShare');
@@ -1922,12 +1922,13 @@ async function finishWalk() {
   if (rec.pts.length < 2) toast('No GPS track of the walk — the card will carry the drawn line');
 
   // Her own record of the walk stays on her phone.
-  db.addSession({
+  const own = {
     id: uid(), handlerId: S.handler.id, dogId: null, layerId: null,
     targetId: 'person', startedAt: walked[0].t,
     summary: `Walked ${walk.card.from ? walk.card.from + '’s' : 'a'} plan — ${fmtKm(pathLen(walked))}.`,
     data: { trail: walked, waypoints: [], weather: null, contamination: [], walkOf: true },
-  });
+  };
+  guardSave(own, () => db.addSession(own));
   snap();
 
   // The card the handler scans after the find: the trail as it was REALLY walked.
@@ -1965,16 +1966,17 @@ async function applyWalked(sessionId, card) {
   if (dist(card.points[0], plan[0]) > 300 &&
       !confirm('That walk starts a long way from this plan. Use it anyway?')) return false;
 
-  db.updateSession(s.id, {
+  const walkedPatch = {
     startedAt: card.started,
     data: { ...s.data, planTrail: plan, trail: card.points, walked: true, walkedFrom: card.from },
-  });
+  };
+  const savedWalk = guardSave(s, () => saveSession(s, walkedPatch));
   snap();
-  let s2 = db.sessions().find(x => x.id === s.id);
+  let s2 = savedWalk ?? { ...s, ...walkedPatch };
   toast(`The real walked line from ${card.from || 'the layer'} — re-grading`);
   if (s2.data.track) {
     const result = await computeResult(s2, s2.data.track, s2.data.trackWaypoints || [], s2.data.trackStarted, { bank: true });
-    db.updateSession(s2.id, { summary: result.sentence, data: { ...s2.data, result } });
+    guardSave(s2, () => saveSession(s2, { summary: result.sentence, data: { ...s2.data, result } }));
     snap();
     s2 = db.sessions().find(x => x.id === s.id);
   }
@@ -2025,6 +2027,7 @@ async function startRun(s) {
   liveState = null;
   paintLiveBtn();
   coachStart(s);
+  if (db.usage().bytes > STORAGE_MB * 0.8 * 1048576) toast('Storage nearly full — delete old sessions in Settings soon');
 
   if (t.kind === 'person') {
     // Only the start of the trail. The line itself stays hidden: run blind.
@@ -2104,14 +2107,18 @@ async function stopRun() {
   const provisional = !!s.data.plan && !s.data.walked;
   const result = await computeResult(s, rec.pts, rec.wps, run.startedAt, { bank: !provisional });
   liveEnd(result);
-  db.updateSession(s.id, {
+  const patch = {
     dogId: S.dog?.id ?? null,
     handlerId: S.handler.id,
     summary: result.sentence,
     data: { ...s.data, track: rec.pts, trackStarted: run.startedAt, trackWaypoints: rec.wps, result, coach: coachRecord },
-  });
+  };
+  /* If the phone refuses the save, the run stays in memory and on screen:
+     the result still shows, it can be sent as a link or a file, and the
+     save can be retried once there is room. */
+  const saved = guardSave({ ...s, ...patch }, () => saveSession(s, patch));
   snap();
-  run.session = db.sessions().find(x => x.id === s.id);
+  run.session = saved ?? { ...s, ...patch };
   renderResult(run.session);
   go('scrResult');
 }
@@ -2363,6 +2370,76 @@ function showOnMap(from = 'scrResult') {
     : !wx ? 'No weather for this one, so no plume — a guessed one would be worse'
     : 'Modelled scent, ageing in real time. The width is the uncertainty, never narrowed.';
   go('scrShowMap');
+}
+
+/* ── A save that failed ───────────────────────────────────────────────
+   The store throws rather than swallows. This is where the handler learns
+   of it and keeps what is on screen: the unsaved record stays in memory,
+   can be sent as a link or a file right away, and the save is retried once
+   room has been made. A two-second toast would be the wrong shape for this
+   message, so it is a banner that stays until dismissed. */
+let saveTrouble = null;   // { session, retry, err }
+
+/** Save a session whether or not it exists yet; returns what is now stored. */
+function saveSession(s, patch) {
+  const merged = { ...s, ...patch, data: { ...(s.data || {}), ...(patch.data || {}) } };
+  if (db.sessions().some(x => x.id === s.id)) db.updateSession(s.id, patch);
+  else db.addSession(merged);
+  return db.sessions().find(x => x.id === s.id) ?? merged;
+}
+
+function guardSave(session, fn) {
+  try {
+    const v = fn();
+    if (saveTrouble && saveTrouble.session?.id === session?.id) hideSaveTrouble();
+    return v;
+  } catch (e) {
+    if (e?.name !== 'SaveError') throw e;
+    saveTrouble = { session, retry: fn, err: e };
+    showSaveTrouble(e);
+    return null;
+  }
+}
+
+function showSaveTrouble(e) {
+  const hasTrail = !!(saveTrouble?.session?.data?.trail || saveTrouble?.session?.data?.hides);
+  $('saveTroubleTitle').textContent = e.full ? 'Couldn’t save — the phone has no room left' : 'Couldn’t save this';
+  $('saveTroubleText').textContent = e.full
+    ? (hasTrail
+      ? 'It is still here on screen. Send it as a link or a GPX now, then free some space (Settings → All sessions → delete old ones) and try again.'
+      : 'Free some space (Settings → All sessions → delete old ones) and try again.')
+    : `${e.message}.${hasTrail ? ' It is still here on screen — send it as a link or a GPX now, then try again.' : ' Try again in a moment.'}`;
+  $('saveLink').hidden = !hasTrail;
+  $('saveGpx').hidden = !hasTrail;
+  $('saveRetry').hidden = !saveTrouble?.retry;
+  $('saveTrouble').hidden = false;
+}
+function hideSaveTrouble() { saveTrouble = null; $('saveTrouble').hidden = true; }
+
+function retrySave() {
+  if (!saveTrouble?.retry) return hideSaveTrouble();
+  try {
+    saveTrouble.retry();
+    hideSaveTrouble();
+    snap();
+    toast('Saved');
+  } catch (e) {
+    if (e?.name !== 'SaveError') throw e;
+    showSaveTrouble(e);
+    toast(e.full ? 'Still no room — delete an old session first' : 'Still could not save');
+  }
+}
+
+/** How much of the phone's room the records take, said in Settings. Safari
+    allows about five megabytes to a web app; the iOS app has far more. */
+const STORAGE_MB = isNative() ? 50 : 5;
+function paintStorageLine() {
+  const el = $('storageLine');
+  if (!el) return;
+  const mb = db.usage().bytes / 1048576;
+  const nearly = mb > STORAGE_MB * 0.8;
+  el.textContent = `Records use ${mb < 0.1 ? 'under 0.1' : mb.toFixed(1)} MB of the roughly ${STORAGE_MB} MB allowed here${nearly ? ' — delete old sessions soon' : ''}.`;
+  el.classList.toggle('warn', nearly);
 }
 
 /* ── Sharing beyond this phone ────────────────────────────────────────
@@ -3098,7 +3175,7 @@ async function handleCard(data) {
     data: { trail: card.points, waypoints: card.waypoints || [], weather: null,
             contamination: [], drawn: !!card.drawn, imported: { from: card.from || 'another phone', at: Date.now() } },
   };
-  db.addSession(s);
+  guardSave(s, () => db.addSession(s));
   snap();
   toast(`Trail from ${s.data.imported.from} — ${fmtKm(pathLen(card.points))}`);
   // The card carries the REAL laid time; that moment's weather makes ageing true.
@@ -3220,6 +3297,7 @@ function renderSettings() {
 
   $('plumeOn').checked = settings.plume !== false;
   paintCoachControls();
+  paintStorageLine();
   paintUnitSettings();
   paintAppearance();
   renderAccount();
@@ -3650,6 +3728,14 @@ function wire() {
   $('btnRunStop').addEventListener('click', stopRun);
   $('btnCoach').addEventListener('click', openCoachSheet);
   $('btnCoachDone').addEventListener('click', closeCoachSheet);
+  $('saveRetry').addEventListener('click', retrySave);
+  $('saveLater').addEventListener('click', () => { $('saveTrouble').hidden = true; });
+  $('saveLink').addEventListener('click', () => saveTrouble?.session && sendLink(modelOf(saveTrouble.session)));
+  $('saveGpx').addEventListener('click', () => saveTrouble?.session && saveGpx(modelOf(saveTrouble.session)));
+  // A save that fails somewhere unguarded (a weather update, a preference) still gets said.
+  const netSave = (e) => { const err = e.reason ?? e.error; if (err?.name === 'SaveError') { e.preventDefault?.(); saveTrouble = { session: null, retry: null, err }; showSaveTrouble(err); } };
+  window.addEventListener('unhandledrejection', netSave);
+  window.addEventListener('error', netSave);
   $('coachControls').addEventListener('change', (e) => {
     const box = e.target.closest('input[type="checkbox"]');
     if (!box) return;

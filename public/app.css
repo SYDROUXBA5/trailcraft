@@ -862,3 +862,18 @@ body:has(#scrWalk:not([hidden])) { --top-row: calc(var(--safe-t) + 104px); }
 #coachControls .age-row { margin-bottom: 4px; }
 #coachControls .age-chip { min-height: 44px; font-size: 14px; }
 #coachNote { margin-top: 10px; }
+
+/* ── A save that failed ───────────────────────────────────────────────
+   Above every screen, ember-edged, and it stays: the handler decides when
+   it goes, not a timer. */
+.save-trouble {
+  position: fixed; left: 12px; right: 12px; bottom: calc(var(--safe-b) + 12px); z-index: 40;
+  max-width: 536px; margin: 0 auto; padding: 14px 16px;
+  background: var(--card); color: var(--ink); border: 2px solid var(--ember); border-radius: var(--r);
+  box-shadow: 0 18px 40px -12px rgba(23, 32, 26, 0.5);
+}
+.save-trouble b { display: block; font-size: 16px; margin-bottom: 4px; }
+.save-trouble .body { margin: 0 0 10px; }
+.save-trouble-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.save-trouble-row .btn { flex: 1 1 auto; }
+#storageLine.warn { color: var(--ember); font-weight: 600; }

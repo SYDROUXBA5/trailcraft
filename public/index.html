@@ -33,6 +33,18 @@
 <div id="map"></div>
 
 <div id="toast" class="toast" hidden></div>
+<!-- The one message that must never be a two-second toast: a save that
+     failed. It stays until the handler has done something about it. -->
+<div id="saveTrouble" class="save-trouble" role="alert" hidden>
+  <b id="saveTroubleTitle">Couldn’t save — the phone has no room left</b>
+  <p class="body small" id="saveTroubleText">The run is still here on screen. Send it as a link or a GPX now, then free some space (Settings → All sessions → delete old ones) and try again.</p>
+  <div class="save-trouble-row">
+    <button class="btn small moss" id="saveRetry">Try again</button>
+    <button class="btn small" id="saveLink">Send as a link</button>
+    <button class="btn small" id="saveGpx">Save as GPX</button>
+    <button class="btn small ghost" id="saveLater">Later</button>
+  </div>
+</div>
 
 <!-- The air, over every map screen. Three things a handler reads before
      deciding anything: which way it is going, how hard, and how warm. -->
@@ -523,6 +535,7 @@
     <div id="setLayers"></div>
     <span class="label">All sessions</span>
     <button class="btn card-btn" id="btnAllSessions">Open the session list</button>
+    <p class="body small muted" id="storageLine"></p>
     <span class="label">Appearance</span>
     <div class="check-list" id="appearanceSettings" data-setting="theme">
       <button type="button" class="check-row" data-value="system"><span class="check-text"><b>Device default</b><i data-theme-example="system"></i></span><span class="check-mark" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span></button>

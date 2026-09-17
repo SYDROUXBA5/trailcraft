@@ -45,11 +45,42 @@ const K = {
   sessions: 'tc.sessions2', kv: 'tc.kv',
 };
 
+/** A save that did not happen. `full` means the phone refused for lack of
+    room — the one failure a handler can do something about. Thrown, never
+    swallowed: a run lost in silence is the worst thing this app could do. */
+export class SaveError extends Error {
+  constructor(key, cause, chars = 0) {
+    super(isQuota(cause) ? 'The phone has no room left to save this' : `Could not save ${key}`);
+    this.name = 'SaveError';
+    this.key = key;
+    this.full = isQuota(cause);
+    this.chars = chars;
+    this.cause = cause;
+  }
+}
+const isQuota = (e) => !!e && (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED' || e.code === 22 || e.code === 1014);
+
 export function createStore(backend) {
   const read = (k, f) => {
     try { return JSON.parse(backend.getItem(k)) ?? f; } catch { return f; }
   };
-  const write = (k, v) => backend.setItem(k, JSON.stringify(v));
+  const write = (k, v) => {
+    const text = JSON.stringify(v);
+    try { backend.setItem(k, text); } catch (e) { throw new SaveError(k, e, text.length); }
+  };
+  /** How much of the phone's room the records take: bytes as the browser
+      counts them (two per character), and what the biggest record is. */
+  const usage = () => {
+    let bytes = 0, biggest = 0;
+    for (const k of Object.values(K)) {
+      const v = backend.getItem(k);
+      if (v == null) continue;
+      const b = (k.length + v.length) * 2;
+      bytes += b;
+      biggest = Math.max(biggest, b);
+    }
+    return { bytes, biggest };
+  };
 
   /* Anyone listening for changes — the cloud mirror, when signed in. The
      store does not know or care what is listening; it only says what moved. */
@@ -189,6 +220,8 @@ export function createStore(backend) {
       const med = sorted[Math.floor(sorted.length / 2)];
       return Math.min(6, Math.max(0.5, med));   // no single dog rewrites physics
     },
+
+    usage,
 
     exportAll() {
       return JSON.stringify({

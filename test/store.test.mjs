@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createStore, migrateV1, TARGETS, targetById, verbs, uid,
-         dogStats, ageBand, AGE_BANDS, dogAge } from '../public/store.js';
+         dogStats, ageBand, AGE_BANDS, dogAge, SaveError } from '../public/store.js';
 
 let pass = 0;
 const t = (name, fn) => { fn(); pass++; console.log(`  ok  ${name}`); };
@@ -252,6 +252,42 @@ t('store: every change is announced, and a deletion leaves a tombstone', () => {
   stop();
   db.dogs.upsert({ id: 'nell', handlerId: 'h', name: 'Nell' });
   assert.equal(heard.length, 5, 'unsubscribing actually stops the calls');
+});
+
+/** A phone with a ceiling: setItem refuses once the total would pass it,
+    exactly as Safari does at about five megabytes. */
+const fullBackend = (limitChars) => {
+  const m = new Map();
+  const total = () => [...m.entries()].reduce((n, [k, v]) => n + k.length + v.length, 0);
+  return {
+    getItem: (k) => (m.has(k) ? m.get(k) : null),
+    setItem: (k, v) => {
+      const next = total() - (m.has(k) ? k.length + m.get(k).length : 0) + k.length + String(v).length;
+      if (next > limitChars) throw new DOMException('quota', 'QuotaExceededError');
+      m.set(k, String(v));
+    },
+    removeItem: (k) => m.delete(k),
+  };
+};
+
+t('a full phone throws a SaveError that says so, and loses nothing already saved', () => {
+  const db = createStore(fullBackend(2500));
+  const big = (id) => ({ id, startedAt: 1, targetId: 'person', data: { trail: Array.from({ length: 40 }, (_, i) => ({ lat: 51 + i / 1e4, lon: -2, t: i })) } });
+  db.addSession(big('a'));
+  const before = db.usage().bytes;
+  assert.ok(before > 0);
+  assert.throws(() => db.addSession(big('b')), (e) => e instanceof SaveError && e.name === 'SaveError' && e.full === true && /no room/.test(e.message));
+  assert.deepEqual(db.sessions().map(s => s.id), ['a'], 'the first session is untouched');
+  assert.equal(db.usage().bytes, before, 'nothing half-written');
+  db.deleteSession('a');
+  db.addSession(big('b'));
+  assert.deepEqual(db.sessions().map(s => s.id), ['b'], 'room freed, the save goes through');
+});
+
+t('any other failure to save is still a SaveError, not silence', () => {
+  const backend = { getItem: () => null, setItem: () => { throw new Error('disk on fire'); }, removeItem: () => {} };
+  const db = createStore(backend);
+  assert.throws(() => db.kv.set('x', 1), (e) => e.name === 'SaveError' && e.full === false);
 });
 
 console.log(`\n${pass} passed total\n`);
