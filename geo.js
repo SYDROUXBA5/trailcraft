@@ -294,7 +294,38 @@ export function signedOffsets(trail, track) {
   });
 }
 
-/** Mean of signed offsets — the number the result card leads with. */
+/** Median of the absolute offsets: how far the track typically sat from
+    the line. A mean of SIGNED offsets lets a dog casting 15 m left and
+    15 m right average to zero and read as "held the line" — this cannot. */
+export function medianAbs(offs) {
+  const a = (offs ?? []).filter(Number.isFinite).map(Math.abs).sort((x, y) => x - y);
+  if (!a.length) return null;
+  const m = a.length >> 1;
+  return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2;
+}
+
+/** Share of the run's time spent left of, on, and right of the line. Each
+    fix weighs what it stood for — its dwell plus the gap to the next fix,
+    capped so one dropped stretch cannot own the answer. Within `deadM` of
+    the line a fix says nothing about side and counts as "on". */
+export function sideShares(track, offs, { deadM = 3, capS = 10 } = {}) {
+  if (!track?.length || !offs?.length || track.length !== offs.length) return null;
+  let left = 0, on = 0, right = 0;
+  track.forEach((p, i) => {
+    const next = track[i + 1];
+    const gap = next && Number.isFinite(next.t) && Number.isFinite(p.t) ? Math.min(capS, Math.max(0, (next.t - p.t) / 1000)) : 1;
+    const w = gap + (p.dwellS > 0 ? p.dwellS : 0);
+    const o = offs[i];
+    if (!Number.isFinite(o) || Math.abs(o) < deadM) on += w;
+    else if (o > 0) right += w;
+    else left += w;
+  });
+  const total = left + on + right;
+  if (!(total > 0)) return null;
+  return { left: left / total, on: on / total, right: right / total };
+}
+
+/** Mean of signed offsets — kept for the side, never for the distance. */
 export function meanSigned(offs) {
   if (!offs?.length) return null;
   return offs.reduce((a, b) => a + b, 0) / offs.length;

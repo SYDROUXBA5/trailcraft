@@ -31,9 +31,9 @@ export const TOL_OPTIONS = {
 };
 
 export const COACH_DEFAULTS = {
-  coachOn: true,
+  coachOn: false,        // off = a blind run: no prompts. Assisted runs are a choice, and are recorded as such.
   coachTol: 20,          // metres each side of the line
-  coachScent: true,      // widen the downwind side to the scent band
+  coachScent: false,     // experimental: widen the downwind side toward the scent band
   coachVoice: true,
   coachSound: true,
   coachVibrate: true,    // only where the phone can (not iPhone)
@@ -44,6 +44,8 @@ export const QUIET_MS = 10_000;    // never two alerts closer than this
 export const STILL_MS = 30_000;    // "still off" from here on
 export const CONFIRM_MS = 6_000;   // one excursion this long counts even from single fixes
 export const PLAN_EXTRA_M = 10;    // a drawn line is a sketch: give it room
+export const SCENT_CAP = 1.5;      // the scent widening never exceeds this × the tolerance
+export const STILL_REPEATS = 2;    // repeats without a new fix: then quiet until the dog moves
 
 const fin = Number.isFinite;
 
@@ -58,7 +60,9 @@ export function dogPosition(pos, headingDeg, lineM) {
 
 /** The corridor at trail vertex `i`: how far the dog may sit on each side.
     `field` is geo.scentField(trail, …) or empty; with it, the downwind side
-    opens up to the scent band's far edge. */
+    opens toward the scent band's far edge — capped at SCENT_CAP × the
+    tolerance, because the band's distance is a modelled guess and the cap
+    is a design choice to test, not a validated scent distance. */
 export function corridor(trail, field, i, tolM, scentAware = true) {
   const out = { left: tolM, right: tolM, driftSide: null, band: 0 };
   const f = scentAware ? field?.[i] : null;
@@ -69,7 +73,7 @@ export function corridor(trail, field, i, tolM, scentAware = true) {
   const side = across > 0 ? 'right' : 'left';
   out.driftSide = side;
   out.band = Math.abs(across) + (f.halfWidth ?? 0);
-  out[side] = Math.max(tolM, out.band);
+  out[side] = Math.min(tolM * SCENT_CAP, Math.max(tolM, out.band));
   return out;
 }
 
@@ -79,6 +83,7 @@ export const initialCoach = () => ({
   offSince: 0,           // when this excursion began being outside
   offAt: 0,              // when the coach first called it off
   lastAlert: 0,
+  repeatsSinceFix: 0,    // a standing dog is not called forever
   edgeWarned: false,
   last: null,            // the most recent reading, for timer-driven repeats
   excursions: 0,         // how many times the coach had to call it
@@ -133,6 +138,7 @@ export function coachStep(state, {
   };
 
   if (fix) {
+    st.repeatsSinceFix = 0;
     if (reading.outside) {
       st.offRun += 1;
       if (!st.offSince) st.offSince = now;
@@ -165,8 +171,10 @@ export function coachStep(state, {
   }
 
   /* Repeats are on the clock, not on the fixes: a dog standing still off the
-     trail sends no new fixes and must still be called every ten seconds. */
-  if (!alert && st.status === 'off' && now - st.lastAlert >= QUIET_MS) {
+     trail sends no new fixes and is still called again — twice. After that
+     the handler knows, and the coach waits for the dog to move. */
+  if (!alert && st.status === 'off' && now - st.lastAlert >= QUIET_MS && st.repeatsSinceFix < STILL_REPEATS) {
+    st.repeatsSinceFix += 1;
     call(now - st.offAt >= STILL_MS ? 'still' : 'off');
   }
   return { state: st, reading, alert };

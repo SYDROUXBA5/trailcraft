@@ -42,6 +42,7 @@ export function trailModel(s, { dog = null, handler = null, layer = null, k = nu
     wps: d.track?.length > 1 ? (d.trackWaypoints ?? []) : [],
     wx: d.weather ?? null,
     result: d.result ?? null,
+    coach: d.coach ?? null,
     k: fin(k) ? k : null,
     thinnedM: 0,
   };
@@ -111,6 +112,8 @@ function pack(m) {
     trail: packPts(m.trail), hides: packPts(m.hides), track: packPts(m.track), wps: packPts(m.wps),
     contam: m.contamination?.length ? m.contamination.map(c => packPts(c.points)) : undefined,
     wx: packWx(m.wx), result: m.result ? roundDeep(m.result) : undefined,
+    coach: m.coach ? { assisted: !!m.coach.assisted, tolM: m.coach.tolM, scent: !!m.coach.scent, calls: m.coach.calls,
+      shadow: m.coach.shadow ? pick(m.coach.shadow, ['tolM', 'plain', 'scent']) : undefined } : undefined,
     k: m.k, thinnedM: m.thinnedM || undefined,
   };
   return Object.fromEntries(Object.entries(o).filter(([, v]) => v != null));
@@ -144,6 +147,15 @@ function unpack(o) {
     contamination: (Array.isArray(o.contam) ? o.contam : []).map(unpackPts).filter(p => p?.length > 1).map(points => ({ points })),
     wx: o.wx && typeof o.wx === 'object' ? o.wx : null,
     result: o.result && typeof o.result === 'object' ? o.result : null,
+    coach: o.coach && typeof o.coach === 'object' ? {
+      assisted: !!o.coach.assisted, tolM: fin(o.coach.tolM) ? o.coach.tolM : null, scent: !!o.coach.scent,
+      calls: fin(o.coach.calls) ? o.coach.calls : null,
+      shadow: o.coach.shadow && typeof o.coach.shadow === 'object' ? {
+        tolM: fin(o.coach.shadow.tolM) ? o.coach.shadow.tolM : null,
+        plain: fin(o.coach.shadow.plain) ? o.coach.shadow.plain : null,
+        scent: fin(o.coach.shadow.scent) ? o.coach.shadow.scent : null,
+      } : null,
+    } : null,
     k: fin(o.k) ? o.k : null,
     thinnedM: fin(o.thinnedM) ? o.thinnedM : 0,
   };
@@ -389,10 +401,22 @@ export function detailSections(m, u = {}) {
     if (fin(a.t) && fin(b.t) && b.t > a.t) rows.push(['Duration', clock(b.t - a.t)]);
     rows.push(['Distance', fmtDist(pathLen(tr), imp)]);
     if (r?.kind === 'trail') {
-      if (fin(r.mean)) rows.push(['Average offset', Math.abs(r.mean) < 0.5 ? 'on the line'
-        : `${fmtShort(Math.abs(r.mean), imp, 1)}${r.side ? ` to the ${r.side}` : ''}`]);
-      if (r.predSide) rows.push(['Wind pushed scent', r.predSide > 0 ? 'to the right' : 'to the left']);
-      if (r.predSide && fin(r.agree)) rows.push(['On the scent side', `${Math.round(r.agree * 100)} % of the run`]);
+      /* Recorded first, then the forecast's suggestion — kept apart, because
+         only the first is a measurement. Older results carry only a mean. */
+      const typical = fin(r.medAbs) ? r.medAbs : fin(r.mean) ? Math.abs(r.mean) : null;
+      if (fin(typical)) rows.push(['Typical distance from the line', typical < 0.5 ? 'on the line' : fmtShort(typical, imp, 1)]);
+      if (r.shares) {
+        const pc = (x) => `${Math.round(x * 100)} %`;
+        rows.push(['Time left · on · right', `${pc(r.shares.left)} · ${pc(r.shares.on)} · ${pc(r.shares.right)}`]);
+      } else if (r.side && fin(r.mean) && Math.abs(r.mean) >= 0.5) {
+        rows.push(['Mainly', `to the ${r.side}`]);
+      }
+      if (r.noisy && fin(r.accMed)) rows.push(['GPS uncertainty', `±${fmtShort(r.accMed, imp)} — too large to read the side`]);
+      if (r.predSide) rows.push(['Forecast wind suggests drift', r.predSide > 0 ? 'to the right' : 'to the left']);
+      const main = r.mainSide ?? (fin(r.mean) && Math.abs(r.mean) >= 0.5 ? r.side : null);
+      if (r.predSide && main && !r.noisy) {
+        rows.push(['Track vs forecast', (r.predSide > 0 ? 'right' : 'left') === main ? 'same side' : 'other side']);
+      }
       if (r.regimeWord) rows.push(['Wind to the trail', cap(String(r.regimeWord))]);
       if (r.stability) rows.push(['Air at ground level', String(r.stability)]);
     } else if (r?.kind === 'search') {
@@ -418,15 +442,32 @@ export function detailSections(m, u = {}) {
   if (m.wps?.length && fin(m.track?.[0]?.t)) {
     out.push({ title: 'Marks', rows: m.wps.map(w => [w.kind || 'Mark', fin(w.t) ? clock(w.t - m.track[0].t) : '—']) });
   }
+
+  /* Whether the run was coached is part of the record: a run with a voice
+     saying "left" is not the same evidence as a blind one. */
+  const c = m.coach;
+  if (c && typeof c === 'object') {
+    const rows = [];
+    rows.push(['Run', c.assisted ? 'assisted — the coach was on' : 'blind — no prompts']);
+    if (c.assisted) {
+      rows.push(['Corridor', `${fmtShort(c.tolM ?? 20, imp)}${c.scent ? ' · experimental scent corridor' : ''}`]);
+      if (fin(c.calls)) rows.push(['Coach calls', String(c.calls)]);
+    }
+    if (c.shadow && fin(c.shadow.plain)) {
+      rows.push(['Had the coach been on', `${c.shadow.plain} call${c.shadow.plain === 1 ? '' : 's'} with a ${fmtShort(c.shadow.tolM ?? 20, imp)} corridor`
+        + (fin(c.shadow.scent) ? `, ${c.shadow.scent} with the scent corridor` : '')]);
+    }
+    out.push({ title: 'Coach', rows });
+  }
   return out;
 }
 
 /** Caveats the reader has to see, in the order they matter. */
 export function notes(m) {
   const n = [];
-  if (m.plan && !m.walked && m.result) n.push('Graded against a line drawn on the map, not the trail as walked.');
+  if (m.plan && !m.walked && m.result) n.push('Compared against a line drawn on the map, not the trail as walked.');
   if (m.thinnedM > 0) n.push(`Lines thinned by up to ${m.thinnedM} m to fit in the link.`);
-  n.push('The model explains what the dog did. It does not predict where scent is.');
+  n.push('The wind side and the scent band are estimates from a forecast, not measurements. They suggest an explanation; they do not judge the dog.');
   return n;
 }
 
