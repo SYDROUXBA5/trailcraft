@@ -101,7 +101,7 @@ html, body {
 .row-gap .btn { flex: 1; }
 
 /* ── Inputs ──────────────────────────────────────────────────────── */
-input[type="text"], input[type="number"], input[type="datetime-local"], select {
+input[type="text"], input[type="number"], input[type="datetime-local"], input[type="date"], select {
   width: 100%; min-height: 56px; padding: 0 16px;
   background: var(--card); color: var(--ink);
   border: 1px solid var(--border); border-radius: 14px;
@@ -109,6 +109,17 @@ input[type="text"], input[type="number"], input[type="datetime-local"], select {
 }
 input:focus-visible, select:focus-visible { outline: 2px solid var(--moss); outline-offset: 1px; }
 input[type="range"] { width: 100%; accent-color: var(--moss); height: 40px; }
+/* An iPhone draws a date field as a small grey pill and ignores the width
+   and height it was given unless told to stop drawing it its own way. Then
+   it is the same box as every other field, the date sitting on the left. */
+input[type="date"] {
+  -webkit-appearance: none; appearance: none;
+  display: flex; align-items: center;
+  width: 100%; min-height: 56px; padding: 0 16px;
+  text-align: left; color: var(--ink); background: var(--card);
+}
+input[type="date"]::-webkit-date-and-time-value { text-align: left; margin: 0; }
+input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.75; cursor: pointer; }
 
 /* ── Chips (home rows) ───────────────────────────────────────────── */
 .chip-row {

@@ -23,7 +23,7 @@ import { createStore, migrateV1, TARGETS, targetById, verbs, uid,
          dogStats, ageBand, AGE_BANDS, LEVELS, levelById, dogAge } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-17c';
+const BUILD = '2026-09-17d';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true,
@@ -606,6 +606,7 @@ function openDogForm({ id = null, handlerId = null, returnTo = null, firstLaunch
   $('obDogChip').value = existing?.chip ?? '';
   // A date input speaks ISO and nothing else, whatever the phone displays.
   $('obDogDob').value = existing?.dob ? new Date(existing.dob).toISOString().slice(0, 10) : '';
+  $('obDogDob').max = new Date().toISOString().slice(0, 10);   // no dog is born tomorrow
   $('obDogWeightUnit').textContent = imp() ? 'lb' : 'kg';
   const shown = kgToShown(existing?.weightKg, imp());
   $('obDogWeight').value = shown ? shown.toFixed(1) : '';
