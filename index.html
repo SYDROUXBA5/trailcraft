@@ -76,6 +76,20 @@
   <div class="wx-row wx-note"><i id="wxNote">10 m forecast</i></div>
 </div>
 
+<!-- The map style: satellite for the field, terrain for the contours, streets
+     for town. Bottom right, above whatever controls the screen has. -->
+<div class="style-pick" id="stylePick" hidden>
+  <button type="button" data-style="satellite">Satellite</button>
+  <button type="button" data-style="terrain">Terrain</button>
+  <button type="button" data-style="streets">Streets</button>
+</div>
+<button type="button" class="map-style" id="btnMapStyle" hidden aria-label="Map style" aria-expanded="false">
+  <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
+    <path d="M12 3.6 3.6 8.4 12 13.2l8.4-4.8z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+    <path d="M3.6 12.4 12 17.2l8.4-4.8M3.6 16.4 12 21.2l8.4-4.8" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+  </svg>
+</button>
+
 <!-- ── Onboarding: handler ─────────────────────────────────────────── -->
 <section id="scrOnboardHandler" class="screen paper" hidden>
   <div class="page">
