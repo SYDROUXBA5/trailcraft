@@ -4,13 +4,13 @@
   "webDir": "public",
   "ios": {
     "contentInset": "never",
-    "backgroundColor": "#F4EFE6",
+    "backgroundColor": "#F6F7FA",
     "preferredContentMode": "mobile"
   },
   "plugins": {
     "SplashScreen": {
       "launchAutoHide": true,
-      "backgroundColor": "#F4EFE6",
+      "backgroundColor": "#F6F7FA",
       "showSpinner": false
     }
   }

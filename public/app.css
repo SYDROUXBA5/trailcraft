@@ -4,14 +4,14 @@
    sun: 56px touch targets, 8pt spacing, light theme only. */
 
 :root {
-  --paper: #F4EFE6;
-  --card: #FFFDF8;
-  --border: #DDD5C6;
-  --ink: #17201A;
-  --moss: #2F4A3A;
-  --moss-deep: #1E3328;
-  --ember: #D9662B;
-  --muted: #6E7468;
+  --paper: #F6F7FA;
+  --card: #FFFFFF;
+  --border: #D8DEEA;
+  --ink: #0F1F3D;
+  --moss: #14284B;
+  --moss-deep: #0B1730;
+  --ember: #B8861B;
+  --muted: #5B6A85;
 
   --r: 20px;
   --safe-b: env(safe-area-inset-bottom, 0px);
@@ -150,7 +150,7 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.75; cursor: p
 /* ── Avatars ─────────────────────────────────────────────────────── */
 .ava {
   width: 40px; height: 40px; border-radius: 50%; flex: none;
-  background: #E4DCC9 center/cover no-repeat;
+  background: #E1E7F2 center/cover no-repeat;
   display: inline-flex; align-items: center; justify-content: center;
   font: 700 16px var(--body); color: var(--muted); overflow: hidden;
 }
@@ -221,7 +221,7 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.75; cursor: p
   display: flex; align-items: center; gap: 9px;
   background: var(--card); border: 1px solid var(--border); border-radius: 999px;
   padding: 12px 20px; font: 700 15px var(--body); text-align: center;
-  box-shadow: 0 6px 18px rgba(23, 32, 26, 0.14);
+  box-shadow: 0 6px 18px rgba(15, 31, 61, 0.14);
   font-variant-numeric: tabular-nums; max-width: calc(100vw - 24px);
   border-radius: 22px;
 }
@@ -256,7 +256,7 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.75; cursor: p
   position: relative;
   width: 100%;
   aspect-ratio: 300 / 170;
-  background: #E7EBDD;
+  background: #E6EAF3;
   border-radius: 12px;
   overflow: hidden;
 }
@@ -302,7 +302,7 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.75; cursor: p
   position: fixed; top: var(--top-row); right: 12px; z-index: 60;
   background: var(--ink); color: var(--paper); border-radius: 999px;
   padding: 13px 22px; font: 600 15px var(--body); pointer-events: none;
-  box-shadow: 0 12px 34px rgba(23, 32, 26, 0.3);
+  box-shadow: 0 12px 34px rgba(15, 31, 61, 0.3);
   opacity: 0; transform: translateY(-6px);
   transition: opacity 180ms ease, transform 180ms ease;
   visibility: hidden; text-align: center;
@@ -375,9 +375,9 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.75; cursor: p
   display: flex; align-items: center; gap: 16px;
   padding: 16px 20px;
   background: var(--moss-deep);
-  color: #FFFDF8;
+  color: #FFFFFF;
   border-radius: 22px;
-  box-shadow: 0 10px 30px rgba(23, 32, 26, 0.34);
+  box-shadow: 0 10px 30px rgba(15, 31, 61, 0.34);
   transition: background 240ms ease;
 }
 .nav-banner.off-line { background: #8A4318; }   /* drifting: ember, not alarm */
@@ -404,12 +404,12 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.75; cursor: p
   display: grid; place-items: center;
   border: none; border-radius: 50%;
   background: var(--card); color: var(--moss);
-  box-shadow: 0 6px 18px rgba(23, 32, 26, 0.28);
+  box-shadow: 0 6px 18px rgba(15, 31, 61, 0.28);
   cursor: pointer;
   transition: transform 140ms ease, background 200ms ease;
 }
 .map-fab:active { transform: scale(0.94); }
-.map-fab.nudge { background: var(--ember); color: #FFFDF8; }
+.map-fab.nudge { background: var(--ember); color: #FFFFFF; }
 
 @media (prefers-reduced-motion: reduce) {
   .map-fab, .nav-banner { transition: none; }
@@ -437,7 +437,7 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.75; cursor: p
 .switch-row input[type="checkbox"]::after {
   content: ''; position: absolute; top: 3px; left: 3px;
   width: 26px; height: 26px; border-radius: 50%;
-  background: var(--card); box-shadow: 0 1px 3px rgba(23, 32, 26, 0.3);
+  background: var(--card); box-shadow: 0 1px 3px rgba(15, 31, 61, 0.3);
   transition: transform 180ms cubic-bezier(0.23, 1, 0.32, 1);
 }
 .switch-row input[type="checkbox"]:checked { background: var(--moss); }
@@ -462,7 +462,7 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.75; cursor: p
 .band-top span { font-variant-numeric: tabular-nums; font-weight: 700; font-size: 15px; }
 .band-rail { height: 8px; border-radius: 4px; background: var(--paper); overflow: hidden; }
 .band-fill { display: block; height: 100%; border-radius: 4px; }
-.band-hot  { background: #D9662B; }
+.band-hot  { background: #B8861B; }
 .band-warm { background: #E0A33C; }
 .band-cold { background: #4E7FA8; }
 
@@ -514,11 +514,11 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.75; cursor: p
   display: flex; flex-direction: column; gap: 3px;
   padding: 10px 14px 9px;
   border-radius: 18px;
-  color: #F6F2E9;
+  color: #F4F6FA;
   pointer-events: none;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.03) 46%, rgba(0, 0, 0, 0.12)),
-    rgba(20, 27, 22, 0.62);
+    rgba(11, 22, 48, 0.62);
   backdrop-filter: blur(16px) saturate(150%);
   -webkit-backdrop-filter: blur(16px) saturate(150%);
   box-shadow:
@@ -531,13 +531,13 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.75; cursor: p
   display: grid; place-items: center;
   width: 40px; height: 40px; flex: 0 0 auto;
   border-radius: 50%;
-  color: #FFE9C4;
-  background: rgba(255, 233, 196, 0.10);
-  box-shadow: inset 0 0 0 1px rgba(255, 233, 196, 0.2);
+  color: #F1D27A;
+  background: rgba(241, 210, 122, 0.10);
+  box-shadow: inset 0 0 0 1px rgba(241, 210, 122, 0.2);
   pointer-events: auto; cursor: pointer;   /* the one part of the panel you can tap */
 }
 .wx-rose svg { display: block; }
-.wx-rose.live { box-shadow: inset 0 0 0 1px rgba(255, 138, 91, 0.6); }
+.wx-rose.live { box-shadow: inset 0 0 0 1px rgba(212, 165, 55, 0.6); }
 #wxRoseRing, #wxArrow {
   transform-box: fill-box; transform-origin: center;
   transition: transform 500ms cubic-bezier(0.23, 1, 0.32, 1);
@@ -555,7 +555,7 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.75; cursor: p
 
 
 @media (prefers-reduced-transparency: reduce) {
-  .wx-panel { background: #141B16; backdrop-filter: none; -webkit-backdrop-filter: none; }
+  .wx-panel { background: #0B1630; backdrop-filter: none; -webkit-backdrop-filter: none; }
 }
 @media (prefers-reduced-motion: reduce) {
   .wx-arrow { transition: none; }
@@ -582,10 +582,10 @@ body:has(#scrWalk:not([hidden])) { --top-row: calc(var(--safe-t) + 104px); }
   display: grid; place-items: center;
   width: 34px; height: 34px; flex: 0 0 auto; margin-right: 9px;
   border-radius: 50%;
-  background: rgba(23, 32, 26, 0.06);
-  box-shadow: inset 0 0 0 1px rgba(23, 32, 26, 0.08);
+  background: rgba(15, 31, 61, 0.06);
+  box-shadow: inset 0 0 0 1px rgba(15, 31, 61, 0.08);
 }
-.chip.lvl-cold .lvl-mark { color: #3D7FA8; }
+.chip.lvl-cold .lvl-mark { color: #3B8BD6; }
 .chip.lvl-warm .lvl-mark { color: #D0821F; }
 .chip.lvl-hot  .lvl-mark { color: #BE3F2E; }
 
@@ -599,10 +599,10 @@ body:has(#scrWalk:not([hidden])) { --top-row: calc(var(--safe-t) + 104px); }
 .chip.lvl.selected .sub { color: rgba(255, 255, 255, 0.78); }
 
 .chip.lvl-cold.selected {
-  background: #3D7FA8;
+  background: #3B8BD6;
   box-shadow:
     inset 0 1.5px 0 rgba(255, 255, 255, 0.4), inset 0 -3px 9px rgba(0, 0, 0, 0.2),
-    0 2px 4px rgba(24, 62, 86, 0.24), 0 12px 26px -8px rgba(61, 127, 168, 0.6);
+    0 2px 4px rgba(20, 50, 90, 0.24), 0 12px 26px -8px rgba(59, 139, 214, 0.6);
 }
 .chip.lvl-warm.selected {
   background: #D0821F;
@@ -629,7 +629,7 @@ body:has(#scrWalk:not([hidden])) { --top-row: calc(var(--safe-t) + 104px); }
 .chip::after {
   content: ''; position: absolute; inset: 0; border-radius: inherit;
   border: 1px solid rgba(255, 255, 255, 0.3);
-  border-bottom-color: rgba(23, 32, 26, 0.10);
+  border-bottom-color: rgba(15, 31, 61, 0.10);
   pointer-events: none; z-index: 2;
 }
 .chip.selected::after { border-color: rgba(255, 255, 255, 0.24); border-bottom-color: rgba(0, 0, 0, 0.16); }
@@ -669,7 +669,7 @@ body:has(#scrWalk:not([hidden])) { --top-row: calc(var(--safe-t) + 104px); }
   border-radius: 18px; overflow: hidden;
   background: var(--card);
   border: 1px solid var(--border);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7), 0 6px 16px -10px rgba(23, 32, 26, 0.22);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7), 0 6px 16px -10px rgba(15, 31, 61, 0.22);
 }
 .check-row {
   display: flex; align-items: center; gap: 12px;
@@ -679,7 +679,7 @@ body:has(#scrWalk:not([hidden])) { --top-row: calc(var(--safe-t) + 104px); }
   transition: background 140ms ease;
 }
 .check-row + .check-row { border-top: 1px solid var(--border); }
-.check-row:active { background: rgba(47, 74, 58, 0.06); }
+.check-row:active { background: rgba(20, 40, 75, 0.06); }
 .check-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .check-text b { font-size: 16px; font-weight: 700; }
 .check-text i {
@@ -691,7 +691,7 @@ body:has(#scrWalk:not([hidden])) { --top-row: calc(var(--safe-t) + 104px); }
   flex: 0 0 auto; display: grid; place-items: center;
   width: 30px; height: 30px; border-radius: 50%;
   color: #fff; background: var(--moss);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 4px 10px -4px rgba(47, 74, 58, 0.55);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 4px 10px -4px rgba(20, 40, 75, 0.55);
   opacity: 0; transform: scale(0.6);
   transition: opacity 160ms ease, transform 220ms cubic-bezier(0.23, 1, 0.32, 1);
 }
@@ -722,33 +722,33 @@ body:has(#scrWalk:not([hidden])) { --top-row: calc(var(--safe-t) + 104px); }
    theme is built on, taken down to almost nothing, with the text warmed so
    it reads as paper under a lamp rather than a terminal.
 
-   Moss is LIFTED for the dark — #2F4A3A on near-black simply disappears,
+   Moss is LIFTED for the dark — #14284B on near-black simply disappears,
    and every filled button and selected chip is drawn in it.
 
    The map chrome is untouched: it floats over satellite imagery, which does
    not change with the theme. And the QR plate stays white, always — a code
    on a dark ground is one a phone camera will not read. */
 :root[data-theme="dark"] {
-  --paper: #0F1411;
-  --card: #182019;
-  --border: #2B352D;
-  --ink: #EAE5DA;
-  --moss: #3F6B50;
-  --moss-deep: #22382B;
-  --ember: #E07A3F;
-  --muted: #97A096;
+  --paper: #0B1630;
+  --card: #13223F;
+  --border: #25395E;
+  --ink: #F1F4F9;
+  --moss: #3561A8;
+  --moss-deep: #0A1329;
+  --ember: #C8951F;
+  --muted: #9AA8C2;
   color-scheme: dark;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --paper: #0F1411;
-    --card: #182019;
-    --border: #2B352D;
-    --ink: #EAE5DA;
-    --moss: #3F6B50;
-    --moss-deep: #22382B;
-    --ember: #E07A3F;
-    --muted: #97A096;
+    --paper: #0B1630;
+    --card: #13223F;
+    --border: #25395E;
+    --ink: #F1F4F9;
+    --moss: #3561A8;
+    --moss-deep: #0A1329;
+    --ember: #C8951F;
+    --muted: #9AA8C2;
     color-scheme: dark;
   }
 }
@@ -757,11 +757,11 @@ body:has(#scrWalk:not([hidden])) { --top-row: calc(var(--safe-t) + 104px); }
    tokens. Grouped under one selector list so both routes into dark —
    chosen, or following the phone — get exactly the same treatment. */
 :root[data-theme="dark"] .ava,
-:root[data-theme="dark"] .photo-pick .ava { background-color: #2A332C; color: #C9C3B6; }
+:root[data-theme="dark"] .photo-pick .ava { background-color: #203352; color: #C3CBDB; }
 :root[data-theme="dark"] .minimap { background: #1D251F; }
 :root[data-theme="dark"] .btn.danger { color: #F08A7E; border-color: #5A2F2A; }
 :root[data-theme="dark"] .where-row { background: #141A16; }
-:root[data-theme="dark"] .band-rail { background: #232B25; }
+:root[data-theme="dark"] .band-rail { background: #1B2C4D; }
 
 /* Glass on a dark card: the white highlights that make a pale pill look lit
    make a dark one look milky. Same shape of light, far less of it. */
@@ -781,7 +781,7 @@ body:has(#scrWalk:not([hidden])) { --top-row: calc(var(--safe-t) + 104px); }
 :root[data-theme="dark"] .chip::after { border-color: rgba(255, 255, 255, 0.06); border-bottom-color: rgba(0, 0, 0, 0.3); }
 :root[data-theme="dark"] .check-list { box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 6px 16px -10px rgba(0, 0, 0, 0.6); }
 :root[data-theme="dark"] .screen.paper .btn.ghost {
-  background-color: rgba(24, 32, 25, 0.7);
+  background-color: rgba(19, 34, 63, 0.7);
   background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0));
 }
 :root[data-theme="dark"] .check-row:active { background: rgba(255, 255, 255, 0.04); }
@@ -800,7 +800,7 @@ body:has(#scrWalk:not([hidden])) { --top-row: calc(var(--safe-t) + 104px); }
   display: flex; flex-direction: column; gap: 10px;
   padding: 16px; border-radius: 24px;
   background: var(--card); border: 1px solid var(--border);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7), 0 14px 32px -18px rgba(23, 32, 26, 0.35);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7), 0 14px 32px -18px rgba(15, 31, 61, 0.35);
 }
 .auth-btn {
   position: relative;
@@ -872,13 +872,13 @@ body:has(#scrWalk:not([hidden])) { --top-row: calc(var(--safe-t) + 104px); }
    controls themselves (the node moves), so there is one truth. */
 .btn.live-btn.on { background: rgba(255, 255, 255, 0.22); }
 .btn.live-btn.alert { background: var(--ember); border-color: var(--ember); color: #fff; }
-.hud-pill.off { background: var(--ember); border-color: var(--ember); color: #fff; box-shadow: 0 6px 18px rgba(217, 102, 43, 0.45); }
+.hud-pill.off { background: var(--ember); border-color: var(--ember); color: #fff; box-shadow: 0 6px 18px rgba(184, 134, 27, 0.45); }
 .hud-pill.off .rec-dot { background: #fff; }
 .coach-sheet {
   position: fixed; left: 12px; right: 12px; bottom: calc(var(--safe-b) + 12px);
   max-width: 536px; margin: 0 auto; max-height: 72vh; overflow-y: auto;
   background: var(--card); border: 1px solid var(--border); border-radius: var(--r);
-  padding: 14px 16px 16px; box-shadow: 0 18px 40px -12px rgba(23, 32, 26, 0.45);
+  padding: 14px 16px 16px; box-shadow: 0 18px 40px -12px rgba(15, 31, 61, 0.45);
 }
 .coach-sheet .home-head { margin-bottom: 4px; }
 .coach-card { padding-top: 4px; padding-bottom: 12px; }
@@ -895,7 +895,7 @@ body:has(#scrWalk:not([hidden])) { --top-row: calc(var(--safe-t) + 104px); }
   position: fixed; left: 12px; right: 12px; bottom: calc(var(--safe-b) + 12px); z-index: 40;
   max-width: 536px; margin: 0 auto; padding: 14px 16px;
   background: var(--card); color: var(--ink); border: 2px solid var(--ember); border-radius: var(--r);
-  box-shadow: 0 18px 40px -12px rgba(23, 32, 26, 0.5);
+  box-shadow: 0 18px 40px -12px rgba(15, 31, 61, 0.5);
 }
 .save-trouble b { display: block; font-size: 16px; margin-bottom: 4px; }
 .save-trouble .body { margin: 0 0 10px; }
@@ -911,10 +911,10 @@ body:has(#scrWalk:not([hidden])) { --top-row: calc(var(--safe-t) + 104px); }
    are the same here: it is the ground that gives the colour. A primary
    action keeps its colour as a tint in the glass, not as paint. */
 .screen.glass .btn, .wp-row, .map-fab, .hud-pill {
-  color: #F6F2E9;
+  color: #F4F6FA;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0.04) 46%, rgba(0, 0, 0, 0.10)),
-    rgba(20, 27, 22, 0.42);
+    rgba(11, 22, 48, 0.42);
   border: 1px solid rgba(255, 255, 255, 0.28);
   backdrop-filter: blur(18px) saturate(160%);
   -webkit-backdrop-filter: blur(18px) saturate(160%);
@@ -929,19 +929,19 @@ body:has(#scrWalk:not([hidden])) { --top-row: calc(var(--safe-t) + 104px); }
 .screen.glass .btn.ghost {
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.03) 46%, rgba(0, 0, 0, 0.08)),
-    rgba(20, 27, 22, 0.30);
+    rgba(11, 22, 48, 0.30);
 }
 .screen.glass .btn.moss, .screen.glass .btn.moss-on-dark {
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.20), rgba(255, 255, 255, 0.05) 46%, rgba(0, 0, 0, 0.10)),
-    rgba(47, 74, 58, 0.62);
+    rgba(20, 40, 75, 0.62);
 }
 .screen.glass .btn.ember, .screen.glass .btn.live-btn.alert, .hud-pill.off, .map-fab.nudge {
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.24), rgba(255, 255, 255, 0.06) 46%, rgba(0, 0, 0, 0.08)),
-    rgba(217, 102, 43, 0.68);
+    rgba(184, 134, 27, 0.68);
   border-color: rgba(255, 255, 255, 0.36);
-  color: #FFF8F1;
+  color: #FFFFFF;
 }
 .screen.glass .btn.live-btn.on {
   background:
@@ -950,23 +950,23 @@ body:has(#scrWalk:not([hidden])) { --top-row: calc(var(--safe-t) + 104px); }
 }
 .screen.glass .btn:active { filter: brightness(1.12); }
 .hud-pill { border-radius: 22px; }
-.hud-pill.off .rec-dot { background: #FFF8F1; }
-.map-fab { color: #F6F2E9; }
+.hud-pill.off .rec-dot { background: #FFFFFF; }
+.map-fab { color: #F4F6FA; }
 
 /* The marks: one glass track, each mark a lighter segment — the shape of a
    segmented control, without pretending to be one. */
 .wp-row { padding: 4px; gap: 4px; border-radius: 999px; }
 .wp-pill {
-  background: rgba(255, 255, 255, 0.13); border: 1px solid transparent; color: #F6F2E9;
+  background: rgba(255, 255, 255, 0.13); border: 1px solid transparent; color: #F4F6FA;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22);
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
   min-height: 40px;
 }
-.wp-pill:active { background: rgba(255, 255, 255, 0.34); color: #F6F2E9; }
+.wp-pill:active { background: rgba(255, 255, 255, 0.34); color: #F4F6FA; }
 
 /* With transparency reduced, the glass turns near-solid rather than vanishing. */
 @media (prefers-reduced-transparency: reduce) {
-  .screen.glass .btn, .screen.glass .btn.ghost, .wp-row, .map-fab, .hud-pill { background: rgba(20, 27, 22, 0.88); backdrop-filter: none; -webkit-backdrop-filter: none; }
-  .screen.glass .btn.moss, .screen.glass .btn.moss-on-dark { background: rgba(47, 74, 58, 0.95); }
-  .screen.glass .btn.ember, .screen.glass .btn.live-btn.alert, .hud-pill.off, .map-fab.nudge { background: rgba(217, 102, 43, 0.95); }
+  .screen.glass .btn, .screen.glass .btn.ghost, .wp-row, .map-fab, .hud-pill { background: rgba(11, 22, 48, 0.88); backdrop-filter: none; -webkit-backdrop-filter: none; }
+  .screen.glass .btn.moss, .screen.glass .btn.moss-on-dark { background: rgba(20, 40, 75, 0.95); }
+  .screen.glass .btn.ember, .screen.glass .btn.live-btn.alert, .hud-pill.off, .map-fab.nudge { background: rgba(184, 134, 27, 0.95); }
 }

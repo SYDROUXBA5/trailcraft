@@ -72,7 +72,7 @@ t('the picture goes in as a JPEG stream with its exact length', () => {
 t('without a picture the map is paper and no image object exists', () => {
   const s = bin(buildPdf(doc({ map: { ...doc().map, jpeg: null } })));
   assert.doesNotMatch(s, /DCTDecode|\/Im1/);
-  assert.match(s, /0\.96 0\.94 0\.9 rg [\d. ]+ re f/);
+  assert.match(s, /0\.97 0\.97 0\.98 rg [\d. ]+ re f/);
   assert.match(s, /\[4 3\] 0 d/);
 });
 

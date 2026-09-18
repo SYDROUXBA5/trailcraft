@@ -13,10 +13,10 @@
 const PAGE = { w: 595, h: 842 };            // A4, in points
 const M = 48;                               // margin
 const COL = PAGE.w - 2 * M;                 // 499 pt of content
-const INK = [0.09, 0.125, 0.102];           // #17201A
-const MUTED = [0.43, 0.455, 0.41];          // #6E7468
-const RULE = [0.867, 0.835, 0.776];         // #DDD5C6
-const PAPER = [0.957, 0.937, 0.902];        // #F4EFE6
+const INK = [0.059, 0.122, 0.239];          // #0F1F3D
+const MUTED = [0.357, 0.416, 0.522];        // #5B6A85
+const RULE = [0.847, 0.871, 0.918];         // #D8DEEA
+const PAPER = [0.965, 0.969, 0.98];         // #F6F7FA
 
 /* ── Text: WinAnsi bytes and Helvetica widths ──────────────────────── */
 

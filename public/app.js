@@ -23,7 +23,7 @@ import { createStore, migrateV1, TARGETS, targetById, verbs, uid,
          dogStats, ageBand, AGE_BANDS, LEVELS, levelById, dogAge } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-17g';
+const BUILD = '2026-09-17h';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true,
@@ -241,7 +241,7 @@ function addOverlays() {
      arrow pointing whichever way the forecast says. */
   add({ id: 'flow-casing', type: 'line', source: 'flow',
         layout: { 'line-cap': 'round', 'line-join': 'round' },
-        paint: { 'line-color': '#2A1B08', 'line-width': 5, 'line-opacity': 0.35, 'line-blur': 1.5 } });
+        paint: { 'line-color': '#0B1630', 'line-width': 5, 'line-opacity': 0.35, 'line-blur': 1.5 } });
   add({ id: 'flow-lines', type: 'line', source: 'flow',
         layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: { 'line-color': '#FFD36B', 'line-width': 2.4, 'line-opacity': 0.9 } });
@@ -254,16 +254,16 @@ function addOverlays() {
   // dashed and the dog solid, so colour is never the only difference.
   add({ id: 'runner-casing', type: 'line', source: 'runner',
         layout: { 'line-cap': 'round', 'line-join': 'round' },
-        paint: { 'line-color': '#17201A', 'line-width': 8, 'line-opacity': 0.55 } });
+        paint: { 'line-color': '#0B1630', 'line-width': 8, 'line-opacity': 0.55 } });
   add({ id: 'runner-line', type: 'line', source: 'runner',
         layout: { 'line-cap': 'butt', 'line-join': 'round' },
         paint: { 'line-color': '#F5D14A', 'line-width': 5, 'line-opacity': 0.98, 'line-dasharray': [2.2, 1.4] } });
   add({ id: 'dog-casing', type: 'line', source: 'dog',
         layout: { 'line-cap': 'round', 'line-join': 'round' },
-        paint: { 'line-color': '#17201A', 'line-width': 8, 'line-opacity': 0.55 } });
+        paint: { 'line-color': '#0B1630', 'line-width': 8, 'line-opacity': 0.55 } });
   add({ id: 'dog-line', type: 'line', source: 'dog',
         layout: { 'line-cap': 'round', 'line-join': 'round' },
-        paint: { 'line-color': '#E8793F', 'line-width': 4.5, 'line-opacity': 0.98 } });
+        paint: { 'line-color': '#FFFFFF', 'line-width': 4.5, 'line-opacity': 0.98 } });
   /* The route you are following, in the grammar every navigation app uses:
      a dark casing so it survives any imagery, a bright core, and the part
      you have already walked dimmed to grey — seeing the split is how you
@@ -274,29 +274,29 @@ function addOverlays() {
         paint: { 'line-color': '#7C8880', 'line-width': wide(7, 12, 20), 'line-opacity': 0.5 } });
   add({ id: 'route-glow', type: 'line', source: 'routeAhead',
         layout: { 'line-cap': 'round', 'line-join': 'round' },
-        paint: { 'line-color': '#17201A', 'line-width': wide(18, 30, 48), 'line-opacity': 0.28, 'line-blur': 10 } });
+        paint: { 'line-color': '#0B1630', 'line-width': wide(18, 30, 48), 'line-opacity': 0.28, 'line-blur': 10 } });
   add({ id: 'route-casing', type: 'line', source: 'routeAhead',
         layout: { 'line-cap': 'round', 'line-join': 'round' },
-        paint: { 'line-color': '#16351F', 'line-width': wide(13, 22, 36), 'line-opacity': 0.95 } });
+        paint: { 'line-color': '#14284B', 'line-width': wide(13, 22, 36), 'line-opacity': 0.95 } });
   add({ id: 'route-core', type: 'line', source: 'routeAhead',
         layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: { 'line-color': '#57C766', 'line-width': wide(8, 14, 24), 'line-opacity': 1 } });
 
   add({ id: 'hide-dots', type: 'circle', source: 'hides',
-        paint: { 'circle-radius': 9, 'circle-color': '#D9662B',
-                 'circle-stroke-width': 2.5, 'circle-stroke-color': '#FFFDF8' } });
+        paint: { 'circle-radius': 9, 'circle-color': '#C99A2E',
+                 'circle-stroke-width': 2.5, 'circle-stroke-color': '#FFFFFF' } });
   add({ id: 'start-dot', type: 'circle', source: 'start',
         paint: { 'circle-radius': 9, 'circle-color': '#2F9E44',
-                 'circle-stroke-width': 2.5, 'circle-stroke-color': '#FFFDF8' } });
+                 'circle-stroke-width': 2.5, 'circle-stroke-color': '#FFFFFF' } });
   add({ id: 'start-text', type: 'symbol', source: 'start',
         layout: { 'text-field': 'Start', 'text-size': 12, 'text-offset': [0, 1.3], 'text-anchor': 'top' },
-        paint: { 'text-color': '#FFFDF8', 'text-halo-color': '#17201A', 'text-halo-width': 1.6 } });
+        paint: { 'text-color': '#FFFFFF', 'text-halo-color': '#0B1630', 'text-halo-width': 1.6 } });
   add({ id: 'wp-dots', type: 'circle', source: 'wps',
-        paint: { 'circle-radius': 7, 'circle-color': '#FFFDF8',
-                 'circle-stroke-width': 2, 'circle-stroke-color': '#17201A' } });
+        paint: { 'circle-radius': 7, 'circle-color': '#FFFFFF',
+                 'circle-stroke-width': 2, 'circle-stroke-color': '#0B1630' } });
   add({ id: 'wp-text', type: 'symbol', source: 'wps',
         layout: { 'text-field': ['get', 'kind'], 'text-size': 11, 'text-offset': [0, 1.4], 'text-anchor': 'top' },
-        paint: { 'text-color': '#FFFDF8', 'text-halo-color': '#17201A', 'text-halo-width': 1.6 } });
+        paint: { 'text-color': '#FFFFFF', 'text-halo-color': '#0B1630', 'text-halo-width': 1.6 } });
 
   /* The air, moving. The plume says where scent has got to; it cannot say
      that the air is going anywhere, and a still picture of moving air
@@ -305,7 +305,7 @@ function addOverlays() {
      REAL speed — so what you watch is the drift, not an impression of it. */
   add({ id: 'wind-tracers', type: 'circle', source: 'wind',
         paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 13, 1.1, 17, 2.4, 19, 4],
-                 'circle-color': '#FFE9C4',
+                 'circle-color': '#F1D27A',
                  'circle-opacity': ['*', ['get', 'a'], 0.9],
                  'circle-blur': 0.35 } });
 
@@ -326,7 +326,7 @@ function addOverlays() {
   add({ id: 'puck-acc-fill', type: 'fill', source: 'acc',
         paint: { 'fill-color': '#2F9E44', 'fill-opacity': 0.13 } });
   add({ id: 'puck-acc-edge', type: 'line', source: 'acc',
-        paint: { 'line-color': '#FFFDF8', 'line-width': 1.4, 'line-opacity': 0.5 } });
+        paint: { 'line-color': '#FFFFFF', 'line-width': 1.4, 'line-opacity': 0.5 } });
   add({ id: 'puck-arrow', type: 'symbol', source: 'puck',
         layout: { 'icon-image': 'puck',
                   'icon-size': ['interpolate', ['linear'], ['zoom'], 14, 0.5, 17, 0.8, 19, 1.05],
@@ -435,9 +435,9 @@ function puckImage() {
     g.closePath();
   };
   g.shadowColor = 'rgba(0,0,0,0.45)'; g.shadowBlur = 10; g.shadowOffsetY = 2;
-  chevron(); g.fillStyle = '#FFFDF8'; g.fill();
+  chevron(); g.fillStyle = '#FFFFFF'; g.fill();
   g.shadowColor = 'transparent';
-  g.lineWidth = 7; g.strokeStyle = '#FFFDF8'; g.lineJoin = 'round'; chevron(); g.stroke();
+  g.lineWidth = 7; g.strokeStyle = '#FFFFFF'; g.lineJoin = 'round'; chevron(); g.stroke();
   chevron(); g.fillStyle = '#2F9E44'; g.fill();
   return g.getImageData(0, 0, S, S);
 }
@@ -1599,11 +1599,11 @@ function miniMapSvg(pts, view) {
   const [ax, ay] = v.at(pts[0]);
   const [bx, by] = v.at(pts[pts.length - 1]);
   // A dark casing so the line survives whatever the imagery happens to be.
-  return `<path d="${d}" fill="none" stroke="#17201A" stroke-width="6.5" stroke-opacity="0.5"
+  return `<path d="${d}" fill="none" stroke="#0B1630" stroke-width="6.5" stroke-opacity="0.5"
       stroke-linecap="round" stroke-linejoin="round"/>
     <path d="${d}" fill="none" stroke="#F5D14A" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/>
-    <circle cx="${ax.toFixed(1)}" cy="${ay.toFixed(1)}" r="5.5" fill="#2F9E44" stroke="#FFFDF8" stroke-width="2"/>
-    <circle cx="${bx.toFixed(1)}" cy="${by.toFixed(1)}" r="5.5" fill="#D9662B" stroke="#FFFDF8" stroke-width="2"/>`;
+    <circle cx="${ax.toFixed(1)}" cy="${ay.toFixed(1)}" r="5.5" fill="#2F9E44" stroke="#FFFFFF" stroke-width="2"/>
+    <circle cx="${bx.toFixed(1)}" cy="${by.toFixed(1)}" r="5.5" fill="#C99A2E" stroke="#FFFFFF" stroke-width="2"/>`;
 }
 
 /** Put the ground behind the line, if there is a token and a signal. */
@@ -1644,7 +1644,7 @@ function renderShare(s) {
   if (isHide) {
     $('shareMiniImg').hidden = true;
     $('shareMini').innerHTML = (s.data.hides || []).map((h, i) =>
-      `<circle cx="${40 + i * 40}" cy="85" r="7" fill="#D9662B"/>`).join('');
+      `<circle cx="${40 + i * 40}" cy="85" r="7" fill="#C99A2E"/>`).join('');
     $('shareMeta').textContent = `${s.data.hides.length} hide${s.data.hides.length === 1 ? '' : 's'} · set ${laid}`
       + (wx?.wind_speed != null ? ` · wind ${fmtWind(wx.wind_speed)} ${cardinal(wx.wind_direction)}` : '');
     /* Hide cards are not in the QR codec yet — single-phone hides for now. */
@@ -2586,7 +2586,7 @@ const saveGpx = (m) => deliverFile(toGpx(m), `${fileBase(m)}.gpx`, 'application/
 /* The report's map: the same static square as the share card, larger, with
    the lines drawn in vector over it — so the picture is only a picture. */
 const RPT_W = 600, RPT_H = 340;
-const INKC = [0.09, 0.125, 0.102];
+const INKC = [0.059, 0.122, 0.239];
 async function reportMap(m) {
   const all = [m.trail, m.hides, m.track, ...m.contamination.map(c => c.points)].filter(Boolean).flat();
   if (!all.length) return null;
@@ -2595,14 +2595,14 @@ async function reportMap(m) {
   const paths = [], dots = [];
   m.contamination.forEach(c => paths.push({ pts: c.points.map(at), stroke: [0.78, 0.72, 0.91], width: 1.8, dash: [3, 3] }));
   // The dog's track under the trail: where they overlap, the line that was laid must still show.
-  if (m.track) paths.push({ pts: m.track.map(at), stroke: [0.91, 0.47, 0.25], casing: INKC, width: 2.2 });
+  if (m.track) paths.push({ pts: m.track.map(at), stroke: [1, 1, 1], casing: INKC, width: 2.2 });
   if (m.trail) paths.push({ pts: m.trail.map(at), stroke: [0.96, 0.82, 0.29], casing: INKC, width: 2.6,
     dash: m.plan && !m.walked ? [4, 3] : null });
-  (m.hides ?? []).forEach(h => { const [x, y] = at(h); dots.push({ x, y, fill: [0.85, 0.4, 0.17], r: 4.5 }); });
+  (m.hides ?? []).forEach(h => { const [x, y] = at(h); dots.push({ x, y, fill: [0.79, 0.6, 0.18], r: 4.5 }); });
   (m.wps ?? []).forEach(w => { const [x, y] = at(w); dots.push({ x, y, fill: [1, 1, 1], rim: INKC, r: 2.6 }); });
   if (m.trail) {
     const [ax, ay] = at(m.trail[0]), [bx, by] = at(m.trail[m.trail.length - 1]);
-    dots.push({ x: ax, y: ay, fill: [0.18, 0.62, 0.27], r: 4.5 }, { x: bx, y: by, fill: [0.85, 0.4, 0.17], r: 4.5 });
+    dots.push({ x: ax, y: ay, fill: [0.18, 0.62, 0.27], r: 4.5 }, { x: bx, y: by, fill: [0.79, 0.6, 0.18], r: 4.5 });
   }
   const pic = await staticJpeg(view).catch(() => null);   // offline, no token: paper instead
   return { aspect: RPT_W / RPT_H, ...(pic ?? {}), paths, dots };
@@ -2669,14 +2669,14 @@ function paintSharedMini(m) {
   const line = (pts, color, w, dashed) => {
     if (!pts || pts.length < 2) return '';
     const d = pts.map((p, i) => { const [x, y] = view.at(p); return `${i ? 'L' : 'M'}${x.toFixed(1)},${y.toFixed(1)}`; }).join(' ');
-    return `<path d="${d}" fill="none" stroke="#17201A" stroke-width="${w + 3}" stroke-opacity="0.5" stroke-linecap="round" stroke-linejoin="round"/>
+    return `<path d="${d}" fill="none" stroke="#0B1630" stroke-width="${w + 3}" stroke-opacity="0.5" stroke-linecap="round" stroke-linejoin="round"/>
       <path d="${d}" fill="none" stroke="${color}" stroke-width="${w}"${dashed ? ' stroke-dasharray="5 3"' : ''} stroke-linecap="round" stroke-linejoin="round"/>`;
   };
-  const dot = (p, fill) => { const [x, y] = view.at(p); return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="5.5" fill="${fill}" stroke="#FFFDF8" stroke-width="2"/>`; };
+  const dot = (p, fill) => { const [x, y] = view.at(p); return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="5.5" fill="${fill}" stroke="#FFFFFF" stroke-width="2"/>`; };
   // The dog's track under the trail, so the line that was laid always shows.
-  svg.innerHTML = line(m.track, '#E8793F', 2.6) + line(m.trail, '#F5D14A', 3.2, m.plan && !m.walked)
-    + (m.hides ?? []).map(h => dot(h, '#D9662B')).join('')
-    + (m.trail ? dot(m.trail[0], '#2F9E44') + dot(m.trail[m.trail.length - 1], '#D9662B') : '');
+  svg.innerHTML = line(m.track, '#FFFFFF', 2.6) + line(m.trail, '#F5D14A', 3.2, m.plan && !m.walked)
+    + (m.hides ?? []).map(h => dot(h, '#C99A2E')).join('')
+    + (m.trail ? dot(m.trail[0], '#2F9E44') + dot(m.trail[m.trail.length - 1], '#C99A2E') : '');
   const url = miniImgUrl(view);
   img.hidden = true;
   if (!url) return;
@@ -3439,7 +3439,7 @@ const resolvedTheme = () => settings.theme === 'dark' ? 'dark'
 function applyTheme() {
   const t = resolvedTheme();
   document.documentElement.dataset.theme = t;
-  $('themeColor')?.setAttribute('content', t === 'dark' ? '#0F1411' : '#F4EFE6');
+  $('themeColor')?.setAttribute('content', t === 'dark' ? '#0B1630' : '#F6F7FA');
   paintAppearance();
 }
 darkQuery.addEventListener?.('change', () => { if (settings.theme === 'system') applyTheme(); });
