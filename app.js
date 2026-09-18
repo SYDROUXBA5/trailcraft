@@ -23,7 +23,7 @@ import { createStore, migrateV1, TARGETS, targetById, verbs, uid,
          dogStats, ageBand, AGE_BANDS, LEVELS, levelById, dogAge } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-17i';
+const BUILD = '2026-09-18a';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true,
@@ -127,8 +127,44 @@ const SCREENS = ['scrOnboardHandler', 'scrOnboardDog', 'scrTutorial', 'scrHome',
 /* The screens that are transparent chrome over the live map. */
 const MAP_SCREENS = ['scrLay', 'scrConfirm', 'scrContam', 'scrRun', 'scrShowMap', 'scrDraw', 'scrWalk', 'scrLive'];
 
-function go(id) {
+/* ── Going back ───────────────────────────────────────────────────────
+   Every page except home carries the same arrow, top-left, and it always
+   means "the page I came from". Screens that are moments rather than
+   places — a recording, a scan, the map behind a card — are never gone
+   back TO; the arrow skips over them to the last real page, or home.
+   Each forward step is also a browser history entry, so the phone's
+   edge-swipe and the browser's back button do exactly what the arrow does. */
+const TRANSIENT = new Set(['scrLay', 'scrConfirm', 'scrContam', 'scrRun', 'scrWalk', 'scrDraw', 'scrScan',
+  'scrLive', 'scrShowMap', 'scrOnboardHandler', 'scrOnboardDog', 'scrTutorial', 'scrSignIn']);
+const BACKABLE = ['scrShare', 'scrPick', 'scrScan', 'scrResult', 'scrSessions', 'scrSettings', 'scrDog',
+  'scrShareOut', 'scrShared', 'scrCountdown', 'scrWait'];
+let currentScreen = null;
+const navStack = [];
+
+function goBackNow() {
+  const special = { scrShared: closeShared, scrLive: closeLive }[currentScreen];
+  if (special) return special();
+  let prev = navStack.pop();
+  while (prev && TRANSIENT.has(prev)) prev = navStack.pop();
+  go(prev ?? 'scrHome', { back: true });
+}
+function goBack() {
+  // Through the browser's history when this screen has an entry, so the
+  // history and the app never disagree about where "back" leads.
+  if (history.state?.tc === currentScreen) history.back();
+  else goBackNow();
+}
+window.addEventListener('popstate', () => { if (currentScreen && currentScreen !== 'scrHome') goBackNow(); });
+
+function go(id, { back = false } = {}) {
   stopScan();
+  if (id === 'scrHome') navStack.length = 0;
+  else if (!back && currentScreen && currentScreen !== id && !TRANSIENT.has(currentScreen)) {
+    navStack.push(currentScreen);
+    if (navStack.length > 12) navStack.shift();
+    try { history.pushState({ tc: id }, ''); } catch { /* file:// and the like */ }
+  }
+  currentScreen = id;
   for (const s of SCREENS) $(s).hidden = s !== id;
   if (id === 'scrHome') renderHome();
   // The map only needs to be right when something transparent sits over it.
@@ -3984,6 +4020,18 @@ function boot() {
   importFromLink();
 }
 
+/* The arrow, placed once on every page that can be left. */
+for (const id of BACKABLE) {
+  const page = $(id)?.querySelector('.page');
+  if (!page || page.querySelector('.back-btn')) continue;
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'back-btn';
+  b.setAttribute('aria-label', 'Back');
+  b.innerHTML = '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M14.5 5.5 8 12l6.5 6.5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  b.addEventListener('click', goBack);
+  page.prepend(b);
+}
 buildMap();
 wire();
 initSync(db);            // does nothing until a Firebase config exists; before boot so a live link can wait on it

@@ -995,3 +995,17 @@ body:has(#scrWalk:not([hidden])) { --top-row: calc(var(--safe-t) + 104px); }
 .screen.glass .btn.moss, .screen.glass .btn.ember {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.38), inset 0 -2px 8px rgba(0, 0, 0, 0.22), 0 10px 26px -10px rgba(0, 0, 0, 0.55);
 }
+
+/* ── The back arrow ───────────────────────────────────────────────────
+   Top-left of every page that can be left, the same on all of them. */
+.back-btn {
+  width: 42px; height: 42px; flex: 0 0 auto; align-self: flex-start;
+  display: grid; place-items: center; margin: -4px 0 2px -4px;
+  border-radius: 50%; cursor: pointer;
+  background: var(--card); color: var(--ink); border: 1px solid var(--border);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6), 0 2px 6px rgba(11, 23, 48, 0.12);
+  transition: transform 120ms var(--ease-out);
+}
+.back-btn:active { transform: scale(0.92); }
+.screen.tutorial .back-btn { background: rgba(255, 255, 255, 0.12); color: #fff; border-color: rgba(255, 255, 255, 0.22); box-shadow: none; }
+:root[data-theme="dark"] .back-btn { box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 2px 6px rgba(0, 0, 0, 0.4); }
