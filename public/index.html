@@ -60,6 +60,11 @@
           <filter id="wxNeedleShade" x="-40%" y="-40%" width="180%" height="180%">
             <feDropShadow dx="0" dy="0.7" stdDeviation="0.8" flood-color="#000" flood-opacity="0.55"/>
           </filter>
+          <linearGradient id="wxNeedleGrad" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0" stop-color="#FFF3CC"/>
+            <stop offset="0.5" stop-color="#F1D27A"/>
+            <stop offset="1" stop-color="#B8861B"/>
+          </linearGradient>
         </defs>
         <g id="wxRoseRing">
           <circle cx="20" cy="20" r="18.5" fill="none" stroke="currentColor" stroke-opacity="0.32" stroke-width="1"/>
@@ -70,14 +75,12 @@
           </g>
           <path d="M20 2.2 L17.5 8.8 L22.5 8.8 Z" fill="#FF8A5B"/>
           <text x="20" y="15.4" text-anchor="middle" font-size="6.4" font-weight="700" font-family="Roboto, sans-serif" fill="currentColor" opacity="0.92">N</text>
-          <!-- The wind needle: two faces, one lit and one in shade, so it reads
-               as a machined needle rather than a drawn arrow. Its box is
-               centred on the pivot, so it turns true. -->
+          <!-- The wind needle: a slim barbed needle in brushed gold, lit on
+               one edge and shaded on the other, a highlight down its spine.
+               Its box is centred on the pivot, so it turns true. -->
           <g id="wxArrow" filter="url(#wxNeedleShade)">
-            <path d="M20 8.5 L15.6 21.2 L20 18.4 Z" fill="#FFE8A6"/>
-            <path d="M20 8.5 L24.4 21.2 L20 18.4 Z" fill="#C9962A"/>
-            <path d="M18.9 18.9 L20 18.4 L20 31.5 L18.9 31.5 Z" fill="#FFE8A6"/>
-            <path d="M21.1 18.9 L20 18.4 L20 31.5 L21.1 31.5 Z" fill="#C9962A"/>
+            <path d="M20 7 L17.2 20.4 L18.9 19.6 L18.9 31 L20 33 L21.1 31 L21.1 19.6 L22.8 20.4 Z" fill="url(#wxNeedleGrad)"/>
+            <path d="M20 8.6 V30.6" fill="none" stroke="#FFF8E1" stroke-width="0.45" stroke-opacity="0.75" stroke-linecap="round"/>
           </g>
           <circle cx="20" cy="20" r="2.1" fill="#0B1630" stroke="#FFE8A6" stroke-width="0.9"/>
         </g>
