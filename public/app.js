@@ -23,11 +23,11 @@ import { createStore, migrateV1, TARGETS, targetById, verbs, uid,
          dogStats, ageBand, AGE_BANDS, LEVELS, levelById, dogAge } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-18b';
+const BUILD = '2026-09-18c';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true,
-  distUnits: 'metric', tempUnits: 'c', coordFormat: 'dd', theme: 'system', mbToken: (window.MB_TOKEN || '') };
+  distUnits: 'metric', tempUnits: 'c', coordFormat: 'dd', theme: 'system', mapStyle: 'satellite', mbToken: (window.MB_TOKEN || '') };
 const loadJson = (k, f) => { try { return JSON.parse(localStorage.getItem(k)) ?? f; } catch { return f; } };
 let settings = { ...DEFAULTS, ...loadJson('tc.settings', {}) };
 /* One "imperial" switch became three separate choices. A phone that already
@@ -171,14 +171,52 @@ function go(id, { back = false } = {}) {
   if (MAP_SCREENS.includes(id)) {
     map?.resize();
     weatherPanelFor(run.session ?? pendingSession);
+    mapChromeShow(true);
   } else {
     // Nothing on the map is worth animating while a paper screen covers it.
     airStop();
     hideWeather();
+    mapChromeShow(false);
   }
 }
 
 /* ── Map ──────────────────────────────────────────────────────────── */
+
+/* ── The map style ────────────────────────────────────────────────────
+   One button, bottom right, sitting just above whatever controls the
+   screen has (CSS --bar-gap is measured from the visible bottom bar). */
+function styleGap() {
+  const bar = MAP_SCREENS.map(id => $(id)).find(sc => sc && !sc.hidden)?.querySelector('.glass-bottom');
+  const gap = bar ? Math.max(0, Math.round(window.innerHeight - bar.getBoundingClientRect().top)) : 0;
+  document.documentElement.style.setProperty('--bar-gap', `${gap}px`);
+}
+function paintStylePick() {
+  $('stylePick').querySelectorAll('[data-style]').forEach(b =>
+    b.classList.toggle('selected', b.dataset.style === settings.mapStyle));
+}
+function closeStylePick() {
+  $('stylePick').hidden = true;
+  $('btnMapStyle').setAttribute('aria-expanded', 'false');
+}
+function toggleStylePick() {
+  const open = $('stylePick').hidden;
+  paintStylePick();
+  $('stylePick').hidden = !open;
+  $('btnMapStyle').setAttribute('aria-expanded', String(open));
+}
+function mapChromeShow(on) {
+  $('btnMapStyle').hidden = !on || !settings.mbToken;   // the tokenless map has one style only
+  if (!on) closeStylePick();
+  requestAnimationFrame(styleGap);
+}
+function setMapStyle(key) {
+  if (!MAP_STYLES[key]) return;
+  closeStylePick();
+  if (key === settings.mapStyle) return;
+  settings.mapStyle = key; saveSettings();
+  paintStylePick();
+  if (map && settings.mbToken) map.setStyle(MAP_STYLES[key].url);   // style.load puts the overlays back
+}
 const EMPTY = { type: 'FeatureCollection', features: [] };
 let map, mapReady = false;
 let GL = mapboxgl;   // every control/bounds must come from the SAME library
@@ -187,6 +225,13 @@ const srcData = { runner: EMPTY, dog: EMPTY, wps: EMPTY, drift: EMPTY, start: EM
                   flow: EMPTY, flowHead: EMPTY, air: EMPTY, acc: EMPTY };
 
 const SAT_STYLE = 'mapbox://styles/mapbox/standard-satellite';
+/* Satellite for the field, terrain for the contours and paths, streets for
+   town. All three carry the same 3D ground and the same overlays. */
+const MAP_STYLES = {
+  satellite: { name: 'Satellite', url: SAT_STYLE },
+  terrain:   { name: 'Terrain',   url: 'mapbox://styles/mapbox/outdoors-v12' },
+  streets:   { name: 'Streets',   url: 'mapbox://styles/mapbox/streets-v12' },
+};
 const RASTER_FALLBACK = {
   version: 8,
   sources: { osm: { type: 'raster', tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
@@ -202,7 +247,7 @@ function buildMap() {
   if (GL === mapboxgl) mapboxgl.accessToken = settings.mbToken || 'pk.tokenless';
   map = new GL.Map({
     container: 'map',
-    style: noToken ? RASTER_FALLBACK : SAT_STYLE,
+    style: noToken ? RASTER_FALLBACK : (MAP_STYLES[settings.mapStyle] ?? MAP_STYLES.satellite).url,
     center: [-2.6449, 51.2094], zoom: 15, pitch: 55, maxPitch: 85,
     attributionControl: { compact: true },
   });
@@ -210,7 +255,9 @@ function buildMap() {
      real accuracy ring around it, and the re-centre button brings the camera
      back — a third control doing the same job only took the top right corner
      that messages now need. */
-  map.on('load', addOverlays);
+  /* On every style, not just the first: a style swap drops every source,
+     layer and image the app added, and this puts them all back. */
+  map.on('style.load', addOverlays);
   // Touching the map means they want to look around; stop chasing them.
   map.on('dragstart', releaseFollow);
   map.on('zoomstart', (e) => { if (e.originalEvent) releaseFollow(); });
@@ -434,6 +481,7 @@ function paintMe(lat, lon, acc, brg = null) {
    TIGHTER fix arrives, never a looser one, until the fix is as good as a
    phone gets or the window closes. */
 const locate = { watch: 0, timer: 0, best: Infinity };
+let lastFix = null;   // the newest position any watch has handed over
 
 function locateMe({ zoom = 17.5, settleMs = 12000, good = 8 } = {}) {
   locateStop();
@@ -445,6 +493,7 @@ function locateMe({ zoom = 17.5, settleMs = 12000, good = 8 } = {}) {
     if (acc > locate.best) return;            // never move to a worse answer
     locate.best = acc;
     const { latitude: lat, longitude: lon } = p.coords;
+    lastFix = { lat, lon, t: Date.now() };
     paintMe(lat, lon, acc);
     map.easeTo({ center: [lon, lat], zoom, duration: 700, essential: true });
     if (acc <= good) locateStop();            // as tight as it gets: stop burning the radio
@@ -1063,9 +1112,20 @@ let wxWatch = null;
 function showWeather(wx) {
   const p = $('wxPanel');
   if (!p) return;
-  if (!wx || wx.wind_speed == null) { p.hidden = true; wxGap(); return; }
+  // A late answer must not surface over a paper screen.
+  if (!MAP_SCREENS.includes(currentScreen)) { p.hidden = true; wxGap(); return; }
   p.hidden = false;
   if (!wxWatch && 'ResizeObserver' in window) { wxWatch = new ResizeObserver(wxGap); wxWatch.observe(p); }
+  if (!wx || wx.wind_speed == null) {
+    /* The panel stays: the compass works without a forecast, and an empty
+       corner says "broken" where "nothing yet" is the truth. */
+    $('wxSpeed').textContent = '\u2014';
+    $('wxDir').textContent = 'wind unknown';
+    $('wxTemp').textContent = '';
+    compass.wind = null; paintRose();
+    $('wxNote').textContent = wxNow.asking ? 'Getting the forecast\u2026' : 'No forecast \u2014 tap to retry';
+    wxGap(); return;
+  }
   $('wxSpeed').textContent = fmtWind(wx.wind_speed);
   /* The arrow says where the air is GOING; the words say where it is coming
      FROM, which is how every forecast reports it. Both are on screen because
@@ -1146,16 +1206,23 @@ async function headingStart(fromTap = false) {
    looking at a trail from last week should show last week's air. */
 const wxNow = { at: 0, wx: null, asking: false };
 
-async function weatherHere() {
+async function weatherHere(hint = null) {
   if (wxNow.wx && Date.now() - wxNow.at < 15 * 60000) return wxNow.wx;
   if (wxNow.asking) return wxNow.wx;
   wxNow.asking = true;
   try {
-    const pos = await new Promise((res, rej) => navigator.geolocation
-      ? navigator.geolocation.getCurrentPosition(res, rej,
-          { enableHighAccuracy: false, maximumAge: 300000, timeout: 12000 })
-      : rej(new Error('no gps')));
-    const wx = await fetchWeather(pos.coords.latitude, pos.coords.longitude, Date.now());
+    /* Where "here" is, cheapest first: a fix the app already holds, then
+       the trail's own start, and only then a fresh ask of the browser —
+       which inside the iPhone shell is the one that can be refused. */
+    let at = lastFix && Date.now() - lastFix.t < 5 * 60000 ? lastFix : hint;
+    if (!at) {
+      const pos = await new Promise((res, rej) => navigator.geolocation
+        ? navigator.geolocation.getCurrentPosition(res, rej,
+            { enableHighAccuracy: false, maximumAge: 300000, timeout: 12000 })
+        : rej(new Error('no gps')));
+      at = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+    }
+    const wx = await fetchWeather(at.lat, at.lon, Date.now());
     wxNow.wx = wx; wxNow.at = Date.now();
     return wx;
   } catch { return wxNow.wx; }          // offline or blocked: the panel stays away
@@ -1167,8 +1234,11 @@ async function weatherHere() {
 function weatherPanelFor(session) {
   const own = session?.data?.weather;
   if (own) return showWeather(own);
-  if (wxNow.wx) showWeather(wxNow.wx);        // something now, rather than nothing
-  weatherHere().then(wx => { if (wx) showWeather(wx); });
+  const d = session?.data;
+  const t = d?.trail?.[0] ?? d?.plan?.[0] ?? d?.track?.[0];
+  const asked = weatherHere(t ? { lat: t.lat, lon: t.lon } : null);   // marks itself as asking at once
+  showWeather(wxNow.wx);                     // the panel now; the numbers follow
+  asked.then(wx => showWeather(wx));
 }
 
 function airStop() {
@@ -1426,6 +1496,7 @@ function paintNav() {
 
 function onFix(pos) {
   const { latitude: lat, longitude: lon, accuracy: acc, altitude: alt } = pos.coords;
+  lastFix = { lat, lon, t: Date.now() };
   if (!rec.on) return;
   const pt = { lat, lon, t: pos.timestamp || Date.now(), acc, alt: alt ?? null };
   const last = rec.pts[rec.pts.length - 1];
@@ -4031,6 +4102,18 @@ function boot() {
   go('scrHome');
   importFromLink();
 }
+
+/* The map style button and its three choices; tapping anywhere else folds them away. */
+$('btnMapStyle').addEventListener('click', toggleStylePick);
+$('stylePick').addEventListener('click', (e) => { const b = e.target.closest('[data-style]'); if (b) setMapStyle(b.dataset.style); });
+document.addEventListener('pointerdown', (e) => {
+  if (!$('stylePick').hidden && !e.target.closest('#stylePick, #btnMapStyle')) closeStylePick();
+});
+window.addEventListener('resize', styleGap);
+if ('ResizeObserver' in window) {
+  for (const id of MAP_SCREENS) { const bar = $(id)?.querySelector('.glass-bottom'); if (bar) new ResizeObserver(styleGap).observe(bar); }
+}
+$('wxNote').addEventListener('click', () => { if (!wxNow.wx) weatherPanelFor(run.session ?? pendingSession); });
 
 /* The arrow, placed once on every page that can be left. */
 for (const id of BACKABLE) {
