@@ -580,3 +580,27 @@ export function fmtCoord(lat, lon, format = 'dd') {
     ? `${dmsPart(lat, 'N', 'S')} ${dmsPart(lon, 'E', 'W')}`
     : `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
 }
+
+/** Footprints along a track: one point every `strideM` metres, carrying the
+    bearing of travel and its index, so the map can thin them by zoom, put
+    left and right feet on their own sides and light them one after another.
+    The stride carries across corners, so prints never bunch at a turn. */
+export function stepPoints(pts, strideM = 3) {
+  const out = [];
+  if (!pts || pts.length < 2 || !(strideM > 0)) return out;
+  let carry = 0, i = 0;
+  for (let k = 1; k < pts.length; k++) {
+    const a = pts[k - 1], b = pts[k];
+    const L = dist(a, b);
+    if (!(L > 0)) continue;
+    const brg = bearing(a, b);
+    let d = carry;
+    while (d <= L) {
+      const t = d / L;
+      out.push({ lat: a.lat + (b.lat - a.lat) * t, lon: a.lon + (b.lon - a.lon) * t, b: brg, i: i++ });
+      d += strideM;
+    }
+    carry = d - L;
+  }
+  return out;
+}

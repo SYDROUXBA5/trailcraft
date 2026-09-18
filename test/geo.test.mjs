@@ -3,6 +3,8 @@ import {
   dist, project, pathLen, cardinal, driftMetres, driftPolygon, meanOffset, filterFixes, densify, timestamps, crossTrackSigned, signedOffsets, meanSigned, sideOfDrift, sideAgreement, lineCorrect, dwellFold, foldFixes, departure, progressAlong, splitLine, smoothBearing, fmtDist, fmtShort, fmtSpeed, fmtTemp, timestampsEndingAt, fmtWeight, kgToShown, shownToKg, fmtCoord, medianAbs, sideShares,
 } from '../public/geo.js';
 
+import { stepPoints, dist as distM } from '../public/geo.js';
+
 let pass = 0;
 const t = (name, fn) => { fn(); pass++; console.log(`  ok  ${name}`); };
 const near = (a, b, tol, msg) => assert.ok(Math.abs(a - b) <= tol, `${msg}: ${a} vs ${b}`);
@@ -564,6 +566,26 @@ t('sideShares: time-weighted, dead zone counts as on the line, a long gap is cap
   assert.ok(Math.abs(sh.left - 11 / 22) < 1e-9);
   assert.equal(sideShares(track, [1, 2]), null, 'lengths must match');
   assert.equal(sideShares([], []), null);
+});
+
+t('stepPoints: a print every stride along the track, the bearing of travel on each', () => {
+  // 30 m due east, then 12 m due north, from Wells
+  const a = { lat: 51.2094, lon: -2.6449 };
+  const east = { lat: a.lat, lon: a.lon + 30 / (111320 * Math.cos(a.lat * Math.PI / 180)) };
+  const north = { lat: east.lat + 12 / 111320, lon: east.lon };
+  const s = stepPoints([a, east, north], 3);
+  assert.ok(s.length >= 14 && s.length <= 15, `about 14 prints over 42 m, got ${s.length}`);
+  assert.ok(s.every((p, k) => p.i === k), 'indices run in order');
+  assert.ok(distM(s[0], a) < 0.01, 'the first print is on the start');
+  for (let k = 1; k < s.length; k++) {
+    if (s[k].b === s[k - 1].b) assert.ok(Math.abs(distM(s[k - 1], s[k]) - 3) < 0.05, `stride ${k}`);
+  }
+  assert.ok(Math.abs(s[0].b - 90) < 1, 'east first');
+  const last = s[s.length - 1].b;
+  assert.ok(Math.min(last, 360 - last) < 1, 'north last');
+  assert.ok(distM(s[s.length - 1], north) <= 3.01, 'the last print is within a stride of the end');
+  assert.deepEqual(stepPoints([a], 3), []);
+  assert.deepEqual(stepPoints(null, 3), []);
 });
 
 console.log(`\n${pass} passed total\n`);
