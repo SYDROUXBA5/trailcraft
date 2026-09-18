@@ -213,16 +213,17 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.75; cursor: p
 
 /* ── Glass screens (over the map) ────────────────────────────────── */
 .hud-pill {
-  /* On a phone the pill sits just under the weather panel — the gap is the
-     panel's measured height, set from JS, so the two never touch. On a wide
-     screen there is room beside the panel, so it moves up to the top row,
-     centred in the space to the right of it (see the media query). */
-  position: fixed; top: calc(var(--top-row) + var(--wx-gap, 0px)); left: 50%; transform: translateX(-50%);
+  /* The top row, in the band between the weather panel (its measured width
+     comes from JS as --wx-w) and the GPS button, centred there and only as
+     wide as its words: a long message wraps rather than sliding down. */
+  position: fixed; top: var(--top-row);
+  left: calc(20px + var(--wx-w, 0px)); right: 70px;
+  width: fit-content; margin: 0 auto; z-index: 8;
   display: flex; align-items: center; gap: 9px;
   background: var(--card); border: 1px solid var(--border); border-radius: 999px;
   padding: 12px 20px; font: 700 15px var(--body); text-align: center;
   box-shadow: 0 6px 18px rgba(15, 31, 61, 0.14);
-  font-variant-numeric: tabular-nums; max-width: calc(100vw - 24px);
+  font-variant-numeric: tabular-nums; max-width: 420px;
   border-radius: 22px;
 }
 .rec-dot { width: 10px; height: 10px; border-radius: 50%; background: #C43C2B; flex: none; animation: blink 1.4s infinite; }
@@ -398,9 +399,8 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.75; cursor: p
 /* Re-centre: the control that gives the camera back. It only appears once
    following has started, and nudges when the user has panned away. */
 .map-fab {
-  position: absolute; right: 12px;
-  top: calc(env(safe-area-inset-top, 0px) + 118px);
-  width: 52px; height: 52px;
+  position: fixed; right: 12px; top: var(--top-row); z-index: 8;
+  width: 50px; height: 50px;
   display: grid; place-items: center;
   border: none; border-radius: 50%;
   background: var(--card); color: var(--moss);
@@ -598,9 +598,6 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.75; cursor: p
 }
 
 body:has(#scrWalk:not([hidden])) { --top-row: calc(var(--safe-t) + 104px); }
-@media (min-width: 1100px) {
-  .hud-pill { top: var(--top-row); left: calc(50% + 86px); max-width: calc(100vw - 968px); }
-}
 
 /* The hide tools stack. Sharing a row with their own caption squeezed the
    button into a three-line sliver — the caption explains the button, so it

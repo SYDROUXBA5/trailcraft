@@ -83,6 +83,12 @@
   <button type="button" data-style="terrain">Terrain</button>
   <button type="button" data-style="streets">Streets</button>
 </div>
+<!-- Top right of every map screen: back onto you, or find you from cold. -->
+<button type="button" class="map-fab" id="btnRecentre" hidden aria-label="Find me on the map">
+  <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path
+    d="M12 2v3M12 19v3M2 12h3M19 12h3M12 7.5a4.5 4.5 0 100 9 4.5 4.5 0 000-9z"
+    fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+</button>
 <button type="button" class="map-style" id="btnMapStyle" hidden aria-label="Map style" aria-expanded="false">
   <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
     <path d="M12 3.6 3.6 8.4 12 13.2l8.4-4.8z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
@@ -269,11 +275,6 @@
       <span class="nav-sub" id="navSub"></span>
     </div>
   </div>
-  <button class="map-fab" id="btnRecentre" hidden aria-label="Re-centre on me">
-    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path
-      d="M12 2v3M12 19v3M2 12h3M19 12h3M12 7.5a4.5 4.5 0 100 9 4.5 4.5 0 000-9z"
-      fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-  </button>
   <div class="glass-bottom">
     <button class="btn big moss" id="btnInPlace">I&rsquo;m in place</button>
     <button class="btn ghost" id="walkCancel">Cancel</button>
