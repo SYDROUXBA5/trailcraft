@@ -49,7 +49,7 @@
 <!-- The air, over every map screen. Three things a handler reads before
      deciding anything: which way it is going, how hard, and how warm. -->
 <div id="wxPanel" class="wx-panel" hidden>
-  <div class="wx-row">
+  <div class="wx-row wx-top">
     <!-- A compass rose. The ring turns so its N points north where you stand
          (once the phone shares its heading — tap it); the wind arrow sits
          inside the ring, so it always points where the air is going in
@@ -70,8 +70,8 @@
         </g>
       </svg>
     </span>
-    <span class="wx-main"><b id="wxSpeed">—</b></span>
   </div>
+  <div class="wx-row wx-main"><b id="wxSpeed">—</b></div>
   <div class="wx-row wx-sub"><i id="wxDir"></i><b id="wxTemp">—</b></div>
   <div class="wx-row wx-note"><i id="wxNote">10 m forecast</i></div>
 </div>
