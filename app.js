@@ -23,7 +23,7 @@ import { createStore, migrateV1, TARGETS, targetById, verbs, uid,
          dogStats, ageBand, AGE_BANDS, LEVELS, levelById, dogAge } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-18d';
+const BUILD = '2026-09-18e';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true,
@@ -206,6 +206,7 @@ function toggleStylePick() {
 }
 function mapChromeShow(on) {
   $('btnMapStyle').hidden = !on || !settings.mbToken;   // the tokenless map has one style only
+  $('btnRecentre').hidden = !on;
   if (!on) closeStylePick();
   requestAnimationFrame(styleGap);
 }
@@ -1125,11 +1126,13 @@ function airStart(wx, T) {
    The arrow points where the air is GOING. A weather service reports the
    direction wind comes FROM, which is right on a chart and a trap on a map:
    a handler reads an arrow as "that way". */
-/* The HUD pill hangs from the panel's measured height (CSS --wx-gap), so a
-   taller panel — the compass, a longer note — can never sit on top of it. */
+/* The HUD pill sits in the top row beside the panel, so it needs the panel's
+   measured width (CSS --wx-w) to know where its own left edge is. */
 function wxGap() {
   const p = $('wxPanel');
-  document.documentElement.style.setProperty('--wx-gap', p && !p.hidden ? `${Math.round(p.offsetHeight) + 8}px` : '0px');
+  const on = p && !p.hidden;
+  document.documentElement.style.setProperty('--wx-gap', on ? `${Math.round(p.offsetHeight) + 8}px` : '0px');
+  document.documentElement.style.setProperty('--wx-w', on ? `${Math.round(p.offsetWidth)}px` : '0px');
 }
 let wxWatch = null;
 function showWeather(wx) {
@@ -1465,7 +1468,6 @@ function startFollowing(routePts, { courseUp = false } = {}) {
   nav.brg = null;
   nav.onRoute = routePts || null;
   nav.courseUp = courseUp;
-  $('btnRecentre').hidden = false;
   $('btnRecentre').classList.remove('nudge');
   if (courseUp) map.dragRotate?.disable?.();
 }
@@ -1473,7 +1475,7 @@ function stopFollowing() {
   nav.follow = false;
   nav.onRoute = null;
   nav.courseUp = false;
-  $('btnRecentre').hidden = true;
+  $('btnRecentre').classList.remove('nudge');
   map.dragRotate?.enable?.();
   map.easeTo({ bearing: 0, pitch: 55, duration: 400 });
   setSrc('puck', EMPTY);
@@ -1493,6 +1495,16 @@ function recentre() {
   if (last) map.easeTo({ center: [last.lon, last.lat], zoom: 17.5, pitch: 62,
                          bearing: nav.courseUp ? (nav.brg ?? map.getBearing()) : map.getBearing(),
                          duration: 600 });
+}
+/* The GPS button, top right of every map screen. While something is being
+   recorded it brings the camera back onto you and keeps it there; the rest
+   of the time it finds you from cold. */
+function locateTap() {
+  if (rec.on) {
+    if (rec.pts.length) return recentre();
+    return toast('No fix yet \u2014 open sky helps');
+  }
+  locateMe({ zoom: 17.5 });
 }
 
 /** Paint you onto the map, and the route as walked-behind / bright-ahead. */
@@ -2575,7 +2587,7 @@ function showOnMap(from = 'scrResult') {
   fitTo(s.data.trail || s.data.hides || [], s.data.track || []);
   $('showMapText').textContent = t.kind === 'hide'
     ? 'Hides and the search track'
-    : !wx ? 'No weather for this one, so no plume — a guessed one would be worse'
+    : !wx ? 'No weather saved for this trail, so no plume'
     : 'Modelled scent, ageing in real time. The width is the uncertainty, never narrowed.';
   go('scrShowMap');
 }
@@ -3888,7 +3900,7 @@ function wire() {
     go('scrShare');
   });
 
-  $('btnRecentre').addEventListener('click', recentre);
+  $('btnRecentre').addEventListener('click', locateTap);
 
   // The layer's walk
   $('btnInPlace').addEventListener('click', finishWalk);
