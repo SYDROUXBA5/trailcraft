@@ -23,7 +23,7 @@ import { createStore, migrateV1, TARGETS, targetById, verbs, uid,
          dogStats, ageBand, AGE_BANDS, LEVELS, levelById, dogAge } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-18c';
+const BUILD = '2026-09-18d';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true,
@@ -333,14 +333,19 @@ function addOverlays() {
   add({ id: 'contam-line', type: 'line', source: 'contam',
         layout: { 'line-cap': 'butt', 'line-join': 'round' },
         paint: { 'line-color': '#C8B8E8', 'line-width': 3.5, 'line-opacity': 0.9, 'line-dasharray': [1, 1.4] } });
-  // Dark casings keep both tracks legible over any imagery; the trail is
-  // dashed and the dog solid, so colour is never the only difference.
-  add({ id: 'runner-casing', type: 'line', source: 'runner',
-        layout: { 'line-cap': 'round', 'line-join': 'round' },
-        paint: { 'line-color': '#0B1630', 'line-width': 8, 'line-opacity': 0.55 } });
-  add({ id: 'runner-line', type: 'line', source: 'runner',
-        layout: { 'line-cap': 'butt', 'line-join': 'round' },
-        paint: { 'line-color': '#F5D14A', 'line-width': 5, 'line-opacity': 0.98, 'line-dasharray': [2.2, 1.4] } });
+  /* The trail is footprints, not a line: the layer walked it, and the prints
+     say so — and which way. The dog's track stays a solid, dark-cased line,
+     so colour is never the only difference between the two. Spacing and
+     size grow together with zoom, so the pairs tile without piling up. */
+  if (!map.hasImage('steps')) map.addImage('steps', stepsImage(), { pixelRatio: 2 });
+  add({ id: 'runner-steps', type: 'symbol', source: 'runner',
+        layout: { 'symbol-placement': 'line',
+                  'symbol-spacing': ['interpolate', ['linear'], ['zoom'], 13, 15, 16, 27, 18, 44, 20, 65],
+                  'icon-image': 'steps',
+                  'icon-size': ['interpolate', ['linear'], ['zoom'], 13, 0.45, 16, 0.8, 18, 1.3, 20, 1.9],
+                  'icon-rotation-alignment': 'map', 'icon-pitch-alignment': 'map',
+                  'icon-allow-overlap': true, 'icon-ignore-placement': true },
+        paint: { 'icon-opacity': 0.98 } });
   add({ id: 'dog-casing', type: 'line', source: 'dog',
         layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: { 'line-color': '#0B1630', 'line-width': 8, 'line-opacity': 0.55 } });
@@ -525,6 +530,24 @@ function puckImage() {
   g.lineWidth = 7; g.strokeStyle = '#FFFFFF'; g.lineJoin = 'round'; chevron(); g.stroke();
   chevron(); g.fillStyle = '#2F9E44'; g.fill();
   return g.getImageData(0, 0, S, S);
+}
+
+/* Two shoe prints, left then right, toes pointing +x, so laid along the
+   trail they read as someone walking it in that direction. 64 × 32 at
+   pixelRatio 2: a pair is 32 × 16 on screen at icon-size 1. */
+function stepsImage() {
+  const W = 64, H = 32, c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const g = c.getContext('2d');
+  const print = (x, y) => {
+    for (const [cx, rx, ry] of [[x + 5, 4.5, 4], [x + 17, 8, 5.5]]) {   // heel, then ball
+      g.beginPath(); g.ellipse(cx, y, rx, ry, 0, 0, Math.PI * 2);
+      g.lineWidth = 3; g.strokeStyle = '#0B1630'; g.stroke();
+      g.fillStyle = '#F5D14A'; g.fill();
+    }
+  };
+  print(1, 9); print(33, 23);
+  return g.getImageData(0, 0, W, H);
 }
 
 const lineOf = (pts) => !pts || pts.length < 2 ? EMPTY : {
