@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
-<meta name="theme-color" content="#F4EFE6" id="themeColor">
+<meta name="theme-color" content="#F6F7FA" id="themeColor">
 <script>
   /* Before the first paint, so a phone set to dark never flashes white.
      app.js is a module and runs late; this cannot wait for it. */
@@ -13,7 +13,7 @@
     // Always the RESOLVED theme, so every dark rule keys off one attribute
     // whether dark was chosen or inherited from the phone.
     document.documentElement.dataset.theme = dark ? 'dark' : 'light';
-    document.getElementById('themeColor').content = dark ? '#0F1411' : '#F4EFE6';
+    document.getElementById('themeColor').content = dark ? '#0B1630' : '#F6F7FA';
   } catch (e) {}
 </script>
 <meta name="apple-mobile-web-app-capable" content="yes">
