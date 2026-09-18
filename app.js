@@ -9,6 +9,7 @@
 import {
   pathLen, cardinal, dist, dwellFold, bearing, project, fmtDist, fmtShort, fmtSpeed, fmtTemp, unitShort, fmtWeight, kgToShown, shownToKg, fmtCoord, scentField, plumePolygon, densify, timestamps, signedOffsets, meanSigned, sideOfDrift, sideAgreement, lineCorrect, departure, timestampsEndingAt, progressAlong, splitLine, smoothBearing, medianAbs, sideShares,
 } from './geo.js';
+import { stepPoints } from './geo.js';
 import { FLAT, buildTerrain, stability, regime, flowAt, normOf } from './field.js';
 import { predictedOffsets, ScentSim, driftFrom, stepByFlow, AIRBORNE } from './sim.js';
 import { encodeTrail, decodeTrail, cardUrl, cardFromText } from './card.js';
@@ -23,7 +24,7 @@ import { createStore, migrateV1, TARGETS, targetById, verbs, uid,
          dogStats, ageBand, AGE_BANDS, LEVELS, levelById, dogAge } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-18f';
+const BUILD = '2026-09-18g';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true,
@@ -172,9 +173,11 @@ function go(id, { back = false } = {}) {
     map?.resize();
     weatherPanelFor(run.session ?? pendingSession);
     mapChromeShow(true);
+    stepsRun(true);
   } else {
     // Nothing on the map is worth animating while a paper screen covers it.
     airStop();
+    stepsRun(false);
     hideWeather();
     mapChromeShow(false);
   }
@@ -221,7 +224,7 @@ function setMapStyle(key) {
 const EMPTY = { type: 'FeatureCollection', features: [] };
 let map, mapReady = false;
 let GL = mapboxgl;   // every control/bounds must come from the SAME library
-const srcData = { runner: EMPTY, dog: EMPTY, wps: EMPTY, drift: EMPTY, start: EMPTY, hides: EMPTY, contam: EMPTY,
+const srcData = { runner: EMPTY, steps: EMPTY, dog: EMPTY, wps: EMPTY, drift: EMPTY, start: EMPTY, hides: EMPTY, contam: EMPTY,
                   routeDone: EMPTY, routeAhead: EMPTY, puck: EMPTY, scent: EMPTY, wind: EMPTY,
                   flow: EMPTY, flowHead: EMPTY, air: EMPTY, acc: EMPTY };
 
@@ -335,18 +338,22 @@ function addOverlays() {
         layout: { 'line-cap': 'butt', 'line-join': 'round' },
         paint: { 'line-color': '#C8B8E8', 'line-width': 3.5, 'line-opacity': 0.9, 'line-dasharray': [1, 1.4] } });
   /* The trail is footprints, not a line: the layer walked it, and the prints
-     say so — and which way. The dog's track stays a solid, dark-cased line,
-     so colour is never the only difference between the two. Spacing and
-     size grow together with zoom, so the pairs tile without piling up. */
-  if (!map.hasImage('steps')) map.addImage('steps', stepsImage(), { pixelRatio: 2 });
-  add({ id: 'runner-steps', type: 'symbol', source: 'runner',
-        layout: { 'symbol-placement': 'line',
-                  'symbol-spacing': ['interpolate', ['linear'], ['zoom'], 13, 15, 16, 27, 18, 44, 20, 65],
-                  'icon-image': 'steps',
-                  'icon-size': ['interpolate', ['linear'], ['zoom'], 13, 0.45, 16, 0.8, 18, 1.3, 20, 1.9],
+     say so — and which way. One print every stride (see setTrail), thinned
+     by zoom so they never pile up, left and right feet on their own sides,
+     and lit one after another from the start so the trail reads as walked.
+     The dog's track stays a solid, dark-cased line, so colour is never the
+     only difference between the two. */
+  if (!map.hasImage('print')) map.addImage('print', printSdf(), { pixelRatio: 2, sdf: true });
+  const every = (k) => ['==', ['%', ['get', 'i'], k], 0];
+  const side = (k) => ['case', ['==', ['%', ['/', ['get', 'i'], k], 2], 0], ['literal', [-5, 0]], ['literal', [5, 0]]];
+  add({ id: 'runner-steps', type: 'symbol', source: 'steps',
+        filter: ['step', ['zoom'], every(64), 14, every(32), 15, every(16), 16, every(8), 17, every(4), 18, every(2), 19, true],
+        layout: { 'icon-image': 'print', 'icon-rotate': ['get', 'b'],
+                  'icon-offset': ['step', ['zoom'], side(64), 14, side(32), 15, side(16), 16, side(8), 17, side(4), 18, side(2), 19, side(1)],
+                  'icon-size': ['interpolate', ['linear'], ['zoom'], 13, 0.55, 16, 0.85, 18, 1.2, 20, 1.8],
                   'icon-rotation-alignment': 'map', 'icon-pitch-alignment': 'map',
                   'icon-allow-overlap': true, 'icon-ignore-placement': true },
-        paint: { 'icon-opacity': 0.98 } });
+        paint: { 'icon-color': '#F5D14A', 'icon-halo-color': '#0B1630', 'icon-halo-width': 1.4, 'icon-opacity': 0.98 } });
   add({ id: 'dog-casing', type: 'line', source: 'dog',
         layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: { 'line-color': '#0B1630', 'line-width': 8, 'line-opacity': 0.55 } });
@@ -533,28 +540,83 @@ function puckImage() {
   return g.getImageData(0, 0, S, S);
 }
 
-/* Two shoe prints, left then right, toes pointing +x, so laid along the
-   trail they read as someone walking it in that direction. 64 × 32 at
-   pixelRatio 2: a pair is 32 × 16 on screen at icon-size 1. */
-function stepsImage() {
-  const W = 64, H = 32, c = document.createElement('canvas');
-  c.width = W; c.height = H;
+/* One shoe print, toes up, as a signed-distance field so the map can colour
+   and halo each print on its own (a raster icon could only fade). 48 × 48 at
+   pixelRatio 2; alpha 0.75 is the edge, the way Mapbox reads an SDF. */
+function printSdf() {
+  const S = 48, R = 8, c = document.createElement('canvas');
+  c.width = c.height = S;
   const g = c.getContext('2d');
-  const print = (x, y) => {
-    for (const [cx, rx, ry] of [[x + 5, 4.5, 4], [x + 17, 8, 5.5]]) {   // heel, then ball
-      g.beginPath(); g.ellipse(cx, y, rx, ry, 0, 0, Math.PI * 2);
-      g.lineWidth = 3; g.strokeStyle = '#0B1630'; g.stroke();
-      g.fillStyle = '#F5D14A'; g.fill();
+  g.fillStyle = '#000';
+  g.beginPath(); g.ellipse(S / 2, 16, 8, 10.5, 0, 0, Math.PI * 2); g.fill();    // the ball
+  g.beginPath(); g.ellipse(S / 2, 35, 5.5, 6.5, 0, 0, Math.PI * 2); g.fill();   // the heel
+  const a = g.getImageData(0, 0, S, S).data;
+  const inside = new Uint8Array(S * S);
+  for (let i = 0; i < S * S; i++) inside[i] = a[i * 4 + 3] > 127 ? 1 : 0;
+  const edge = [];
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    if (!inside[y * S + x]) continue;
+    if (x === 0 || y === 0 || x === S - 1 || y === S - 1 ||
+        !inside[y * S + x - 1] || !inside[y * S + x + 1] || !inside[(y - 1) * S + x] || !inside[(y + 1) * S + x]) edge.push(x, y);
+  }
+  const out = g.createImageData(S, S);
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    let d2 = Infinity;
+    for (let e = 0; e < edge.length; e += 2) {
+      const dx = x - edge[e], dy = y - edge[e + 1], q = dx * dx + dy * dy;
+      if (q < d2) d2 = q;
     }
-  };
-  print(1, 9); print(33, 23);
-  return g.getImageData(0, 0, W, H);
+    const d = inside[y * S + x] ? -Math.sqrt(d2) : Math.sqrt(d2);
+    const k = (y * S + x) * 4;
+    out.data[k] = out.data[k + 1] = out.data[k + 2] = 255;
+    out.data[k + 3] = Math.max(0, Math.min(255, Math.round(255 * (0.75 - d / R))));
+  }
+  return out;
 }
 
 const lineOf = (pts) => !pts || pts.length < 2 ? EMPTY : {
   type: 'FeatureCollection',
   features: [{ type: 'Feature', geometry: { type: 'LineString', coordinates: pts.map(p => [p.lon, p.lat]) } }],
 };
+
+/* The laid trail, as footprints: one print every stride. A bright step walks
+   the prints from the start to the end and round again, so the trail reads
+   as walked, and which way. Prints stay where they are; only the light
+   moves (paint, not layout — nothing is laid out again per tick). */
+const STRIDE_M = 3;
+const LIT = 4;                       // prints either side of the walking step that glow
+const steps = { n: 0, f: -1e9, timer: 0 };
+function stepsOf(pts) {
+  const s = stepPoints(pts, STRIDE_M);
+  return !s.length ? EMPTY : { type: 'FeatureCollection', features: s.map(p => ({
+    type: 'Feature', properties: { i: p.i, b: Math.round(p.b) },
+    geometry: { type: 'Point', coordinates: [p.lon, p.lat] } })) };
+}
+function setTrail(pts) {
+  const fc = stepsOf(pts);
+  setSrc('steps', fc);
+  steps.n = fc === EMPTY ? 0 : fc.features.length;
+  stepsRun(MAP_SCREENS.includes(currentScreen));
+}
+function stepsPaint() {
+  if (!mapReady || !map.getLayer('runner-steps')) return;
+  const near = ['<', ['abs', ['-', ['get', 'i'], steps.f]], LIT];
+  map.setPaintProperty('runner-steps', 'icon-color', ['case', near, '#FFF4C8', '#F5D14A']);
+  map.setPaintProperty('runner-steps', 'icon-halo-color', ['case', near, 'rgba(255, 244, 200, 0.85)', '#0B1630']);
+  map.setPaintProperty('runner-steps', 'icon-halo-width', ['case', near, 2.2, 1.4]);
+}
+function stepsTick() {
+  steps.f = steps.f > steps.n + LIT ? -LIT * 4 : steps.f + 1;   // a breath past the end, then from the start
+  stepsPaint();
+}
+function stepsRun(on) {
+  if (on && steps.n) {
+    if (!steps.timer) { steps.f = -LIT; steps.timer = setInterval(stepsTick, 90); }
+    return;
+  }
+  clearInterval(steps.timer); steps.timer = 0;
+  steps.f = -1e9; stepsPaint();
+}
 const pointsOf = (pts, kindKey) => ({
   type: 'FeatureCollection',
   features: (pts || []).map(p => ({
@@ -1547,7 +1609,7 @@ function onFix(pos) {
   }
   pt.dwellS = 0;
   rec.pts.push(pt);
-  if (rec.kind === 'lay') setSrc('runner', lineOf(rec.pts));
+  if (rec.kind === 'lay') setTrail(rec.pts);
   if (rec.kind === 'run') setSrc('dog', lineOf(rec.pts));
   paintNav();
   if (rec.kind === 'run') coachOnFix(pt);
@@ -1642,7 +1704,7 @@ async function layStop() {
   }
   $('confirmText').textContent =
     `${fmtKm(pathLen(rec.pts))} · ${fmtDur(rec.pts[rec.pts.length - 1].t - rec.pts[0].t)}`;
-  setSrc('runner', lineOf(rec.pts));
+  setTrail(rec.pts);
   fitTo(rec.pts);
   go('scrConfirm');
 }
@@ -1872,7 +1934,7 @@ const contam = { pts: [], forSession: null };
 function openContam(s) {
   contam.pts = [];
   contam.forSession = s.id;
-  setSrc('runner', lineOf(s.data.trail));
+  setTrail(s.data.trail);
   setSrc('contam', lineOf([]));
   setSrc('wps', EMPTY);
   fitTo(s.data.trail);
@@ -1977,7 +2039,7 @@ function onDrawTap(e) {
   paintDraw();
 }
 function paintDraw() {
-  setSrc('runner', lineOf(draw.pts));
+  setTrail(draw.pts);
   setSrc('wps', pointsOf(draw.pts.map((pt, i) => ({ ...pt, kind: i === 0 ? 'A' : String(i + 1) })), 'kind'));
   if (draw.pts.length) setSrc('start', pointsOf([draw.pts[0]]));
   const n = draw.pts.length;
@@ -2282,7 +2344,7 @@ function toggleReveal() {
   run.revealed = !run.revealed;
   const t = targetById(s.targetId);
   if (t.kind === 'person') {
-    setSrc('runner', run.revealed ? lineOf(s.data.trail) : EMPTY);
+    setTrail(run.revealed ? s.data.trail : null);
     /* The plume is the trail, drawn in air. Showing it before Reveal would
        hand the handler the answer, so it waits for the same button. */
     if (run.revealed) plumeStart(s.data.trail, s.data.weather);
@@ -2560,7 +2622,7 @@ function showOnMap(from = 'scrResult') {
   clearMap();
   const wx = s.data.weather;
   if (t.kind === 'person') {
-    setSrc('runner', lineOf(s.data.trail));
+    setTrail(s.data.trail);
     setSrc('start', pointsOf([s.data.trail[0]]));
     if (s.data.contamination?.length) {
       setSrc('contam', { type: 'FeatureCollection',
@@ -2937,7 +2999,7 @@ async function openLive(id) {
     pendingSession = sessionFromModel(m);
     if (m.kind === 'search') setSrc('hides', pointsOf(m.hides || []));
     else {
-      setSrc('runner', lineOf(m.trail));
+      setTrail(m.trail);
       if (m.trail) setSrc('start', pointsOf([m.trail[0]]));
       if (m.contamination.length) setSrc('contam', { type: 'FeatureCollection',
         features: m.contamination.map(c => lineOf(c.points).features[0]).filter(Boolean) });
