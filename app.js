@@ -23,7 +23,7 @@ import { createStore, migrateV1, TARGETS, targetById, verbs, uid,
          dogStats, ageBand, AGE_BANDS, LEVELS, levelById, dogAge } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-18a';
+const BUILD = '2026-09-18b';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true,
@@ -137,7 +137,7 @@ const MAP_SCREENS = ['scrLay', 'scrConfirm', 'scrContam', 'scrRun', 'scrShowMap'
 const TRANSIENT = new Set(['scrLay', 'scrConfirm', 'scrContam', 'scrRun', 'scrWalk', 'scrDraw', 'scrScan',
   'scrLive', 'scrShowMap', 'scrOnboardHandler', 'scrOnboardDog', 'scrTutorial', 'scrSignIn']);
 const BACKABLE = ['scrShare', 'scrPick', 'scrScan', 'scrResult', 'scrSessions', 'scrSettings', 'scrDog',
-  'scrShareOut', 'scrShared', 'scrCountdown', 'scrWait'];
+  'scrShareOut', 'scrShared', 'scrCountdown', 'scrWait', 'scrOnboardHandler', 'scrOnboardDog'];
 let currentScreen = null;
 const navStack = [];
 
@@ -595,6 +595,9 @@ function openHandlerForm({ id = null, returnTo = null, firstLaunch = false } = {
   obPhoto = existing?.photo ?? null;
   $('obHandlerName').value = existing?.name ?? '';
   $('scrOnboardHandler').querySelector('.label').textContent = firstLaunch ? 'Step 1 of 3' : 'Handler';
+  $('scrOnboardHandler').querySelector('.display').textContent = 'You, the handler';
+  $('scrOnboardHandler').querySelector('p.body').textContent = 'Trailcraft records what your dog does with a scent. It starts with who is holding the line. Other handlers can be added later.';
+  $('scrOnboardHandler').classList.toggle('first-launch', firstLaunch);
   $('obHandlerNext').textContent = firstLaunch ? 'Next: your dog' : 'Save';
   paintObAva('obHandlerAva', existing?.name);
   go('scrOnboardHandler');
@@ -607,6 +610,8 @@ function openLayerForm({ id = null, returnTo = 'scrHome' } = {}) {
   $('obHandlerName').value = existing?.name ?? '';
   $('scrOnboardHandler').querySelector('.label').textContent = 'Lays trails or sets hides';
   $('scrOnboardHandler').querySelector('.display').textContent = 'Who lays for you';
+  $('scrOnboardHandler').querySelector('p.body').textContent = 'The person who lays the trail or sets the hides. A name is enough — more people can be added later.';
+  $('scrOnboardHandler').classList.remove('first-launch');
   $('obHandlerNext').textContent = 'Save';
   paintObAva('obHandlerAva', existing?.name);
   go('scrOnboardHandler');
@@ -623,10 +628,16 @@ function saveHandlerForm() {
     db.kv.set('lastHandlerId', id);
   }
   snap();
-  // Reset the shared form's wording for its next use.
-  $('scrOnboardHandler').querySelector('.display').textContent = 'You, the handler';
   if (obMode.firstLaunch) return openDogForm({ firstLaunch: true });
-  go(obMode.returnTo || 'scrHome');
+  leaveForm(obMode.returnTo);
+}
+
+/* A saved form leaves the way it was entered when that is where it is headed,
+   so the history and the stack stay honest: one press of the arrow on
+   Settings afterwards, not two. The arrow itself is plain goBack. */
+function leaveForm(to = 'scrHome') {
+  if (navStack[navStack.length - 1] === to) return goBack();
+  go(to);
 }
 
 let obDogLevel = 'Hot';
@@ -649,6 +660,7 @@ function openDogForm({ id = null, handlerId = null, returnTo = null, firstLaunch
   $('obDogLine').value = existing?.lineM ?? 10;
   paintDogSex();
   $('scrOnboardDog').querySelector('.label').textContent = firstLaunch ? 'Step 2 of 3' : 'Dog';
+  $('scrOnboardDog').classList.toggle('first-launch', firstLaunch);
   $('obDogTitle').textContent = firstLaunch ? 'Your dog' : (existing ? existing.name : 'A new dog');
   $('obDogSub').hidden = !firstLaunch;
   $('obDogNext').textContent = firstLaunch ? 'Next: how it works' : 'Save';
@@ -693,7 +705,7 @@ function saveDogForm() {
   db.kv.set('lastDogId', id);
   snap();
   if (obMode.firstLaunch) return openTutorial(false);
-  go(obMode.returnTo || 'scrHome');
+  leaveForm(obMode.returnTo);
 }
 
 /* ── Tutorial: five cards a handler would say to another handler ──── */
