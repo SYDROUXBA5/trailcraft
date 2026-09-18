@@ -902,3 +902,71 @@ body:has(#scrWalk:not([hidden])) { --top-row: calc(var(--safe-t) + 104px); }
 .save-trouble-row { display: flex; flex-wrap: wrap; gap: 8px; }
 .save-trouble-row .btn { flex: 1 1 auto; }
 #storageLine.warn { color: var(--ember); font-weight: 600; }
+
+/* ── Glass on the map screens ─────────────────────────────────────────
+   Over satellite imagery an opaque paper button is a hole in the picture.
+   Everything that floats on the map is glass now — the panel, the pill, the
+   marks, the buttons, the re-centre disc — cut from the same material as
+   the wind panel, with the ground showing through. Light and dark themes
+   are the same here: it is the ground that gives the colour. A primary
+   action keeps its colour as a tint in the glass, not as paint. */
+.screen.glass .btn, .wp-row, .map-fab, .hud-pill {
+  color: #F6F2E9;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0.04) 46%, rgba(0, 0, 0, 0.10)),
+    rgba(20, 27, 22, 0.42);
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  backdrop-filter: blur(18px) saturate(160%);
+  -webkit-backdrop-filter: blur(18px) saturate(160%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.38),
+    inset 0 -2px 8px rgba(0, 0, 0, 0.22),
+    0 10px 26px -10px rgba(0, 0, 0, 0.55);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+}
+.screen.glass .btn { position: relative; }
+.screen.glass .btn::before { display: none; }          /* the paper specular; the glass has its own */
+.screen.glass .btn.ghost {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.03) 46%, rgba(0, 0, 0, 0.08)),
+    rgba(20, 27, 22, 0.30);
+}
+.screen.glass .btn.moss, .screen.glass .btn.moss-on-dark {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.20), rgba(255, 255, 255, 0.05) 46%, rgba(0, 0, 0, 0.10)),
+    rgba(47, 74, 58, 0.62);
+}
+.screen.glass .btn.ember, .screen.glass .btn.live-btn.alert, .hud-pill.off, .map-fab.nudge {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.24), rgba(255, 255, 255, 0.06) 46%, rgba(0, 0, 0, 0.08)),
+    rgba(217, 102, 43, 0.68);
+  border-color: rgba(255, 255, 255, 0.36);
+  color: #FFF8F1;
+}
+.screen.glass .btn.live-btn.on {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0.06) 46%, rgba(0, 0, 0, 0.08)),
+    rgba(255, 255, 255, 0.16);
+}
+.screen.glass .btn:active { filter: brightness(1.12); }
+.hud-pill { border-radius: 22px; }
+.hud-pill.off .rec-dot { background: #FFF8F1; }
+.map-fab { color: #F6F2E9; }
+
+/* The marks: one glass track, each mark a lighter segment — the shape of a
+   segmented control, without pretending to be one. */
+.wp-row { padding: 4px; gap: 4px; border-radius: 999px; }
+.wp-pill {
+  background: rgba(255, 255, 255, 0.13); border: 1px solid transparent; color: #F6F2E9;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+  min-height: 40px;
+}
+.wp-pill:active { background: rgba(255, 255, 255, 0.34); color: #F6F2E9; }
+
+/* With transparency reduced, the glass turns near-solid rather than vanishing. */
+@media (prefers-reduced-transparency: reduce) {
+  .screen.glass .btn, .screen.glass .btn.ghost, .wp-row, .map-fab, .hud-pill { background: rgba(20, 27, 22, 0.88); backdrop-filter: none; -webkit-backdrop-filter: none; }
+  .screen.glass .btn.moss, .screen.glass .btn.moss-on-dark { background: rgba(47, 74, 58, 0.95); }
+  .screen.glass .btn.ember, .screen.glass .btn.live-btn.alert, .hud-pill.off, .map-fab.nudge { background: rgba(217, 102, 43, 0.95); }
+}
