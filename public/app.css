@@ -970,3 +970,28 @@ body:has(#scrWalk:not([hidden])) { --top-row: calc(var(--safe-t) + 104px); }
   .screen.glass .btn.moss, .screen.glass .btn.moss-on-dark { background: rgba(20, 40, 75, 0.95); }
   .screen.glass .btn.ember, .screen.glass .btn.live-btn.alert, .hud-pill.off, .map-fab.nudge { background: rgba(184, 134, 27, 0.95); }
 }
+
+/* ── Selected things are lit the same way ─────────────────────────────
+   The level chips were the only selected controls with the full lit
+   treatment: a bright top edge, a shaded underside, a floor glow in their
+   own colour. Every selected chip, age chip, radio card and primary button
+   now gets it, in its own colour — navy for the primary, gold for the accent. */
+.chip.selected:not(.lvl), .age-chip.selected, .radio-card.selected, .btn.moss,
+:root[data-theme="dark"] .chip.selected:not(.lvl), :root[data-theme="dark"] .age-chip.selected,
+:root[data-theme="dark"] .radio-card.selected, :root[data-theme="dark"] .btn.moss {
+  box-shadow:
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.4), inset 0 -3px 9px rgba(0, 0, 0, 0.22),
+    0 2px 4px rgba(11, 23, 48, 0.24), 0 12px 26px -8px rgba(20, 40, 75, 0.62);
+}
+.btn.ember, :root[data-theme="dark"] .btn.ember {
+  box-shadow:
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.42), inset 0 -3px 9px rgba(0, 0, 0, 0.2),
+    0 2px 4px rgba(110, 78, 10, 0.24), 0 12px 26px -8px rgba(184, 134, 27, 0.62);
+}
+.chip.selected::before {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.4), rgba(255, 255, 255, 0.12) 62%, rgba(255, 255, 255, 0));
+}
+/* On the map the glass keeps its own, translucent look. */
+.screen.glass .btn.moss, .screen.glass .btn.ember {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.38), inset 0 -2px 8px rgba(0, 0, 0, 0.22), 0 10px 26px -10px rgba(0, 0, 0, 0.55);
+}
