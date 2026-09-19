@@ -15,6 +15,9 @@ import { plumePalette, stepPalette, windPalette, trackPalette, COLOUR_PRESETS, i
 import { FLAT, buildTerrain, stability, regime, flowAt, normOf } from './field.js';
 import { predictedOffsets, ScentSim, driftFrom, stepByFlow, AIRBORNE } from './sim.js';
 import { encodeTrail, decodeTrail, cardUrl, cardFromText } from './card.js';
+import { decodeTile, tileOf, tileBox } from './mvt.js';
+import { GROUND_LAYERS, buildGround, surfaceAt, surfaceAlong, surfaceRows, withSpread,
+         tilesCovering, spreadOf } from './ground.js';
 import { sync, onSync, initSync, signInWithGoogle, signInWithApple, signOut,
          startLive, pushLive, endLive, watchLive } from './sync.js';
 import { trailModel, encodeShared, decodeShared, sharedUrl, toGpx, fileBase,
@@ -26,7 +29,7 @@ import { createStore, migrateV1, TARGETS, ODOURS, targetById, targetText, verbs,
          dogStats, ageBand, AGE_BANDS, LEVELS, levelById, dogAge } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-19m';
+const BUILD = '2026-09-19n';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true,
@@ -1287,6 +1290,115 @@ function dropHideAtFeet() {
    because a guessed plume is worse than none. */
 const plume = { sim: null, tick: 0, T: FLAT, wx: null, st: null, trail: null, tAt: 0, tLen: 0 };
 
+/* ── The ground under the trail ───────────────────────────────────────
+   Woods, grass, crop, hard surface: read from the same map data the map is
+   drawn from (ground.js has the rules, mvt.js reads the tiles). Two uses —
+   metres per surface on the trail card and the result, and a plume drawn
+   half as wide over hard ground. A handful of small tiles per trail, asked
+   for once and kept for the session; with no signal nothing is saved and the
+   next look at the trail asks again. Needs the Mapbox token: the plain map
+   has no such data behind it. */
+const TILESETS = { streets: 'mapbox.mapbox-streets-v8', terrain: 'mapbox.mapbox-terrain-v2' };
+const groundTiles = new Map();          // 'kind/z/x/y' → Promise of a decoded tile
+const SURF_V = 1;
+
+function groundTile(kind, z, x, y) {
+  const key = `${kind}/${z}/${x}/${y}`;
+  if (groundTiles.has(key)) return groundTiles.get(key);
+  const job = (async () => {
+    const res = await fetch(`https://api.mapbox.com/v4/${TILESETS[kind]}/${z}/${x}/${y}.mvt?access_token=${settings.mbToken}`);
+    if (!res.ok && res.status !== 404) throw new Error(`ground tile ${res.status}`);
+    const t = res.ok ? decodeTile(new Uint8Array(await res.arrayBuffer()), z, x, y, GROUND_LAYERS[kind]) : {};
+    t.kind = kind;
+    t.box = tileBox(z, x, y);
+    return t;
+  })();
+  groundTiles.set(key, job);
+  job.catch(() => groundTiles.delete(key));            // a failed ask is asked again next time
+  if (groundTiles.size > 60) groundTiles.delete(groundTiles.keys().next().value);
+  return job;
+}
+
+async function groundFor(pts) {
+  if (!settings.mbToken || !pts?.length) return null;
+  const tiles = await Promise.all([
+    ...tilesCovering(pts, tileOf).map(t => groundTile('streets', t.z, t.x, t.y)),
+    ...tilesCovering(pts, tileOf, { zooms: [14, 13, 12] }).map(t => groundTile('terrain', t.z, t.x, t.y)),
+  ]);
+  return buildGround(tiles);
+}
+
+/* The letters belong to one exact trail. A walked card replaces the drawn
+   line with a different one, and letters for the old line would then colour
+   the wrong ground — so they carry the trail's fingerprint. */
+const surfSig = (pts) => `${SURF_V}:${pts.length}:${pts[0].lat.toFixed(5)},${pts[0].lon.toFixed(5)}:${pts[pts.length - 1].lat.toFixed(5)},${pts[pts.length - 1].lon.toFixed(5)}`;
+const surfValid = (s) => { const t = s?.data?.trail; return !!t && t.length > 1 && s.data.surfSig === surfSig(t) && s.data.surf?.length === t.length; };
+/** The session's trail, with hard ground marked for the plume and the band. */
+const trailOf = (s) => (surfValid(s) ? withSpread(s.data.trail, s.data.surf) : s.data.trail);
+
+const surfBusy = new Map();             // session id → the ask in flight
+function fillSurfaces(s) {
+  const pts = s?.data?.trail;
+  if (!pts || pts.length < 2 || !settings.mbToken || navigator.onLine === false) return Promise.resolve(null);
+  if (surfValid(s)) return Promise.resolve(s);
+  if (surfBusy.has(s.id)) return surfBusy.get(s.id);
+  const job = (async () => {
+    try {
+      const ground = await groundFor(pts);
+      if (!ground || s.data.trail !== pts) return null;              // the trail was replaced while we asked
+      const { letters, metres } = surfaceAlong(ground, pts);
+      Object.assign(s.data, { surf: letters, surfM: metres, surfSig: surfSig(pts) });   // whoever holds this session sees it
+      const kept = db.sessions().find(x => x.id === s.id);
+      if (kept && kept.data.trail?.length === pts.length) {
+        db.updateSession(s.id, { data: { ...kept.data, surf: letters, surfM: metres, surfSig: surfSig(pts) } });
+        snap();
+      }
+      return s;
+    } catch { return null; }            // offline, or no room to save: the next look asks again
+    finally { surfBusy.delete(s.id); }
+  })();
+  surfBusy.set(s.id, job);
+  return job;
+}
+
+function groundHtml(s) {
+  const rows = surfaceRows(s.data.surfM);
+  if (!rows.length) return '';
+  return `<span class="label">Ground</span>
+    <div class="surf-bar" aria-hidden="true">${rows.map(r => `<i class="gs-${r.id}" style="flex:${r.share.toFixed(4)}"></i>`).join('')}</div>
+    <div class="surf-rows">${rows.map(r =>
+      `<div><i class="gs-${r.id}"></i><span>${esc(r.label)}</span><b>${fmtKm(r.metres)}</b><em>${Math.round(r.share * 100)}%</em></div>`).join('')}</div>
+    <p class="body small muted">Read from the map, not from the ground: a track or a yard nobody drew is missed. Scent is drawn half as wide over hard surface.</p>`;
+}
+/** Show it if it is known; if not, ask, and fill the box in when the answer
+    comes — provided the box is still showing the same trail. */
+function paintGround(id, s) {
+  const el = $(id);
+  el.dataset.sid = s.id;
+  el.innerHTML = surfValid(s) ? groundHtml(s) : '';
+  el.hidden = !el.innerHTML;
+  if (surfValid(s)) return;
+  fillSurfaces(s).then(f => {
+    if (!f || el.dataset.sid !== s.id) return;
+    el.innerHTML = groundHtml(f);
+    el.hidden = !el.innerHTML;
+  });
+}
+
+/* While laying, each fix is read against the tile it stands in, so the live
+   plume already narrows on tarmac. The tile is asked for once as the walker
+   enters it; until it answers the ground counts as ordinary. */
+const liveGround = { key: '', ground: null };
+function liveSpread(pt) {
+  if (!settings.mbToken) return 1;
+  const t = tileOf(pt.lat, pt.lon, 15), key = `${t.x}/${t.y}`;
+  if (key !== liveGround.key) {
+    liveGround.key = key;
+    groundFor([pt]).then(g => { if (liveGround.key === key) liveGround.ground = g; }).catch(() => {});
+  }
+  return liveGround.ground ? spreadOf(surfaceAt(liveGround.ground, pt)) : 1;
+}
+
 /* The ground the air is running over.
 
    flowAt already deflects wind around slopes, runs cold air downhill under a
@@ -1856,6 +1968,7 @@ function onFix(pos) {
     return;
   }
   pt.dwellS = 0;
+  if (rec.kind === 'lay') { const sp = liveSpread(pt); if (sp !== 1) pt.spread = sp; }
   rec.pts.push(pt);
   if (rec.kind === 'lay') setTrail(rec.pts);
   if (rec.kind === 'run') setDogTrack(rec.pts);
@@ -1962,7 +2075,7 @@ async function confirmLay() {
   const isHide = rec.kind === 'hide';
   const origin = isHide ? rec.hides[0] : rec.pts[0];
   const startedAt = isHide ? rec.hides[0].t : rec.pts[0].t;
-  rec.pts.forEach(p => delete p._seen);
+  rec.pts.forEach(p => { delete p._seen; delete p.spread; });   // the ground is saved once, as letters (fillSurfaces)
 
   const s = {
     id: uid(), handlerId: S.handler.id, dogId: null,
@@ -2086,6 +2199,7 @@ function paintMini(pts) {
 
 function renderShare(s) {
   paintWhere(s);
+  paintGround('shareGround', s);
   const isHide = targetById(s.targetId).kind === 'hide';
   const isPlan = !!s.data.plan;
   $('shareTitle').textContent = isHide ? 'Hide set' : isPlan ? 'Trail planned' : 'Trail laid';
@@ -2579,6 +2693,7 @@ async function startRun(s) {
   clearMap();
   liveState = null;
   paintLiveBtn();
+  fillSurfaces(s);              // ready by the time Reveal wants the plume
   coachStart(s);
   if (db.usage().bytes > STORAGE_MB * 0.8 * 1048576) toast('Storage nearly full — delete old sessions in Settings soon');
 
@@ -2618,7 +2733,7 @@ function toggleReveal() {
     setTrail(run.revealed ? s.data.trail : null);
     /* The plume is the trail, drawn in air. Showing it before Reveal would
        hand the handler the answer, so it waits for the same button. */
-    if (run.revealed) plumeStart(s.data.trail, s.data.weather);
+    if (run.revealed) plumeStart(trailOf(s), s.data.weather);
     else plumeStop();
     setSrc('contam', run.revealed
       ? { type: 'FeatureCollection',
@@ -2825,6 +2940,7 @@ function legacySentence(r, dogName) {
 }
 
 function renderResult(s) {
+  paintGround('resGround', s);
   const r = s.data.result;
   const d = S.dogs.find(x => x.id === s.dogId);
   $('resWho').textContent = `${d?.name ?? ''} · ${fmtWhen(s.startedAt)}`;
@@ -2904,10 +3020,10 @@ function showOnMap(from = 'scrResult') {
          collected (dog card: "observed track patterns") but no longer fed
          back in — a model tuned on the track it is asked to explain would
          only learn to agree with it. */
-      const field = scentField(s.data.trail, wx, s.data.trackStarted ?? undefined);
+      const field = scentField(trailOf(s), wx, s.data.trackStarted ?? undefined);
       if (field.length) setSrc('drift', plumePolygon(field));
       // ...and the air itself, moving, as it was when the dog worked it.
-      plumeStart(s.data.trail, wx);
+      plumeStart(trailOf(s), wx);
       showWeather(wx);
     }
   } else {
@@ -3474,7 +3590,10 @@ function coachStart(s) {
   coach.everOn = false; coach.used = null;
   coach.shadow = coach.trail ? { plain: initialCoach(), scent: initialCoach(), log: { plain: [], scent: [] } } : null;
   const wx = s.data.weather;
-  coach.field = wx && coach.trail ? scentField(coach.trail, wx, run.startedAt) : [];
+  coach.field = wx && coach.trail ? scentField(trailOf(s), wx, run.startedAt) : [];
+  if (coach.trail && wx && !surfValid(s)) {
+    fillSurfaces(s).then(f => { if (f && run.session?.id === s.id) coach.field = scentField(trailOf(s), wx, run.startedAt); });
+  }
   clearInterval(coach.shadowTick);
   coach.shadowTick = coach.trail ? setInterval(() => { if (rec.on) shadowStep(null); }, 1000) : 0;
   coachSync();

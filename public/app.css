@@ -292,6 +292,23 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.75; cursor: p
 .grid2 i { display: block; margin-top: 4px; font-style: normal; font-size: 11px; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase; color: var(--muted); }
 .grid2 .sub-line { font-size: 13px; color: var(--muted); margin-top: 2px; }
 
+/* ── Ground: metres per surface ───────────────────────────────────── */
+.surf-box { margin-top: 12px; }
+.surf-box[hidden] { display: none; }
+.surf-box .label { margin-top: 0; }
+.surf-bar { display: flex; height: 10px; border-radius: 999px; overflow: hidden; gap: 2px; margin: 8px 0 10px; }
+.surf-bar i { display: block; min-width: 3px; }
+.surf-rows > div { display: grid; grid-template-columns: 12px 1fr auto 44px; align-items: center; gap: 10px; padding: 7px 0; border-top: 1px solid var(--border); }
+.surf-rows > div:first-child { border-top: 0; }
+.surf-rows i { width: 12px; height: 12px; border-radius: 4px; }
+.surf-rows span { font: 500 15px var(--body); }
+.surf-rows b { font: 600 16px var(--display); font-variant-numeric: tabular-nums; }
+.surf-rows em { font-style: normal; font-size: 13px; color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; }
+.surf-box p { margin: 8px 0 0; }
+.gs-w { background: #2E6B3F; } .gs-s { background: #7A8B3A; } .gs-g { background: #57B26A; }
+.gs-c { background: #D8B657; } .gs-h { background: #8C95A6; } .gs-a { background: #3B8BD6; }
+.gs-u { background: #C9D0DC; }
+
 /* ── Settings ────────────────────────────────────────────────────── */
 .set-card { margin-bottom: 10px; }
 .set-row { display: flex; align-items: center; gap: 12px; min-height: 52px; cursor: pointer; border: 0; background: none; width: 100%; text-align: left; font: inherit; padding: 4px 0; }
