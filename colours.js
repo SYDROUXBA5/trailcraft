@@ -72,3 +72,10 @@ export function windPalette(base) {
   if (!isHex(base)) base = '#DCE9FF';
   return { base, tail: rgba(base, 0), mid: rgba(base, 0.55), head: rgba(base, 1) };
 }
+
+/** A track drawn as a line: its colour, and a casing that contrasts with it
+    so it reads on any ground (dark under a light line, light under a dark). */
+export function trackPalette(base, fallback = '#FFFFFF') {
+  if (!isHex(base)) base = fallback;
+  return { base, casing: luminance(base) < 0.3 ? '#FFFFFF' : '#0B1630' };
+}
