@@ -663,38 +663,43 @@
     <span class="label">Coach</span>
     <div class="card coach-card" id="coachHome">
       <div id="coachControls">
-        <label class="switch-row" for="coachOn">
-          <span>Assisted run — call it when the track leaves the corridor<i>Off is a blind run: no prompts. Either way the model keeps a silent log, and the review says which kind of run it was.</i></span>
-          <input id="coachOn" type="checkbox">
-        </label>
-        <span class="unit-head">How far off counts</span>
-        <div class="age-row" id="coachTolRow">
-          <button type="button" class="age-chip" data-tol="0">10 m</button>
-          <button type="button" class="age-chip" data-tol="1">20 m</button>
-          <button type="button" class="age-chip" data-tol="2">30 m</button>
-          <button type="button" class="age-chip" data-tol="3">50 m</button>
+        <div class="coach-head">
+          <span class="coach-mark" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22"><path d="M9.5 8.5a5 5 0 1 0 0 10 5 5 0 0 0 0-10zM12.5 9.2H21v3.3h-6.6" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round"/><circle cx="9.5" cy="13.5" r="1.4" fill="currentColor"/></svg></span>
+          <div><b>The coach</b><i>Watches the dog’s track against the line and speaks only when it matters. The review says which kind of run it was.</i></div>
         </div>
-        <label class="switch-row" for="coachScent">
-          <span>Experimental: follow the scent<i>Opens the downwind side toward the modelled scent band, by half the corridor at most. A guess, recorded on the run so the review can show what it changed.</i></span>
-          <input id="coachScent" type="checkbox">
-        </label>
-        <label class="switch-row" for="coachVoice">
-          <span>Say it out loud<i>“Off the trail, 25 metres to the right”</i></span>
-          <input id="coachVoice" type="checkbox">
-        </label>
-        <label class="switch-row" for="coachSound">
-          <span>Sound<i>A tick at the edge, a firm tone when off, a chime when back</i></span>
-          <input id="coachSound" type="checkbox">
-        </label>
-        <label class="switch-row" for="coachVibrate" id="coachVibrateRow" hidden>
-          <span>Vibrate<i>A short buzz with each call</i></span>
-          <input id="coachVibrate" type="checkbox">
-        </label>
-        <label class="switch-row" for="coachShow">
-          <span>Show the distance on screen<i>Off keeps the run blind — the coach still speaks</i></span>
-          <input id="coachShow" type="checkbox">
-        </label>
-        <p class="body small muted" id="coachNote"></p>
+        <div class="mode-cards" id="coachModeRow" role="radiogroup" aria-label="Kind of run">
+          <button type="button" class="radio-card" data-coach="0"><b>Blind run</b><i>No prompts. The model still keeps its silent log.</i><span class="radio-dot"></span></button>
+          <button type="button" class="radio-card" data-coach="1"><b>Assisted run</b><i>A call when the track leaves the corridor, and when it comes back.</i><span class="radio-dot"></span></button>
+        </div>
+        <input id="coachOn" type="checkbox" hidden>
+        <div class="coach-when" id="coachWhen">
+          <span class="unit-head">How far off counts</span>
+          <div class="age-row" id="coachTolRow">
+            <button type="button" class="age-chip" data-tol="0">10 m</button>
+            <button type="button" class="age-chip" data-tol="1">20 m</button>
+            <button type="button" class="age-chip" data-tol="2">30 m</button>
+            <button type="button" class="age-chip" data-tol="3">50 m</button>
+          </div>
+          <p class="coach-cap">Either side of the line. A single stray GPS fix never counts on its own.</p>
+          <span class="unit-head">How it tells you</span>
+          <div class="tile-row">
+            <label class="tile" for="coachVoice"><input id="coachVoice" type="checkbox"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5h16v10H10l-5.5 4v-4H4z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/><path d="M8 9.5h8M8 12.5h5" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg><b>Voice</b><i>“Off the trail, 25 m right”</i></label>
+            <label class="tile" for="coachSound"><input id="coachSound" type="checkbox"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10v4M8 7v10M12 4v16M16 7v10M20 10v4" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/></svg><b>Tones</b><i>A tick, a firm tone, a chime</i></label>
+            <label class="tile" for="coachVibrate" id="coachVibrateRow" hidden><input id="coachVibrate" type="checkbox"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="3" width="8" height="18" rx="2" fill="none" stroke="currentColor" stroke-width="1.9"/><path d="M4.5 8.5v7M19.5 8.5v7" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg><b>Buzz</b><i>A short tap with each call</i></label>
+          </div>
+          <label class="switch-row" for="coachShow">
+            <span>Show the distance on screen<i>Off keeps the run blind — the coach still speaks</i></span>
+            <input id="coachShow" type="checkbox">
+          </label>
+          <label class="switch-row" for="coachScent">
+            <span>Follow the scent <em class="tag">experimental</em><i>Opens the downwind side toward the modelled scent, by half the corridor at most. Recorded, so the review shows what it changed.</i></span>
+            <input id="coachScent" type="checkbox">
+          </label>
+        </div>
+        <details class="coach-more">
+          <summary>How the coach decides</summary>
+          <p class="body small muted" id="coachNote"></p>
+        </details>
       </div>
     </div>
 
