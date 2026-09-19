@@ -10,6 +10,7 @@ import {
   pathLen, cardinal, dist, dwellFold, bearing, project, fmtDist, fmtShort, fmtSpeed, fmtTemp, unitShort, fmtWeight, kgToShown, shownToKg, fmtCoord, scentField, plumePolygon, densify, timestamps, signedOffsets, meanSigned, sideOfDrift, sideAgreement, lineCorrect, departure, timestampsEndingAt, progressAlong, splitLine, smoothBearing, medianAbs, sideShares,
 } from './geo.js';
 import { stepPoints } from './geo.js';
+import { plumePalette, stepPalette, COLOUR_PRESETS, isHex } from './colours.js';
 import { FLAT, buildTerrain, stability, regime, flowAt, normOf } from './field.js';
 import { predictedOffsets, ScentSim, driftFrom, stepByFlow, AIRBORNE } from './sim.js';
 import { encodeTrail, decodeTrail, cardUrl, cardFromText } from './card.js';
@@ -24,11 +25,11 @@ import { createStore, migrateV1, TARGETS, targetById, verbs, uid,
          dogStats, ageBand, AGE_BANDS, LEVELS, levelById, dogAge } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-19b';
+const BUILD = '2026-09-19c';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true,
-  distUnits: 'metric', tempUnits: 'c', coordFormat: 'dd', theme: 'system', mapStyle: 'satellite', mbToken: (window.MB_TOKEN || '') };
+  distUnits: 'metric', tempUnits: 'c', coordFormat: 'dd', theme: 'system', mapStyle: 'satellite', plumeColor: '#F5D14A', stepColor: '#0B1630', mbToken: (window.MB_TOKEN || '') };
 const loadJson = (k, f) => { try { return JSON.parse(localStorage.getItem(k)) ?? f; } catch { return f; } };
 let settings = { ...DEFAULTS, ...loadJson('tc.settings', {}) };
 /* One "imperial" switch became three separate choices. A phone that already
@@ -431,6 +432,7 @@ function addOverlays() {
                   'icon-rotation-alignment': 'map', 'icon-pitch-alignment': 'map' } });
 
   mapReady = true;
+  applyMapColours();
   for (const id of Object.keys(srcData)) map.getSource(id)?.setData(srcData[id]);
   map.resize();
 }
@@ -600,10 +602,38 @@ function setTrail(pts) {
 }
 function stepsPaint() {
   if (!mapReady || !map.getLayer('runner-steps')) return;
+  const c = stepPalette(settings.stepColor);
   const near = ['<', ['abs', ['-', ['get', 'i'], steps.f]], LIT];
-  map.setPaintProperty('runner-steps', 'icon-color', ['case', near, '#FFF4C8', '#F5D14A']);
-  map.setPaintProperty('runner-steps', 'icon-halo-color', ['case', near, 'rgba(255, 244, 200, 0.85)', '#0B1630']);
-  map.setPaintProperty('runner-steps', 'icon-halo-width', ['case', near, 2.2, 1.4]);
+  map.setPaintProperty('runner-steps', 'icon-color', ['case', near, c.lit, c.base]);
+  map.setPaintProperty('runner-steps', 'icon-halo-color', ['case', near, c.haloLit, c.halo]);
+  map.setPaintProperty('runner-steps', 'icon-halo-width', ['case', near, c.haloLitWidth, c.haloWidth]);
+}
+/* The handler's colours for the scent and the footprints, onto the layers
+   that draw them: when a style has loaded (the layers are new) and whenever
+   a swatch is tapped. The report and the small maps keep their own. */
+function applyMapColours() {
+  if (!mapReady) return;
+  const p = plumePalette(settings.plumeColor);
+  if (map.getLayer('scent-glow')) map.setPaintProperty('scent-glow', 'circle-color', p.base);
+  if (map.getLayer('scent-dots')) map.setPaintProperty('scent-dots', 'circle-color',
+    ['interpolate', ['linear'], ['get', 's'], 0, p.dark, 0.45, p.base, 1, p.light]);
+  stepsPaint();
+}
+function paintColourRows() {
+  const row = (id, key, presets) => {
+    const cur = String(settings[key]).toUpperCase();
+    const custom = !presets.some(c => c.hex === cur);
+    $(id).innerHTML = presets.map(c =>
+      `<button type="button" class="swatch${c.hex === cur ? ' selected' : ''}" data-colour="${c.hex}" style="--c:${c.hex}" aria-label="${c.name}" title="${c.name}"></button>`).join('')
+      + `<label class="swatch custom${custom ? ' selected' : ''}" title="Any colour" style="--c:${custom ? cur : 'transparent'}"><input type="color" value="${cur}" aria-label="Choose any colour"></label>`;
+  };
+  row('plumeRow', 'plumeColor', COLOUR_PRESETS);
+  row('stepRow', 'stepColor', COLOUR_PRESETS.filter(c => c.hex !== '#FFFFFF'));   // the dog's track is white
+}
+function setColour(key, hex) {
+  if (!isHex(hex)) return;
+  settings[key] = hex.toUpperCase(); saveSettings();
+  paintColourRows(); applyMapColours();
 }
 function stepsTick() {
   steps.f = steps.f > steps.n + LIT ? -LIT * 4 : steps.f + 1;   // a breath past the end, then from the start
@@ -3594,6 +3624,7 @@ function renderSettings() {
   $('plumeOn').checked = settings.plume !== false;
   paintCoachControls();
   paintStorageLine();
+  paintColourRows();
   paintUnitSettings();
   paintAppearance();
   renderAccount();
@@ -4216,6 +4247,11 @@ function boot() {
   importFromLink();
 }
 
+/* The colour swatches in Settings: a tap on a preset, or the picker at the end. */
+for (const [id, key] of [['plumeRow', 'plumeColor'], ['stepRow', 'stepColor']]) {
+  $(id).addEventListener('click', (e) => { const b = e.target.closest('[data-colour]'); if (b) setColour(key, b.dataset.colour); });
+  $(id).addEventListener('input', (e) => { if (e.target.type === 'color') setColour(key, e.target.value); });
+}
 /* The map style button and its three choices; tapping anywhere else folds them away. */
 $('btnMapStyle').addEventListener('click', toggleStylePick);
 $('stylePick').addEventListener('click', (e) => { const b = e.target.closest('[data-style]'); if (b) setMapStyle(b.dataset.style); });
