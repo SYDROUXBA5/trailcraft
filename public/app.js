@@ -25,7 +25,7 @@ import { createStore, migrateV1, TARGETS, targetById, verbs, uid,
          dogStats, ageBand, AGE_BANDS, LEVELS, levelById, dogAge } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-19d';
+const BUILD = '2026-09-19e';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true,
@@ -3356,6 +3356,13 @@ function paintCoachControls() {
     chip.textContent = imp() ? `${[30, 60, 100, 150][i]} ft` : `${opts[i]} m`;
     chip.classList.toggle('selected', opts[i] === settings.coachTol);
   });
+  const on = settings.coachOn !== false;
+  $('coachControls').querySelectorAll('[data-coach]').forEach(b => {
+    const sel = (b.dataset.coach === '1') === on;
+    b.classList.toggle('selected', sel);
+    b.setAttribute('aria-checked', String(sel));
+  });
+  $('coachWhen').classList.toggle('off', !on);
   const canBuzz = typeof navigator.vibrate === 'function' || canHaptic();
   $('coachVibrateRow').hidden = !canBuzz;
   $('coachNote').textContent = canBuzz
@@ -3867,6 +3874,13 @@ function wire() {
   $('obHandlerNext').addEventListener('click', () => saveHandlerForm());
   $('obHandlerLayOnly').addEventListener('click', () => saveHandlerForm(true));
   $('obDogUnits').addEventListener('click', (e) => { const b = e.target.closest('[data-units]'); if (b) setDogUnits(b.dataset.units); });
+  $('coachModeRow').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-coach]');
+    if (!b) return;
+    const want = b.dataset.coach === '1';
+    if ($('coachOn').checked !== want) { $('coachOn').checked = want; $('coachOn').dispatchEvent(new Event('change', { bubbles: true })); }
+    paintCoachControls();
+  });
   $('obDogPhoto').addEventListener('click', () => photoTo('obDogAva'));
   $('obDogPhoto2').addEventListener('click', () => photoTo('obDogAva'));
   $('obDogSex').addEventListener('click', (e) => {
