@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { handlerStats } from '../public/store.js';
+import { handlerStats, ODOURS, targetText } from '../public/store.js';
 import { createStore, migrateV1, TARGETS, targetById, verbs, uid,
          dogStats, ageBand, AGE_BANDS, dogAge, SaveError } from '../public/store.js';
 
@@ -312,6 +312,37 @@ t('handlerStats: runs, laid trails, time, age bands, dogs and the typical offset
   assert.equal(st.medOff, 8);
   assert.equal(handlerStats('h2', sessions).bands.cold, 1);
   assert.equal(handlerStats('nobody', sessions).runs, 0);
+});
+
+t('odours: narcotics and explosives name theirs, each target remembers its own, the record says which', () => {
+  for (const id of ['narcotics', 'explosives']) {
+    const set = ODOURS[id];
+    assert.equal(targetById(id).kind, 'hide');
+    assert.ok(set.ask && set.name);
+    assert.ok(set.list.length >= 10);
+    assert.equal(new Set(set.list).size, set.list.length, 'no odour listed twice');
+    for (const o of set.list) assert.ok(o.length <= 40, `${o} fits the typed field`);
+  }
+  assert.deepEqual(Object.keys(ODOURS), ['narcotics', 'explosives']);
+
+  assert.equal(targetText({ targetId: 'narcotics', odour: 'Cocaine' }), 'Narcotics · Cocaine');
+  assert.equal(targetText({ targetId: 'explosives' }), 'Explosives');
+  assert.equal(targetText({ targetId: 'other', odour: ' Truffle ' }), 'Truffle');
+  assert.equal(targetText({ targetId: 'other', odour: '' }), 'Other');
+  assert.equal(targetText({ targetId: 'person', odour: null }), 'A person');
+  assert.equal(targetText({}), 'A person');
+
+  const db = createStore(fakeBackend());
+  db.handlers.upsert({ id: 'h1', name: 'Rémi', photo: null });
+  db.kv.set('odour.narcotics', 'Heroin');
+  db.kv.set('odour.other', 'Truffle');
+  assert.equal(db.snapshot().odour, '', 'a person has no odour to name');
+  db.kv.set('lastTargetId', 'narcotics');
+  assert.equal(db.snapshot().odour, 'Heroin');
+  db.kv.set('lastTargetId', 'explosives');
+  assert.equal(db.snapshot().odour, '');
+  db.kv.set('lastTargetId', 'other');
+  assert.equal(db.snapshot().odour, 'Truffle');
 });
 
 console.log(`\n${pass} passed total\n`);

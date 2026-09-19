@@ -59,40 +59,40 @@
      north once the phone shares its heading (tap it); the gold arrow points
      where the air is going; the mark on the rim reads the heading. -->
 <span class="wx-rose" id="wxRose" role="button" tabindex="0" hidden aria-label="Compass. Tap to use the phone’s heading.">
+  <!-- An ordinary compass: white face, black marks, red end of the needle to
+       north. The card turns with the phone so the needle stays on true north;
+       the blue marker on the rim is where the wind is carrying the air. -->
   <svg viewBox="0 0 100 100" aria-hidden="true">
     <defs>
-      <radialGradient id="wxDial" cx="50%" cy="42%" r="62%">
-        <stop offset="0" stop-color="#1B3160"/><stop offset="1" stop-color="#0B1630"/>
+      <linearGradient id="wxBezel" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#3D4451"/><stop offset="1" stop-color="#12151B"/>
+      </linearGradient>
+      <radialGradient id="wxDial" cx="50%" cy="45%" r="60%">
+        <stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#E6E9EE"/>
       </radialGradient>
-      <linearGradient id="wxBezel" x1="0" y1="0" x2="1" y2="1">
-        <stop offset="0" stop-color="#F6E3A1"/><stop offset="0.5" stop-color="#D9B44A"/><stop offset="1" stop-color="#9C7420"/>
-      </linearGradient>
-      <linearGradient id="wxNeedleGrad" x1="0" y1="0" x2="1" y2="0">
-        <stop offset="0" stop-color="#FFF3CC"/><stop offset="0.5" stop-color="#F1D27A"/><stop offset="1" stop-color="#B8861B"/>
-      </linearGradient>
-      <filter id="wxNeedleShade" x="-40%" y="-40%" width="180%" height="180%">
-        <feDropShadow dx="0" dy="1" stdDeviation="1" flood-color="#000" flood-opacity="0.5"/>
-      </filter>
     </defs>
     <circle cx="50" cy="50" r="49" fill="url(#wxBezel)"/>
-    <circle cx="50" cy="50" r="44.5" fill="url(#wxDial)"/>
-    <circle cx="50" cy="50" r="44.5" fill="none" stroke="#0B1630" stroke-opacity="0.55" stroke-width="0.8"/>
+    <circle cx="50" cy="50" r="43.6" fill="url(#wxDial)"/>
+    <circle cx="50" cy="50" r="43.6" fill="none" stroke="#000" stroke-opacity="0.4" stroke-width="0.8"/>
     <g id="wxRoseRing">
-      <path d="M69.30 16.57L71.00 13.63M83.43 30.70L86.37 29.00M86.00 50.00L92.00 50.00M83.43 69.30L86.37 71.00M69.30 83.43L71.00 86.37M50.00 86.00L50.00 92.00M30.70 83.43L29.00 86.37M16.57 69.30L13.63 71.00M14.00 50.00L8.00 50.00M16.57 30.70L13.63 29.00M30.70 16.57L29.00 13.63" fill="none" stroke="#F6E3A1" stroke-opacity="0.7" stroke-width="1.3" stroke-linecap="round"/>
-      <path d="M50 8.6 L46.3 17 L53.7 17Z" fill="#E4572E"/>
-      <g font-family="Georgia, 'Times New Roman', serif" font-weight="700" text-anchor="middle">
-        <text x="50" y="33.5" font-size="15" fill="#F6E3A1">N</text>
-        <text x="71.5" y="54.2" font-size="11.5" fill="#F6E3A1" fill-opacity="0.78">E</text>
-        <text x="50" y="78.5" font-size="11.5" fill="#F6E3A1" fill-opacity="0.78">S</text>
-        <text x="28.5" y="54.2" font-size="11.5" fill="#F6E3A1" fill-opacity="0.78">W</text>
+      <path d="M56.84 11.20L57.33 8.44M63.48 12.98L64.43 10.34M75.33 19.82L77.13 17.67M80.18 24.67L82.33 22.87M87.02 36.52L89.66 35.57M88.80 43.16L91.56 42.67M88.80 56.84L91.56 57.33M87.02 63.48L89.66 64.43M80.18 75.33L82.33 77.13M75.33 80.18L77.13 82.33M63.48 87.02L64.43 89.66M56.84 88.80L57.33 91.56M43.16 88.80L42.67 91.56M36.52 87.02L35.57 89.66M24.67 80.18L22.87 82.33M19.82 75.33L17.67 77.13M12.98 63.48L10.34 64.43M11.20 56.84L8.44 57.33M11.20 43.16L8.44 42.67M12.98 36.52L10.34 35.57M19.82 24.67L17.67 22.87M24.67 19.82L22.87 17.67M36.52 12.98L35.57 10.34M43.16 11.20L42.67 8.44" fill="none" stroke="#5B6472" stroke-width="0.9"/>
+      <path d="M50.00 13.40L50.00 7.80M68.30 18.30L71.10 13.45M81.70 31.70L86.55 28.90M86.60 50.00L92.20 50.00M81.70 68.30L86.55 71.10M68.30 81.70L71.10 86.55M50.00 86.60L50.00 92.20M31.70 81.70L28.90 86.55M18.30 68.30L13.45 71.10M13.40 50.00L7.80 50.00M18.30 31.70L13.45 28.90M31.70 18.30L28.90 13.45" fill="none" stroke="#161B26" stroke-width="1.7"/>
+      <g font-family="-apple-system, 'Helvetica Neue', Arial, sans-serif" font-weight="700" font-size="12" text-anchor="middle">
+        <text x="50" y="25.6" fill="#D12B2B">N</text>
+        <text x="70.4" y="54.3" fill="#161B26">E</text>
+        <text x="50" y="83" fill="#161B26">S</text>
+        <text x="29.6" y="54.3" fill="#161B26">W</text>
       </g>
+      <g id="wxArrow">
+        <path d="M50 7.2 L55.4 15.4 L50 13.4 L44.6 15.4Z" fill="#1F6FEB" stroke="#FFFFFF" stroke-width="0.9" stroke-linejoin="round"/>
+      </g>
+      <path d="M50 27.5 L44.4 50 L50 50Z" fill="#E5403C"/>
+      <path d="M50 27.5 L55.6 50 L50 50Z" fill="#B3201F"/>
+      <path d="M50 72.5 L44.4 50 L50 50Z" fill="#4A5262"/>
+      <path d="M50 72.5 L55.6 50 L50 50Z" fill="#232938"/>
     </g>
-    <g id="wxArrow" filter="url(#wxNeedleShade)">
-      <path d="M50 13 L44.6 39 L48.3 37 L48.3 72.5 L50 78.5 L51.7 72.5 L51.7 37 L55.4 39 Z" fill="url(#wxNeedleGrad)"/>
-      <path d="M50 16 V72" fill="none" stroke="#FFF8E1" stroke-width="0.6" stroke-opacity="0.7" stroke-linecap="round"/>
-    </g>
-    <circle cx="50" cy="50" r="3.8" fill="#0B1630" stroke="#F1D27A" stroke-width="1.5"/>
-    <path id="wxIndex" d="M46.4 0.8 L53.6 0.8 L50 6Z" fill="#0B1630"/>
+    <circle cx="50" cy="50" r="3.4" fill="#F2F4F7" stroke="#161B26" stroke-width="1.3"/>
+    <path id="wxIndex" d="M46.4 0.9 L53.6 0.9 L50 6Z" fill="#8B93A1"/>
   </svg>
 </span>
 
@@ -239,6 +239,12 @@
     <span class="label">Looking for</span>
     <div class="chip-row" id="rowTargets"></div>
 
+    <span class="label" id="lblOdour" hidden>Which narcotic</span>
+    <div class="chip-row" id="rowOdours" hidden></div>
+    <input id="otherTarget" class="target-name" type="text" hidden maxlength="40"
+      placeholder="What is the dog looking for?" aria-label="What the dog is looking for"
+      autocomplete="off" autocapitalize="sentences" enterkeyhint="done">
+
     <span class="label" id="lblLevel" hidden>Trail age</span>
     <div class="chip-row" id="rowLevels" hidden></div>
 
@@ -271,9 +277,9 @@
 
 <!-- ── Draw a plan: finger on the map, A to B ──────────────────────── -->
 <section id="scrDraw" class="screen glass" hidden>
-  <div class="hud-pill"><span id="drawText">Tap the map at each corner — A to B</span></div>
+  <div class="hud-pill"><span id="drawText">Tap the map at each corner, start to finish</span></div>
   <div class="glass-bottom">
-    <div class="card">
+    <div class="card" id="ageCard" hidden>
       <span class="label" style="margin-top:0">Dog starts after</span>
       <div class="age-row" id="ageRow">
         <button class="age-chip" data-age="0">Now</button>
@@ -287,7 +293,11 @@
       </div>
     </div>
     <button class="btn big moss" id="drawSave" disabled>Save plan</button>
-    <div class="row-gap">
+    <button class="btn big moss" id="drawConfirm" hidden><b>Confirm</b><i id="drawConfirmSub"></i></button>
+    <div class="row-gap" id="drawBackRow" hidden>
+      <button class="btn ghost" id="drawBack">Back to the map</button>
+    </div>
+    <div class="row-gap" id="drawTools">
       <button class="btn ghost" id="drawUndo">Undo</button>
       <button class="btn ghost" id="drawCancel">Cancel</button>
     </div>
