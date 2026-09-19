@@ -28,6 +28,33 @@ export const TARGETS = [
 
 export const targetById = (id) => TARGETS.find(t => t.id === id) ?? TARGETS[0];
 
+/* The odours a detection dog is imprinted on, as the certifying bodies name
+   them. Labels for the handler's records and nothing more: the engine treats
+   every one as a hide. Anything missing can be typed in. */
+export const ODOURS = {
+  narcotics: {
+    ask: 'Which narcotic', name: 'Name the narcotic',
+    list: ['Marijuana', 'Hashish', 'Cocaine', 'Crack cocaine', 'Heroin', 'Methamphetamine',
+      'MDMA (ecstasy)', 'Amphetamine', 'Fentanyl', 'Opium', 'Ketamine', 'Psilocybin',
+      'Synthetic cannabinoids', 'Pseudo training aid'],
+  },
+  explosives: {
+    ask: 'Which explosive', name: 'Name the explosive',
+    list: ['Black powder', 'Smokeless powder', 'Pyrodex', 'Dynamite', 'TNT', 'RDX', 'C-4',
+      'PETN', 'Det cord', 'Semtex', 'Ammonium nitrate', 'ANFO', 'Emulsion / water gel',
+      'TATP', 'HMTD', 'Chlorates', 'Nitromethane', 'Urea nitrate', 'Cast booster', 'Safety fuse'],
+  },
+};
+
+/** What the record calls the thing searched for: "Narcotics · Cocaine", or
+    the handler's own word when they chose Other and named it. */
+export const targetText = (s) => {
+  const t = targetById(s?.targetId);
+  const odour = typeof s?.odour === 'string' ? s.odour.trim() : '';
+  if (!odour) return t.label;
+  return t.id === 'other' ? odour : `${t.label} · ${odour}`;
+};
+
 /** Verbs for the two big buttons and the session sentence. */
 export const verbs = (t) => t.kind === 'person'
   ? { lay: 'Lay a trail', laySub: 'walks it', run: 'Run a trail',
@@ -179,6 +206,9 @@ export function createStore(backend) {
         handlers: hs, handler, dogs: dogs.all(), team, dog,
         layers: layers.all(), layer,
         target: targetById(kv.get('lastTargetId')),
+        /* Remembered per target, so going back to Explosives finds TNT still
+           chosen and Other still says what it said. */
+        odour: String(kv.get(`odour.${targetById(kv.get('lastTargetId')).id}`) ?? '').trim(),
         /* Seeded from the dog's usual standard, then it is the handler's to
            change for the day — a hot dog can be given a cold trail. */
         level: levelById(kv.get('lastLevel') ?? dog?.level),

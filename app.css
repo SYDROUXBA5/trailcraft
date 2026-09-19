@@ -143,6 +143,9 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.75; cursor: p
 .chip.plain { padding: 8px 18px; display: inline-flex; flex-direction: column; align-items: center; text-align: center; gap: 0; }
 .chip.plain b { font-family: var(--display); font-weight: 600; font-size: 16px; }
 .chip.plain i { font-style: normal; font-size: 11px; font-weight: 500; color: var(--muted); }
+.chip.odour { padding: 8px 18px; min-height: 48px; }
+/* The typed name sits under its row like one more line of the same choice. */
+.target-name { margin: 2px 0 6px; }
 .chip.ghost { border-style: dashed; background: transparent; padding: 8px 18px; color: var(--muted); }
 .chip i.sub { font-style: normal; font-size: 11.5px; font-weight: 500; color: var(--muted); display: block; }
 .chip .who { display: flex; flex-direction: column; align-items: flex-start; line-height: 1.2; }
@@ -535,13 +538,12 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.75; cursor: p
   position: fixed; top: var(--top-row); right: 12px; z-index: 8;
   display: grid; place-items: center;
   width: 64px; height: 64px; border-radius: 50%;
-  color: #F6E3A1;
   filter: drop-shadow(0 4px 10px rgba(0, 0, 0, 0.5));
   cursor: pointer;
 }
 .wx-rose[hidden] { display: none; }
 .wx-rose svg { display: block; width: 64px; height: 64px; }
-.wx-rose.live #wxIndex { fill: #E4572E; }   /* the heading is live */
+.wx-rose.live #wxIndex { fill: #E5403C; }   /* the heading is live */
 #wxRoseRing, #wxArrow {
   transform-box: view-box; transform-origin: 50px 50px;   /* the dial's centre, whatever the needle's shape */
   transition: transform 500ms cubic-bezier(0.23, 1, 0.32, 1);

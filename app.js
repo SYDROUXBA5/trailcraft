@@ -22,11 +22,11 @@ import { trailModel, encodeShared, decodeShared, sharedUrl, toGpx, fileBase,
 import { buildPdf, jpegSize } from './pdf.js';
 import { coachStep, initialCoach, coachPhrase, coachLine, TOL_OPTIONS, COACH_DEFAULTS } from './coach.js';
 import { isNative, watchBackground, canHaptic, haptic } from './native.js';
-import { createStore, migrateV1, TARGETS, targetById, verbs, uid,
+import { createStore, migrateV1, TARGETS, ODOURS, targetById, targetText, verbs, uid,
          dogStats, ageBand, AGE_BANDS, LEVELS, levelById, dogAge } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-19k';
+const BUILD = '2026-09-19l';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true,
@@ -666,8 +666,8 @@ const lineOf = (pts) => !pts || pts.length < 2 ? EMPTY : {
    the prints from the start to the end and round again, so the trail reads
    as walked, and which way. Prints stay where they are; only the light
    moves (paint, not layout — nothing is laid out again per tick). */
-const STRIDE_M = 3;
-const LIT = 4;                       // prints either side of the walking step that glow
+const STRIDE_M = 2;
+const LIT = 6;                       // prints either side of the walking step that glow
 const steps = { n: 0, f: -1e9, timer: 0 };
 function stepsOf(pts) {
   const s = stepPoints(pts, STRIDE_M);
@@ -1030,7 +1030,7 @@ function saveDogForm() {
 /* ── Tutorial: five cards a handler would say to another handler ──── */
 const TUT_CARDS = [
   { k: '01', title: 'Two people, one dog.', body: 'Someone walks a trail and waits at the end. You run the dog along it. Trailcraft records both, and the weather that day.' },
-  { k: '02', title: 'Draw the line with your finger.', body: 'Tap the corners, A to B, then pick how long it ages before the dog starts. Now, 5, 10, or any number you type.' },
+  { k: '02', title: 'Draw the line with your finger.', body: 'Tap the corners from start to finish, then Save plan and pick how long it ages before the dog starts. Now, 5, 10, or any number you type.' },
   { k: '03', title: 'The other phone walks it.', body: 'They scan the code and their phone guides them down your line. The clock starts when they leave, on both phones, and they hand back the trail they really walked. No signal needed.' },
   { k: '04', title: 'Run blind.', body: 'While the dog works, the trail stays hidden. Mark what you see: an indication, a loss, a re-find, an article. Your line length is already accounted for.' },
   { k: '05', title: 'Then read one sentence.', body: '"Bo worked 9 m right of the line. The wind pushed scent right." The model explains what the dog did. It never claims to know where scent is.' },
@@ -1095,6 +1095,38 @@ function showSelectedChip(row) {
   row.scrollLeft += (chip.left + chip.width / 2) - (box.left + box.width / 2);
 }
 
+/* Narcotics and Explosives open a second row, the way A person opens "who
+   lays it": which odour, from the ones detection dogs are certified on, or
+   typed when it is not there. Other is only ever typed. The field is part of
+   the page rather than painted here, so repainting the rows never takes the
+   keyboard away from someone half way through a word. */
+let odourTyping = false;
+let odoursFor = null;
+function paintOdours() {
+  const { target, odour } = S;
+  const set = ODOURS[target.id];
+  const custom = !!set && (odourTyping || (!!odour && !set.list.includes(odour)));
+  $('lblOdour').hidden = !set;
+  $('rowOdours').hidden = !set;
+  if (set) {
+    $('lblOdour').textContent = set.ask;
+    $('rowOdours').innerHTML = set.list.map(o =>
+      `<button class="chip odour${!custom && o === odour ? ' selected' : ''}" data-odour="${esc(o)}">${esc(o)}</button>`).join('')
+      + `<button class="chip odour${custom ? ' selected' : ' ghost'}" data-odour-other>${custom ? 'Other' : '+ Other'}</button>`;
+    /* One row, two lists: coming from the far end of the other list, a list
+       with nothing chosen yet should open at its beginning. */
+    if (odoursFor !== target.id) $('rowOdours').scrollLeft = 0;
+  }
+  odoursFor = target.id;
+  const field = $('otherTarget');
+  const typing = target.id === 'other' || custom;
+  field.hidden = !typing;
+  if (!typing) return;
+  field.placeholder = set ? set.name : 'What is the dog looking for?';
+  const typed = set && set.list.includes(odour) ? '' : odour;
+  if (document.activeElement !== field) field.value = typed;
+}
+
 function renderHome() {
   snap();
   const { handler, handlers, team, dog, layers, layer, target } = S;
@@ -1115,6 +1147,7 @@ function renderHome() {
 
   $('rowTargets').innerHTML = TARGETS.map(t =>
     `<button class="chip plain${t.id === target.id ? ' selected' : ''}" data-target="${t.id}"><b>${esc(t.label)}</b><i>${esc(t.sub)}</i></button>`).join('');
+  paintOdours();
 
   /* Trail age belongs to a person and only to a person: a hide has no walk
      behind it to age — it sits there from the moment it is placed. */
@@ -1143,7 +1176,8 @@ function renderHome() {
   $('btnLayLabel').textContent = v.lay;
   const solo = S.layerOnly && !dog;             // lays for someone else's dog: no run, no 'who lays'
   $('btnLaySub').textContent = solo
-    ? `You walk it — the handler scans your card and runs the dog`
+    ? (isPerson ? `You walk it — the handler scans your card and runs the dog`
+                : `You place it — hides stay on this phone for now`)
     : !isPerson
     ? `${setter} places it, ${handler.name} searches with ${dog?.name ?? 'the dog'}`
     : layer
@@ -1152,7 +1186,7 @@ function renderHome() {
   $('btnRun').hidden = solo;
   $('lblSetter').hidden = solo;
   $('rowLayers').hidden = solo;
-  for (const id of ['rowHandlers', 'rowDogs', 'rowTargets', 'rowLevels', 'rowLayers']) {
+  for (const id of ['rowHandlers', 'rowDogs', 'rowTargets', 'rowOdours', 'rowLevels', 'rowLayers']) {
     showSelectedChip($(id));
   }
 
@@ -1171,7 +1205,7 @@ function renderHome() {
 function sessionCard(s) {
   const d = S.dogs.find(x => x.id === s.dogId);
   return `<div class="card" data-open-session="${s.id}">
-    <div class="meta"><span>${fmtWhen(s.startedAt)}</span><span>${esc(d?.name ?? '')}${d ? ' · ' : ''}${esc(targetById(s.targetId).label)}</span></div>
+    <div class="meta"><span>${fmtWhen(s.startedAt)}</span><span>${esc(d?.name ?? '')}${d ? ' · ' : ''}${esc(targetText(s))}</span></div>
     <div class="story">${esc(s.summary)}</div>
   </div>`;
 }
@@ -1932,7 +1966,7 @@ async function confirmLay() {
 
   const s = {
     id: uid(), handlerId: S.handler.id, dogId: null,
-    layerId: S.layer?.id ?? null, targetId: t.id, startedAt,
+    layerId: S.layer?.id ?? null, targetId: t.id, odour: S.odour || null, startedAt,
     summary: isHide
       ? `${rec.hides.length} hide${rec.hides.length === 1 ? '' : 's'} set, not searched yet.`
       : `${fmtKm(pathLen(rec.pts))} trail laid, not run yet.`,
@@ -2075,7 +2109,7 @@ function renderShare(s) {
     $('shareMiniImg').hidden = true;
     $('shareMini').innerHTML = (s.data.hides || []).map((h, i) =>
       `<circle cx="${40 + i * 40}" cy="85" r="7" fill="#C99A2E"/>`).join('');
-    $('shareMeta').textContent = `${s.data.hides.length} hide${s.data.hides.length === 1 ? '' : 's'} · set ${laid}`
+    $('shareMeta').textContent = `${targetText(s)} · ${s.data.hides.length} hide${s.data.hides.length === 1 ? '' : 's'} · set ${laid}`
       + (wx?.wind_speed != null ? ` · wind ${fmtWind(wx.wind_speed)} ${cardinal(wx.wind_direction)}` : '');
     /* Hide cards are not in the QR codec yet — single-phone hides for now. */
     $('shareQrCard').hidden = true;
@@ -2214,7 +2248,7 @@ function saveContam() {
    walked trail comes back as a second card and the verdict is graded
    against the truth on the ground, not the sketch. */
 
-const draw = { pts: [], ageMin: 10 };
+const draw = { pts: [], ageMin: 10, step: 'map' };
 
 /** The ageing choice, and the one chip whose label changes. */
 function paintAge() {
@@ -2226,6 +2260,26 @@ function paintAge() {
     b.classList.toggle('selected', mine);
     if (custom) b.textContent = mine ? `${draw.ageMin} min` : 'Custom';
   });
+  $('drawConfirmSub').textContent = draw.ageMin
+    ? `The dog starts ${draw.ageMin} min after the trail is laid`
+    : 'The dog starts as soon as the trail is laid';
+}
+
+/* Two steps on one map. Drawing first, with nothing on the sheet but Save —
+   the head start is a question for afterwards, and asking it early only took
+   map away from the finger. Save plan then asks it, over the finished line. */
+function drawStep(step) {
+  draw.step = step;
+  const age = step === 'age';
+  $('ageCard').hidden = !age;
+  $('drawConfirm').hidden = !age;
+  $('drawBackRow').hidden = !age;
+  $('drawSave').hidden = age;
+  $('drawTools').hidden = age;
+  map.getCanvas().style.cursor = age ? '' : 'crosshair';
+  paintDraw();
+  styleGap();
+  requestAnimationFrame(styleGap);
 }
 
 function openDraw() {
@@ -2239,12 +2293,12 @@ function openDraw() {
   $('ageCustom').hidden = true;
   $('ageMins').value = '';
   paintAge();
-  map.getCanvas().style.cursor = 'crosshair';
   map.on('click', onDrawTap);
-  paintDraw();
+  drawStep('map');
   go('scrDraw');
 }
 function onDrawTap(e) {
+  if (draw.step !== 'map') return;             // choosing the head start: the line is finished
   const pt = { lat: e.lngLat.lat, lon: e.lngLat.lng };
   const prev = draw.pts[draw.pts.length - 1];
   if (prev && dist(prev, pt) > 5000) return toast('That corner is km away — zoom in');
@@ -2254,11 +2308,11 @@ function onDrawTap(e) {
 }
 function paintDraw() {
   setTrail(draw.pts);
-  setSrc('wps', pointsOf(draw.pts.map((pt, i) => ({ ...pt, kind: i === 0 ? 'A' : String(i + 1) })), 'kind'));
+  setSrc('wps', pointsOf(draw.pts.map((pt, i) => ({ ...pt, kind: String(i + 1) })), 'kind'));
   if (draw.pts.length) setSrc('start', pointsOf([draw.pts[0]]));
   const n = draw.pts.length;
   $('drawText').textContent = n < 2
-    ? (n === 0 ? 'Tap the map at each corner — A to B' : 'Now tap where it goes next')
+    ? (n === 0 ? 'Tap the map at each corner, start to finish' : 'Now tap where it goes next')
     : `${n} corners · ${fmtKm(pathLen(draw.pts))}`;
   $('drawSave').disabled = n < 2;
 }
@@ -2353,7 +2407,7 @@ function startWalk(card) {
   go('scrWalk');
   startFollowing(card.points, { courseUp: true });
   startWatch('navSink').then(ok => { if (!ok) { stopFollowing(); go('scrHome'); } });
-  toast(`${card.from ? card.from + '’s' : 'The'} plan — walk the line, A to B`);
+  toast(`${card.from ? card.from + '’s' : 'The'} plan — walk the line, start to finish`);
 }
 
 function walkHud() {
@@ -2498,7 +2552,7 @@ function openPick() {
     const age = ageWord(Date.now() - s.startedAt);
     return `<div class="card" data-run-session="${s.id}">
       <div class="meta"><span>${fmtWhen(s.startedAt)}</span><span>${what}</span></div>
-      <div class="story">${esc(targetById(s.targetId).label)} · ${age} old</div>
+      <div class="story">${esc(targetText(s))} · ${age} old</div>
     </div>`;
   }).join('') : `<div class="card"><p class="body muted">Nothing waiting. ${t.kind === 'hide' ? 'Set a hide first.' : 'Lay a trail first, or scan a card.'}</p></div>`;
   go('scrPick');
@@ -4124,6 +4178,13 @@ function wire() {
 
   // Home
   $('homeSettings').addEventListener('click', () => { renderSettings(); go('scrSettings'); });
+  /* Saved as it is typed and never repainted from here: the rows stay put and
+     the keyboard stays up until the handler is finished with it. */
+  $('otherTarget').addEventListener('input', (e) => {
+    db.kv.set(`odour.${S.target.id}`, e.target.value.trim().slice(0, 40));
+    snap();
+  });
+  $('otherTarget').addEventListener('keydown', (e) => { if (e.key === 'Enter') e.target.blur(); });
   $('scrHome').addEventListener('click', (e) => {
     const h = e.target.closest('[data-handler]');
     if (h) {
@@ -4146,7 +4207,23 @@ function wire() {
     }
     if (e.target.closest('[data-add-dog]')) return openDogForm({ returnTo: 'scrHome' });
     const t = e.target.closest('[data-target]');
-    if (t) { db.kv.set('lastTargetId', t.dataset.target); return renderHome(); }
+    if (t) {
+      db.kv.set('lastTargetId', t.dataset.target);
+      odourTyping = false;
+      $('otherTarget').blur();      // let go first, or it keeps the last target's word
+      renderHome();
+      /* Inside the tap, or an iPhone will not raise the keyboard. */
+      if (t.dataset.target === 'other') $('otherTarget').focus();
+      return;
+    }
+    const od = e.target.closest('[data-odour]');
+    if (od) { odourTyping = false; db.kv.set(`odour.${S.target.id}`, od.dataset.odour); return renderHome(); }
+    if (e.target.closest('[data-odour-other]')) {
+      odourTyping = true;
+      if (ODOURS[S.target.id]?.list.includes(S.odour)) db.kv.set(`odour.${S.target.id}`, '');
+      renderHome();
+      return $('otherTarget').focus();
+    }
     const lv = e.target.closest('[data-trail-level]');
     if (lv) { db.kv.set('lastLevel', lv.dataset.trailLevel); return renderHome(); }
     const l = e.target.closest('[data-layer]');
@@ -4247,7 +4324,9 @@ function wire() {
   $('ageMins').addEventListener('keydown', (e) => { if (e.key === 'Enter') setCustomAge(); });
   $('drawUndo').addEventListener('click', () => { draw.pts.pop(); paintDraw(); });
   $('drawCancel').addEventListener('click', () => { closeDraw(); clearMap(); go('scrHome'); });
-  $('drawSave').addEventListener('click', saveDrawPlan);
+  $('drawSave').addEventListener('click', () => { if (draw.pts.length > 1) drawStep('age'); });
+  $('drawConfirm').addEventListener('click', saveDrawPlan);
+  $('drawBack').addEventListener('click', () => drawStep('map'));
 
   // The countdown, on the handler's phone
   $('btnOff').addEventListener('click', () => {
