@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mix, luminance, plumePalette, stepPalette, isHex, COLOUR_PRESETS } from '../public/colours.js';
+import { mix, luminance, plumePalette, stepPalette, isHex, COLOUR_PRESETS, rgba, windPalette } from '../public/colours.js';
 
 let pass = 0;
 const t = (name, fn) => { fn(); pass++; console.log(`  ok  ${name}`); };
@@ -33,6 +33,14 @@ t('plume: darker at the edge, lighter against the line, from any base', () => {
 t('presets are valid hex and unique', () => {
   assert.ok(COLOUR_PRESETS.every(c => isHex(c.hex)));
   assert.equal(new Set(COLOUR_PRESETS.map(c => c.hex)).size, COLOUR_PRESETS.length);
+});
+
+t('wind: a wisp runs from nothing at the tail to the full colour at the head', () => {
+  assert.equal(rgba('#0B1630', 0.5), 'rgba(11, 22, 48, 0.5)');
+  const w = windPalette('#FFFFFF');
+  assert.equal(w.tail, 'rgba(255, 255, 255, 0)');
+  assert.equal(w.head, 'rgba(255, 255, 255, 1)');
+  assert.equal(windPalette('nope').base, '#DCE9FF');
 });
 
 console.log(`\n${pass} passed total\n`);

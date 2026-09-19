@@ -11,7 +11,7 @@ import {
 } from './geo.js';
 import { stepPoints } from './geo.js';
 import { handlerStats } from './store.js';
-import { plumePalette, stepPalette, COLOUR_PRESETS, isHex } from './colours.js';
+import { plumePalette, stepPalette, windPalette, COLOUR_PRESETS, isHex } from './colours.js';
 import { FLAT, buildTerrain, stability, regime, flowAt, normOf } from './field.js';
 import { predictedOffsets, ScentSim, driftFrom, stepByFlow, AIRBORNE } from './sim.js';
 import { encodeTrail, decodeTrail, cardUrl, cardFromText } from './card.js';
@@ -26,11 +26,11 @@ import { createStore, migrateV1, TARGETS, targetById, verbs, uid,
          dogStats, ageBand, AGE_BANDS, LEVELS, levelById, dogAge } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-19g';
+const BUILD = '2026-09-19h';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true,
-  distUnits: 'metric', tempUnits: 'c', coordFormat: 'dd', theme: 'system', mapStyle: 'satellite', plumeColor: '#F5D14A', stepColor: '#0B1630', mbToken: (window.MB_TOKEN || '') };
+  distUnits: 'metric', tempUnits: 'c', coordFormat: 'dd', theme: 'system', mapStyle: 'satellite', plumeColor: '#F5D14A', stepColor: '#0B1630', windColor: '#DCE9FF', mbToken: (window.MB_TOKEN || '') };
 const loadJson = (k, f) => { try { return JSON.parse(localStorage.getItem(k)) ?? f; } catch { return f; } };
 let settings = { ...DEFAULTS, ...loadJson('tc.settings', {}) };
 /* One "imperial" switch became three separate choices. A phone that already
@@ -313,7 +313,7 @@ function addOverlays() {
     try { map.setConfigProperty('basemap', 'showPointOfInterestLabels', false); } catch { /* not Standard */ }
   }
   for (const id of Object.keys(srcData)) {
-    if (!map.getSource(id)) map.addSource(id, { type: 'geojson', data: srcData[id] });
+    if (!map.getSource(id)) map.addSource(id, { type: 'geojson', data: srcData[id], ...(id === 'air' ? { lineMetrics: true } : {}) });   // metrics: the wind wisps fade along their length
   }
   const add = (spec) => { if (!map.getLayer(spec.id)) map.addLayer(spec); };
 
@@ -329,12 +329,23 @@ function addOverlays() {
      moved by the SAME flow field the plume is built from, so where the
      ground turns the wind you can watch it turn. Faint on purpose: this is
      the condition the work is happening in, not the work. */
+  /* Each parcel is a wisp: nothing at its tail, brightest at its head (a
+     gradient along the line), thin and soft, longer and wider in stronger
+     wind, over a faint dark under-glow so it holds on bright grass as well
+     as in dark woods. Its colour is the handler's (applyMapColours). */
+  const wispW = (k) => ['*', k, ['+', 0.55, ['*', ['coalesce', ['get', 'w'], 0.5], 0.9]]];
+  add({ id: 'air-shade', type: 'line', source: 'air',
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: { 'line-width': ['interpolate', ['linear'], ['zoom'], 13, wispW(1.8), 17, wispW(2.6), 19, wispW(3.6)],
+                 'line-opacity': ['*', ['get', 'a'], 0.14],
+                 'line-blur': 2,
+                 'line-gradient': ['interpolate', ['linear'], ['line-progress'], 0, 'rgba(11, 22, 48, 0)', 1, 'rgba(11, 22, 48, 1)'] } });
   add({ id: 'air-streaks', type: 'line', source: 'air',
-        layout: { 'line-cap': 'round' },
-        paint: { 'line-color': '#FFFFFF',
-                 'line-width': ['interpolate', ['linear'], ['zoom'], 13, 0.7, 17, 1.1, 19, 1.7],
-                 'line-opacity': ['*', ['get', 'a'], 0.34],
-                 'line-blur': 0.5 } });
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: { 'line-width': ['interpolate', ['linear'], ['zoom'], 13, wispW(0.45), 17, wispW(0.7), 19, wispW(1.1)],
+                 'line-opacity': ['*', ['get', 'a'], 0.5],
+                 'line-blur': 0.6,
+                 'line-gradient': ['interpolate', ['linear'], ['line-progress'], 0, 'rgba(220, 233, 255, 0)', 0.55, 'rgba(220, 233, 255, 0.5)', 1, 'rgba(220, 233, 255, 1)'] } });
 
   /* The air itself, drawn as scent rather than as a stain.
 
@@ -650,8 +661,12 @@ function applyMapColours() {
   if (map.getLayer('scent-glow')) map.setPaintProperty('scent-glow', 'circle-color', p.base);
   if (map.getLayer('scent-dots')) map.setPaintProperty('scent-dots', 'circle-color',
     ['interpolate', ['linear'], ['get', 's'], 0, p.dark, 0.45, p.base, 1, p.light]);
+  const wc = windPalette(settings.windColor);
+  if (map.getLayer('air-streaks')) map.setPaintProperty('air-streaks', 'line-gradient',
+    ['interpolate', ['linear'], ['line-progress'], 0, wc.tail, 0.55, wc.mid, 1, wc.head]);
   stepsPaint();
 }
+const WIND_PRESETS = [{ name: 'Air', hex: '#DCE9FF' }, ...COLOUR_PRESETS.filter(c => c.hex !== '#FFFFFF')];
 function paintColourRows() {
   const row = (id, key, presets) => {
     const cur = String(settings[key]).toUpperCase();
@@ -662,6 +677,7 @@ function paintColourRows() {
   };
   row('plumeRow', 'plumeColor', COLOUR_PRESETS);
   row('stepRow', 'stepColor', COLOUR_PRESETS.filter(c => c.hex !== '#FFFFFF'));   // the dog's track is white
+  row('windRow', 'windColor', WIND_PRESETS);
 }
 function setColour(key, hex) {
   if (!isHex(hex)) return;
@@ -1261,7 +1277,8 @@ function plumeStop() {
 /* Few, short and faint. This is the CONDITION the work is happening in, not
    the work: it has to be readable at a glance and then forgettable, or it
    competes with the plume for the one thing the screen is actually for. */
-const AIR_N = 90, AIR_LIFE = 20, AIR_STEP = 1.1, AIR_TAIL = 5;
+const AIR_N = 60, AIR_LIFE = 20, AIR_STEP = 0.35, AIR_TAIL = 14, AIR_FRAME_MS = 32;
+const AIR_FULL_MS = 8;   // wind speed at which a wisp is at its longest and brightest
 const air = { on: false, wx: null, st: null, T: FLAT, pts: [], raf: 0, last: 0 };
 
 function airStart(wx, T) {
@@ -1455,6 +1472,8 @@ function airSpawn(fresh = false) {
 
 function airFrame(now) {
   if (!air.on || !map) return;
+  // A fixed pace, not every frame: smoother on a phone and kinder to it.
+  if (now - air.last < AIR_FRAME_MS) { air.raf = requestAnimationFrame(airFrame); return; }
   const dt = Math.min(0.1, (now - air.last) / 1000);
   air.last = now;
   const c = map.getCanvas();
@@ -1479,6 +1498,7 @@ function airFrame(now) {
        north while the plume ran south. */
     const next = stepByFlow(p, f, dt, 1);
     p.lat = next.lat; p.lon = next.lon;
+    p.w = Math.min(1, Math.hypot(f.u, f.v) / AIR_FULL_MS);   // how hard it blows here, 0..1
 
     p.since += dt;
     if (p.since >= AIR_STEP || !p.tail.length) {
@@ -1492,7 +1512,7 @@ function airFrame(now) {
     const t = p.age / AIR_LIFE;
     feats.push({
       type: 'Feature',
-      properties: { a: Math.min(1, Math.min(t * 5, (1 - t) * 4)) },
+      properties: { a: Math.min(1, Math.min(t * 5, (1 - t) * 4)) * (0.55 + 0.45 * (p.w ?? 0.5)), w: p.w ?? 0.5 },
       // The head is where it is NOW, not where it was at the last sample.
       geometry: { type: 'LineString', coordinates: [...p.tail, [p.lon, p.lat]] },
     });
@@ -4404,7 +4424,7 @@ function boot() {
 }
 
 /* The colour swatches in Settings: a tap on a preset, or the picker at the end. */
-for (const [id, key] of [['plumeRow', 'plumeColor'], ['stepRow', 'stepColor']]) {
+for (const [id, key] of [['plumeRow', 'plumeColor'], ['stepRow', 'stepColor'], ['windRow', 'windColor']]) {
   $(id).addEventListener('click', (e) => { const b = e.target.closest('[data-colour]'); if (b) setColour(key, b.dataset.colour); });
   $(id).addEventListener('input', (e) => { if (e.target.type === 'color') setColour(key, e.target.value); });
 }
