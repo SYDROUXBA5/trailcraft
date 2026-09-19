@@ -38,7 +38,7 @@ export const verbs = (t) => t.kind === 'person'
 /* ── Store ──────────────────────────────────────────────────────────
    Tables: handlers [{id,name,photo}], dogs [{id,handlerId,name,photo,level,lineM}],
    layers [{id,name,photo}] (shared across handlers), sessions (newest first).
-   kv: lastHandlerId, lastDogId, lastLayerId, lastTargetId, tutorialDone. */
+   kv: lastHandlerId, lastDogId, lastLayerId, lastTargetId, tutorialDone, layerOnly. */
 
 const K = {
   handlers: 'tc.handlers', dogs: 'tc.dogs', layers: 'tc.layers',
@@ -184,6 +184,7 @@ export function createStore(backend) {
         level: levelById(kv.get('lastLevel') ?? dog?.level),
         sessions: store.sessions(),
         tutorialDone: !!kv.get('tutorialDone'),
+        layerOnly: !!kv.get('layerOnly'),      // here to lay trails for someone else's dog
       };
     },
 
