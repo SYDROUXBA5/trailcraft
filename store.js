@@ -336,6 +336,45 @@ export function ageBand(mins) {
 /** Everything worth showing about one dog's work. `sessions` is newest-first,
     as the store keeps them. Only RUN sessions count — a trail that was laid
     and never worked says nothing about the dog. */
+/** Everything the phone knows about a handler's work: the runs they handled
+    (a session with a track), the trails they walked themselves (laid with no
+    other layer), time on the trail, the age of the trails at the start, the
+    dogs they ran, and how far the tracks sat from the line. */
+export function handlerStats(handlerId, sessions) {
+  const all = (sessions || []).filter(s => s.handlerId === handlerId && s.data);
+  const runs = all.filter(s => s.data.track);
+  const laid = all.filter(s => s.data.trail && !s.layerId);
+  const out = {
+    runs: runs.length, laid: laid.length,
+    metres: 0, laidMetres: 0, seconds: 0, longest: 0,
+    firstAt: null, lastAt: null,
+    bands: { hot: 0, warm: 0, cold: 0 }, unknownAge: 0,
+    dogs: {}, assisted: 0, blind: 0, medOff: null,
+  };
+  for (const s of laid) out.laidMetres += pathLenOf(s.data.trail);
+  const offs = [];
+  for (const s of runs) {
+    const tr = s.data.track;
+    const len = pathLenOf(tr);
+    out.metres += len;
+    out.longest = Math.max(out.longest, len);
+    if (tr.length > 1 && Number.isFinite(tr[0].t) && Number.isFinite(tr[tr.length - 1].t)) {
+      out.seconds += Math.max(0, (tr[tr.length - 1].t - tr[0].t) / 1000);
+    }
+    const at = s.data.trackStarted ?? s.startedAt;
+    out.firstAt = out.firstAt == null ? at : Math.min(out.firstAt, at);
+    out.lastAt = out.lastAt == null ? at : Math.max(out.lastAt, at);
+    const band = ageBand(s.data.result?.ageMin);
+    if (band) out.bands[band.key]++; else out.unknownAge++;
+    if (s.dogId) out.dogs[s.dogId] = (out.dogs[s.dogId] || 0) + 1;
+    if (s.data.coach) { if (s.data.coach.assisted) out.assisted++; else out.blind++; }
+    const r = s.data.result;
+    if (r && Number.isFinite(r.medAbs)) offs.push(r.medAbs);
+  }
+  if (offs.length) { const a = [...offs].sort((x, y) => x - y); out.medOff = a[Math.floor(a.length / 2)]; }
+  return out;
+}
+
 export function dogStats(dogId, sessions, calibration = []) {
   const runs = (sessions || []).filter(s => s.dogId === dogId && s.data && s.data.track);
   const out = {
