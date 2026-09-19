@@ -25,7 +25,7 @@ import { createStore, migrateV1, TARGETS, targetById, verbs, uid,
          dogStats, ageBand, AGE_BANDS, LEVELS, levelById, dogAge } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-19c';
+const BUILD = '2026-09-19d';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true,
@@ -823,14 +823,13 @@ function openDogForm({ id = null, handlerId = null, returnTo = null, firstLaunch
   obDogSex = existing?.sex ?? null;
   $('obDogName').value = existing?.name ?? '';
   $('obDogBreed').value = existing?.breed ?? '';
-  $('obDogChip').value = existing?.chip ?? '';
   // A date input speaks ISO and nothing else, whatever the phone displays.
   $('obDogDob').value = existing?.dob ? new Date(existing.dob).toISOString().slice(0, 10) : '';
   $('obDogDob').max = new Date().toISOString().slice(0, 10);   // no dog is born tomorrow
-  $('obDogWeightUnit').textContent = imp() ? 'lb' : 'kg';
+  paintDogUnits();
   const shown = kgToShown(existing?.weightKg, imp());
   $('obDogWeight').value = shown ? shown.toFixed(1) : '';
-  $('obDogLine').value = existing?.lineM ?? 10;
+  $('obDogLine').value = lineShown(existing?.lineM ?? 10);
   paintDogSex();
   $('scrOnboardDog').querySelector('.label').textContent = firstLaunch ? 'Step 2 of 3' : 'Dog';
   $('scrOnboardDog').classList.toggle('first-launch', firstLaunch);
@@ -840,6 +839,30 @@ function openDogForm({ id = null, handlerId = null, returnTo = null, firstLaunch
   paintDogLevel();
   paintObAva('obDogAva', existing?.name);
   go('scrOnboardDog');
+}
+
+/* Units on the dog form itself: the same setting as in Settings, switchable
+   where the numbers are typed. What is already typed is converted, so a
+   number keeps its meaning when the unit under it changes. */
+const lineShown = (m) => imp() ? Math.round(m / 0.3048 * 2) / 2 : m;
+function paintDogUnits() {
+  const im = imp();
+  $('obDogUnits').querySelectorAll('[data-units]').forEach(b =>
+    b.classList.toggle('on', (b.dataset.units === 'imperial') === im));
+  $('obDogWeightUnit').textContent = im ? 'lb' : 'kg';
+  const ll = document.querySelector('label[for="obDogLine"]');
+  if (ll) ll.textContent = `Line length, ${im ? 'feet' : 'metres'}`;
+  $('obDogLine').max = im ? 130 : 40;
+}
+function setDogUnits(units) {
+  if (units === settings.distUnits) return;
+  const toImp = units === 'imperial';
+  const w = parseFloat(String($('obDogWeight').value).replace(',', '.'));
+  const l = parseFloat(String($('obDogLine').value).replace(',', '.'));
+  settings.distUnits = units; saveSettings();
+  if (Number.isFinite(w)) $('obDogWeight').value = (toImp ? w * 2.20462 : w / 2.20462).toFixed(1);
+  if (Number.isFinite(l)) $('obDogLine').value = String(Math.round((toImp ? l / 0.3048 : l * 0.3048) * 2) / 2);
+  paintDogUnits();
 }
 
 function paintDogSex() {
@@ -860,7 +883,8 @@ function paintObAva(id, name) {
 function saveDogForm() {
   const name = $('obDogName').value.trim();
   if (!name) return toast("The dog needs a name");
-  const lineM = Math.max(0, parseFloat(String($('obDogLine').value).replace(',', '.')) || 0);
+  const lineTyped = Math.max(0, parseFloat(String($('obDogLine').value).replace(',', '.')) || 0);
+  const lineM = Math.round((imp() ? lineTyped * 0.3048 : lineTyped) * 10) / 10;   // stored in metres whatever was typed
   const id = obMode.id ?? uid();
   const dobStr = $('obDogDob').value;
   const wShown = parseFloat(String($('obDogWeight').value).replace(',', '.'));
@@ -873,7 +897,7 @@ function saveDogForm() {
     sex: obDogSex,
     dob: dobStr ? Date.parse(`${dobStr}T12:00:00`) : null,
     weightKg,
-    chip: $('obDogChip').value.trim() || null,
+    chip: (obMode.id ? db.dogs.byId(obMode.id)?.chip : null) ?? null,   // no longer asked for; kept if it was ever entered
   });
   db.kv.set('lastDogId', id);
   snap();
@@ -3629,8 +3653,6 @@ function renderSettings() {
   paintAppearance();
   renderAccount();
   $('accCap').value = settings.accCap; $('accCapVal').textContent = settings.accCap;
-  const ll = document.querySelector('label[for="obDogLine"]');
-  if (ll) ll.textContent = `Line length, ${imp() ? 'feet' : 'metres'}`;
   $('stillCap').value = settings.stillCap; $('stillCapVal').textContent = settings.stillCap;
   $('mbToken').value = settings.mbToken;
   $('gpsReport').hidden = true;
@@ -3844,6 +3866,7 @@ function wire() {
   $('obHandlerPhoto2').addEventListener('click', () => photoTo('obHandlerAva'));
   $('obHandlerNext').addEventListener('click', () => saveHandlerForm());
   $('obHandlerLayOnly').addEventListener('click', () => saveHandlerForm(true));
+  $('obDogUnits').addEventListener('click', (e) => { const b = e.target.closest('[data-units]'); if (b) setDogUnits(b.dataset.units); });
   $('obDogPhoto').addEventListener('click', () => photoTo('obDogAva'));
   $('obDogPhoto2').addEventListener('click', () => photoTo('obDogAva'));
   $('obDogSex').addEventListener('click', (e) => {

@@ -140,7 +140,7 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.75; cursor: p
 .chip:active { transform: scale(0.96); }
 .chip.selected { background: var(--moss); border-color: var(--moss); color: #fff; }
 .chip.selected i { color: rgba(255, 255, 255, 0.75); }
-.chip.plain { padding: 8px 18px; display: inline-flex; flex-direction: column; align-items: flex-start; gap: 0; }
+.chip.plain { padding: 8px 18px; display: inline-flex; flex-direction: column; align-items: center; text-align: center; gap: 0; }
 .chip.plain b { font-family: var(--display); font-weight: 600; font-size: 16px; }
 .chip.plain i { font-style: normal; font-size: 11px; font-weight: 500; color: var(--muted); }
 .chip.ghost { border-style: dashed; background: transparent; padding: 8px 18px; color: var(--muted); }
@@ -555,6 +555,13 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.75; cursor: p
 .wx-sub i { font-style: normal; font-size: 13px; font-weight: 600; opacity: 0.8; }
 .wx-note { pointer-events: auto; cursor: pointer; }   /* tap to ask again */
 .wx-note i { font-style: normal; font-size: 10.5px; font-weight: 400; opacity: 0.55; white-space: nowrap; }
+
+/* ── The units toggle on the dog form, and the optional tag ─────────── */
+.unit-toggle { display: inline-flex; align-self: flex-start; gap: 2px; padding: 3px; margin: 2px 0 14px; border-radius: 999px; background: var(--card); border: 1px solid var(--border); }
+.unit-toggle button { border: 0; background: transparent; padding: 8px 14px; border-radius: 999px; font: 600 13px var(--body); color: var(--muted); cursor: pointer; transition: transform 120ms var(--ease-out); }
+.unit-toggle button:active { transform: scale(0.96); }
+.unit-toggle button.on { background: var(--moss); color: #FFFFFF; }
+.field-label .opt { font-style: normal; font-weight: 500; opacity: 0.6; margin-left: 6px; }
 
 /* ── Map colours (Settings) ───────────────────────────────────────────
    Swatches for the scent and the footprints; the last one is any colour. */
