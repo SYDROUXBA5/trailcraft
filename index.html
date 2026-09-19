@@ -175,6 +175,10 @@
     <span class="label">Step 2 of 3</span>
     <h1 class="display" id="obDogTitle">Your dog</h1>
     <p class="body muted" id="obDogSub">You can add more dogs later from the home screen.</p>
+    <div class="unit-toggle" id="obDogUnits" role="group" aria-label="Units">
+      <button type="button" data-units="metric">Metric · kg, m</button>
+      <button type="button" data-units="imperial">Imperial · lb, ft</button>
+    </div>
     <div class="photo-row">
       <button class="photo-pick" id="obDogPhoto" aria-label="Add a photo"><span class="ava big" id="obDogAva"></span></button>
       <button class="btn ghost small" id="obDogPhoto2">Add a photo</button>
@@ -190,15 +194,12 @@
       <button type="button" class="age-chip" data-sex="Female">Female</button>
     </div>
 
-    <label class="field-label" for="obDogDob" style="margin-top:20px">Date of birth</label>
+    <label class="field-label" for="obDogDob" style="margin-top:20px">Date of birth <i class="opt">optional</i></label>
     <input id="obDogDob" type="date">
     <p class="body muted small">The age looks after itself once this is in.</p>
 
-    <label class="field-label" for="obDogWeight">Weight, <b id="obDogWeightUnit">kg</b></label>
+    <label class="field-label" for="obDogWeight">Weight, <b id="obDogWeightUnit">kg</b> <i class="opt">optional</i></label>
     <input id="obDogWeight" type="number" inputmode="decimal" step="0.1" min="0" max="200">
-
-    <label class="field-label" for="obDogChip">Microchip</label>
-    <input id="obDogChip" type="text" inputmode="numeric" placeholder="Optional">
 
     <span class="label" style="margin-top:20px">Trail level</span>
     <div class="radio-cards" id="obDogLevel">
