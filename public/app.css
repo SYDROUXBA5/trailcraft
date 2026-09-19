@@ -579,6 +579,60 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.75; cursor: p
 .swatch.custom.selected { background: var(--c); }
 .swatch.custom input { position: absolute; inset: -8px; width: calc(100% + 16px); height: calc(100% + 16px); opacity: 0; cursor: pointer; }
 
+/* ── The map gestures tutorial ─────────────────────────────────────────
+   A card over the map with a small stage: a grid of ground and one or two
+   fingertips acting out the gesture. Each stage is a CSS animation. */
+.map-tut { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; padding: 20px; background: rgba(11, 22, 48, 0.55); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+.map-tut[hidden] { display: none; }
+.map-tut-card { width: min(100%, 360px); background: var(--card); color: var(--ink); border-radius: 24px; padding: 16px 16px 14px; box-shadow: 0 24px 60px -20px rgba(0, 0, 0, 0.6); text-align: center; }
+.map-tut-card > b { display: block; font-family: var(--display); font-size: 20px; font-weight: 700; margin-top: 12px; }
+.map-tut-card > p { margin: 6px 4px 12px; color: var(--muted); font-size: 14.5px; line-height: 1.45; min-height: 42px; }
+.map-tut .tut-dots { justify-content: center; margin-bottom: 14px; }
+.map-tut .tut-dot { background: var(--border); }
+.map-tut .tut-dot.on { background: var(--moss); width: 20px; }
+.gest { position: relative; height: 176px; border-radius: 18px; overflow: hidden; perspective: 420px; background: linear-gradient(180deg, #14284B, #0B1630); }
+.stage { position: absolute; inset: 0; display: none; }
+.stage.on { display: block; }
+.ground {
+  position: absolute; left: 50%; top: 50%; width: 128px; height: 92px; margin: -46px 0 0 -64px; border-radius: 10px;
+  background:
+    repeating-linear-gradient(0deg, rgba(241, 210, 122, 0.3) 0 1px, transparent 1px 16px),
+    repeating-linear-gradient(90deg, rgba(241, 210, 122, 0.3) 0 1px, transparent 1px 16px),
+    rgba(53, 97, 168, 0.35);
+  border: 1px solid rgba(241, 210, 122, 0.55);
+}
+.finger {
+  position: absolute; left: 50%; top: 50%; width: 22px; height: 22px; margin: -11px 0 0 -11px; border-radius: 50%;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 0 0 7px rgba(255, 255, 255, 0.16), 0 4px 10px rgba(0, 0, 0, 0.35);
+}
+/* move: one finger, the ground follows */
+.stage[data-g="pan"] .f1 { animation: gPan 2.6s ease-in-out infinite; }
+.stage[data-g="pan"] .ground { animation: gPanGround 2.6s ease-in-out infinite; }
+@keyframes gPan { 0%, 100% { transform: translate(-34px, 8px); } 50% { transform: translate(34px, -8px); } }
+@keyframes gPanGround { 0%, 100% { transform: translate(-30px, 8px); } 50% { transform: translate(30px, -8px); } }
+/* zoom: two fingers apart, the ground grows */
+.stage[data-g="zoom"] .f1 { animation: gZoomA 2.6s ease-in-out infinite; }
+.stage[data-g="zoom"] .f2 { animation: gZoomB 2.6s ease-in-out infinite; }
+.stage[data-g="zoom"] .ground { animation: gZoomGround 2.6s ease-in-out infinite; }
+@keyframes gZoomA { 0%, 100% { transform: translate(-12px, 12px); } 50% { transform: translate(-40px, 40px); } }
+@keyframes gZoomB { 0%, 100% { transform: translate(12px, -12px); } 50% { transform: translate(40px, -40px); } }
+@keyframes gZoomGround { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.35); } }
+/* tilt: two fingers up together, the ground leans back into 3D */
+.stage[data-g="tilt"] .f1 { animation: gTiltA 2.8s ease-in-out infinite; }
+.stage[data-g="tilt"] .f2 { animation: gTiltB 2.8s ease-in-out infinite; }
+.stage[data-g="tilt"] .ground { animation: gTiltGround 2.8s ease-in-out infinite; }
+@keyframes gTiltA { 0%, 100% { transform: translate(-16px, 26px); } 50% { transform: translate(-16px, -26px); } }
+@keyframes gTiltB { 0%, 100% { transform: translate(16px, 26px); } 50% { transform: translate(16px, -26px); } }
+@keyframes gTiltGround { 0%, 100% { transform: rotateX(0deg); } 50% { transform: rotateX(58deg); } }
+/* turn: two fingers orbit, the ground turns with them */
+.stage[data-g="turn"] .f1 { animation: gTurnA 3.4s linear infinite; }
+.stage[data-g="turn"] .f2 { animation: gTurnB 3.4s linear infinite; }
+.stage[data-g="turn"] .ground { animation: gTurnGround 3.4s linear infinite; }
+@keyframes gTurnA { from { transform: rotate(0deg) translateX(34px); } to { transform: rotate(360deg) translateX(34px); } }
+@keyframes gTurnB { from { transform: rotate(180deg) translateX(34px); } to { transform: rotate(540deg) translateX(34px); } }
+@keyframes gTurnGround { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
 /* ── The map style button ─────────────────────────────────────────────
    Bottom right, above the screen's controls (--bar-gap, measured), in the
    same glass as the panel opposite. The choices unfold above it. */

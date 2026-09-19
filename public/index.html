@@ -142,6 +142,25 @@
     d="M12 2v3M12 19v3M2 12h3M19 12h3M12 7.5a4.5 4.5 0 100 9 4.5 4.5 0 000-9z"
     fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
 </button>
+<!-- How to move a 3D map with two fingers: shown once, the first time the
+     map appears, and again from Settings → Help. Pure CSS animation. -->
+<div class="map-tut" id="mapTut" hidden role="dialog" aria-modal="true" aria-labelledby="mapTutTitle">
+  <div class="map-tut-card">
+    <div class="gest" id="mapTutGest">
+      <div class="stage" data-g="pan"><div class="ground"></div><span class="finger f1"></span></div>
+      <div class="stage" data-g="zoom"><div class="ground"></div><span class="finger f1"></span><span class="finger f2"></span></div>
+      <div class="stage" data-g="tilt"><div class="ground"></div><span class="finger f1"></span><span class="finger f2"></span></div>
+      <div class="stage" data-g="turn"><div class="ground"></div><span class="finger f1"></span><span class="finger f2"></span></div>
+    </div>
+    <b id="mapTutTitle"></b>
+    <p id="mapTutBody"></p>
+    <div class="tut-dots" id="mapTutDots"></div>
+    <div class="row-gap">
+      <button type="button" class="btn ghost" id="mapTutSkip">Skip</button>
+      <button type="button" class="btn moss" id="mapTutNext">Next</button>
+    </div>
+  </div>
+</div>
 <button type="button" class="map-style" id="btnMapStyle" hidden aria-label="Map style" aria-expanded="false">
   <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
     <path d="M12 3.6 3.6 8.4 12 13.2l8.4-4.8z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
@@ -705,6 +724,7 @@
 
     <span class="label">Help</span>
     <button class="btn card-btn" id="btnTutorial">Show the tutorial again</button>
+    <button class="btn card-btn" id="btnMapTut">Show the map gestures</button>
     <button class="btn card-btn" id="btnGpsCheck">Check GPS on this phone</button>
     <p class="body small" id="gpsReport" hidden></p>
     <details class="advanced">

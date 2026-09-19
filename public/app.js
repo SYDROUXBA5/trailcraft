@@ -25,7 +25,7 @@ import { createStore, migrateV1, TARGETS, targetById, verbs, uid,
          dogStats, ageBand, AGE_BANDS, LEVELS, levelById, dogAge } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-19e';
+const BUILD = '2026-09-19f';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true,
@@ -175,6 +175,7 @@ function go(id, { back = false } = {}) {
     weatherPanelFor(run.session ?? pendingSession);
     mapChromeShow(true);
     stepsRun(true);
+    if (!db.kv.get('mapTutDone') && !mapTut.open) openMapTut();
   } else {
     // Nothing on the map is worth animating while a paper screen covers it.
     airStop();
@@ -185,6 +186,36 @@ function go(id, { back = false } = {}) {
 }
 
 /* ── Map ──────────────────────────────────────────────────────────── */
+
+/* ── How to move the map ───────────────────────────────────────────────
+   The map is 3D, and a phone gives no hint of that. Four gestures, acted
+   out, the first time the map appears; again from Settings → Help. */
+const MAP_TUT = [
+  { g: 'pan', title: 'Move around', body: 'Drag with one finger.' },
+  { g: 'zoom', title: 'Zoom', body: 'Pinch with two fingers. Double-tap to zoom in a step.' },
+  { g: 'tilt', title: 'Tilt the ground', body: 'Drag up or down with two fingers. The map is 3D \u2014 tilt it to see the slopes scent runs down.' },
+  { g: 'turn', title: 'Turn the map', body: 'Twist with two fingers. The GPS button at the top right brings you back onto yourself.' },
+];
+const mapTut = { i: 0, open: false };
+function openMapTut() {
+  mapTut.i = 0; mapTut.open = true;
+  paintMapTut();
+  $('mapTut').hidden = false;
+}
+function paintMapTut() {
+  const c = MAP_TUT[mapTut.i], last = mapTut.i === MAP_TUT.length - 1;
+  $('mapTutGest').querySelectorAll('.stage').forEach(s => s.classList.toggle('on', s.dataset.g === c.g));
+  $('mapTutTitle').textContent = c.title;
+  $('mapTutBody').textContent = c.body;
+  $('mapTutDots').innerHTML = MAP_TUT.map((_, k) => `<span class="tut-dot${k === mapTut.i ? ' on' : ''}"></span>`).join('');
+  $('mapTutNext').textContent = last ? 'Got it' : 'Next';
+  $('mapTutSkip').hidden = last;
+}
+function closeMapTut() {
+  $('mapTut').hidden = true;
+  mapTut.open = false;
+  db.kv.set('mapTutDone', true);
+}
 
 /* ── The map style ────────────────────────────────────────────────────
    One button, bottom right, sitting just above whatever controls the
@@ -4169,6 +4200,9 @@ function wire() {
   $('btnSetDone').addEventListener('click', () => go('scrHome'));
   $('btnAllSessions').addEventListener('click', () => { renderSessions(); go('scrSessions'); });
   $('btnTutorial').addEventListener('click', () => openTutorial(true));
+  $('btnMapTut').addEventListener('click', openMapTut);
+  $('mapTutNext').addEventListener('click', () => { if (mapTut.i >= MAP_TUT.length - 1) closeMapTut(); else { mapTut.i++; paintMapTut(); } });
+  $('mapTutSkip').addEventListener('click', closeMapTut);
   $('btnGpsCheck').addEventListener('click', gpsCheck);
   $('scrSettings').addEventListener('click', (e) => {
     const eh = e.target.closest('[data-edit-handler]');
