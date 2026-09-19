@@ -59,3 +59,16 @@ export function stepPalette(base) {
     haloLitWidth: 2.4,
   };
 }
+
+/** A hex colour with an alpha, as CSS. */
+export function rgba(hex, a) {
+  const [r, g, b] = hexToRgb(isHex(hex) ? hex : '#FFFFFF');
+  return `rgba(${r}, ${g}, ${b}, ${a})`;
+}
+
+/** The wind: nothing at the tail of a wisp, full at its head, in the
+    chosen colour. Pale and cool by default, so it reads as air. */
+export function windPalette(base) {
+  if (!isHex(base)) base = '#DCE9FF';
+  return { base, tail: rgba(base, 0), mid: rgba(base, 0.55), head: rgba(base, 1) };
+}
