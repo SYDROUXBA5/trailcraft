@@ -11,7 +11,7 @@ import {
 } from './geo.js';
 import { stepPoints } from './geo.js';
 import { handlerStats } from './store.js';
-import { plumePalette, stepPalette, windPalette, trackPalette, COLOUR_PRESETS, isHex } from './colours.js';
+import { plumePalette, stepPalette, windPalette, trackPalette, COLOUR_PRESETS, isHex, mix } from './colours.js';
 import { FLAT, buildTerrain, stability, regime, flowAt, normOf } from './field.js';
 import { predictedOffsets, ScentSim, driftFrom, stepByFlow, AIRBORNE } from './sim.js';
 import { encodeTrail, decodeTrail, cardUrl, cardFromText } from './card.js';
@@ -29,7 +29,7 @@ import { createStore, migrateV1, TARGETS, ODOURS, targetById, targetText, verbs,
          dogStats, ageBand, AGE_BANDS, LEVELS, levelById, dogAge } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-19n';
+const BUILD = '2026-09-19o';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true,
@@ -264,7 +264,7 @@ let map, mapReady = false;
 let GL = mapboxgl;   // every control/bounds must come from the SAME library
 const srcData = { runner: EMPTY, steps: EMPTY, dog: EMPTY, paws: EMPTY, wps: EMPTY, drift: EMPTY, start: EMPTY, hides: EMPTY, contam: EMPTY,
                   routeDone: EMPTY, routeAhead: EMPTY, puck: EMPTY, scent: EMPTY, wind: EMPTY,
-                  flow: EMPTY, flowHead: EMPTY, air: EMPTY, acc: EMPTY };
+                  flow: EMPTY, flowPulse: EMPTY, air: EMPTY, acc: EMPTY };
 
 const SAT_STYLE = 'mapbox://styles/mapbox/standard-satellite';
 /* Satellite for the field, terrain for the contours and paths, streets for
@@ -374,17 +374,22 @@ function addOverlays() {
                  'circle-opacity': ['+', 0.25, ['*', ['get', 's'], 0.7]],
                  'circle-blur': 0.18 } });
 
-  /* The flow itself: short arcs traced through the SAME drift the parcels
+  /* The flow itself: a few arrows traced through the SAME drift the parcels
      follow, so they are the model's streamlines rather than a decorative
-     arrow pointing whichever way the forecast says. */
-  add({ id: 'flow-casing', type: 'line', source: 'flow',
-        layout: { 'line-cap': 'round', 'line-join': 'round' },
-        paint: { 'line-color': '#0B1630', 'line-width': 5, 'line-opacity': 0.35, 'line-blur': 1.5 } });
-  add({ id: 'flow-lines', type: 'line', source: 'flow',
-        layout: { 'line-cap': 'round', 'line-join': 'round' },
-        paint: { 'line-color': '#FFD36B', 'line-width': 2.4, 'line-opacity': 0.9 } });
-
-  // Contamination trails: same family as the laid trail, visibly not it.
+     arrow pointing whichever way the forecast says. Each is a brushed
+     shape, not a stroked line: strokes of the same outline laid over one
+     another, each starting further along, so it is a whisper where it
+     leaves the trail and solid at the head (paintFlow). Filled shapes
+     because a line cannot taper, and because a head drawn as part of the
+     shape can never sit crooked on its shaft. */
+  add({ id: 'flow-shadow', type: 'fill', source: 'flow',
+        paint: { 'fill-color': '#050B1A', 'fill-opacity': 0.26, 'fill-antialias': true,
+                 'fill-translate': [1.2, 2], 'fill-translate-anchor': 'viewport' } });
+  add({ id: 'flow-fill', type: 'fill', source: 'flow',
+        paint: { 'fill-color': '#FFEDBE', 'fill-opacity': 0.4, 'fill-antialias': true } });
+  /* The light that runs along each one, tail to head, at the wind's pace. */
+  add({ id: 'flow-pulse', type: 'fill', source: 'flowPulse',
+        paint: { 'fill-color': '#FFFBEF', 'fill-opacity': ['get', 'o'], 'fill-antialias': true } });
   add({ id: 'contam-line', type: 'line', source: 'contam',
         layout: { 'line-cap': 'butt', 'line-join': 'round' },
         paint: { 'line-color': '#C8B8E8', 'line-width': 3.5, 'line-opacity': 0.9, 'line-dasharray': [1, 1.4] } });
@@ -486,13 +491,6 @@ function addOverlays() {
      way you are facing, which is the half of the question you are actually
      asking when you look down at a phone in a field. */
   if (!map.hasImage('puck')) map.addImage('puck', puckImage(), { pixelRatio: 2 });
-  if (!map.hasImage('flowhead')) map.addImage('flowhead', flowHeadImage(), { pixelRatio: 2 });
-  add({ id: 'flow-heads', type: 'symbol', source: 'flowHead',
-        layout: { 'icon-image': 'flowhead',
-                  'icon-size': ['interpolate', ['linear'], ['zoom'], 13, 0.22, 17, 0.36, 19, 0.5],
-                  'icon-allow-overlap': true, 'icon-ignore-placement': true,
-                  'icon-rotate': ['get', 'brg'], 'icon-rotation-alignment': 'map' },
-        paint: { 'icon-opacity': 0.8 } });
   /* The accuracy ring is drawn in METRES, not pixels, so it means something:
      it is the circle the phone says you are somewhere inside. A ring you can
      see is the difference between "the map is wrong" and "the fix is loose". */
@@ -526,20 +524,6 @@ function watchForBlankMap() {
 /** The heading arrow, drawn at load rather than fetched — one less file to
     ship, and it stays sharp on a retina screen. Points up; the layer spins
     it. A white collar keeps it readable on grass, tarmac and snow alike. */
-/** A small open arrowhead for the ends of the flow arcs. Points up; the
-    layer turns it to the direction the air is actually going. */
-function flowHeadImage() {
-  const S = 64, c = document.createElement('canvas');
-  c.width = c.height = S;
-  const g = c.getContext('2d');
-  g.strokeStyle = '#F7C65A';
-  g.lineWidth = 7; g.lineCap = 'round'; g.lineJoin = 'round';
-  g.beginPath();
-  g.moveTo(14, 40); g.lineTo(S / 2, 14); g.lineTo(S - 14, 40);
-  g.stroke();
-  return g.getImageData(0, 0, S, S);
-}
-
 /** A circle on the ground, in metres. */
 function circlePoly(centre, radiusM, n = 48) {
   if (!centre || !(radiusM > 0)) return EMPTY;
@@ -712,6 +696,7 @@ function applyMapColours() {
   if (map.getLayer('scent-glow')) map.setPaintProperty('scent-glow', 'circle-color', p.base);
   if (map.getLayer('scent-dots')) map.setPaintProperty('scent-dots', 'circle-color',
     ['interpolate', ['linear'], ['get', 's'], 0, p.dark, 0.45, p.base, 1, p.light]);
+  if (map.getLayer('flow-fill')) map.setPaintProperty('flow-fill', 'fill-color', mix(p.base, '#FFFFFF', 0.62));
   const wc = windPalette(settings.windColor);
   if (map.getLayer('air-streaks')) map.setPaintProperty('air-streaks', 'line-color', wc.base);
   /* Which drawing of the trail and of the dog's track is showing. */
@@ -1477,7 +1462,8 @@ function plumeStop() {
   plume.sim = null; plume.trail = null;
   setSrc('scent', EMPTY);
   setSrc('flow', EMPTY);
-  setSrc('flowHead', EMPTY);
+  setSrc('flowPulse', EMPTY);
+  flow.arcs = [];
   setSrc('drift', EMPTY);
 }
 /* ── The wind, over the whole map ─────────────────────────────────────
@@ -1810,6 +1796,7 @@ function tracerFrame(now) {
     });
   }
   setSrc('wind', { type: 'FeatureCollection', features: feats });
+  if (now - flow.last >= 32) { flow.last = now; paintFlowPulse(now); }
   windDots.raf = requestAnimationFrame(tracerFrame);
 }
 
@@ -1832,31 +1819,124 @@ function parcelWeight(s) {
   return Math.min(1, s.str / (1 + d / 22));
 }
 
-/** Streamlines: a handful of arcs traced through the very drift the parcels
-    are following, so they show what the air is doing HERE — bending with the
-    ground — rather than repeating the forecast's single wind direction. */
+/* ── Flow arrows ──────────────────────────────────────────────────────
+   A handful of arrows traced through the very drift the parcels are
+   following, so they show what the air is doing HERE — bending with the
+   ground, and only half as far over hard surface — rather than repeating
+   the forecast's one wind direction.
+
+   Drawn in screen pixels and built in metres: the map only fills shapes on
+   the ground, so each repaint asks how many metres a pixel is worth at this
+   zoom and sizes the brush to suit. Pinching stretches them with the map
+   for a moment, and the next repaint (a fraction of a second) sets them
+   right again. */
+const FLOW_SAMPLES = 16;
+const FLOW_STROKES = [0, 0.3, 0.55, 0.76];      // where each layer of the brush stroke begins
+const flow = { arcs: [], mpp: 1, last: 0 };
+
+const metresPerPixel = (lat) => (78271.517 * Math.cos((lat * Math.PI) / 180)) / 2 ** map.getZoom();
+const smooth = (x) => { const t = Math.max(0, Math.min(1, x)); return t * t * (3 - 2 * t); };
+
+/** A point and heading at share `t` (0…1) of an arc's length. */
+function alongArc(arc, t) {
+  const want = Math.max(0, Math.min(1, t)) * arc.len;
+  let i = 1;
+  while (i < arc.cum.length - 1 && arc.cum[i] < want) i++;
+  const a = arc.pts[i - 1], b = arc.pts[i], seg = arc.cum[i] - arc.cum[i - 1] || 1;
+  const f = (want - arc.cum[i - 1]) / seg;
+  return { lat: a.lat + (b.lat - a.lat) * f, lon: a.lon + (b.lon - a.lon) * f, brg: arc.brg[i - 1] + shortTurn(arc.brg[i - 1], arc.brg[Math.min(i, arc.brg.length - 1)]) * f };
+}
+const shortTurn = (from, to) => ((((to - from) % 360) + 540) % 360) - 180;
+
+/** The brush: a hair where it leaves the trail, full width where the head sits. */
+const flowWidth = (arc, t) => arc.px * (1.5 + 5.2 * t ** 1.25);
+
+/** One filled shape from `t0` to `t1` along an arc. `width(t)` is in pixels.
+    With `head`, it ends in a swept arrowhead instead of a point. */
+function flowShape(arc, t0, t1, width, head) {
+  const left = [], right = [];
+  const n = Math.max(4, Math.round((t1 - t0) * FLOW_SAMPLES));
+  for (let k = 0; k <= n; k++) {
+    const t = t0 + ((t1 - t0) * k) / n;
+    const c = alongArc(arc, t), half = (width(t) * flow.mpp) / 2;
+    const l = project(c, (c.brg + 270) % 360, half), r = project(c, (c.brg + 90) % 360, half);
+    left.push([l.lon, l.lat]); right.push([r.lon, r.lat]);
+  }
+  let cap = [];
+  if (head) {
+    const e = alongArc(arc, 1), u = arc.px * flow.mpp;
+    const at = (fwd, side) => { const q = project(project(e, e.brg, fwd * u), (e.brg + 90) % 360, side * u); return [q.lon, q.lat]; };
+    // Barbs swept back behind the shoulder and a long fine tip: a drawn arrow, not a triangle.
+    cap = [at(-5.5, -9.6), at(17.5, 0), at(-5.5, 9.6)];
+  }
+  const ring = [...left, ...cap, ...right.reverse()];
+  ring.push(ring[0]);
+  return { type: 'Polygon', coordinates: [ring] };
+}
+
 function paintFlow() {
   const line = plume.trail;
-  if (!line || line.length < 2 || !plume.wx) { setSrc('flow', EMPTY); setSrc('flowHead', EMPTY); return; }
+  if (!line || line.length < 2 || !plume.wx) { setSrc('flow', EMPTY); setSrc('flowPulse', EMPTY); flow.arcs = []; return; }
+  flow.mpp = metresPerPixel(line[0].lat);
   const N = Math.max(2, Math.min(6, Math.round(pathLen(line) / 140)));
-  const arcs = [], heads = [];
+  const arcs = [];
   for (let a = 0; a < N; a++) {
     const seed = line[Math.floor(((a + 0.5) / N) * (line.length - 1))];
     if (!seed) continue;
+    const reach = AIRBORNE * 0.55 * (seed.spread ?? 1);       // hard ground carries it half as far
     const pts = [];
-    for (let k = 0; k <= 6; k++) {
-      const d = driftFrom(plume.T, seed, (k / 6) * AIRBORNE * 0.55, plume.wx, plume.st, 3);
-      pts.push([d.lon, d.lat]);
+    for (let k = 0; k <= FLOW_SAMPLES; k++) {
+      pts.push(driftFrom(plume.T, seed, (k / FLOW_SAMPLES) * reach, plume.wx, plume.st, 3));
     }
-    if (pts.length < 2) continue;
-    arcs.push({ type: 'Feature', geometry: { type: 'LineString', coordinates: pts } });
-    const [p1, p0] = [pts[pts.length - 1], pts[pts.length - 2]];
-    heads.push({ type: 'Feature',
-      properties: { brg: bearing({ lat: p0[1], lon: p0[0] }, { lat: p1[1], lon: p1[0] }) },
-      geometry: { type: 'Point', coordinates: p1 } });
+    const cum = [0];
+    for (let k = 1; k < pts.length; k++) cum.push(cum[k - 1] + dist(pts[k - 1], pts[k]));
+    const len = cum[cum.length - 1], lenPx = len / flow.mpp;
+    /* Still air, or the whole trail a thumbnail: an arrow too short to have
+       a shaft is a blot, and says nothing the plume does not. */
+    if (!(lenPx > 34)) continue;
+    const brg = pts.slice(1).map((q, k) => bearing(pts[k], q));
+    // Longer arrows get a bolder brush, within reason, so they never look like wire.
+    arcs.push({ pts, cum, len, brg, px: Math.max(0.85, Math.min(1.7, lenPx / 150)), i: a });
   }
-  setSrc('flow', { type: 'FeatureCollection', features: arcs });
-  setSrc('flowHead', { type: 'FeatureCollection', features: heads });
+  flow.arcs = arcs;
+  const feats = [];
+  for (const arc of arcs) {
+    for (const t0 of FLOW_STROKES) {
+      // Each stroke opens from a point over the first fifth of its own length, inside the same outline.
+      const width = (t) => flowWidth(arc, t) * smooth((t - t0) / 0.2 + (t0 === 0 ? 0.25 : 0));
+      feats.push({ type: 'Feature', properties: {}, geometry: flowShape(arc, t0, 1, width, true) });
+    }
+  }
+  setSrc('flow', { type: 'FeatureCollection', features: feats });
+  if (!windDots.raf) paintFlowPulse(performance.now());     // no animation loop running: still show them lit once
+}
+
+/** The light along each arrow. One pass takes longer in a breeze than in a
+    wind, the arrows take turns rather than blinking together, and the head
+    catches the light as it arrives. */
+function paintFlowPulse(now) {
+  if (!flow.arcs.length) { setSrc('flowPulse', EMPTY); return; }
+  const U = plume.wx?.wind_speed ?? 0;
+  const period = Math.max(1.6, Math.min(4.2, 9 / Math.max(1, U)));      // seconds, tail to head
+  const feats = [];
+  for (const arc of flow.arcs) {
+    const ph = ((now / 1000 / period) + arc.i * 0.37) % 1.5;              // the last third is rest
+    if (ph < 1) {
+      const c = ph, L = 0.2;                                             // a lens a fifth of the arrow long
+      const t0 = Math.max(0, c - L), t1 = Math.min(1, c + L * 0.4);
+      if (t1 - t0 > 0.03) {
+        const width = (t) => flowWidth(arc, t) * 0.78 * Math.sin(Math.PI * Math.max(0, Math.min(1, (t - t0) / (t1 - t0)))) ** 0.7;
+        feats.push({ type: 'Feature', properties: { o: 0.9 * Math.sin(Math.PI * Math.min(1, ph * 1.05)) ** 0.6 },
+          geometry: flowShape(arc, t0, t1, width, false) });
+      }
+    }
+    const glow = Math.max(0, 1 - Math.abs(ph - 1.02) / 0.22);             // peaks as the light reaches the head
+    if (glow > 0.02) {
+      feats.push({ type: 'Feature', properties: { o: 0.75 * glow },
+        geometry: flowShape(arc, 0.9, 1, (t) => flowWidth(arc, t), true) });
+    }
+  }
+  setSrc('flowPulse', { type: 'FeatureCollection', features: feats });
 }
 
 function plumeFrame() {
