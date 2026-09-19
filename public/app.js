@@ -10,6 +10,7 @@ import {
   pathLen, cardinal, dist, dwellFold, bearing, project, fmtDist, fmtShort, fmtSpeed, fmtTemp, unitShort, fmtWeight, kgToShown, shownToKg, fmtCoord, scentField, plumePolygon, densify, timestamps, signedOffsets, meanSigned, sideOfDrift, sideAgreement, lineCorrect, departure, timestampsEndingAt, progressAlong, splitLine, smoothBearing, medianAbs, sideShares,
 } from './geo.js';
 import { stepPoints } from './geo.js';
+import { handlerStats } from './store.js';
 import { plumePalette, stepPalette, COLOUR_PRESETS, isHex } from './colours.js';
 import { FLAT, buildTerrain, stability, regime, flowAt, normOf } from './field.js';
 import { predictedOffsets, ScentSim, driftFrom, stepByFlow, AIRBORNE } from './sim.js';
@@ -25,7 +26,7 @@ import { createStore, migrateV1, TARGETS, targetById, verbs, uid,
          dogStats, ageBand, AGE_BANDS, LEVELS, levelById, dogAge } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-19f';
+const BUILD = '2026-09-19g';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true,
@@ -121,7 +122,7 @@ const avaHtml = (ent, cls = '') => {
 };
 
 /* ── Screens ──────────────────────────────────────────────────────── */
-const SCREENS = ['scrOnboardHandler', 'scrOnboardDog', 'scrTutorial', 'scrHome', 'scrLay',
+const SCREENS = ['scrOnboardHandler', 'scrOnboardDog', 'scrTutorial', 'scrHome', 'scrHandler', 'scrLay',
   'scrConfirm', 'scrShare', 'scrContam', 'scrPick', 'scrScan', 'scrRun', 'scrResult',
   'scrShowMap', 'scrSessions', 'scrSettings', 'scrDraw', 'scrCountdown', 'scrWalk', 'scrWait', 'scrDog',
   'scrSignIn', 'scrShareOut', 'scrShared', 'scrLive'];
@@ -139,7 +140,7 @@ const MAP_SCREENS = ['scrLay', 'scrConfirm', 'scrContam', 'scrRun', 'scrShowMap'
 const TRANSIENT = new Set(['scrLay', 'scrConfirm', 'scrContam', 'scrRun', 'scrWalk', 'scrDraw', 'scrScan',
   'scrLive', 'scrShowMap', 'scrOnboardHandler', 'scrOnboardDog', 'scrTutorial', 'scrSignIn']);
 const BACKABLE = ['scrShare', 'scrPick', 'scrScan', 'scrResult', 'scrSessions', 'scrSettings', 'scrDog',
-  'scrShareOut', 'scrShared', 'scrCountdown', 'scrWait', 'scrOnboardHandler', 'scrOnboardDog'];
+  'scrShareOut', 'scrShared', 'scrCountdown', 'scrWait', 'scrOnboardHandler', 'scrOnboardDog', 'scrHandler'];
 let currentScreen = null;
 const navStack = [];
 
@@ -169,6 +170,7 @@ function go(id, { back = false } = {}) {
   currentScreen = id;
   for (const s of SCREENS) $(s).hidden = s !== id;
   if (id === 'scrHome') renderHome();
+  if (id === 'scrHandler' && handlerCardId) paintHandlerCard(handlerCardId);   // fresh after an edit
   // The map only needs to be right when something transparent sits over it.
   if (MAP_SCREENS.includes(id)) {
     map?.resize();
@@ -3581,6 +3583,82 @@ async function handleCard(data) {
    out of step with the runs it describes. */
 let dogCardId = null;
 
+/* ── The handler card ─────────────────────────────────────────────────
+   Tap the handler already chosen on the home screen and this opens: who
+   they are, and everything their runs add up to on this phone. */
+let handlerCardId = null;
+const fmtHours = (sec) => {
+  const m = Math.round(sec / 60);
+  return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')}`;
+};
+function ringHtml(st) {
+  const total = AGE_BANDS.reduce((n, b) => n + st.bands[b.key], 0);
+  if (!total) return `<p class="body small muted">No graded runs yet. The ring fills in as trails are run.</p>`;
+  const r = 46, C = 2 * Math.PI * r;
+  let off = 0;
+  const arcs = AGE_BANDS.map(b => {
+    const len = C * st.bands[b.key] / total;
+    const el = `<circle class="ring-${b.key}" cx="60" cy="60" r="${r}" fill="none" stroke-width="14" stroke-linecap="butt"
+      stroke-dasharray="${len.toFixed(2)} ${(C - len).toFixed(2)}" stroke-dashoffset="${(-off).toFixed(2)}" transform="rotate(-90 60 60)"/>`;
+    off += len;
+    return el;
+  }).join('');
+  const legend = AGE_BANDS.map(b =>
+    `<div class="ring-row"><span class="ring-dot ring-${b.key}"></span><b>${esc(b.label)}</b><span class="ring-n">${st.bands[b.key]}</span><i>${esc(b.blurb)}</i></div>`).join('');
+  return `<div class="ring-wrap">
+    <svg viewBox="0 0 120 120" class="ring" aria-hidden="true">
+      <circle cx="60" cy="60" r="${r}" fill="none" stroke="var(--border)" stroke-width="14"/>${arcs}
+      <text x="60" y="57" text-anchor="middle" class="ring-big">${total}</text>
+      <text x="60" y="72" text-anchor="middle" class="ring-small">graded</text>
+    </svg>
+    <div class="ring-legend">${legend}</div>
+  </div>` + (st.unknownAge
+    ? `<p class="body small muted" style="margin-top:10px">${st.unknownAge} run${st.unknownAge === 1 ? '' : 's'} had no weather, so no age was worked out.</p>` : '');
+}
+function paintHandlerCard(id) {
+  const h = db.handlers.byId(id);
+  if (!h) return;
+  snap();
+  const st = handlerStats(id, S.sessions);
+  const dogs = S.dogs.filter(d => d.handlerId === id);
+  $('hAva').innerHTML = avaHtml(h, 'big');
+  $('hName').textContent = h.name;
+  $('hSub').textContent = [
+    dogs.length ? `${dogs.length} dog${dogs.length === 1 ? '' : 's'}` : 'No dog yet',
+    st.firstAt ? `handling since ${new Date(st.firstAt).toLocaleDateString([], { month: 'short', year: 'numeric' })}` : null,
+  ].filter(Boolean).join(' \u00b7 ');
+  const cell = (big, small) => `<div class="cell"><b>${big}</b><span>${esc(small)}</span></div>`;
+  $('hGrid').innerHTML =
+    cell(st.runs, st.runs === 1 ? 'trail run' : 'trails run')
+    + cell(st.runs ? fmtKm(st.metres) : '\u2014', 'run in total')
+    + cell(st.runs ? fmtHours(st.seconds) : '\u2014', 'on the trail')
+    + cell(st.laid, st.laid === 1 ? 'trail laid' : 'trails laid')
+    + cell(st.runs ? fmtKm(st.longest) : '\u2014', 'longest run')
+    + cell(st.medOff != null ? fmtM(st.medOff) : '\u2014', 'typical distance from the line')
+    + (st.assisted + st.blind ? cell(`${st.assisted}\u2009/\u2009${st.blind}`, 'assisted / blind runs') : '');
+  $('hRing').innerHTML = ringHtml(st);
+  $('hDogsLabel').textContent = dogs.length ? `Dogs \u00b7 ${dogs.length}` : 'Dogs';
+  $('hDogs').innerHTML = dogs.length ? dogs.map(d => {
+    const n = st.dogs[d.id] || 0;
+    return `<div class="card person-row" data-dog-card="${d.id}">${avaHtml(d)}<span class="who"><b>${esc(d.name)}</b><i class="sub">${n} run${n === 1 ? '' : 's'} \u00b7 ${esc(d.level)}</i></span></div>`;
+  }).join('') : `<div class="card"><p class="body muted">No dog on this handler yet. Add one from the home screen.</p></div>`;
+  const runs = S.sessions.filter(x => x.handlerId === id && x.data?.track);
+  $('hRunsLabel').textContent = runs.length ? `Every trail \u00b7 ${runs.length}` : 'Every trail';
+  $('hRuns').innerHTML = runs.length ? runs.map(x => {
+    const d = S.dogs.find(z => z.id === x.dogId);
+    const band = ageBand(x.data.result?.ageMin);
+    return `<div class="card" data-open-session="${x.id}">
+      <div class="meta"><span>${fmtWhen(x.data.trackStarted ?? x.startedAt)}</span><span>${esc(d?.name ?? '')}${d ? ' \u00b7 ' : ''}${fmtKm(pathLen(x.data.track || []))}${band ? ' \u00b7 ' + esc(band.label) : ''}</span></div>
+      <p class="body small">${esc(x.data.result?.sentence ?? x.summary ?? '')}</p>
+    </div>`;
+  }).join('') : `<div class="card"><p class="body muted">No trail run yet.</p></div>`;
+}
+function openHandlerCard(id) {
+  handlerCardId = id;
+  paintHandlerCard(id);
+  go('scrHandler');
+}
+
 function openDogCard(id) {
   const d = db.dogs.byId(id);
   if (!d) return;
@@ -3935,7 +4013,10 @@ function wire() {
   $('homeSettings').addEventListener('click', () => { renderSettings(); go('scrSettings'); });
   $('scrHome').addEventListener('click', (e) => {
     const h = e.target.closest('[data-handler]');
-    if (h) { db.kv.set('lastHandlerId', h.dataset.handler); return renderHome(); }
+    if (h) {
+      if (h.classList.contains('selected')) return openHandlerCard(h.dataset.handler);   // the chosen one again: their card
+      db.kv.set('lastHandlerId', h.dataset.handler); return renderHome();
+    }
     if (e.target.closest('[data-add-handler]')) return openHandlerForm({ returnTo: 'scrHome' });
     const d = e.target.closest('[data-dog]');
     if (d) {
@@ -4181,6 +4262,10 @@ function wire() {
 
   // Sessions
   $('dogBack').addEventListener('click', () => go('scrHome'));
+  $('hBack').addEventListener('click', () => go('scrHome'));
+  $('hEdit').addEventListener('click', () => { if (handlerCardId) openHandlerForm({ id: handlerCardId, returnTo: 'scrHandler' }); });
+  $('hDogs').addEventListener('click', (e) => { const dc = e.target.closest('[data-dog-card]'); if (dc) openDogCard(dc.dataset.dogCard); });
+  $('hRuns').addEventListener('click', (e) => { const open = e.target.closest('[data-open-session]'); if (open) openSession(open.dataset.openSession); });
   $('dogEdit').addEventListener('click', () => {
     const d = db.dogs.byId(dogCardId);
     if (d) openDogForm({ id: d.id, handlerId: d.handlerId, returnTo: 'scrHome' });

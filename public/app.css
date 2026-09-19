@@ -556,6 +556,25 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.75; cursor: p
 .wx-note { pointer-events: auto; cursor: pointer; }   /* tap to ask again */
 .wx-note i { font-style: normal; font-size: 10.5px; font-weight: 400; opacity: 0.55; white-space: nowrap; }
 
+/* ── The handler card: the ring of trail ages, and the dog rows ───────── */
+.ring-wrap { display: flex; align-items: center; gap: 16px; }
+.ring { width: 124px; height: 124px; flex: none; }
+.ring-big { font: 700 26px var(--display); fill: var(--ink); }
+.ring-small { font: 600 9px var(--body); fill: var(--muted); letter-spacing: 0.08em; text-transform: uppercase; }
+.ring-legend { flex: 1; display: grid; gap: 9px; min-width: 0; }
+.ring-row { display: grid; grid-template-columns: 12px 1fr auto; column-gap: 9px; align-items: center; }
+.ring-row b { font-size: 14px; font-weight: 700; }
+.ring-row i { grid-column: 2; font-style: normal; font-size: 11.5px; color: var(--muted); }
+.ring-n { font: 700 18px var(--display); font-variant-numeric: tabular-nums; }
+.ring-dot { width: 12px; height: 12px; border-radius: 50%; }
+.ring-hot  { stroke: #B8861B; background: #B8861B; }
+.ring-warm { stroke: #E0A33C; background: #E0A33C; }
+.ring-cold { stroke: #4E7FA8; background: #4E7FA8; }
+.recent .card.person-row, .person-row { display: flex; flex-direction: row; align-items: center; gap: 12px; text-align: left; cursor: pointer; }
+.person-row .who { display: flex; flex-direction: column; line-height: 1.25; }
+.person-row .who b { font-weight: 700; }
+.person-row .who .sub { font-style: normal; font-size: 12.5px; color: var(--muted); }
+
 /* ── The units toggle on the dog form, and the optional tag ─────────── */
 .unit-toggle { display: inline-flex; align-self: flex-start; gap: 2px; padding: 3px; margin: 2px 0 14px; border-radius: 999px; background: var(--card); border: 1px solid var(--border); }
 .unit-toggle button { border: 0; background: transparent; padding: 8px 14px; border-radius: 999px; font: 600 13px var(--body); color: var(--muted); cursor: pointer; transition: transform 120ms var(--ease-out); }

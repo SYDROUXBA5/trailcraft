@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { handlerStats } from '../public/store.js';
 import { createStore, migrateV1, TARGETS, targetById, verbs, uid,
          dogStats, ageBand, AGE_BANDS, dogAge, SaveError } from '../public/store.js';
 
@@ -288,6 +289,29 @@ t('any other failure to save is still a SaveError, not silence', () => {
   const backend = { getItem: () => null, setItem: () => { throw new Error('disk on fire'); }, removeItem: () => {} };
   const db = createStore(backend);
   assert.throws(() => db.kv.set('x', 1), (e) => e.name === 'SaveError' && e.full === false);
+});
+
+t('handlerStats: runs, laid trails, time, age bands, dogs and the typical offset, for one handler only', () => {
+  const p = (lat, lon, t) => ({ lat, lon, t });
+  const trackA = [p(51.2094, -2.6449, 0), p(51.2103, -2.6449, 60000), p(51.2112, -2.6449, 120000)];     // ~200 m, 2 min
+  const trackB = [p(51.2094, -2.6449, 0), p(51.2130, -2.6449, 300000)];                                  // ~400 m, 5 min
+  const sessions = [
+    { id: 'a', handlerId: 'h1', dogId: 'd1', layerId: 'l1', startedAt: 1000, data: { track: trackA, trail: trackA, result: { ageMin: 5, medAbs: 4 }, coach: { assisted: true } } },
+    { id: 'b', handlerId: 'h1', dogId: 'd2', layerId: null, startedAt: 2000, data: { track: trackB, trail: trackB, result: { ageMin: 45, medAbs: 8 }, coach: { assisted: false } } },
+    { id: 'c', handlerId: 'h1', dogId: 'd1', layerId: null, startedAt: 3000, data: { trail: trackA } },              // laid, never run
+    { id: 'd', handlerId: 'h2', dogId: 'd9', layerId: null, startedAt: 4000, data: { track: trackB, result: { ageMin: 300 } } },
+  ];
+  const st = handlerStats('h1', sessions);
+  assert.equal(st.runs, 2);
+  assert.equal(st.laid, 2, 'b and c were walked by the handler themself');
+  assert.ok(st.metres > 550 && st.metres < 650, `about 600 m, got ${st.metres}`);
+  assert.equal(st.seconds, 420);
+  assert.deepEqual(st.bands, { hot: 1, warm: 1, cold: 0 });
+  assert.deepEqual(st.dogs, { d1: 1, d2: 1 });
+  assert.equal(st.assisted, 1); assert.equal(st.blind, 1);
+  assert.equal(st.medOff, 8);
+  assert.equal(handlerStats('h2', sessions).bands.cold, 1);
+  assert.equal(handlerStats('nobody', sessions).runs, 0);
 });
 
 console.log(`\n${pass} passed total\n`);

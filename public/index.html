@@ -536,6 +536,31 @@
 
 <!-- ── Sessions ────────────────────────────────────────────────────── -->
 <!-- ── Share beyond this phone: a link, a GPX file, a PDF report ────── -->
+<!-- ── The handler card: who they are, and everything their runs add up to ── -->
+<section id="scrHandler" class="screen paper" hidden>
+  <div class="page">
+    <div class="dog-head">
+      <span id="hAva"></span>
+      <div>
+        <h1 class="display" id="hName"></h1>
+        <p class="body muted" id="hSub"></p>
+      </div>
+    </div>
+    <span class="label">Work so far</span>
+    <div class="grid2" id="hGrid"></div>
+    <span class="label">Trail age at the start</span>
+    <div class="card" id="hRing"></div>
+    <span class="label" id="hDogsLabel">Dogs</span>
+    <div id="hDogs" class="recent"></div>
+    <span class="label" id="hRunsLabel">Every trail</span>
+    <div id="hRuns" class="recent"></div>
+    <div class="page-bottom">
+      <button class="btn moss" id="hEdit">Edit this handler</button>
+      <button class="btn ghost" id="hBack">Done</button>
+    </div>
+  </div>
+</section>
+
 <section id="scrShareOut" class="screen paper" hidden>
   <div class="page">
     <span class="label">Share</span>
