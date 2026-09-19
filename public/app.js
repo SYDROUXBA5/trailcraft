@@ -26,7 +26,7 @@ import { createStore, migrateV1, TARGETS, targetById, verbs, uid,
          dogStats, ageBand, AGE_BANDS, LEVELS, levelById, dogAge } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-19j';
+const BUILD = '2026-09-19k';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true,
@@ -430,7 +430,7 @@ function addOverlays() {
         filter: ['step', ['zoom'], every(64), 14, every(32), 15, every(16), 16, every(8), 17, every(4), 18, every(2), 19, true],
         layout: { 'icon-image': 'paw', 'icon-rotate': ['get', 'b'], visibility: 'none',
                   'icon-offset': ['step', ['zoom'], pawSide(64), 14, pawSide(32), 15, pawSide(16), 16, pawSide(8), 17, pawSide(4), 18, pawSide(2), 19, pawSide(1)],
-                  'icon-size': ['interpolate', ['linear'], ['zoom'], 13, 0.5, 16, 0.78, 18, 1.1, 20, 1.6],
+                  'icon-size': ['interpolate', ['linear'], ['zoom'], 13, 0.4, 16, 0.62, 18, 0.88, 20, 1.28],
                   'icon-rotation-alignment': 'map', 'icon-pitch-alignment': 'map',
                   'icon-allow-overlap': true, 'icon-ignore-placement': true },
         paint: { 'icon-color': '#FFFFFF', 'icon-halo-color': '#0B1630', 'icon-halo-width': 1.4, 'icon-opacity': 0.98 } });
