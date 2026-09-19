@@ -24,7 +24,7 @@ import { createStore, migrateV1, TARGETS, targetById, verbs, uid,
          dogStats, ageBand, AGE_BANDS, LEVELS, levelById, dogAge } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-19a';
+const BUILD = '2026-09-19b';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true,
@@ -734,6 +734,7 @@ function openHandlerForm({ id = null, returnTo = null, firstLaunch = false } = {
   $('scrOnboardHandler').querySelector('p.body').textContent = 'Trailcraft records what your dog does with a scent. It starts with who is holding the line. Other handlers can be added later.';
   $('scrOnboardHandler').classList.toggle('first-launch', firstLaunch);
   $('obHandlerNext').textContent = firstLaunch ? 'Next: your dog' : 'Save';
+  $('obHandlerLayOnly').hidden = !firstLaunch;   // the person who only lays: a name, then straight in
   paintObAva('obHandlerAva', existing?.name);
   go('scrOnboardHandler');
 }
@@ -748,11 +749,12 @@ function openLayerForm({ id = null, returnTo = 'scrHome' } = {}) {
   $('scrOnboardHandler').querySelector('p.body').textContent = 'The person who lays the trail or sets the hides. A name is enough — more people can be added later.';
   $('scrOnboardHandler').classList.remove('first-launch');
   $('obHandlerNext').textContent = 'Save';
+  $('obHandlerLayOnly').hidden = true;
   paintObAva('obHandlerAva', existing?.name);
   go('scrOnboardHandler');
 }
 
-function saveHandlerForm() {
+function saveHandlerForm(layOnly = false) {
   const name = $('obHandlerName').value.trim();
   if (!name) return toast('A name is enough — add one');
   if (obMode.type === 'layer') {
@@ -763,7 +765,13 @@ function saveHandlerForm() {
     db.kv.set('lastHandlerId', id);
   }
   snap();
-  if (obMode.firstLaunch) return openDogForm({ firstLaunch: true });
+  if (obMode.firstLaunch) {
+    /* Someone here only to lay trails needs no dog: the trail card they make
+       goes to whoever runs one. The dog step is skipped, not lost — a dog can
+       be added from the home screen any day. */
+    if (layOnly === true) { db.kv.set('layerOnly', true); snap(); return openTutorial(false); }
+    return openDogForm({ firstLaunch: true });
+  }
   leaveForm(obMode.returnTo);
 }
 
@@ -957,11 +965,17 @@ function renderHome() {
 
   const setter = layer ? layer.name : handler.name;
   $('btnLayLabel').textContent = v.lay;
-  $('btnLaySub').textContent = !isPerson
+  const solo = S.layerOnly && !dog;             // lays for someone else's dog: no run, no 'who lays'
+  $('btnLaySub').textContent = solo
+    ? `You walk it — the handler scans your card and runs the dog`
+    : !isPerson
     ? `${setter} places it, ${handler.name} searches with ${dog?.name ?? 'the dog'}`
     : layer
       ? `${layer.name} walks it, ${handler.name} runs ${dog?.name ?? 'the dog'}`
       : 'Choose who lays it — it cannot be you';
+  $('btnRun').hidden = solo;
+  $('lblSetter').hidden = solo;
+  $('rowLayers').hidden = solo;
   for (const id of ['rowHandlers', 'rowDogs', 'rowTargets', 'rowLevels', 'rowLayers']) {
     showSelectedChip($(id));
   }
@@ -3797,7 +3811,8 @@ function wire() {
   const photoTo = (avaId) => pickPhoto(p => { obPhoto = p; paintObAva(avaId, $(avaId).textContent); });
   $('obHandlerPhoto').addEventListener('click', () => photoTo('obHandlerAva'));
   $('obHandlerPhoto2').addEventListener('click', () => photoTo('obHandlerAva'));
-  $('obHandlerNext').addEventListener('click', saveHandlerForm);
+  $('obHandlerNext').addEventListener('click', () => saveHandlerForm());
+  $('obHandlerLayOnly').addEventListener('click', () => saveHandlerForm(true));
   $('obDogPhoto').addEventListener('click', () => photoTo('obDogAva'));
   $('obDogPhoto2').addEventListener('click', () => photoTo('obDogAva'));
   $('obDogSex').addEventListener('click', (e) => {
@@ -3848,10 +3863,11 @@ function wire() {
     if (open) return openSession(open.dataset.openSession);
   });
   $('btnLay').addEventListener('click', () => {
-    if (!S.dog) return toast('Add a dog first');
+    const solo = S.layerOnly && !S.dog;          // here to lay for someone else's dog
+    if (!S.dog && !solo) return toast('Add a dog first');
     /* A person trail needs a person. You cannot be the handler and the one
        being found — somebody has to walk away and wait to be reached. */
-    if (S.target.kind === 'person' && !S.layer) {
+    if (S.target.kind === 'person' && !S.layer && !solo) {
       return toast('Choose who lays the trail — it cannot be you');
     }
     startLay();
@@ -4194,7 +4210,7 @@ function boot() {
     return openSignIn({ firstLaunch: true });
   }
   if (!S.handler) return openHandlerForm({ firstLaunch: true });
-  if (!S.team.length && !S.dogs.length) return openDogForm({ firstLaunch: true });
+  if (!S.team.length && !S.dogs.length && !S.layerOnly) return openDogForm({ firstLaunch: true });
   if (!S.tutorialDone) return openTutorial(false);
   go('scrHome');
   importFromLink();
@@ -4235,4 +4251,15 @@ if (!settings.mbToken) setTimeout(() =>
 
 if ('serviceWorker' in navigator && window.isSecureContext) {
   navigator.serviceWorker.register('sw.js').catch(() => { /* cache is a bonus */ });
+  /* A new version takes over the cache at once (the worker skips waiting and
+     claims the page), but the page keeps running the old code until it
+     reloads. Reload for them when they are idle on the home screen; anywhere
+     else, say so and the next open has it. Never on the very first install —
+     there is nothing to replace, and someone may be typing their name. */
+  const hadSw = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadSw) return;
+    if (currentScreen === 'scrHome' && !rec.on) location.reload();
+    else toast('A new version is ready \u2014 it loads next time you open the app');
+  });
 }
