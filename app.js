@@ -26,7 +26,7 @@ import { createStore, migrateV1, TARGETS, ODOURS, targetById, targetText, verbs,
          dogStats, ageBand, AGE_BANDS, LEVELS, levelById, dogAge } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-19l';
+const BUILD = '2026-09-19m';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true,
@@ -2308,12 +2308,15 @@ function onDrawTap(e) {
 }
 function paintDraw() {
   setTrail(draw.pts);
-  setSrc('wps', pointsOf(draw.pts.map((pt, i) => ({ ...pt, kind: String(i + 1) })), 'kind'));
-  if (draw.pts.length) setSrc('start', pointsOf([draw.pts[0]]));
+  /* The first tap is the green Start and says so; the corners after it count
+     from 1. It is kept out of the numbered dots, or a white dot and a "1"
+     would sit on top of the start and hide both. */
+  setSrc('wps', pointsOf(draw.pts.slice(1).map((pt, i) => ({ ...pt, kind: String(i + 1) })), 'kind'));
+  setSrc('start', pointsOf(draw.pts.slice(0, 1)));
   const n = draw.pts.length;
   $('drawText').textContent = n < 2
-    ? (n === 0 ? 'Tap the map at each corner, start to finish' : 'Now tap where it goes next')
-    : `${n} corners · ${fmtKm(pathLen(draw.pts))}`;
+    ? (n === 0 ? 'Tap where the trail starts' : 'Now tap the first corner')
+    : `${n - 1} corner${n === 2 ? '' : 's'} · ${fmtKm(pathLen(draw.pts))}`;
   $('drawSave').disabled = n < 2;
 }
 function closeDraw() {
