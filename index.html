@@ -49,85 +49,52 @@
 <!-- The air, over every map screen. Three things a handler reads before
      deciding anything: which way it is going, how hard, and how warm. -->
 <div id="wxPanel" class="wx-panel" hidden>
-  <div class="wx-row wx-top">
-    <!-- A compass rose. The ring turns so its N points north where you stand
-         (once the phone shares its heading — tap it); the wind arrow sits
-         inside the ring, so it always points where the air is going in
-         the real world, not just on the map. -->
-    <span class="wx-rose" id="wxRose" role="button" tabindex="0" aria-label="Compass. Tap to use the phone’s heading.">
-      <svg viewBox="0 0 100 100" width="84" height="84" aria-hidden="true">
-        <defs>
-          <filter id="wxNeedleShade" x="-40%" y="-40%" width="180%" height="180%">
-            <feDropShadow dx="0" dy="1" stdDeviation="1" flood-color="#000" flood-opacity="0.5"/>
-          </filter>
-          <radialGradient id="wxDial" cx="50%" cy="50%" r="50%">
-            <stop offset="0" stop-color="#16294F"/><stop offset="1" stop-color="#0B1630"/>
-          </radialGradient>
-          <radialGradient id="wxJewel" cx="38%" cy="32%" r="68%">
-            <stop offset="0" stop-color="#7FA9F0"/><stop offset="0.55" stop-color="#2A4F9E"/><stop offset="1" stop-color="#0E1F4A"/>
-          </radialGradient>
-        </defs>
-        <!-- The housing: one flat gold ring and the navy dial. It does not turn. -->
-        <circle cx="50" cy="50" r="50" fill="#E3C15A"/>
-        <circle cx="50" cy="50" r="40.6" fill="url(#wxDial)"/>
-        <circle cx="50" cy="50" r="40.6" fill="none" stroke="#B8861B" stroke-width="0.7"/>
-        <!-- The card: the degree scale, the rose and the letters. It turns so N
-             points at true north once the phone shares its heading. -->
-        <g id="wxRoseRing">
-          <path d="M50.00 9.10L50.00 7.60M53.56 9.26L53.70 7.76M57.10 9.72L57.47 7.65M60.59 10.49L60.97 9.04M63.99 11.57L64.71 9.59M67.29 12.93L67.92 11.57M70.45 14.58L71.20 13.28M73.46 16.50L74.32 15.27M76.29 18.67L77.64 17.06M78.92 21.08L79.98 20.02M81.33 23.71L82.94 22.36M83.50 26.54L84.73 25.68M85.42 29.55L86.72 28.80M87.07 32.71L88.43 32.08M88.43 36.01L90.41 35.29M89.51 39.41L90.96 39.03M90.28 42.90L92.35 42.53M90.74 46.44L92.24 46.30M90.90 50.00L92.40 50.00M90.74 53.56L92.24 53.70M90.28 57.10L92.35 57.47M89.51 60.59L90.96 60.97M88.43 63.99L90.41 64.71M87.07 67.29L88.43 67.92M85.42 70.45L86.72 71.20M83.50 73.46L84.73 74.32M81.33 76.29L82.94 77.64M78.92 78.92L79.98 79.98M76.29 81.33L77.64 82.94M73.46 83.50L74.32 84.73M70.45 85.42L71.20 86.72M67.29 87.07L67.92 88.43M63.99 88.43L64.71 90.41M60.59 89.51L60.97 90.96M57.10 90.28L57.47 92.35M53.56 90.74L53.70 92.24M50.00 90.90L50.00 92.40M46.44 90.74L46.30 92.24M42.90 90.28L42.53 92.35M39.41 89.51L39.03 90.96M36.01 88.43L35.29 90.41M32.71 87.07L32.08 88.43M29.55 85.42L28.80 86.72M26.54 83.50L25.68 84.73M23.71 81.33L22.36 82.94M21.08 78.92L20.02 79.98M18.67 76.29L17.06 77.64M16.50 73.46L15.27 74.32M14.58 70.45L13.28 71.20M12.93 67.29L11.57 67.92M11.57 63.99L9.59 64.71M10.49 60.59L9.04 60.97M9.72 57.10L7.65 57.47M9.26 53.56L7.76 53.70M9.10 50.00L7.60 50.00M9.26 46.44L7.76 46.30M9.72 42.90L7.65 42.53M10.49 39.41L9.04 39.03M11.57 36.01L9.59 35.29M12.93 32.71L11.57 32.08M14.58 29.55L13.28 28.80M16.50 26.54L15.27 25.68M18.67 23.71L17.06 22.36M21.08 21.08L20.02 20.02M23.71 18.67L22.36 17.06M26.54 16.50L25.68 15.27M29.55 14.58L28.80 13.28M32.71 12.93L32.08 11.57M36.01 11.57L35.29 9.59M39.41 10.49L39.03 9.04M42.90 9.72L42.53 7.65M46.44 9.26L46.30 7.76" fill="none" stroke="#3A2A0A" stroke-width="0.7" stroke-opacity="0.85"/>
-          <g fill="#3A2A0A" font-family="Georgia, 'Times New Roman', serif" font-weight="700" font-size="6.2" text-anchor="middle">
-            <text x="50" y="6.9" transform="rotate(0 50 50)">0</text>
-            <text x="50" y="6.9" transform="rotate(30 50 50)">30</text>
-            <text x="50" y="6.9" transform="rotate(60 50 50)">60</text>
-            <text x="50" y="6.9" transform="rotate(90 50 50)">90</text>
-            <text x="50" y="6.9" transform="rotate(120 50 50)">120</text>
-            <text x="50" y="6.9" transform="rotate(150 50 50)">150</text>
-            <text x="50" y="6.9" transform="rotate(180 50 50)">180</text>
-            <text x="50" y="6.9" transform="rotate(210 50 50)">210</text>
-            <text x="50" y="6.9" transform="rotate(240 50 50)">240</text>
-            <text x="50" y="6.9" transform="rotate(270 50 50)">270</text>
-            <text x="50" y="6.9" transform="rotate(300 50 50)">300</text>
-            <text x="50" y="6.9" transform="rotate(330 50 50)">330</text>
-          </g>
-          <circle cx="50" cy="50" r="38.6" fill="none" stroke="#E3C15A" stroke-width="0.9"/>
-          <circle cx="50" cy="50" r="37.2" fill="none" stroke="#E3C15A" stroke-width="0.4" stroke-opacity="0.6"/>
-          <circle cx="50" cy="50" r="23" fill="none" stroke="#E3C15A" stroke-width="0.5" stroke-opacity="0.7"/>
-          <g transform="rotate(45 50 50)"><path d="M50 37 L48.0 50 L50 50Z" fill="#D9B44A"/><path d="M50 37 L52.0 50 L50 50Z" fill="#8F6A15"/></g>
-          <g transform="rotate(135 50 50)"><path d="M50 37 L48.0 50 L50 50Z" fill="#D9B44A"/><path d="M50 37 L52.0 50 L50 50Z" fill="#8F6A15"/></g>
-          <g transform="rotate(225 50 50)"><path d="M50 37 L48.0 50 L50 50Z" fill="#D9B44A"/><path d="M50 37 L52.0 50 L50 50Z" fill="#8F6A15"/></g>
-          <g transform="rotate(315 50 50)"><path d="M50 37 L48.0 50 L50 50Z" fill="#D9B44A"/><path d="M50 37 L52.0 50 L50 50Z" fill="#8F6A15"/></g>
-          <g transform="rotate(0 50 50)"><path d="M50 30 L47.4 50 L50 50Z" fill="#F1D27A"/><path d="M50 30 L52.6 50 L50 50Z" fill="#B8861B"/></g>
-          <g transform="rotate(90 50 50)"><path d="M50 30 L47.4 50 L50 50Z" fill="#F1D27A"/><path d="M50 30 L52.6 50 L50 50Z" fill="#B8861B"/></g>
-          <g transform="rotate(180 50 50)"><path d="M50 30 L47.4 50 L50 50Z" fill="#F1D27A"/><path d="M50 30 L52.6 50 L50 50Z" fill="#B8861B"/></g>
-          <g transform="rotate(270 50 50)"><path d="M50 30 L47.4 50 L50 50Z" fill="#F1D27A"/><path d="M50 30 L52.6 50 L50 50Z" fill="#B8861B"/></g>
-          <g fill="#E3C15A" font-family="Georgia, 'Times New Roman', serif" font-weight="700" text-anchor="middle">
-            <text x="50" y="24.1" font-size="8.6">N</text>
-            <text x="79" y="52.7" font-size="7.4">E</text>
-            <text x="50" y="81.7" font-size="7.4">S</text>
-            <text x="21" y="52.7" font-size="7.4">W</text>
-          </g>
-        </g>
-        <!-- The needle: a gold blade with a navy inlay pointing where the air is
-             going, a gold tail with a lozenge. It turns about the jewel. -->
-        <g id="wxArrow" filter="url(#wxNeedleShade)">
-          <path d="M50 16 L46.6 50 L53.4 50Z" fill="#E3C15A"/>
-          <path d="M50 19.5 L47.9 49 L52.1 49Z" fill="#0B1630"/>
-          <path d="M50 74 L47.2 50 L52.8 50Z" fill="#E3C15A"/>
-          <path d="M50 66 L48.4 69.8 L50 74 L51.6 69.8Z" fill="#B8861B"/>
-          <path d="M50 17.5V48" fill="none" stroke="#FFF3CC" stroke-width="0.5" stroke-opacity="0.7" stroke-linecap="round"/>
-        </g>
-        <circle cx="50" cy="50" r="5" fill="url(#wxJewel)" stroke="#E3C15A" stroke-width="1.4"/>
-        <circle cx="48.4" cy="48.2" r="1.1" fill="#FFFFFF" fill-opacity="0.55"/>
-        <!-- The fixed index at the top: the heading reads off the turning scale
-             beneath it. It lights up once the heading is live. -->
-        <path id="wxIndex" d="M47.2 0.4 L52.8 0.4 L50 4.8Z" fill="#0B1630"/>
-      </svg>
-    </span>
-  </div>
   <div class="wx-row wx-main"><b id="wxSpeed">—</b></div>
   <div class="wx-row wx-sub"><i id="wxDir"></i><b id="wxTemp">—</b></div>
   <div class="wx-row wx-note"><i id="wxNote">10 m forecast</i></div>
 </div>
+
+<!-- The compass, top right of every map screen: a plain traditional dial. The
+     card (ticks, N E S W, the red north mark) turns so N points at true
+     north once the phone shares its heading (tap it); the gold arrow points
+     where the air is going; the mark on the rim reads the heading. -->
+<span class="wx-rose" id="wxRose" role="button" tabindex="0" hidden aria-label="Compass. Tap to use the phone’s heading.">
+  <svg viewBox="0 0 100 100" aria-hidden="true">
+    <defs>
+      <radialGradient id="wxDial" cx="50%" cy="42%" r="62%">
+        <stop offset="0" stop-color="#1B3160"/><stop offset="1" stop-color="#0B1630"/>
+      </radialGradient>
+      <linearGradient id="wxBezel" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#F6E3A1"/><stop offset="0.5" stop-color="#D9B44A"/><stop offset="1" stop-color="#9C7420"/>
+      </linearGradient>
+      <linearGradient id="wxNeedleGrad" x1="0" y1="0" x2="1" y2="0">
+        <stop offset="0" stop-color="#FFF3CC"/><stop offset="0.5" stop-color="#F1D27A"/><stop offset="1" stop-color="#B8861B"/>
+      </linearGradient>
+      <filter id="wxNeedleShade" x="-40%" y="-40%" width="180%" height="180%">
+        <feDropShadow dx="0" dy="1" stdDeviation="1" flood-color="#000" flood-opacity="0.5"/>
+      </filter>
+    </defs>
+    <circle cx="50" cy="50" r="49" fill="url(#wxBezel)"/>
+    <circle cx="50" cy="50" r="44.5" fill="url(#wxDial)"/>
+    <circle cx="50" cy="50" r="44.5" fill="none" stroke="#0B1630" stroke-opacity="0.55" stroke-width="0.8"/>
+    <g id="wxRoseRing">
+      <path d="M69.30 16.57L71.00 13.63M83.43 30.70L86.37 29.00M86.00 50.00L92.00 50.00M83.43 69.30L86.37 71.00M69.30 83.43L71.00 86.37M50.00 86.00L50.00 92.00M30.70 83.43L29.00 86.37M16.57 69.30L13.63 71.00M14.00 50.00L8.00 50.00M16.57 30.70L13.63 29.00M30.70 16.57L29.00 13.63" fill="none" stroke="#F6E3A1" stroke-opacity="0.7" stroke-width="1.3" stroke-linecap="round"/>
+      <path d="M50 8.6 L46.3 17 L53.7 17Z" fill="#E4572E"/>
+      <g font-family="Georgia, 'Times New Roman', serif" font-weight="700" text-anchor="middle">
+        <text x="50" y="33.5" font-size="15" fill="#F6E3A1">N</text>
+        <text x="71.5" y="54.2" font-size="11.5" fill="#F6E3A1" fill-opacity="0.78">E</text>
+        <text x="50" y="78.5" font-size="11.5" fill="#F6E3A1" fill-opacity="0.78">S</text>
+        <text x="28.5" y="54.2" font-size="11.5" fill="#F6E3A1" fill-opacity="0.78">W</text>
+      </g>
+    </g>
+    <g id="wxArrow" filter="url(#wxNeedleShade)">
+      <path d="M50 13 L44.6 39 L48.3 37 L48.3 72.5 L50 78.5 L51.7 72.5 L51.7 37 L55.4 39 Z" fill="url(#wxNeedleGrad)"/>
+      <path d="M50 16 V72" fill="none" stroke="#FFF8E1" stroke-width="0.6" stroke-opacity="0.7" stroke-linecap="round"/>
+    </g>
+    <circle cx="50" cy="50" r="3.8" fill="#0B1630" stroke="#F1D27A" stroke-width="1.5"/>
+    <path id="wxIndex" d="M46.4 0.8 L53.6 0.8 L50 6Z" fill="#0B1630"/>
+  </svg>
+</span>
 
 <!-- The map style: satellite for the field, terrain for the contours, streets
      for town. Bottom right, above whatever controls the screen has. -->
