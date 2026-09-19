@@ -11,7 +11,7 @@ import {
 } from './geo.js';
 import { stepPoints } from './geo.js';
 import { handlerStats } from './store.js';
-import { plumePalette, stepPalette, windPalette, COLOUR_PRESETS, isHex } from './colours.js';
+import { plumePalette, stepPalette, windPalette, trackPalette, COLOUR_PRESETS, isHex } from './colours.js';
 import { FLAT, buildTerrain, stability, regime, flowAt, normOf } from './field.js';
 import { predictedOffsets, ScentSim, driftFrom, stepByFlow, AIRBORNE } from './sim.js';
 import { encodeTrail, decodeTrail, cardUrl, cardFromText } from './card.js';
@@ -26,11 +26,11 @@ import { createStore, migrateV1, TARGETS, targetById, verbs, uid,
          dogStats, ageBand, AGE_BANDS, LEVELS, levelById, dogAge } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-19i';
+const BUILD = '2026-09-19j';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true,
-  distUnits: 'metric', tempUnits: 'c', coordFormat: 'dd', theme: 'system', mapStyle: 'satellite', plumeColor: '#F5D14A', stepColor: '#0B1630', windColor: '#DCE9FF', mbToken: (window.MB_TOKEN || '') };
+  distUnits: 'metric', tempUnits: 'c', coordFormat: 'dd', theme: 'system', mapStyle: 'satellite', plumeColor: '#F5D14A', stepColor: '#0B1630', windColor: '#DCE9FF', dogColor: '#FFFFFF', trailStyle: 'steps', dogStyle: 'line', mbToken: (window.MB_TOKEN || '') };
 const loadJson = (k, f) => { try { return JSON.parse(localStorage.getItem(k)) ?? f; } catch { return f; } };
 let settings = { ...DEFAULTS, ...loadJson('tc.settings', {}) };
 /* One "imperial" switch became three separate choices. A phone that already
@@ -259,7 +259,7 @@ function setMapStyle(key) {
 const EMPTY = { type: 'FeatureCollection', features: [] };
 let map, mapReady = false;
 let GL = mapboxgl;   // every control/bounds must come from the SAME library
-const srcData = { runner: EMPTY, steps: EMPTY, dog: EMPTY, wps: EMPTY, drift: EMPTY, start: EMPTY, hides: EMPTY, contam: EMPTY,
+const srcData = { runner: EMPTY, steps: EMPTY, dog: EMPTY, paws: EMPTY, wps: EMPTY, drift: EMPTY, start: EMPTY, hides: EMPTY, contam: EMPTY,
                   routeDone: EMPTY, routeAhead: EMPTY, puck: EMPTY, scent: EMPTY, wind: EMPTY,
                   flow: EMPTY, flowHead: EMPTY, air: EMPTY, acc: EMPTY };
 
@@ -391,6 +391,17 @@ function addOverlays() {
      and lit one after another from the start so the trail reads as walked.
      The dog's track stays a solid, dark-cased line, so colour is never the
      only difference between the two. */
+  /* The same trail as a plain line or as stripes, for whoever prefers them:
+     Settings → On the map picks one of the three (applyMapColours). */
+  add({ id: 'runner-casing', type: 'line', source: 'runner',
+        layout: { 'line-cap': 'round', 'line-join': 'round', visibility: 'none' },
+        paint: { 'line-color': '#FFFFFF', 'line-width': 8, 'line-opacity': 0.55 } });
+  add({ id: 'runner-line', type: 'line', source: 'runner',
+        layout: { 'line-cap': 'round', 'line-join': 'round', visibility: 'none' },
+        paint: { 'line-color': '#0B1630', 'line-width': 5, 'line-opacity': 0.98 } });
+  add({ id: 'runner-dash', type: 'line', source: 'runner',
+        layout: { 'line-cap': 'butt', 'line-join': 'round', visibility: 'none' },
+        paint: { 'line-color': '#0B1630', 'line-width': 5, 'line-opacity': 0.98, 'line-dasharray': [2.2, 1.4] } });
   if (!map.hasImage('print')) map.addImage('print', printSdf(), { pixelRatio: 2, sdf: true });
   const every = (k) => ['==', ['%', ['get', 'i'], k], 0];
   const side = (k) => ['case', ['==', ['%', ['/', ['get', 'i'], k], 2], 0], ['literal', [-5, 0]], ['literal', [5, 0]]];
@@ -408,6 +419,21 @@ function addOverlays() {
   add({ id: 'dog-line', type: 'line', source: 'dog',
         layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: { 'line-color': '#FFFFFF', 'line-width': 4.5, 'line-opacity': 0.98 } });
+  add({ id: 'dog-dash', type: 'line', source: 'dog',
+        layout: { 'line-cap': 'butt', 'line-join': 'round', visibility: 'none' },
+        paint: { 'line-color': '#FFFFFF', 'line-width': 4.5, 'line-opacity': 0.98, 'line-dasharray': [2, 1.5] } });
+  /* The dog's track as paw prints: the same thinning and turning as the
+     footprints, a narrower gait. */
+  if (!map.hasImage('paw')) map.addImage('paw', pawSdf(), { pixelRatio: 2, sdf: true });
+  const pawSide = (k) => ['case', ['==', ['%', ['/', ['get', 'i'], k], 2], 0], ['literal', [-3.5, 0]], ['literal', [3.5, 0]]];
+  add({ id: 'dog-paws', type: 'symbol', source: 'paws',
+        filter: ['step', ['zoom'], every(64), 14, every(32), 15, every(16), 16, every(8), 17, every(4), 18, every(2), 19, true],
+        layout: { 'icon-image': 'paw', 'icon-rotate': ['get', 'b'], visibility: 'none',
+                  'icon-offset': ['step', ['zoom'], pawSide(64), 14, pawSide(32), 15, pawSide(16), 16, pawSide(8), 17, pawSide(4), 18, pawSide(2), 19, pawSide(1)],
+                  'icon-size': ['interpolate', ['linear'], ['zoom'], 13, 0.5, 16, 0.78, 18, 1.1, 20, 1.6],
+                  'icon-rotation-alignment': 'map', 'icon-pitch-alignment': 'map',
+                  'icon-allow-overlap': true, 'icon-ignore-placement': true },
+        paint: { 'icon-color': '#FFFFFF', 'icon-halo-color': '#0B1630', 'icon-halo-width': 1.4, 'icon-opacity': 0.98 } });
   /* The route you are following, in the grammar every navigation app uses:
      a dark casing so it survives any imagery, a bright core, and the part
      you have already walked dimmed to grey — seeing the split is how you
@@ -589,16 +615,15 @@ function puckImage() {
   return g.getImageData(0, 0, S, S);
 }
 
-/* One shoe print, toes up, as a signed-distance field so the map can colour
-   and halo each print on its own (a raster icon could only fade). 48 × 48 at
+/* A small shape as a signed-distance field, so the map can colour and halo
+   each icon on its own (a raster icon could only fade). 48 × 48 at
    pixelRatio 2; alpha 0.75 is the edge, the way Mapbox reads an SDF. */
-function printSdf() {
+function sdfFrom(draw) {
   const S = 48, R = 8, c = document.createElement('canvas');
   c.width = c.height = S;
   const g = c.getContext('2d');
   g.fillStyle = '#000';
-  g.beginPath(); g.ellipse(S / 2, 16, 8, 10.5, 0, 0, Math.PI * 2); g.fill();    // the ball
-  g.beginPath(); g.ellipse(S / 2, 35, 5.5, 6.5, 0, 0, Math.PI * 2); g.fill();   // the heel
+  draw(g, S);
   const a = g.getImageData(0, 0, S, S).data;
   const inside = new Uint8Array(S * S);
   for (let i = 0; i < S * S; i++) inside[i] = a[i * 4 + 3] > 127 ? 1 : 0;
@@ -622,6 +647,15 @@ function printSdf() {
   }
   return out;
 }
+const ell = (g, x, y, rx, ry, rot = 0) => { g.beginPath(); g.ellipse(x, y, rx, ry, rot, 0, Math.PI * 2); g.fill(); };
+/* One shoe print, toes up: the ball and the heel. */
+const printSdf = () => sdfFrom((g, S) => { ell(g, S / 2, 16, 8, 10.5); ell(g, S / 2, 35, 5.5, 6.5); });
+/* One paw print, toes up: the pad and four toes. */
+const pawSdf = () => sdfFrom((g, S) => {
+  ell(g, S / 2, 31, 9.5, 8);
+  ell(g, 11.5, 20, 4, 5.2, -0.45); ell(g, 19.5, 12.5, 4.2, 5.6, -0.15);
+  ell(g, 28.5, 12.5, 4.2, 5.6, 0.15); ell(g, 36.5, 20, 4, 5.2, 0.45);
+});
 
 const lineOf = (pts) => !pts || pts.length < 2 ? EMPTY : {
   type: 'FeatureCollection',
@@ -642,11 +676,22 @@ function stepsOf(pts) {
     geometry: { type: 'Point', coordinates: [p.lon, p.lat] } })) };
 }
 function setTrail(pts) {
+  setSrc('runner', lineOf(pts));      // for the line and stripes styles
   const fc = stepsOf(pts);
   setSrc('steps', fc);
   steps.n = fc === EMPTY ? 0 : fc.features.length;
   stepsRun(MAP_SCREENS.includes(currentScreen));
 }
+/* The dog's track: a line for the line and stripes styles, points for paws. */
+function setDogTrack(pts) {
+  setSrc('dog', lineOf(pts));
+  const s = settings.dogStyle === 'paws' ? stepPoints(pts, 2.5) : [];
+  setSrc('paws', !s.length ? EMPTY : { type: 'FeatureCollection', features: s.map(q => ({
+    type: 'Feature', properties: { i: q.i, b: Math.round(q.b) },
+    geometry: { type: 'Point', coordinates: [q.lon, q.lat] } })) });
+  dogTrackPts = pts || null;
+}
+let dogTrackPts = null;
 function stepsPaint() {
   if (!mapReady || !map.getLayer('runner-steps')) return;
   const c = stepPalette(settings.stepColor);
@@ -666,7 +711,27 @@ function applyMapColours() {
     ['interpolate', ['linear'], ['get', 's'], 0, p.dark, 0.45, p.base, 1, p.light]);
   const wc = windPalette(settings.windColor);
   if (map.getLayer('air-streaks')) map.setPaintProperty('air-streaks', 'line-color', wc.base);
+  /* Which drawing of the trail and of the dog's track is showing. */
+  const vis = (id, on) => { if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', on ? 'visible' : 'none'); };
+  const paint = (id, prop, v) => { if (map.getLayer(id)) map.setPaintProperty(id, prop, v); };
+  const ts = settings.trailStyle, ds = settings.dogStyle;
+  vis('runner-steps', ts === 'steps'); vis('runner-casing', ts !== 'steps');
+  vis('runner-line', ts === 'line'); vis('runner-dash', ts === 'stripes');
+  vis('dog-paws', ds === 'paws'); vis('dog-casing', ds !== 'paws');
+  vis('dog-line', ds === 'line'); vis('dog-dash', ds === 'stripes');
+  const tp = trackPalette(settings.stepColor, '#0B1630'), dp = trackPalette(settings.dogColor);
+  paint('runner-line', 'line-color', tp.base); paint('runner-dash', 'line-color', tp.base); paint('runner-casing', 'line-color', tp.casing);
+  paint('dog-line', 'line-color', dp.base); paint('dog-dash', 'line-color', dp.base); paint('dog-casing', 'line-color', dp.casing);
+  paint('dog-paws', 'icon-color', dp.base); paint('dog-paws', 'icon-halo-color', dp.casing);
   stepsPaint();
+}
+/* A style of drawing, chosen in Settings. Paw prints are points, so the
+   dog's track is rebuilt when they are switched on. */
+function setLook(key, v) {
+  settings[key] = v; saveSettings();
+  if (key === 'dogStyle' && dogTrackPts) setDogTrack(dogTrackPts);
+  paintColourRows(); applyMapColours();
+  stepsRun(MAP_SCREENS.includes(currentScreen));
 }
 const WIND_PRESETS = [{ name: 'Air', hex: '#DCE9FF' }, ...COLOUR_PRESETS.filter(c => c.hex !== '#FFFFFF')];
 function paintColourRows() {
@@ -678,8 +743,14 @@ function paintColourRows() {
       + `<label class="swatch custom${custom ? ' selected' : ''}" title="Any colour" style="--c:${custom ? cur : 'transparent'}"><input type="color" value="${cur}" aria-label="Choose any colour"></label>`;
   };
   row('plumeRow', 'plumeColor', COLOUR_PRESETS);
-  row('stepRow', 'stepColor', COLOUR_PRESETS.filter(c => c.hex !== '#FFFFFF'));   // the dog's track is white
+  row('stepRow', 'stepColor', COLOUR_PRESETS);
+  row('dogRow', 'dogColor', COLOUR_PRESETS);
   row('windRow', 'windColor', WIND_PRESETS);
+  for (const [dot, key] of [['plumeDot', 'plumeColor'], ['stepDot', 'stepColor'], ['dogDot', 'dogColor'], ['windDot', 'windColor']]) {
+    $(dot).style.background = settings[key];
+  }
+  $('trailStyleSeg').querySelectorAll('[data-trail-style]').forEach(b => b.classList.toggle('on', b.dataset.trailStyle === settings.trailStyle));
+  $('dogStyleSeg').querySelectorAll('[data-dog-style]').forEach(b => b.classList.toggle('on', b.dataset.dogStyle === settings.dogStyle));
 }
 function setColour(key, hex) {
   if (!isHex(hex)) return;
@@ -691,7 +762,7 @@ function stepsTick() {
   stepsPaint();
 }
 function stepsRun(on) {
-  if (on && steps.n) {
+  if (on && steps.n && settings.trailStyle === 'steps') {
     if (!steps.timer) { steps.f = -LIT; steps.timer = setInterval(stepsTick, 90); }
     return;
   }
@@ -1753,7 +1824,7 @@ function onFix(pos) {
   pt.dwellS = 0;
   rec.pts.push(pt);
   if (rec.kind === 'lay') setTrail(rec.pts);
-  if (rec.kind === 'run') setSrc('dog', lineOf(rec.pts));
+  if (rec.kind === 'run') setDogTrack(rec.pts);
   paintNav();
   if (rec.kind === 'run') coachOnFix(pt);
   if (rec.kind === 'lay') {
@@ -2786,7 +2857,7 @@ function showOnMap(from = 'scrResult') {
     setSrc('hides', pointsOf(s.data.hides));
   }
   if (s.data.track) {
-    setSrc('dog', lineOf(s.data.track));
+    setDogTrack(s.data.track);
     setSrc('wps', pointsOf(s.data.trackWaypoints || [], 'kind'));
   }
   fitTo(s.data.trail || s.data.hides || [], s.data.track || []);
@@ -3147,7 +3218,7 @@ async function openLive(id) {
       if (m.contamination.length) setSrc('contam', { type: 'FeatureCollection',
         features: m.contamination.map(c => lineOf(c.points).features[0]).filter(Boolean) });
     }
-    setSrc('dog', lineOf(m.track));
+    setDogTrack(m.track);
     setSrc('wps', pointsOf(m.wps, 'kind'));
     $('btnLiveDetails').hidden = false;
     const fitAll = () => fitTo(m.trail || m.hides || [], m.track || []);
@@ -4446,10 +4517,24 @@ function boot() {
 }
 
 /* The colour swatches in Settings: a tap on a preset, or the picker at the end. */
-for (const [id, key] of [['plumeRow', 'plumeColor'], ['stepRow', 'stepColor'], ['windRow', 'windColor']]) {
+for (const [id, key] of [['plumeRow', 'plumeColor'], ['stepRow', 'stepColor'], ['dogRow', 'dogColor'], ['windRow', 'windColor']]) {
   $(id).addEventListener('click', (e) => { const b = e.target.closest('[data-colour]'); if (b) setColour(key, b.dataset.colour); });
   $(id).addEventListener('input', (e) => { if (e.target.type === 'color') setColour(key, e.target.value); });
 }
+/* Custom unfolds a row of choices; the style buttons pick how a track is drawn. */
+$('lookCard').addEventListener('click', (e) => {
+  const c = e.target.closest('[data-custom]');
+  if (c) {
+    const r = document.getElementById(c.dataset.custom);
+    r.hidden = !r.hidden;
+    c.textContent = r.hidden ? 'Custom' : 'Done';
+    return;
+  }
+  const ts = e.target.closest('[data-trail-style]');
+  if (ts) return setLook('trailStyle', ts.dataset.trailStyle);
+  const ds = e.target.closest('[data-dog-style]');
+  if (ds) return setLook('dogStyle', ds.dataset.dogStyle);
+});
 /* The map style button and its three choices; tapping anywhere else folds them away. */
 $('btnMapStyle').addEventListener('click', toggleStylePick);
 $('stylePick').addEventListener('click', (e) => { const b = e.target.closest('[data-style]'); if (b) setMapStyle(b.dataset.style); });

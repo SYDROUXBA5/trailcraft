@@ -631,15 +631,19 @@
     <span class="label">All sessions</span>
     <button class="btn card-btn" id="btnAllSessions">Open the session list</button>
     <p class="body small muted" id="storageLine"></p>
-    <span class="label">Map colours</span>
-    <div class="card colour-card">
-      <p class="body small muted">Three things share the map: the scent the model draws, the layer’s footprints and the wind. Keep them apart.</p>
-      <span class="unit-head">Scent plume</span>
-      <div class="swatch-row" id="plumeRow"></div>
-      <span class="unit-head">Footprints</span>
-      <div class="swatch-row" id="stepRow"></div>
-      <span class="unit-head">Wind</span>
-      <div class="swatch-row" id="windRow"></div>
+    <span class="label">On the map</span>
+    <div class="card colour-card" id="lookCard">
+      <p class="body small muted">Four things share the map: the scent the model draws, the layer’s trail, the dog’s track and the wind. Keep them apart.</p>
+      <div class="look-row"><span class="look-name">Scent plume</span><span class="look-dot" id="plumeDot"></span><button type="button" class="btn ghost small" data-custom="plumeRow">Custom</button></div>
+      <div class="swatch-row" id="plumeRow" hidden></div>
+      <div class="look-row"><span class="look-name">The layer’s trail</span><span class="look-dot" id="stepDot"></span><button type="button" class="btn ghost small" data-custom="stepRow">Custom</button></div>
+      <div class="unit-toggle look-seg" id="trailStyleSeg" role="group"><button type="button" data-trail-style="line">Line</button><button type="button" data-trail-style="stripes">Stripes</button><button type="button" data-trail-style="steps">Footprints</button></div>
+      <div class="swatch-row" id="stepRow" hidden></div>
+      <div class="look-row"><span class="look-name">The dog’s track</span><span class="look-dot" id="dogDot"></span><button type="button" class="btn ghost small" data-custom="dogRow">Custom</button></div>
+      <div class="unit-toggle look-seg" id="dogStyleSeg" role="group"><button type="button" data-dog-style="line">Line</button><button type="button" data-dog-style="stripes">Stripes</button><button type="button" data-dog-style="paws">Paw prints</button></div>
+      <div class="swatch-row" id="dogRow" hidden></div>
+      <div class="look-row"><span class="look-name">Wind</span><span class="look-dot" id="windDot"></span><button type="button" class="btn ghost small" data-custom="windRow">Custom</button></div>
+      <div class="swatch-row" id="windRow" hidden></div>
     </div>
     <span class="label">Appearance</span>
     <div class="check-list" id="appearanceSettings" data-setting="theme">

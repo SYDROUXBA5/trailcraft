@@ -585,6 +585,16 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.75; cursor: p
 /* ── Map colours (Settings) ───────────────────────────────────────────
    Swatches for the scent and the footprints; the last one is any colour. */
 .colour-card .unit-head { display: block; margin: 12px 0 8px; }
+/* One line per thing on the map: its name, the colour it has now, and a
+   Custom button that unfolds the choices. Styles sit under the name. */
+.look-row { display: flex; align-items: center; gap: 10px; padding: 12px 0 8px; border-top: 1px solid var(--border); }
+.colour-card p + .look-row { border-top: 0; padding-top: 6px; }
+.look-name { flex: 1; font-size: 15px; font-weight: 600; color: var(--ink); }
+.look-dot { flex: none; width: 26px; height: 26px; border-radius: 50%; border: 2px solid var(--border); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 1px 4px rgba(11, 23, 48, 0.2); }
+.look-seg { display: flex; align-self: stretch; margin: 0 0 10px; }
+.look-seg button { flex: 1; padding: 9px 8px; }
+.swatch-row[hidden] { display: none; }
+.colour-card .swatch-row { padding-bottom: 12px; }
 .swatch-row { display: flex; flex-wrap: wrap; gap: 10px; }
 .swatch {
   width: 38px; height: 38px; border-radius: 50%; padding: 0; cursor: pointer;

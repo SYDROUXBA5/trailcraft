@@ -115,6 +115,15 @@ t('a ::before or ::after placed absolutely stays inside its own element', () => 
     `these would be drawn against the whole screen — give the host position: relative: ${escaping.join(', ')}`);
 });
 
+/* Debug probes (window.__something) are how the map gets inspected from the
+   preview; they must never ship. */
+t('no debug probe is left in the app', () => {
+  for (const f of readdirSync(new URL('../public/', import.meta.url)).filter(x => x.endsWith('.js') && x !== 'token.js')) {
+    const src = readFileSync(new URL(`../public/${f}`, import.meta.url), 'utf8');
+    assert.ok(!/TEMP PROBE|window\.__[a-zA-Z]/.test(src), `${f} still has a debug probe`);
+  }
+});
+
 /* Nothing else parses the app's own files: a duplicate `const` shipped a blank
    page once, caught only by eye. Node checks each module's syntax here. */
 t('every script in public/ parses as a module', () => {

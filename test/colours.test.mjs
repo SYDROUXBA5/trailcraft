@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mix, luminance, plumePalette, stepPalette, isHex, COLOUR_PRESETS, rgba, windPalette } from '../public/colours.js';
+import { mix, luminance, plumePalette, stepPalette, isHex, COLOUR_PRESETS, rgba, windPalette, trackPalette } from '../public/colours.js';
 
 let pass = 0;
 const t = (name, fn) => { fn(); pass++; console.log(`  ok  ${name}`); };
@@ -41,6 +41,13 @@ t('wind: a wisp runs from nothing at the tail to the full colour at the head', (
   assert.equal(w.tail, 'rgba(255, 255, 255, 0)');
   assert.equal(w.head, 'rgba(255, 255, 255, 1)');
   assert.equal(windPalette('nope').base, '#DCE9FF');
+});
+
+t('a track drawn as a line gets a casing that contrasts with it', () => {
+  assert.equal(trackPalette('#FFFFFF').casing, '#0B1630');
+  assert.equal(trackPalette('#0B1630').casing, '#FFFFFF');
+  assert.equal(trackPalette('bad').base, '#FFFFFF');
+  assert.equal(trackPalette('bad', '#0B1630').base, '#0B1630');
 });
 
 console.log(`\n${pass} passed total\n`);
