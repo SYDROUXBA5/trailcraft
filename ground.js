@@ -1,0 +1,236 @@
+/* What the ground is, along a trail.
+
+   Scent does not lie on tarmac the way it lies on grass, and a handler wants
+   to know how much of each a trail crossed. The map's own data already knows
+   most of it: woods, grass, fields, buildings, car parks, and the roads with
+   their class. This module turns that into one letter per point and a total
+   in metres per surface.
+
+   It is a reading of a MAP, not of the ground. A concrete farm track nobody
+   drew is a field here, and a pavement beside a verge is whichever the GPS
+   happened to favour. The totals are honest to a few metres in the places
+   the map is good, and say "not mapped" where it is not.
+
+   Pure: no DOM, no map, no network. The app fetches the tiles; this reads
+   them. */
+
+import { dist } from './geo.js';
+
+/** Letter, name, and how far scent is drawn to spread compared with grass. */
+export const SURFACES = [
+  { id: 'w', label: 'Woods',        spread: 1 },
+  { id: 's', label: 'Scrub',        spread: 1 },
+  { id: 'g', label: 'Grass',        spread: 1 },
+  { id: 'c', label: 'Crop & field', spread: 1 },
+  /* Hard ground holds less and gives it up sooner: the plume is drawn half
+     as wide. A working figure from a trainer's experience, not a measurement
+     — one number, here, so it is easy to change when there is one. */
+  { id: 'h', label: 'Hard surface', spread: 0.5 },
+  { id: 'a', label: 'Water',        spread: 1 },
+  { id: 'u', label: 'Not mapped',   spread: 1 },
+];
+const BY_ID = new Map(SURFACES.map(s => [s.id, s]));
+export const surfaceById = (id) => BY_ID.get(id) ?? BY_ID.get('u');
+export const spreadOf = (id) => surfaceById(id).spread;
+
+/** Which layers and properties the app must ask the tiles for. */
+export const GROUND_LAYERS = {
+  streets: { landuse: ['class'], road: ['class', 'type', 'surface', 'structure'], building: [], water: [] },
+  terrain: { landcover: ['class'] },
+};
+
+/* Vegetation the map has drawn wins over the broad built-up areas it sits
+   in: a park inside a town is grass, not town. */
+const GREEN = { wood: 'w', scrub: 's', grass: 'g', park: 'g', pitch: 'g', cemetery: 'g', agriculture: 'c' };
+const BUILT = new Set(['residential', 'commercial_area', 'industrial', 'parking', 'airport',
+  'hospital', 'school', 'facility']);
+const COVER = { wood: 'w', scrub: 's', grass: 'g', crop: 'c' };
+
+/* Half the width of the sealed ground a road stands for, in metres: the
+   carriageway and the pavement beside it, plus a little for the GPS. Roads
+   arrive as centre lines with no width, so this is the width. */
+const ROAD_HALF = {
+  motorway: 12, motorway_link: 8, trunk: 10, trunk_link: 7.5,
+  primary: 8.5, primary_link: 7, secondary: 7.5, secondary_link: 6.5,
+  tertiary: 7, tertiary_link: 6.5, street: 6.5, street_limited: 6, service: 4, pedestrian: 5,
+};
+const PAVED_PATHS = new Set(['sidewalk', 'crossing', 'steps', 'platform']);
+const PATH_HALF = 3.5;
+
+/** Is this line sealed ground, and how wide? 0 = not a hard surface. */
+function hardHalf(p) {
+  if (p.structure === 'tunnel') return 0;                 // it is under the ground, not on it
+  if (ROAD_HALF[p.class]) return p.surface === 'unpaved' ? 0 : ROAD_HALF[p.class];
+  if (p.class === 'path' || p.class === 'track') {
+    return p.surface === 'paved' || PAVED_PATHS.has(p.type) ? PATH_HALF : 0;
+  }
+  return 0;
+}
+
+const bboxOf = (rings, pad = 0) => {
+  let w = Infinity, s = Infinity, e = -Infinity, n = -Infinity;
+  for (const r of rings) for (const [x, y] of r) {
+    if (x < w) w = x; if (x > e) e = x; if (y < s) s = y; if (y > n) n = y;
+  }
+  return [w - pad, s - pad, e + pad, n + pad];
+};
+
+/**
+ * Decoded tiles → one searchable ground.
+ * @param {Array<object>} tiles  results of mvt.decodeTile, streets and terrain
+ *        tiles mixed, each carrying `kind: 'streets' | 'terrain'` and
+ *        `box: [w, s, e, n]` — the ground it speaks for.
+ */
+export function buildGround(tiles) {
+  const areas = [], lines = [], boxes = { streets: [], terrain: [] };
+  for (const t of tiles || []) {
+    if (t.box && boxes[t.kind]) boxes[t.kind].push(t.box);
+    for (const f of t.landuse || []) {
+      if (f.type !== 3) continue;
+      const as = GREEN[f.props.class] ?? (BUILT.has(f.props.class) ? 'h' : null);
+      if (as) areas.push({ rank: GREEN[f.props.class] ? 3 : 4, as, rings: f.geom, box: bboxOf(f.geom) });
+    }
+    for (const f of t.building || []) if (f.type === 3) areas.push({ rank: 2, as: 'h', rings: f.geom, box: bboxOf(f.geom) });
+    for (const f of t.water || []) if (f.type === 3) areas.push({ rank: 1, as: 'a', rings: f.geom, box: bboxOf(f.geom) });
+    for (const f of t.landcover || []) {
+      if (f.type === 3 && COVER[f.props.class]) areas.push({ rank: 5, as: COVER[f.props.class], rings: f.geom, box: bboxOf(f.geom) });
+    }
+    for (const f of t.road || []) {
+      const half = hardHalf(f.props);
+      if (!half) continue;
+      if (f.type === 3) { areas.push({ rank: 0, as: 'h', rings: f.geom, box: bboxOf(f.geom) }); continue; }   // a paved square
+      if (f.type !== 2) continue;
+      // ~0.00018° is 20 m of latitude and more than 12 m of longitude anywhere people train.
+      for (const line of f.geom) lines.push({ half, pts: line, box: bboxOf([line], 0.00018) });
+    }
+  }
+  areas.sort((a, b) => a.rank - b.rank);
+  return { areas, lines, boxes };
+}
+
+/** Even-odd across every ring, so holes and multi-part areas need no sorting out. */
+function inside(rings, x, y) {
+  let hit = false;
+  for (const r of rings) {
+    for (let i = 0, j = r.length - 1; i < r.length; j = i++) {
+      const [xi, yi] = r[i], [xj, yj] = r[j];
+      if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) hit = !hit;
+    }
+  }
+  return hit;
+}
+
+/** Metres from a point to a line of [lon, lat], on a local flat earth. */
+function metresTo(line, lat, lon) {
+  const ky = 111320, kx = 111320 * Math.cos((lat * Math.PI) / 180);
+  let best = Infinity;
+  for (let i = 1; i < line.length; i++) {
+    const ax = (line[i - 1][0] - lon) * kx, ay = (line[i - 1][1] - lat) * ky;
+    const bx = (line[i][0] - lon) * kx, by = (line[i][1] - lat) * ky;
+    const dx = bx - ax, dy = by - ay, len2 = dx * dx + dy * dy;
+    const t = len2 ? Math.max(0, Math.min(1, -(ax * dx + ay * dy) / len2)) : 0;
+    const d = Math.hypot(ax + t * dx, ay + t * dy);
+    if (d < best) best = d;
+  }
+  return best;
+}
+
+const within = (box, lon, lat) => lon >= box[0] && lon <= box[2] && lat >= box[1] && lat <= box[3];
+
+/** The surface under one point. Sealed roads first — a lane through a wood is
+    still tarmac, and a bridge is not the river under it — then what the map
+    has drawn, most specific first, then the coarse land cover. */
+export function surfaceAt(ground, pt) {
+  if (!ground) return 'u';
+  const { lat, lon } = pt;
+  for (const l of ground.lines) {
+    if (within(l.box, lon, lat) && metresTo(l.pts, lat, lon) <= l.half) return 'h';
+  }
+  for (const a of ground.areas) {
+    if (within(a.box, lon, lat) && inside(a.rings, lon, lat)) return a.as;
+  }
+  /* The land cover knows wood, scrub, grass and crop and leaves everything
+     else blank — which, where people train dogs, is a town: yards, squares,
+     the ground between buildings that nobody drew. Blank only means that
+     where both maps were actually loaded; a missing tile means nothing. */
+  const has = (list) => (list || []).some(box => within(box, lon, lat));
+  return has(ground.boxes?.streets) && has(ground.boxes?.terrain) ? 'h' : 'u';
+}
+
+/**
+ * The ground along a trail.
+ * @returns {{ letters: string, metres: object }} one letter per input point,
+ *          and metres per surface measured every `step` metres along the line
+ *          — finer than the fixes, or a six-metre road crossed between two of
+ *          them would never be seen.
+ */
+export function surfaceAlong(ground, pts, step = 2) {
+  if (!pts || !pts.length) return { letters: '', metres: {} };
+  if (pts.length === 1) return { letters: surfaceAt(ground, pts[0]), metres: {} };
+  /* Sampled here rather than with densify(): each fix has to find its own
+     sample again afterwards, and a projected copy of it is never quite equal. */
+  const fine = [pts[0]], at = [0];
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i - 1], b = pts[i];
+    const n = Math.max(1, Math.round(dist(a, b) / step));
+    for (let k = 1; k < n; k++) {
+      fine.push({ lat: a.lat + ((b.lat - a.lat) * k) / n, lon: a.lon + ((b.lon - a.lon) * k) / n });
+    }
+    fine.push(b);
+    at.push(fine.length - 1);
+  }
+  const raw = fine.map(p => surfaceAt(ground, p));
+  /* One sample on its own between two that agree is the GPS brushing an
+     edge, not two metres of something else. Three in a row is a road. */
+  const seen = raw.map((s, i) => (i > 0 && i < raw.length - 1 && raw[i - 1] === raw[i + 1] ? raw[i - 1] : s));
+
+  const metres = {};
+  for (let i = 1; i < fine.length; i++) {
+    const d = dist(fine[i - 1], fine[i]) / 2;
+    metres[seen[i - 1]] = (metres[seen[i - 1]] ?? 0) + d;
+    metres[seen[i]] = (metres[seen[i]] ?? 0) + d;
+  }
+  for (const k of Object.keys(metres)) metres[k] = Math.round(metres[k] * 10) / 10;
+  const letters = at.map(i => seen[i]).join('');
+  return { letters, metres };
+}
+
+/** Rows for a card: surfaces that were crossed, longest first, with their share. */
+export function surfaceRows(metres) {
+  const total = Object.values(metres || {}).reduce((a, b) => a + b, 0);
+  if (!(total > 0)) return [];
+  return Object.entries(metres)
+    .filter(([, m]) => m >= 0.5)
+    .sort((a, b) => b[1] - a[1])
+    .map(([id, m]) => ({ id, label: surfaceById(id).label, metres: m, share: m / total }));
+}
+
+/** The same trail with `spread` on the points that lie on hard ground, for the
+    plume and the scent band. Points on ordinary ground are passed through
+    untouched, so a trail with no hard ground costs nothing. */
+export function withSpread(pts, letters) {
+  if (!pts || !letters || letters.length !== pts.length) return pts;
+  return pts.map((p, i) => {
+    const sp = spreadOf(letters[i]);
+    return sp === 1 ? p : { ...p, spread: sp };
+  });
+}
+
+/** The tiles that cover a trail, at the finest zoom that keeps the count sane. */
+export function tilesCovering(pts, tileOf, { zooms = [15, 14, 13], max = 12, padDeg = 0.0003 } = {}) {
+  if (!pts || !pts.length) return [];
+  let w = Infinity, s = Infinity, e = -Infinity, n = -Infinity;
+  for (const p of pts) {
+    if (p.lon < w) w = p.lon; if (p.lon > e) e = p.lon;
+    if (p.lat < s) s = p.lat; if (p.lat > n) n = p.lat;
+  }
+  for (const z of zooms) {
+    const a = tileOf(n + padDeg, w - padDeg, z), b = tileOf(s - padDeg, e + padDeg, z);
+    const count = (b.x - a.x + 1) * (b.y - a.y + 1);
+    if (count > max && z !== zooms[zooms.length - 1]) continue;
+    const out = [];
+    for (let x = a.x; x <= b.x; x++) for (let y = a.y; y <= b.y; y++) out.push({ z, x, y });
+    return out.slice(0, max * 2);
+  }
+  return [];
+}

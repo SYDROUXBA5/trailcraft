@@ -55,6 +55,10 @@ export function densify(pts, spacing = 5) {
          fixes, in beads, which is the opposite of what densifying is for. */
       if (Number.isFinite(a.t) && Number.isFinite(b.t)) q.t = a.t + (b.t - a.t) * (k / n);
       if (Number.isFinite(a.dwellS)) q.dwellS = k === n ? (b.dwellS ?? 0) : 0;
+      /* The ground carries across too: the new points between two fixes on
+         tarmac are on tarmac (ground.js puts `spread` on hard-surface points). */
+      const sp = k === n ? b.spread : a.spread;
+      if (Number.isFinite(sp) && sp !== 1) q.spread = sp;
       out.push(q);
     }
   }
@@ -220,12 +224,16 @@ export function scentField(trail, wx, workedAt, k = DRIFT_PER_MS) {
     const hdg = bearing(a, b);
     const reg = windRegime(hdg, from);
     const ageS = Math.max(0, (end - p.t) / 1000);
-    const off = scentOffset(U, ageS, k);
+    /* Hard ground (spread 0.5) holds the band closer and narrower; every other
+       surface is 1 and changes nothing. A trainer's working figure, drawn —
+       the side the wind predicts does not depend on it. */
+    const sp = Number.isFinite(p.spread) ? p.spread : 1;
+    const off = scentOffset(U, ageS, k) * sp;
 
     // Split the offset into across-track and along-track parts.
     let c = project(p, (hdg + 90) % 360, off * reg.cross);
     c = project(c, hdg, off * reg.along);
-    return { centre: c, halfWidth: plumeWidth(ageS, U), heading: hdg, regime: reg, ageS };
+    return { centre: c, halfWidth: plumeWidth(ageS, U) * sp, heading: hdg, regime: reg, ageS };
   });
 }
 

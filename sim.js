@@ -148,6 +148,11 @@ export class ScentSim {
              the plume — the one shape a plume never has. */
           life: RESIDENCE(),
           dwellS: p.dwellS ?? 0,           // seconds spent standing here
+          /* How far this ground lets scent spread, against grass as 1. Hard
+             ground is handed in as 0.5 (ground.js): its parcels are carried
+             half as far and drawn half as strong, so a stretch of tarmac
+             reads as a thinner band, not as the same scent packed tighter. */
+          spread: p.spread ?? 1,
           str: 0,
         });
       }
@@ -156,13 +161,13 @@ export class ScentSim {
          over the disc that dwell earned. The end of the trail is handled by
          the live pool below — this is for pauses along the way. */
       if ((p.dwellS ?? 0) >= 45) {
-        const R = poolRadius(p.dwellS);
+        const R = poolRadius(p.dwellS) * (p.spread ?? 1);
         for (let k = 0; k < 10; k++) {
           const g = project(p, Math.random() * 360, Math.sqrt(Math.random()) * R);
           this.parts.push({
             lat: g.lat, lon: g.lon, hlat: g.lat, hlon: g.lon, born: p.t,
             phase: (k + Math.random()) / 10, seed: Math.random() * 6.28318,
-            life: RESIDENCE(), dwellS: p.dwellS, str: 0,
+            life: RESIDENCE(), dwellS: p.dwellS, spread: p.spread ?? 1, str: 0,
           });
         }
       }
@@ -249,7 +254,8 @@ export class ScentSim {
       // travels less far horizontally before it stops mattering — and each
       // parcel carries its own residence time on top of that, so they do not
       // all stop at the same distance.
-      const secs = s.phase * AIRBORNE * (s.life ?? 1) / mix;
+      const sp = s.spread ?? 1;
+      const secs = s.phase * AIRBORNE * (s.life ?? 1) / mix * sp;
       const d = driftFrom(T, { lat: s.hlat, lon: s.hlon }, secs, wx, st);
       s.lat = d.lat; s.lon = d.lon;
 
@@ -284,7 +290,7 @@ export class ScentSim {
          residence time above: parcels from the same piece of ground reach
          very different distances, and the far ones are both fainter and much
          rarer, which is how a plume actually ends. */
-      s.str = Math.exp(-age / (lifeMs * linger)) * (1 - s.phase * 0.72) * pocket * dwellBoost;
+      s.str = Math.exp(-age / (lifeMs * linger)) * (1 - s.phase * 0.72) * pocket * dwellBoost * sp;
     }
 
     /* The end pool. Two deliberate differences from the trail plume:
@@ -308,10 +314,11 @@ export class ScentSim {
         s.lat = src.lat; s.lon = src.lon;
         continue;
       }
-      const poolR = poolRadius(dwellS);
+      const sp = src.spread ?? 1;                       // someone waiting on tarmac pools less widely too
+      const poolR = poolRadius(dwellS) * sp;
       const g = project({ lat: src.lat, lon: src.lon }, s.ang, s.rad * poolR);
       s.hlat = g.lat; s.hlon = g.lon;
-      const d = driftFrom(T, g, s.phase * AIRBORNE * (s.life ?? 1) / mix, wx, st);
+      const d = driftFrom(T, g, s.phase * AIRBORNE * (s.life ?? 1) / mix * sp, wx, st);
       s.lat = d.lat; s.lon = d.lon;
       // Up to ~1.5× a fresh trail particle — the hottest thing on the map.
       s.str = (0.55 + 0.95 * build) * (1 - s.phase * 0.45);
