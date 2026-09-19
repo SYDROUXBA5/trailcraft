@@ -218,7 +218,7 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.75; cursor: p
      --wx-w) and the GPS button, and only as wide as its words — a long
      message wraps rather than sliding down or under something. */
   position: fixed; top: var(--top-row);
-  left: max(calc(20px + var(--wx-w, 0px)), 70px); right: max(calc(20px + var(--wx-w, 0px)), 70px);
+  left: max(calc(20px + var(--wx-w, 0px)), 88px); right: max(calc(20px + var(--wx-w, 0px)), 88px);
   width: fit-content; margin: 0 auto; z-index: 8;
   display: flex; align-items: center; gap: 9px;
   background: var(--card); border: 1px solid var(--border); border-radius: 999px;
@@ -401,7 +401,8 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.75; cursor: p
 /* Re-centre: the control that gives the camera back. It only appears once
    following has started, and nudges when the user has panned away. */
 .map-fab {
-  position: fixed; right: 12px; top: var(--top-row); z-index: 8;
+  /* Directly under the map-style button, bottom right, above the controls. */
+  position: fixed; right: 12px; bottom: calc(max(var(--bar-gap, 0px), var(--safe-b)) + 12px); z-index: 8;
   width: 50px; height: 50px;
   display: grid; place-items: center;
   border: none; border-radius: 50%;
@@ -509,10 +510,8 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.75; cursor: p
    run. A wind arrow that points where the wind comes FROM is correct
    meteorology and a trap on a map. */
 .wx-panel {
-  /* The compass is a medallion above the box, clear of it by a hair, so
-     the box starts a rose-height plus that gap down from the top row. */
   position: fixed;
-  top: calc(var(--top-row) + 90px);
+  top: var(--top-row);
   left: 12px;
   z-index: 7;
   display: flex; flex-direction: column; gap: 3px;
@@ -531,17 +530,18 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.75; cursor: p
     0 10px 26px -10px rgba(0, 0, 0, 0.6);
 }
 .wx-row { display: flex; align-items: center; gap: 9px; }
-.wx-top { position: absolute; left: 0; right: 0; top: -90px; height: 84px; justify-content: center; margin: 0; }
 .wx-rose {
+  /* Top right of the map, where the eye looks for a compass. */
+  position: fixed; top: var(--top-row); right: 12px; z-index: 8;
   display: grid; place-items: center;
-  width: 84px; height: 84px; flex: 0 0 auto;
-  border-radius: 50%;
-  color: #E3C15A;
-  filter: drop-shadow(0 5px 12px rgba(0, 0, 0, 0.5));
-  pointer-events: auto; cursor: pointer;   /* the one part of the panel you can tap */
+  width: 64px; height: 64px; border-radius: 50%;
+  color: #F6E3A1;
+  filter: drop-shadow(0 4px 10px rgba(0, 0, 0, 0.5));
+  cursor: pointer;
 }
-.wx-rose svg { display: block; width: 84px; height: 84px; }
-.wx-rose.live #wxIndex { fill: #FF8A5B; }   /* the heading is live */
+.wx-rose[hidden] { display: none; }
+.wx-rose svg { display: block; width: 64px; height: 64px; }
+.wx-rose.live #wxIndex { fill: #E4572E; }   /* the heading is live */
 #wxRoseRing, #wxArrow {
   transform-box: view-box; transform-origin: 50px 50px;   /* the dial's centre, whatever the needle's shape */
   transition: transform 500ms cubic-bezier(0.23, 1, 0.32, 1);
@@ -670,13 +670,13 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.75; cursor: p
   transition: transform 120ms var(--ease-out);
 }
 .map-style {
-  position: fixed; right: 12px; bottom: calc(max(var(--bar-gap, 0px), var(--safe-b)) + 12px); z-index: 8;
+  position: fixed; right: 12px; bottom: calc(max(var(--bar-gap, 0px), var(--safe-b)) + 72px); z-index: 8;
   width: 50px; height: 50px; display: grid; place-items: center; border-radius: 50%;
 }
 .map-style:active { transform: scale(0.94); }
 .map-style[aria-expanded="true"] { color: #F1D27A; border-color: rgba(241, 210, 122, 0.6); }
 .style-pick {
-  position: fixed; right: 12px; bottom: calc(max(var(--bar-gap, 0px), var(--safe-b)) + 72px); z-index: 8;
+  position: fixed; right: 12px; bottom: calc(max(var(--bar-gap, 0px), var(--safe-b)) + 132px); z-index: 8;
   display: flex; flex-direction: column; align-items: flex-end; gap: 8px;
 }
 .style-pick[hidden] { display: none; }

@@ -10,7 +10,10 @@
    exist in index.html, and nothing is allowed to drift again. */
 
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync, readdirSync, mkdtempSync, copyFileSync, rmSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 let pass = 0;
 const t = (name, fn) => { fn(); pass++; console.log(`  ok  ${name}`); };
@@ -110,6 +113,20 @@ t('a ::before or ::after placed absolutely stays inside its own element', () => 
     .map(m => m[0]);
   assert.deepEqual(escaping, [],
     `these would be drawn against the whole screen — give the host position: relative: ${escaping.join(', ')}`);
+});
+
+/* Nothing else parses the app's own files: a duplicate `const` shipped a blank
+   page once, caught only by eye. Node checks each module's syntax here. */
+t('every script in public/ parses as a module', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tc-syntax-'));
+  try {
+    for (const f of readdirSync(new URL('../public/', import.meta.url)).filter(x => x.endsWith('.js') && x !== 'sw.js' && x !== 'token.js')) {
+      const tmp = join(dir, f.replace(/\.js$/, '.mjs'));
+      copyFileSync(new URL(`../public/${f}`, import.meta.url), tmp);
+      try { execFileSync(process.execPath, ['--check', tmp], { stdio: 'pipe' }); }
+      catch (e) { assert.fail(`${f} does not parse: ${String(e.stderr || e.message).split('\n').slice(0, 6).join(' | ')}`); }
+    }
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
 console.log(`\n${pass} passed total\n`);

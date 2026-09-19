@@ -26,7 +26,7 @@ import { createStore, migrateV1, TARGETS, targetById, verbs, uid,
          dogStats, ageBand, AGE_BANDS, LEVELS, levelById, dogAge } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-19h';
+const BUILD = '2026-09-19i';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true,
@@ -245,6 +245,7 @@ function mapChromeShow(on) {
   $('btnMapStyle').hidden = !on || !settings.mbToken;   // the tokenless map has one style only
   $('btnRecentre').hidden = !on;
   if (!on) closeStylePick();
+  styleGap();                       // now, and once more after layout settles
   requestAnimationFrame(styleGap);
 }
 function setMapStyle(key) {
@@ -313,7 +314,7 @@ function addOverlays() {
     try { map.setConfigProperty('basemap', 'showPointOfInterestLabels', false); } catch { /* not Standard */ }
   }
   for (const id of Object.keys(srcData)) {
-    if (!map.getSource(id)) map.addSource(id, { type: 'geojson', data: srcData[id], ...(id === 'air' ? { lineMetrics: true } : {}) });   // metrics: the wind wisps fade along their length
+    if (!map.getSource(id)) map.addSource(id, { type: 'geojson', data: srcData[id] });
   }
   const add = (spec) => { if (!map.getLayer(spec.id)) map.addLayer(spec); };
 
@@ -329,23 +330,25 @@ function addOverlays() {
      moved by the SAME flow field the plume is built from, so where the
      ground turns the wind you can watch it turn. Faint on purpose: this is
      the condition the work is happening in, not the work. */
-  /* Each parcel is a wisp: nothing at its tail, brightest at its head (a
-     gradient along the line), thin and soft, longer and wider in stronger
-     wind, over a faint dark under-glow so it holds on bright grass as well
-     as in dark woods. Its colour is the handler's (applyMapColours). */
-  const wispW = (k) => ['*', k, ['+', 0.55, ['*', ['coalesce', ['get', 'w'], 0.5], 0.9]]];
+  /* Each parcel is a wisp: faint at its tail, strongest at its head, thin and
+     soft, brighter in stronger wind, over a faint dark under-glow so it holds
+     on bright grass as well as in dark woods. The fade is built from four
+     short pieces per wisp, each a little stronger than the last (airFrame):
+     Mapbox's own line-gradient rendered these as almost fully transparent,
+     and a gradient with data-driven width and opacity overruns the vertex
+     attributes a phone GPU offers. Its colour is the handler's. */
   add({ id: 'air-shade', type: 'line', source: 'air',
         layout: { 'line-cap': 'round', 'line-join': 'round' },
-        paint: { 'line-width': ['interpolate', ['linear'], ['zoom'], 13, wispW(1.8), 17, wispW(2.6), 19, wispW(3.6)],
-                 'line-opacity': ['*', ['get', 'a'], 0.14],
-                 'line-blur': 2,
-                 'line-gradient': ['interpolate', ['linear'], ['line-progress'], 0, 'rgba(11, 22, 48, 0)', 1, 'rgba(11, 22, 48, 1)'] } });
+        paint: { 'line-color': '#0B1630',
+                 'line-width': ['interpolate', ['linear'], ['zoom'], 13, 3, 17, 3.6, 19, 4.6],
+                 'line-opacity': ['min', 1, ['*', ['get', 'a'], 0.5]],
+                 'line-blur': 2 } });
   add({ id: 'air-streaks', type: 'line', source: 'air',
         layout: { 'line-cap': 'round', 'line-join': 'round' },
-        paint: { 'line-width': ['interpolate', ['linear'], ['zoom'], 13, wispW(0.45), 17, wispW(0.7), 19, wispW(1.1)],
-                 'line-opacity': ['*', ['get', 'a'], 0.5],
-                 'line-blur': 0.6,
-                 'line-gradient': ['interpolate', ['linear'], ['line-progress'], 0, 'rgba(220, 233, 255, 0)', 0.55, 'rgba(220, 233, 255, 0.5)', 1, 'rgba(220, 233, 255, 1)'] } });
+        paint: { 'line-color': '#DCE9FF',
+                 'line-width': ['interpolate', ['linear'], ['zoom'], 13, 1.5, 17, 1.8, 19, 2.4],
+                 'line-opacity': ['min', 1, ['*', ['get', 'a'], 1.5]],
+                 'line-blur': 0.5 } });
 
   /* The air itself, drawn as scent rather than as a stain.
 
@@ -662,8 +665,7 @@ function applyMapColours() {
   if (map.getLayer('scent-dots')) map.setPaintProperty('scent-dots', 'circle-color',
     ['interpolate', ['linear'], ['get', 's'], 0, p.dark, 0.45, p.base, 1, p.light]);
   const wc = windPalette(settings.windColor);
-  if (map.getLayer('air-streaks')) map.setPaintProperty('air-streaks', 'line-gradient',
-    ['interpolate', ['linear'], ['line-progress'], 0, wc.tail, 0.55, wc.mid, 1, wc.head]);
+  if (map.getLayer('air-streaks')) map.setPaintProperty('air-streaks', 'line-color', wc.base);
   stepsPaint();
 }
 const WIND_PRESETS = [{ name: 'Air', hex: '#DCE9FF' }, ...COLOUR_PRESETS.filter(c => c.hex !== '#FFFFFF')];
@@ -1279,6 +1281,7 @@ function plumeStop() {
    competes with the plume for the one thing the screen is actually for. */
 const AIR_N = 60, AIR_LIFE = 20, AIR_STEP = 0.35, AIR_TAIL = 14, AIR_FRAME_MS = 32;
 const AIR_FULL_MS = 8;   // wind speed at which a wisp is at its longest and brightest
+const WISP_FADE = [0.12, 0.32, 0.62, 1];   // tail to head
 const air = { on: false, wx: null, st: null, T: FLAT, pts: [], raf: 0, last: 0 };
 
 function airStart(wx, T) {
@@ -1319,8 +1322,9 @@ function showWeather(wx) {
   const p = $('wxPanel');
   if (!p) return;
   // A late answer must not surface over a paper screen.
-  if (!MAP_SCREENS.includes(currentScreen)) { p.hidden = true; wxGap(); return; }
+  if (!MAP_SCREENS.includes(currentScreen)) { p.hidden = true; $('wxRose').hidden = true; wxGap(); return; }
   p.hidden = false;
+  $('wxRose').hidden = false;
   if (!wxWatch && 'ResizeObserver' in window) { wxWatch = new ResizeObserver(wxGap); wxWatch.observe(p); }
   if (!wx || wx.wind_speed == null) {
     /* The panel stays: the compass works without a forecast, and an empty
@@ -1346,8 +1350,11 @@ function showWeather(wx) {
     ? `10 m forecast, ${new Date(wx.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
     : '10 m forecast';
   wxGap();
+  /* The wind moves on every map screen once it is known, not only when a
+     plume runs: laying a trail is exactly when you want to see it. */
+  airStart(wx);
 }
-const hideWeather = () => { const p = $('wxPanel'); if (p) p.hidden = true; wxGap(); };
+const hideWeather = () => { const p = $('wxPanel'); if (p) p.hidden = true; $('wxRose').hidden = true; wxGap(); };
 
 /* ── The compass ──────────────────────────────────────────────────────
    The phone's heading turns the rose so N points north where the handler
@@ -1485,6 +1492,13 @@ function airFrame(now) {
 
   while (air.pts.length < AIR_N) air.pts.push(airSpawn());
 
+  /* True pace when zoomed in. Zoomed out, a real breeze crosses a pixel or two
+     a second and the wisps shrink to specks, so the clock runs faster there:
+     the direction and the bending round the ground stay the model's, the
+     speed on screen stays readable. */
+  const mpp = 78271.517 * Math.cos(map.getCenter().lat * Math.PI / 180) / 2 ** map.getZoom();
+  const pace = Math.max(1, mpp / 0.35);
+
   const feats = [];
   for (const p of air.pts) {
     p.age += dt;
@@ -1496,7 +1510,7 @@ function airFrame(now) {
        itself is not held back by the ground the way scent at nose height is.
        Doing this arithmetic here by hand is what had the streaks running
        north while the plume ran south. */
-    const next = stepByFlow(p, f, dt, 1);
+    const next = stepByFlow(p, f, dt * pace, 1);
     p.lat = next.lat; p.lon = next.lon;
     p.w = Math.min(1, Math.hypot(f.u, f.v) / AIR_FULL_MS);   // how hard it blows here, 0..1
 
@@ -1509,13 +1523,21 @@ function airFrame(now) {
     if (p.tail.length < 2) continue;
 
     // Fade in as it appears and out as it goes, so nothing pops.
+    /* Four pieces from tail to head, each stronger than the last: that is the
+       fade. The head is where the parcel is NOW, not at the last sample. */
     const t = p.age / AIR_LIFE;
-    feats.push({
-      type: 'Feature',
-      properties: { a: Math.min(1, Math.min(t * 5, (1 - t) * 4)) * (0.55 + 0.45 * (p.w ?? 0.5)), w: p.w ?? 0.5 },
-      // The head is where it is NOW, not where it was at the last sample.
-      geometry: { type: 'LineString', coordinates: [...p.tail, [p.lon, p.lat]] },
-    });
+    const base = Math.min(1, Math.min(t * 5, (1 - t) * 4)) * (0.55 + 0.45 * (p.w ?? 0.5));
+    const line = [...p.tail, [p.lon, p.lat]];
+    const spans = line.length - 1;
+    const cuts = [0, Math.floor(spans * 0.4), Math.floor(spans * 0.7), Math.floor(spans * 0.88), spans];
+    for (let s = 0; s < 4; s++) {
+      if (cuts[s + 1] <= cuts[s]) continue;
+      feats.push({
+        type: 'Feature',
+        properties: { a: base * WISP_FADE[s] },
+        geometry: { type: 'LineString', coordinates: line.slice(cuts[s], cuts[s + 1] + 1) },
+      });
+    }
   }
   setSrc('air', { type: 'FeatureCollection', features: feats });
   air.raf = requestAnimationFrame(airFrame);
