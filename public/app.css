@@ -556,6 +556,22 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.75; cursor: p
 .wx-note { pointer-events: auto; cursor: pointer; }   /* tap to ask again */
 .wx-note i { font-style: normal; font-size: 10.5px; font-weight: 400; opacity: 0.55; white-space: nowrap; }
 
+/* ── Map colours (Settings) ───────────────────────────────────────────
+   Swatches for the scent and the footprints; the last one is any colour. */
+.colour-card .unit-head { display: block; margin: 12px 0 8px; }
+.swatch-row { display: flex; flex-wrap: wrap; gap: 10px; }
+.swatch {
+  width: 38px; height: 38px; border-radius: 50%; padding: 0; cursor: pointer;
+  background: var(--c); border: 2px solid var(--border);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 2px 6px rgba(11, 23, 48, 0.18);
+  transition: transform 120ms var(--ease-out);
+}
+.swatch:active { transform: scale(0.94); }
+.swatch.selected { box-shadow: 0 0 0 3px var(--card), 0 0 0 5px var(--ember); }
+.swatch.custom { position: relative; overflow: hidden; background: conic-gradient(#F5D14A, #F28C28, #FF6B57, #E754C8, #4FD1FF, #4CD964, #F5D14A); }
+.swatch.custom.selected { background: var(--c); }
+.swatch.custom input { position: absolute; inset: -8px; width: calc(100% + 16px); height: calc(100% + 16px); opacity: 0; cursor: pointer; }
+
 /* ── The map style button ─────────────────────────────────────────────
    Bottom right, above the screen's controls (--bar-gap, measured), in the
    same glass as the panel opposite. The choices unfold above it. */
