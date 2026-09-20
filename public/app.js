@@ -29,7 +29,7 @@ import { createStore, migrateV1, TARGETS, ODOURS, targetById, targetText, verbs,
          dogStats, ageBand, AGE_BANDS, LEVELS, levelById, dogAge } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-19o';
+const BUILD = '2026-09-19p';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true,
@@ -1134,7 +1134,7 @@ function renderHome() {
     + `<button class="chip ghost" data-add-dog>+ Add dog</button>`;
 
   $('rowTargets').innerHTML = TARGETS.map(t =>
-    `<button class="chip plain${t.id === target.id ? ' selected' : ''}" data-target="${t.id}"><b>${esc(t.label)}</b><i>${esc(t.sub)}</i></button>`).join('');
+    `<button class="chip plain${t.id === target.id ? ' selected' : ''}" data-target="${t.id}" aria-label="${esc(t.label)}: ${esc(t.sub)}"><b>${esc(t.label)}</b></button>`).join('');
   paintOdours();
 
   /* Trail age belongs to a person and only to a person: a hide has no walk
@@ -1144,9 +1144,9 @@ function renderHome() {
   $('rowLevels').hidden = !isPerson;
   if (isPerson) {
     $('rowLevels').innerHTML = LEVELS.map(l =>
-      `<button class="chip lvl lvl-${l.id}${l.id === S.level.id ? ' selected' : ''}" data-trail-level="${l.id}">
+      `<button class="chip lvl lvl-${l.id}${l.id === S.level.id ? ' selected' : ''}" data-trail-level="${l.id}" aria-label="${esc(l.label)}: ${esc(l.sub)}">
         <span class="lvl-mark">${LEVEL_ICON[l.id]}</span>
-        <span class="who"><b>${esc(l.label)}</b><i class="sub">${esc(l.sub)}</i></span>
+        <span class="who"><b>${esc(l.label)}</b></span>
       </button>`).join('');
   }
 

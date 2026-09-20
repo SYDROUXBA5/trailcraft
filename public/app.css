@@ -140,7 +140,7 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.75; cursor: p
 .chip:active { transform: scale(0.96); }
 .chip.selected { background: var(--moss); border-color: var(--moss); color: #fff; }
 .chip.selected i { color: rgba(255, 255, 255, 0.75); }
-.chip.plain { padding: 8px 18px; display: inline-flex; flex-direction: column; align-items: center; text-align: center; gap: 0; }
+.chip.plain { padding: 8px 18px; display: inline-flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 0; }
 .chip.plain b { font-family: var(--display); font-weight: 600; font-size: 16px; }
 .chip.plain i { font-style: normal; font-size: 11px; font-weight: 500; color: var(--muted); }
 .chip.odour { padding: 8px 18px; min-height: 48px; }
