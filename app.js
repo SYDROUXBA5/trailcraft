@@ -24,12 +24,12 @@ import { trailModel, encodeShared, decodeShared, sharedUrl, toGpx, fileBase,
          detailSections, headline, notes, liveMeta, liveModel } from './share.js';
 import { buildPdf, jpegSize } from './pdf.js';
 import { coachStep, initialCoach, coachPhrase, coachLine, TOL_OPTIONS, COACH_DEFAULTS } from './coach.js';
-import { isNative, watchBackground, canHaptic, haptic } from './native.js';
+import { isNative, watchBackground, canHaptic, haptic, watchHeading } from './native.js';
 import { createStore, migrateV1, TARGETS, ODOURS, targetById, targetText, verbs, uid,
          dogStats, ageBand, AGE_BANDS, LEVELS, levelById, dogAge } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-19p';
+const BUILD = '2026-09-19q';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true,
@@ -245,6 +245,7 @@ function toggleStylePick() {
   $('btnMapStyle').setAttribute('aria-expanded', String(open));
 }
 function mapChromeShow(on) {
+  if (on) headingStart(); else headingStop();           // the compass runs while a map is on screen, and only then
   $('btnMapStyle').hidden = !on || !settings.mbToken;   // the tokenless map has one style only
   $('btnRecentre').hidden = !on;
   if (!on) closeStylePick();
@@ -1560,13 +1561,21 @@ function showWeather(wx) {
 const hideWeather = () => { const p = $('wxPanel'); if (p) p.hidden = true; $('wxRose').hidden = true; wxGap(); };
 
 /* ── The compass ──────────────────────────────────────────────────────
-   The phone's heading turns the rose so N points north where the handler
-   stands; the wind arrow lives inside the ring, so it points where the air
-   is going in the field, not on the screen. iOS hands out a heading only
-   after a permission asked for inside a tap, so the rose is tappable and
-   the start of any recording asks too. Without a heading the rose simply
-   stays north-up, exactly as the panel was before. */
-const compass = { heading: null, on: false, asked: false, wind: null, ring: 0, arrow: 0, raf: 0 };
+   The dial turns so N sits on true north where the handler stands, the
+   figure in the middle is the way the top of the phone is pointing, and the
+   blue marker rides the dial, so it shows where the air is going in the
+   field, not on the screen.
+
+   Where the heading comes from, best first:
+   - inside the iPhone app, Core Location through the shell's own plugin. It
+     starts by itself with the first map and needs nobody's permission again;
+   - in a browser, the device-orientation events. An iPhone hands those out
+     only after a permission asked for inside a tap, and forgets the answer
+     at every launch — so the first tap anywhere on a map screen asks, as
+     well as a tap on the compass itself.
+   It runs only while a map is on screen and the app is in front: a compass
+   chip left on in a pocket is battery for nothing. */
+const compass = { heading: null, on: false, starting: false, stop: null, denied: false, granted: false, wind: null, ring: 0, arrow: 0, raf: 0 };
 
 /** The nearest way round: 350° → 10° is a 20° turn, not 340°. */
 const unwrapTo = (prev, target) => prev + ((((target - prev) % 360) + 540) % 360) - 180;
@@ -1574,6 +1583,7 @@ const unwrapTo = (prev, target) => prev + ((((target - prev) % 360) + 540) % 360
 function paintRose() {
   const ring = $('wxRoseRing'), arrow = $('wxArrow'), rose = $('wxRose');
   if (!ring || !arrow || !rose) return;
+  const live = compass.heading != null;
   compass.ring = unwrapTo(compass.ring, -(compass.heading ?? 0));
   ring.style.transform = `rotate(${compass.ring.toFixed(1)}deg)`;
   if (compass.wind != null) {
@@ -1583,35 +1593,71 @@ function paintRose() {
   } else {
     arrow.style.opacity = '0';
   }
-  rose.classList.toggle('live', compass.heading != null);
+  rose.classList.toggle('live', live);
+  const deg = live ? Math.round(((compass.heading % 360) + 360) % 360) % 360 : null;
+  const degText = live ? `${deg}\u00B0` : '\u2014';
+  if ($('wxDeg').textContent !== degText) $('wxDeg').textContent = degText;
+  /* Not live in a browser means nobody has been asked yet: say what to do. */
+  const word = live ? cardinal(deg) : (compass.on || compass.starting ? '' : 'TAP');
+  if ($('wxCard').textContent !== word) $('wxCard').textContent = word;
+  rose.setAttribute('aria-label', live ? `Compass. Heading ${deg} degrees, ${cardinal(deg)}.` : 'Compass. Tap to start it.');
 }
 
+function onHeading(h) {
+  compass.heading = smoothBearing(compass.heading, h, 0.35);
+  if (!compass.raf) compass.raf = requestAnimationFrame(() => { compass.raf = 0; paintRose(); });
+}
 function onOrientation(e) {
   let h = null;
   if (Number.isFinite(e.webkitCompassHeading)) h = e.webkitCompassHeading;      // iPhone: clockwise from north
   else if (e.absolute && Number.isFinite(e.alpha)) h = (360 - e.alpha) % 360;   // Android: alpha runs the other way
-  if (h == null) return;
-  compass.heading = smoothBearing(compass.heading, h, 0.35);
-  if (!compass.raf) compass.raf = requestAnimationFrame(() => { compass.raf = 0; paintRose(); });
+  if (h != null) onHeading(h);
 }
 
-async function headingStart(fromTap = false) {
-  if (compass.on) return;
-  const DOE = window.DeviceOrientationEvent;
-  if (!DOE) return;
-  if (typeof DOE.requestPermission === 'function') {
-    if (compass.asked && !fromTap) return;
-    compass.asked = true;
-    try {
-      if (await DOE.requestPermission() !== 'granted') {
-        if (fromTap) toast('The compass needs motion access — allow it for Trailcraft in Settings');
+/** @param gesture  called from inside a tap — the only time an iPhone browser may be asked
+    @param loud     say so when the answer is no (a tap on the compass itself) */
+async function headingStart({ gesture = false, loud = false } = {}) {
+  if (compass.on || compass.starting) return;
+  compass.starting = true;
+  try {
+    const stop = await watchHeading(onHeading);
+    if (stop) { compass.stop = stop; compass.on = true; return; }
+
+    const DOE = window.DeviceOrientationEvent;
+    if (!DOE) { if (loud) toast('This device has no compass the browser can read'); return; }
+    /* Once it has said yes, a browser keeps saying yes until the page goes —
+       so coming back from the background needs no second tap. */
+    if (typeof DOE.requestPermission === 'function' && !compass.granted) {
+      if (!gesture || (compass.denied && !loud)) return;      // cannot ask now, or already told no
+      let answer = 'denied';
+      try { answer = await DOE.requestPermission(); } catch { /* asked outside a tap */ }
+      if (answer !== 'granted') {
+        compass.denied = true;
+        if (loud) toast('The compass needs motion access \u2014 allow it when the phone asks');
         return;
       }
-    } catch { return; }   // not inside a tap: iOS refuses quietly, the next tap asks again
+      compass.granted = true;
+    }
+    window.addEventListener('deviceorientationabsolute', onOrientation);
+    window.addEventListener('deviceorientation', onOrientation);
+    compass.stop = () => {
+      window.removeEventListener('deviceorientationabsolute', onOrientation);
+      window.removeEventListener('deviceorientation', onOrientation);
+    };
+    compass.on = true;
+  } finally {
+    compass.starting = false;
+    paintRose();
   }
-  compass.on = true;
-  window.addEventListener('deviceorientationabsolute', onOrientation);
-  window.addEventListener('deviceorientation', onOrientation);
+}
+
+function headingStop() {
+  if (!compass.on) return;
+  try { compass.stop?.(); } catch { /* it is going anyway */ }
+  compass.stop = null;
+  compass.on = false;
+  compass.heading = null;          // a dial frozen on the last heading would be a lie the moment the phone turns
+  paintRose();
 }
 
 /* "At all times on the map" means the panel cannot wait for a session to
@@ -2069,7 +2115,7 @@ function onFix(pos) {
 }
 
 async function startWatch(hudId) {
-  headingStart();   // still inside the tap that started this, which is when iOS allows the ask
+  headingStart({ gesture: true });   // still inside the tap that started this, which is when an iPhone browser allows the ask
   /* Inside the iOS app the shell records in the background: the phone can
      go in a pocket with the screen dark and every fix still arrives. */
   if (isNative()) {
@@ -4601,7 +4647,18 @@ function wire() {
   $('btnCoach').addEventListener('click', openCoachSheet);
   $('btnCoachDone').addEventListener('click', closeCoachSheet);
   $('saveRetry').addEventListener('click', retrySave);
-  $('wxRose').addEventListener('click', () => headingStart(true));
+  $('wxRose').addEventListener('click', () => headingStart({ gesture: true, loud: true }));
+  /* An iPhone browser only hands out its compass after being asked inside a
+     tap. Nobody knows to tap a compass, so the first tap on any map screen
+     asks — once; after a no, only the compass itself asks again. */
+  document.addEventListener('click', (e) => {
+    if (e.target.closest?.('#wxRose')) return;          // its own tap asks out loud; this one must not get in first
+    if (!compass.on && MAP_SCREENS.includes(currentScreen)) headingStart({ gesture: true });
+  }, true);
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) headingStop();
+    else if (MAP_SCREENS.includes(currentScreen)) headingStart();
+  });
   $('saveLater').addEventListener('click', () => { $('saveTrouble').hidden = true; });
   $('saveLink').addEventListener('click', () => saveTrouble?.session && sendLink(modelOf(saveTrouble.session)));
   $('saveGpx').addEventListener('click', () => saveTrouble?.session && saveGpx(modelOf(saveTrouble.session)));
