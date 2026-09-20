@@ -78,3 +78,29 @@ export async function haptic(kind) {
     return true;
   } catch { return false; }
 }
+
+/* ── The compass ─────────────────────────────────────────────────────
+   Inside the iPhone app the heading comes from Core Location (the Heading
+   plugin in ios/App/App/TrailcraftNative.swift): no permission to tap for,
+   true north, and it starts on its own. `onHeading(degrees)` is clockwise
+   from north. Resolves to a function that stops it — or to null where there
+   is no such plugin (the browser, or a shell built before it existed), and
+   the caller falls back on the browser's own compass events. */
+export async function watchHeading(onHeading) {
+  if (!isNative()) return null;
+  const H = plugin('Heading');
+  if (!H?.start || !H.addListener) return null;
+  let sub = null;
+  try {
+    sub = await H.addListener('heading', (e) => { if (Number.isFinite(e?.heading)) onHeading(e.heading, e); });
+    await H.start();
+  } catch {
+    try { await sub?.remove?.(); } catch { /* nothing to undo */ }
+    return null;
+  }
+  return async () => {
+    try { await H.stop(); } catch { /* already stopped */ }
+    try { await sub?.remove?.(); } catch { /* already gone */ }
+  };
+}
+
