@@ -453,6 +453,10 @@
     <div class="grid2" id="resGrid"></div>
     <p class="body small muted" id="resCoach"></p>
     <div class="surf-box" id="resGround" hidden></div>
+    <span class="label" id="dbLabel" hidden>Judged</span>
+    <p class="body" id="dbSummary" hidden></p>
+    <p class="body small muted" id="dbByline" hidden></p>
+    <button class="btn card-btn" id="btnDebrief">Write the debrief</button>
     <span class="label" id="resModelLabel">Modelled</span>
     <p class="body" id="resModel"></p>
     <p class="body small muted" id="resStability"></p>
@@ -596,6 +600,25 @@
 
 <!-- ── Scent bench: the model as an instrument ─────────────────────── -->
 <!-- Replay: the run as it happened, against the scent as it was ----- -->
+<!-- ── Debrief: what the handler judged ────────────────────────────── -->
+<section id="scrDebrief" class="screen paper" hidden>
+  <div class="page">
+    <span class="label" id="dbWho"></span>
+    <h1 class="display">How did that go?</h1>
+    <p class="body small muted">The phone timed it and drew it. These are the parts only you can say.</p>
+    <div id="dbFields"></div>
+    <span class="label">Anything to flag</span>
+    <div class="chip-row" id="dbFlags"></div>
+    <span class="label">One thing for next time</span>
+    <input id="dbNote" type="text" maxlength="140" placeholder="What would you change?" autocomplete="off">
+    <div class="chip-row" id="dbNoteTags"></div>
+    <div class="page-bottom">
+      <button class="btn moss" id="dbSave">Save</button>
+      <button class="btn ghost" id="dbCancel">Not now</button>
+    </div>
+  </div>
+</section>
+
 <section id="scrReplay" class="screen glass" hidden>
   <div class="hud-pill" id="repHud"><span id="repHudText">Replay</span></div>
   <div class="glass-bottom">
@@ -606,7 +629,7 @@
       <button class="rep-speed" id="repSpeed" aria-label="Playback speed">4&times;</button>
     </div>
     <div class="row-gap">
-      <button class="btn ghost" id="repDebrief" hidden>Write the debrief</button>
+      <button class="btn ghost" id="repDebrief">Write the debrief</button>
       <button class="btn ghost" id="repBack">Done</button>
     </div>
   </div>
