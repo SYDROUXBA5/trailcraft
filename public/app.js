@@ -30,7 +30,7 @@ import { createStore, migrateV1, TARGETS, ODOURS, targetById, targetText, verbs,
          dogStats, ageBand, AGE_BANDS, LEVELS, levelById, dogAge } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-21a';
+const BUILD = '2026-09-21b';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true,
@@ -267,7 +267,7 @@ function setMapStyle(key) {
 const EMPTY = { type: 'FeatureCollection', features: [] };
 let map, mapReady = false;
 let GL = mapboxgl;   // every control/bounds must come from the SAME library
-const srcData = { runner: EMPTY, steps: EMPTY, dog: EMPTY, paws: EMPTY, wps: EMPTY, drift: EMPTY, start: EMPTY, hides: EMPTY, contam: EMPTY,
+const srcData = { runner: EMPTY, steps: EMPTY, dog: EMPTY, paws: EMPTY, wps: EMPTY, drift: EMPTY, start: EMPTY, hides: EMPTY, contam: EMPTY, plan: EMPTY,
                   routeDone: EMPTY, routeAhead: EMPTY, puck: EMPTY, scent: EMPTY, wind: EMPTY,
                   flow: EMPTY, flowPulse: EMPTY, air: EMPTY, acc: EMPTY };
 
@@ -395,6 +395,16 @@ function addOverlays() {
   /* The light that runs along each one, tail to head, at the wind's pace. */
   add({ id: 'flow-pulse', type: 'fill', source: 'flowPulse',
         paint: { 'fill-color': '#FFFBEF', 'fill-opacity': ['get', 'o'], 'fill-antialias': true } });
+  /* The line you DREW, once the walked card has replaced it. A sketch, not
+     a record: thin, pale and dashed, and drawn under the real trail, because
+     what the layer actually walked is the thing that laid scent. Seeing both
+     is how you find the corner they turned the wrong way. */
+  add({ id: 'plan-casing', type: 'line', source: 'plan',
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: { 'line-color': '#0B1630', 'line-width': 7, 'line-opacity': 0.55, 'line-blur': 0.5 } });
+  add({ id: 'plan-line', type: 'line', source: 'plan',
+        layout: { 'line-cap': 'butt', 'line-join': 'round' },
+        paint: { 'line-color': '#BFD8FF', 'line-width': 3.2, 'line-opacity': 0.98, 'line-dasharray': [2.2, 1.8] } });
   add({ id: 'contam-line', type: 'line', source: 'contam',
         layout: { 'line-cap': 'butt', 'line-join': 'round' },
         paint: { 'line-color': '#C8B8E8', 'line-width': 3.5, 'line-opacity': 0.9, 'line-dasharray': [1, 1.4] } });
@@ -3289,11 +3299,37 @@ function renderResult(s) {
   const note = $('resProvisional');
   note.hidden = !s.data.plan;
   if (s.data.plan) {
-    note.textContent = provisional
-      ? `Graded against the line you drew, not the walk itself. Nothing is banked to ${S.dog?.name ?? 'this dog'}’s calibration until you scan the layer’s walked card.`
-      : `Graded against the trail ${s.data.walkedFrom || 'the layer'} actually walked.`;
+    if (provisional) {
+      note.textContent = `Graded against the line you drew, not the walk itself. Nothing is banked to ${S.dog?.name ?? 'this dog'}’s calibration until you scan the layer’s walked card.`;
+    } else {
+      /* The walk is the record now. Say how far it drifted from the sketch,
+         because a dog that looks wrong against the plan may have been exactly
+         right against the ground — and Show on map draws both lines. */
+      const w = walkVsPlan(s);
+      const who = s.data.walkedFrom || 'the layer';
+      note.textContent = `Graded against the trail ${who} actually walked.`
+        + (w && w.med >= 3
+          ? ` It sat about ${fmtM(w.med)} off the line you drew, and as much as ${fmtM(w.worst)} ${w.side} of it. Show on map draws both.`
+          : w ? ' It followed your line closely.' : '');
+    }
   }
 }
+/** How far the layer's walk sat from the line you drew, in metres: the
+    median distance, and the worst single point. The same measure used to
+    grade the dog against the trail — pointed at the layer instead. */
+function walkVsPlan(s) {
+  const plan = s?.data?.planTrail, walk = s?.data?.trail;
+  if (!(plan?.length > 1) || !(walk?.length > 1)) return null;
+  /* signedOffsets returns plain NUMBERS, + right of the line and − left —
+     not objects. Reading a field off them leaves the worst point silently
+     at zero, which is the kind of wrong that looks fine on screen. */
+  const offs = signedOffsets(plan, walk).filter(Number.isFinite);
+  if (!offs.length) return null;
+  let worst = 0;
+  for (const o of offs) if (Math.abs(o) > Math.abs(worst)) worst = o;
+  return { med: medianAbs(offs), worst: Math.abs(worst), side: worst >= 0 ? 'right' : 'left' };
+}
+
 const cap = (w) => w ? w.charAt(0).toUpperCase() + w.slice(1) : w;
 
 /* ── Show on map: the ONLY place the plume band appears ───────────── */
@@ -3309,6 +3345,7 @@ function showOnMap(from = 'scrResult') {
   if (t.kind === 'person') {
     setTrail(s.data.trail);
     setSrc('start', pointsOf([s.data.trail[0]]));
+    if (s.data.planTrail?.length > 1) setSrc('plan', lineOf(s.data.planTrail));
     if (s.data.contamination?.length) {
       setSrc('contam', { type: 'FeatureCollection',
         features: s.data.contamination.map(c => lineOf(c.points).features[0]).filter(Boolean) });
@@ -3331,8 +3368,11 @@ function showOnMap(from = 'scrResult') {
     setDogTrack(s.data.track);
     setSrc('wps', pointsOf(s.data.trackWaypoints || [], 'kind'));
   }
-  fitTo(s.data.trail || s.data.hides || [], s.data.track || []);
-  $('showMapText').textContent = t.kind === 'hide'
+  fitTo(s.data.trail || s.data.hides || [], s.data.track || [], s.data.planTrail || []);
+  const planShown = s.data.planTrail?.length > 1;
+  $('showMapText').textContent = planShown
+    ? 'Dashed blue: your plan. Footprints: the real walk, and what the scent is modelled from.'
+    : t.kind === 'hide'
     ? 'Hides and the search track'
     : !wx ? 'No weather saved for this trail, so no plume'
     : 'Modelled scent, ageing in real time. The width is the uncertainty, never narrowed.';
