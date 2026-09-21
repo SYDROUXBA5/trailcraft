@@ -56,9 +56,8 @@ export function densify(pts, spacing = 5) {
       if (Number.isFinite(a.t) && Number.isFinite(b.t)) q.t = a.t + (b.t - a.t) * (k / n);
       if (Number.isFinite(a.dwellS)) q.dwellS = k === n ? (b.dwellS ?? 0) : 0;
       /* The ground carries across too: the new points between two fixes on
-         tarmac are on tarmac (ground.js puts `spread` on hard-surface points). */
-      const sp = k === n ? b.spread : a.spread;
-      if (Number.isFinite(sp) && sp !== 1) q.spread = sp;
+         tarmac are on tarmac (ground.js marks them `hard`). */
+      if (k === n ? b.hard : a.hard) q.hard = true;
       out.push(q);
     }
   }
@@ -227,16 +226,20 @@ export function scentField(trail, wx, workedAt, k = DRIFT_PER_MS) {
     const hdg = bearing(a, b);
     const reg = windRegime(hdg, from);
     const ageS = Math.max(0, (end - p.t) / 1000);
-    /* Hard ground (spread 0.5) holds the band closer and narrower; every other
-       surface is 1 and changes nothing. A trainer's working figure, drawn —
-       the side the wind predicts does not depend on it. */
-    const sp = Number.isFinite(p.spread) ? p.spread : 1;
-    const off = scentOffset(U, ageS, k) * sp;
+    /* Tarmac asks two separate questions here, each its own dial and each 1
+       by default: how far the band is carried (transport), and how unsure the
+       model should be about it (uncertainty). Uncertainty only ever widens —
+       nothing may make the band look MORE certain over ground the model
+       understands less. The old single figure narrowed it, which was exactly
+       backwards. */
+    const hard = !!p.hard;
+    const off = scentOffset(U, ageS, k) * (hard ? PV.hardCarry : 1);
 
     // Split the offset into across-track and along-track parts.
     let c = project(p, (hdg + 90) % 360, off * reg.cross);
     c = project(c, hdg, off * reg.along);
-    return { centre: c, halfWidth: plumeWidth(ageS, U) * sp, heading: hdg, regime: reg, ageS };
+    return { centre: c, halfWidth: plumeWidth(ageS, U) * (hard ? Math.max(1, PV.hardDoubt) : 1),
+      heading: hdg, regime: reg, ageS };
   });
 }
 

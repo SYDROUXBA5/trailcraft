@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { decodeTile, tileOf, tileBox } from '../public/mvt.js';
-import { SURFACES, buildGround, surfaceAt, surfaceAlong, surfaceRows, withSpread,
-         tilesCovering, spreadOf, GROUND_LAYERS } from '../public/ground.js';
+import { SURFACES, buildGround, surfaceAt, surfaceAlong, surfaceRows, withSurface,
+         tilesCovering, isHard, GROUND_LAYERS } from '../public/ground.js';
+import { PV, setParam, resetParams, applyPreset, PRESETS, presetById, dialById, DEFAULTS } from '../public/params.js';
 import { project, dist, densify, scentField } from '../public/geo.js';
 import { ScentSim } from '../public/sim.js';
 import { FLAT, stability } from '../public/field.js';
@@ -135,41 +136,142 @@ t('ground along a trail: one stray sample at an edge is the GPS, three in a row 
   assert.ok(Math.abs(metres.g - 40) < 0.5);
 });
 
-t('spread: only hard ground is marked, and everything else is handed back untouched', () => {
-  assert.equal(spreadOf('h'), 0.5);
-  for (const s of SURFACES) if (s.id !== 'h') assert.equal(s.spread, 1, `${s.label} spreads as normal`);
-  assert.equal(spreadOf('?'), 1);
+t('hard ground is marked, not scaled, and the saved trail is never written on', () => {
+  assert.equal(isHard('h'), true);
+  for (const x of SURFACES) if (x.id !== 'h') assert.equal(isHard(x.id), false, `${x.label} is not hard`);
+  assert.equal(isHard('?'), false);
+  for (const x of SURFACES) assert.equal(x.spread, undefined, `${x.label} carries no baked-in figure`);
   const pts = [at(0, 0), at(5, 0), at(10, 0)];
-  const out = withSpread(pts, 'ghw');
+  const out = withSurface(pts, 'ghw');
   assert.equal(out[0], pts[0]);
   assert.equal(out[2], pts[2]);
-  assert.equal(out[1].spread, 0.5);
-  assert.equal(pts[1].spread, undefined, 'the saved trail is not written on');
-  assert.equal(withSpread(pts, 'gh'), pts, 'letters for another trail are ignored');
-  assert.equal(withSpread(pts, null), pts);
+  assert.equal(out[1].hard, true);
+  assert.equal(pts[1].hard, undefined, 'the saved trail is not written on');
+  assert.equal(withSurface(pts, 'gh'), pts, 'letters for another trail are ignored');
+  assert.equal(withSurface(pts, null), pts);
+
+  const dense = densify(pts.map((p, i) => ({ ...p, t: i * 5000, ...(i >= 1 ? { hard: true } : {}) })), 1);
+  assert.ok(dense.filter(p => p.hard).length >= 6, 'points put in between two hard fixes are hard too');
+  assert.ok(dense.slice(0, 3).every(p => !p.hard));
 });
 
-t('the scent band and the plume are half as wide over hard ground, and unchanged everywhere else', () => {
-  const wx = { wind_speed: 4, wind_direction: 0, wind_gusts: 4, temp: 12, soil_temp: 12 };
-  const base = [0, 10, 20, 30, 40, 50].map((x, i) => ({ ...at(x, 0), t: i * 8000 }));
-  const hard = base.map((p, i) => (i >= 3 ? { ...p, spread: 0.5 } : p));
-  const A = scentField(base, wx, 3600000), B = scentField(hard, wx, 3600000);
-  assert.equal(B[1].halfWidth, A[1].halfWidth);
-  assert.ok(Math.abs(B[4].halfWidth - A[4].halfWidth / 2) < 1e-9);
-  assert.ok(Math.abs(dist(hard[4], B[4].centre) - dist(base[4], A[4].centre) / 2) < 0.05);
+/* The ground under test: six fixes, the last three on tarmac. */
+const wx = { wind_speed: 4, wind_direction: 0, wind_gusts: 4, temp: 12, soil_temp: 12 };
+const base = [0, 10, 20, 30, 40, 50].map((x, i) => ({ ...at(x, 0), t: i * 8000 }));
+const hard = base.map((p, i) => (i >= 3 ? { ...p, hard: true } : p));
+const offM = (F, pts, i) => dist(pts[i], F[i].centre);
 
-  const dense = densify(hard, 2);
-  assert.ok(dense.filter(p => p.spread === 0.5).length >= 10, 'the points put in between two hard fixes are hard too');
-  assert.ok(dense.slice(0, 10).every(p => p.spread === undefined));
-
-  const sim = new ScentSim().seed([{ ...at(0, 0), t: 0 }, { ...at(0, 0), t: 0, spread: 0.5 }]);
-  for (const p of sim.parts) Object.assign(p, { phase: 0.5, life: 1, seed: 0 });     // the same parcel, twice
+/** One parcel on grass and the identical parcel on tarmac, advanced together. */
+function twin({ dwell = 0 } = {}) {
+  const sim = new ScentSim().seed([{ ...at(0, 0), t: 0 }, { ...at(0, 0), t: 0, hard: true }]);
+  for (const p of sim.parts) Object.assign(p, { phase: 0.5, life: 1, seed: 0, dwellS: dwell });
   sim.advance(FLAT, wx, stability(wx.soil_temp, wx.temp), 60000);
-  const soft = sim.parts.find(p => p.spread === 1), firm = sim.parts.find(p => p.spread === 0.5);
+  const soft = sim.parts.find(p => !p.hard), firm = sim.parts.find(p => p.hard);
   const far = (p) => dist({ lat: p.hlat, lon: p.hlon }, p);
-  assert.ok(far(soft) > 5, 'there is a drift to halve');
-  assert.ok(Math.abs(far(firm) / far(soft) - 0.5) < 0.02, `hard ground carried ${far(firm).toFixed(1)} m against ${far(soft).toFixed(1)} m`);
-  assert.ok(Math.abs(firm.str / soft.str - 0.5) < 1e-9, 'and drawn half as strong, so the thinner band is not a brighter one');
+  return { soft, firm, far };
+}
+
+t('at the shipped dials, tarmac changes nothing at all', () => {
+  resetParams();
+  for (const id of ['hardHold', 'hardGive', 'hardCarry', 'hardWiden', 'hardDoubt']) {
+    assert.equal(DEFAULTS[id], 1, `${id} ships at 1`);
+  }
+  const A = scentField(base, wx, 3600000), B = scentField(hard, wx, 3600000);
+  for (let i = 0; i < base.length; i++) {
+    assert.equal(B[i].halfWidth, A[i].halfWidth, `band width unchanged at ${i}`);
+    assert.ok(Math.abs(offM(B, hard, i) - offM(A, base, i)) < 1e-9, `band offset unchanged at ${i}`);
+  }
+  const { soft, firm, far } = twin();
+  assert.ok(far(soft) > 5, 'there is a drift to compare');
+  assert.ok(Math.abs(far(firm) - far(soft)) < 1e-9, 'carried the same distance');
+  assert.equal(firm.str, soft.str, 'drawn the same strength');
+});
+
+t('each ground dial moves its own part of the model and nothing else', () => {
+  const A = scentField(base, wx, 3600000);
+  const ref = twin();
+  try {
+    /* Transport: the band's offset and the parcel's travel, not the width. */
+    resetParams(); setParam('hardCarry', 0.5);
+    let B = scentField(hard, wx, 3600000);
+    assert.ok(Math.abs(offM(B, hard, 4) - offM(A, base, 4) / 2) < 0.05, 'the band is carried half as far');
+    assert.equal(B[4].halfWidth, A[4].halfWidth, 'carrying is not widening');
+    assert.equal(B[1].halfWidth, A[1].halfWidth);
+    let w = twin();
+    assert.ok(Math.abs(w.far(w.firm) / w.far(w.soft) - 0.5) < 0.02, 'the parcel is carried half as far');
+
+    /* Release: how strongly it draws, and nothing about where. */
+    resetParams(); setParam('hardGive', 0.5);
+    w = twin();
+    assert.ok(Math.abs(w.firm.str / w.soft.str - 0.5) < 1e-9, 'drawn half as strong');
+    assert.ok(Math.abs(w.far(w.firm) - w.far(w.soft)) < 1e-9, 'giving off is not carrying');
+
+    /* Retention: how long it lasts, so a weaker parcel after a minute. */
+    resetParams(); setParam('hardHold', 0.5);
+    w = twin();
+    assert.ok(w.firm.str < w.soft.str, 'holding less means fainter sooner');
+    assert.ok(Math.abs(w.far(w.firm) - w.far(w.soft)) < 1e-9, 'and it is still carried the same way');
+
+    /* Uncertainty: the band widens over ground the model understands less. */
+    resetParams(); setParam('hardDoubt', 2);
+    B = scentField(hard, wx, 3600000);
+    assert.ok(Math.abs(B[4].halfWidth - A[4].halfWidth * 2) < 1e-9, 'twice as unsure is twice as wide');
+    assert.ok(Math.abs(offM(B, hard, 4) - offM(A, base, 4)) < 1e-9, 'doubt does not move the band');
+  } finally { resetParams(); }
+  assert.deepEqual(twin().firm.str, ref.firm.str, 'and everything returns when the dials do');
+});
+
+t('uncertainty can only widen, even if a dial is forced below one', () => {
+  assert.equal(dialById('hardDoubt').min, 1, 'the slider cannot go below 1');
+  const A = scentField(base, wx, 3600000);
+  try {
+    PV.hardDoubt = 0.25;           // past the slider, straight into the live values
+    const B = scentField(hard, wx, 3600000);
+    assert.equal(B[4].halfWidth, A[4].halfWidth, 'the band never looks surer over tarmac');
+  } finally { resetParams(); }
+});
+
+t('the tarmac rule is a named experiment: never the default, and never narrows the band', () => {
+  const rule = presetById('tarmacRule');
+  assert.ok(rule && PRESETS.includes(rule));
+  assert.equal(presetById('nope'), null);
+  assert.equal(applyPreset('nope'), false);
+  for (const [k, v] of Object.entries(rule.set)) {
+    const d = dialById(k);
+    assert.ok(d, `${k} is a real dial`);
+    assert.ok(v >= d.min && v <= d.max, `${k}=${v} is inside its slider`);
+    assert.notEqual(v, DEFAULTS[k], `${k} is actually moved by the rule`);
+  }
+  assert.equal(rule.set.hardDoubt, undefined, 'the rule does not touch uncertainty');
+  try {
+    setParam('widthBase', 5);     // something else moved first
+    assert.equal(applyPreset('tarmacRule'), true);
+    assert.equal(PV.widthBase, DEFAULTS.widthBase, 'a preset starts from the defaults, not from whatever was left');
+    assert.equal(PV.hardCarry, 0.5);
+    const A = scentField(base, wx, 3600000), B = scentField(hard, wx, 3600000);
+    assert.ok(B[4].halfWidth >= A[4].halfWidth, 'the band is no narrower than on grass');
+    assert.ok(offM(B, hard, 4) < offM(A, base, 4), 'but it is carried less far, which is the rule');
+  } finally { resetParams(); }
+});
+
+t('a pool on tarmac follows the same dials as the trail, and no longer draws brighter', () => {
+  /* The same random draws for both, so the only difference is the ground. */
+  const end = (h) => {
+    const real = Math.random; let x = 42;
+    Math.random = () => ((x = (x * 16807) % 2147483647) / 2147483647);
+    try {
+      const sim = new ScentSim().seed([{ ...at(0, 0), t: 0 }, { ...at(10, 0), t: 1000, dwellS: 0, ...(h ? { hard: true } : {}) }]);
+      sim.advance(FLAT, wx, stability(wx.soil_temp, wx.temp), 600000);
+      return sim.pool.map(p => p.str).reduce((a, b) => a + b, 0);
+    } finally { Math.random = real; }
+  };
+  try {
+    resetParams();
+    assert.ok(Math.abs(end(true) - end(false)) < 1e-9, 'at the defaults a tarmac pool is an ordinary pool');
+    setParam('hardGive', 0.5);
+    const ratio = end(true) / end(false);
+    assert.ok(Math.abs(ratio - 0.5) < 1e-9, `a weaker-giving surface gives a weaker pool (${ratio.toFixed(3)})`);
+  } finally { resetParams(); }
 });
 
 t('tiles for a trail: one fine tile for a short trail, coarser ones rather than dozens for a long one', () => {

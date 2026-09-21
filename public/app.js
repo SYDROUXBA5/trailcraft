@@ -14,11 +14,11 @@ import { handlerStats } from './store.js';
 import { plumePalette, stepPalette, windPalette, trackPalette, COLOUR_PRESETS, isHex, mix } from './colours.js';
 import { FLAT, buildTerrain, stability, regime, flowAt, normOf } from './field.js';
 import { predictedOffsets, ScentSim, driftFrom, stepByFlow } from './sim.js';
-import { PARAMS, DIALS, PV, setParam, resetParams, changed, isDefault, tally, dialById } from './params.js';
+import { PARAMS, DIALS, PV, setParam, resetParams, changed, isDefault, tally, dialById, PRESETS, applyPreset } from './params.js';
 import { encodeTrail, decodeTrail, cardUrl, cardFromText } from './card.js';
 import { decodeTile, tileOf, tileBox } from './mvt.js';
-import { GROUND_LAYERS, buildGround, surfaceAt, surfaceAlong, surfaceRows, withSpread,
-         tilesCovering, spreadOf } from './ground.js';
+import { GROUND_LAYERS, buildGround, surfaceAt, surfaceAlong, surfaceRows, withSurface,
+         tilesCovering, isHard } from './ground.js';
 import { sync, onSync, initSync, signInWithGoogle, signInWithApple, signOut,
          startLive, pushLive, endLive, watchLive } from './sync.js';
 import { trailModel, encodeShared, decodeShared, sharedUrl, toGpx, fileBase,
@@ -32,7 +32,7 @@ import { createStore, migrateV1, TARGETS, ODOURS, targetById, targetText, verbs,
          dogStats, ageBand, AGE_BANDS, LEVELS, levelById, dogAge } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-21g';
+const BUILD = '2026-09-21h';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true,
@@ -1341,7 +1341,7 @@ async function groundFor(pts) {
 const surfSig = (pts) => `${SURF_V}:${pts.length}:${pts[0].lat.toFixed(5)},${pts[0].lon.toFixed(5)}:${pts[pts.length - 1].lat.toFixed(5)},${pts[pts.length - 1].lon.toFixed(5)}`;
 const surfValid = (s) => { const t = s?.data?.trail; return !!t && t.length > 1 && s.data.surfSig === surfSig(t) && s.data.surf?.length === t.length; };
 /** The session's trail, with hard ground marked for the plume and the band. */
-const trailOf = (s) => (surfValid(s) ? withSpread(s.data.trail, s.data.surf) : s.data.trail);
+const trailOf = (s) => (surfValid(s) ? withSurface(s.data.trail, s.data.surf) : s.data.trail);
 
 const surfBusy = new Map();             // session id → the ask in flight
 function fillSurfaces(s) {
@@ -1396,14 +1396,14 @@ function paintGround(id, s) {
    plume already narrows on tarmac. The tile is asked for once as the walker
    enters it; until it answers the ground counts as ordinary. */
 const liveGround = { key: '', ground: null };
-function liveSpread(pt) {
-  if (!settings.mbToken) return 1;
+function liveHard(pt) {
+  if (!settings.mbToken) return false;
   const t = tileOf(pt.lat, pt.lon, 15), key = `${t.x}/${t.y}`;
   if (key !== liveGround.key) {
     liveGround.key = key;
     groundFor([pt]).then(g => { if (liveGround.key === key) liveGround.ground = g; }).catch(() => {});
   }
-  return liveGround.ground ? spreadOf(surfaceAt(liveGround.ground, pt)) : 1;
+  return liveGround.ground ? isHard(surfaceAt(liveGround.ground, pt)) : false;
 }
 
 /* The ground the air is running over.
@@ -1833,11 +1833,18 @@ const bench = { on: false, trail: null, wx: null, open: false };
 /** A demo trail: a dog-leg on open ground near wherever the map is looking,
     so the wind can be turned against it and the band watched swinging. */
 function benchTrail(centre) {
-  const legs = [[20, 170], [70, 150], [95, 120], [60, 190]];   // bearing, metres
+  /* bearing, metres, and whether the leg counts as tarmac. The third leg is
+     tarmac whatever is really under it, so the ground dials have something
+     to act on — without it they would be five sliders that do nothing. */
+  const legs = [[20, 170, false], [70, 150, false], [95, 120, true], [60, 190, false]];
   const pts = [{ lat: centre.lat, lon: centre.lon }];
-  for (const [brg, m] of legs) {
+  for (const [brg, m, hard] of legs) {
     const step = 4;
-    for (let d = step; d <= m; d += step) pts.push(project(pts[pts.length - 1], brg, step));
+    for (let d = step; d <= m; d += step) {
+      const q = project(pts[pts.length - 1], brg, step);
+      if (hard) q.hard = true;
+      pts.push(q);
+    }
   }
   return pts;
 }
@@ -1942,6 +1949,9 @@ function paintBench() {
       <summary><b>${esc(g.title)}</b><span class="cnt">${g.dials.length} dials${n ? ` · ${n} moved` : ''}</span></summary>
       <p class="why">${esc(g.why)}${g.id === 'flow' && plume.T?.flat
         ? ' <b style="color:#F1C77A">Flat here \u2014 nothing in this group bites until the map has elevation for this spot.</b>' : ''}</p>
+      ${PRESETS.filter(p => p.group === g.id).map(p => `<div class="bench-preset">
+        <button type="button" class="btn small" data-preset="${p.id}">${esc(p.label)}</button>
+        <p class="why">${esc(p.why)}</p></div>`).join('')}
       ${g.dials.map(dialHtml).join('')}
     </details>`;
   }).join('');
@@ -2382,7 +2392,7 @@ function paintFlow() {
   for (let a = 0; a < N; a++) {
     const seed = line[Math.floor(((a + 0.5) / N) * (line.length - 1))];
     if (!seed) continue;
-    const reach = PV.airborne * 0.55 * (seed.spread ?? 1);     // hard ground carries it half as far
+    const reach = PV.airborne * 0.55 * (seed.hard ? PV.hardCarry : 1);   // the bench's transport dial, 1 by default
     const pts = [];
     for (let k = 0; k <= FLOW_SAMPLES; k++) {
       pts.push(driftFrom(plume.T, seed, (k / FLOW_SAMPLES) * reach, plume.wx, plume.st, 3));
@@ -2547,7 +2557,7 @@ function onFix(pos) {
     return;
   }
   pt.dwellS = 0;
-  if (rec.kind === 'lay') { const sp = liveSpread(pt); if (sp !== 1) pt.spread = sp; }
+  if (rec.kind === 'lay' && liveHard(pt)) pt.hard = true;
   rec.pts.push(pt);
   if (rec.kind === 'lay') setTrail(rec.pts);
   if (rec.kind === 'run') setDogTrack(rec.pts);
@@ -2654,7 +2664,7 @@ async function confirmLay() {
   const isHide = rec.kind === 'hide';
   const origin = isHide ? rec.hides[0] : rec.pts[0];
   const startedAt = isHide ? rec.hides[0].t : rec.pts[0].t;
-  rec.pts.forEach(p => { delete p._seen; delete p.spread; });   // the ground is saved once, as letters (fillSurfaces)
+  rec.pts.forEach(p => { delete p._seen; delete p.hard; delete p.spread; });   // the ground is saved once, as letters (fillSurfaces)
 
   const s = {
     id: uid(), handlerId: S.handler.id, dogId: null,
@@ -5323,6 +5333,16 @@ function wire() {
     paintBench();
     benchPaint();
     toast('Every dial back to the number it shipped with');
+  });
+  $('benchBody').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-preset]');
+    if (!b || !applyPreset(b.dataset.preset)) return;
+    /* Redraw with the preset's group left open, so the moved dials are seen. */
+    paintBench();
+    const pre = PRESETS.find(p => p.id === b.dataset.preset);
+    $('benchBody').querySelectorAll('details.bench-grp').forEach((el, i) => { el.open = PARAMS[i]?.id === pre.group; });
+    benchPaint();
+    toast(`${pre.label}: on for this bench only`);
   });
   $('benchBody').addEventListener('input', (e) => {
     const id = e.target.dataset?.set;

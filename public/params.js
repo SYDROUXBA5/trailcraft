@@ -192,7 +192,7 @@ export const PARAMS = [
     D('widthCap', 'Widest band', 'm', 10, 120, 5, 50, 'guess', 'uncertainty', 'a ceiling on the width', 'Rarely binds.'),
   ]),
 
-  G('ground', 'The ground', 'One number used to do five jobs here. It is now five, and four of them ship switched off.', 'physics', [
+  G('ground', 'The ground', 'One number used to do five jobs here. It is now five, all at 1, so tarmac changes nothing until you move one. “Try the tarmac rule” sets the old figure.', 'physics', [
     D('hardHold', 'Hard — holds', '×', 0.2, 1.5, 0.05, 1.0, 'guess', 'retention', 'how much scent the surface keeps',
       'OFF by default. One weak study found asphalt worked for 1–3 h against 8–11 h on grass — that is about THIS dial, not the others.'),
     D('hardGive', 'Hard — gives off', '×', 0.2, 1.5, 0.05, 1.0, 'guess', 'release', 'how strongly it draws', 'OFF by default.'),
@@ -243,6 +243,31 @@ export function setParam(id, v) {
 }
 
 export function resetParams() { Object.assign(PV, DEFAULTS); }
+
+/* ── Named experiments ────────────────────────────────────────────────
+   A hypothesis someone holds, as a set of dial positions with a name on it.
+   Never the default and never applied by the app on its own: a preset is
+   chosen on the bench, and the bench puts everything back when it closes. */
+export const PRESETS = [
+  {
+    id: 'tarmacRule', group: 'ground', label: 'Try the tarmac rule',
+    why: 'The trainer’s working rule the app used to apply to every run: scent on tarmac carried half as far, '
+      + 'drawn half as strong, pools half as wide. It does NOT narrow the band the way the old figure did — '
+      + 'that made the model look surer over ground it understands less.',
+    set: { hardCarry: 0.5, hardGive: 0.5, hardWiden: 0.5 },
+  },
+];
+export const presetById = (id) => PRESETS.find(p => p.id === id) ?? null;
+
+/** Apply a preset on top of the defaults, so it means the same thing whatever
+    was moved before it. Returns false for an unknown one. */
+export function applyPreset(id) {
+  const p = presetById(id);
+  if (!p) return false;
+  resetParams();
+  for (const [k, v] of Object.entries(p.set)) setParam(k, v);
+  return true;
+}
 
 /** Which dials are no longer where they shipped. The bench shows this, and a
     saved analysis has to carry it, or a picture cannot be reproduced. */

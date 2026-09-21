@@ -16,22 +16,27 @@
 
 import { dist } from './geo.js';
 
-/** Letter, name, and how far scent is drawn to spread compared with grass. */
+/** Letter and name. Nothing here says what a surface does to scent.
+
+    It used to: hard ground carried `spread: 0.5`, one number doing five
+    different jobs — how far scent is carried, how strongly it draws, how
+    wide the pools are, how long it lasts, and (wrongly) how sure the band
+    is. That was a trainer's working rule applied to every run by default.
+    Now a point on tarmac is only MARKED as tarmac, and what that does is
+    five separate dials on the bench (params.js), each at 1 — so an unproven
+    rule changes nothing until someone chooses to try it. */
 export const SURFACES = [
-  { id: 'w', label: 'Woods',        spread: 1 },
-  { id: 's', label: 'Scrub',        spread: 1 },
-  { id: 'g', label: 'Grass',        spread: 1 },
-  { id: 'c', label: 'Crop & field', spread: 1 },
-  /* Hard ground holds less and gives it up sooner: the plume is drawn half
-     as wide. A working figure from a trainer's experience, not a measurement
-     — one number, here, so it is easy to change when there is one. */
-  { id: 'h', label: 'Hard surface', spread: 0.5 },
-  { id: 'a', label: 'Water',        spread: 1 },
-  { id: 'u', label: 'Not mapped',   spread: 1 },
+  { id: 'w', label: 'Woods' },
+  { id: 's', label: 'Scrub' },
+  { id: 'g', label: 'Grass' },
+  { id: 'c', label: 'Crop & field' },
+  { id: 'h', label: 'Hard surface' },
+  { id: 'a', label: 'Water' },
+  { id: 'u', label: 'Not mapped' },
 ];
 const BY_ID = new Map(SURFACES.map(s => [s.id, s]));
 export const surfaceById = (id) => BY_ID.get(id) ?? BY_ID.get('u');
-export const spreadOf = (id) => surfaceById(id).spread;
+export const isHard = (id) => id === 'h';
 
 /** Which layers and properties the app must ask the tiles for. */
 export const GROUND_LAYERS = {
@@ -205,15 +210,13 @@ export function surfaceRows(metres) {
     .map(([id, m]) => ({ id, label: surfaceById(id).label, metres: m, share: m / total }));
 }
 
-/** The same trail with `spread` on the points that lie on hard ground, for the
-    plume and the scent band. Points on ordinary ground are passed through
-    untouched, so a trail with no hard ground costs nothing. */
-export function withSpread(pts, letters) {
+/** The same trail with `hard: true` on the points that lie on hard ground, for
+    the plume and the scent band to look up their own dials against. Points
+    on ordinary ground are passed through untouched, and the saved trail is
+    never written on. */
+export function withSurface(pts, letters) {
   if (!pts || !letters || letters.length !== pts.length) return pts;
-  return pts.map((p, i) => {
-    const sp = spreadOf(letters[i]);
-    return sp === 1 ? p : { ...p, spread: sp };
-  });
+  return pts.map((p, i) => (isHard(letters[i]) ? { ...p, hard: true } : p));
 }
 
 /** The tiles that cover a trail, at the finest zoom that keeps the count sane. */
