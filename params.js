@@ -203,6 +203,21 @@ export const PARAMS = [
       'Only ever widens. Uncertainty is one-way: nothing may make the model look more certain than the baseline.'),
   ]),
 
+  G('buildings', 'Buildings', 'Scent at nose height cannot pass through a wall, so the drawn cloud and arrows go round the buildings the map has drawn. That part is always on. What happens in the sheltered pocket behind a building is the experiment.', 'physics', [
+    D('wallSlide', 'Speed along a wall', 'share', 0.2, 1, 0.05, 0.6, 'guess', 'transport',
+      'how fast scent that hits a wall is carried along it, as a share of the step',
+      'Air meeting a wall head-on splits and runs round both ends. How fast is not measured here.'),
+    D('wakeSlow', 'Wind left behind a building', 'share', 0.05, 1, 0.05, 1, 'guess', 'transport',
+      'how fast scent moves in the sheltered pocket downwind of a building',
+      'OFF at 1. Air behind a building slows and curls back towards the wall. How much, for any building here, is not measured.'),
+    D('wakeLen', 'Pocket length', 'heights', 0.5, 5, 0.1, 2, 'guess', 'transport',
+      'how far behind a building the shelter reaches, in building heights',
+      'Studies of air round single buildings put the sheltered zone at roughly one to three building heights, longer for wider buildings. Two is a choice inside that range, not a measurement of any building here.'),
+    D('wakeH', 'Height when the map has none', 'm', 3, 20, 0.5, 6, 'guess', 'transport',
+      'the pocket length behind buildings the map gives no height',
+      'About two storeys.'),
+  ]),
+
   G('draw', 'How it is drawn', 'These change the picture and nothing the model claims. Moving them proves nothing about scent.', 'drawing', [
     D('plumeMs', 'Redraw every', 'ms', 100, 2000, 50, 400, 'drawing', 'drawing', 'how often the cloud is recomputed', ''),
     D('thinDiv', 'Thinning with distance', 'm', 5, 100, 1, 22, 'drawing', 'drawing', 'whether the core or the edge looks hottest',
@@ -255,6 +270,12 @@ export const PRESETS = [
       + 'half as strong, and a standing pool covers half the ground. The band keeps its full width: the old '
       + 'figure narrowed it, which made the model look surest on the ground it understands least.',
     set: { hardCarry: 0.5, hardGive: 0.5, hardWiden: 0.5 },
+  },
+  {
+    id: 'wakeRule', group: 'buildings', label: 'Try building wakes', short: 'Building wakes',
+    why: 'Behind every building the map has drawn, scent keeps only 30% of the wind, recovering over two '
+      + 'building heights, so it lingers against the downwind wall. The pocket’s size and strength are guesses.',
+    set: { wakeSlow: 0.3 },
   },
 ];
 export const presetById = (id) => PRESETS.find(p => p.id === id) ?? null;

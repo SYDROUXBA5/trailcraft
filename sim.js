@@ -19,6 +19,7 @@
 import { project, bearing, dist } from './geo.js';
 import { flowAt, normOf, scentLife } from './field.js';
 import { PV } from './params.js';
+import { blockStep, wallAt, leeFactor } from './walls.js';
 
 /** Seconds a particle stays workable once it has left the ground. Airborne
     residence is what sets the offset scale: at 0.8 m/s, 50 s puts the plume
@@ -100,23 +101,37 @@ export function stepByFlow(p, f, secs, carry = 1) {
   return project(p, flowBearing(f), sp * secs * carry);
 }
 
-export function driftFrom(T, origin, secs, wx, st, steps = 5) {
+/* `walls` (walls.js) are buildings the scent cannot pass through. Only the
+   drawn cloud, tracers and arrows pass them; the grading (predictedOffsets)
+   never does, so a building on the map moves what you see and never a score. */
+export function driftFrom(T, origin, secs, wx, st, steps = 5, walls = null) {
   let pt = { lat: origin.lat, lon: origin.lon };
   if (!(secs > 0)) return pt;
   const dt = secs / steps;
   const f = { u: 0, v: 0 };
+  /* A trail point inside a footprint is GPS against a wall: that building
+     does not trap the scent laid "inside" it. */
+  const skip = walls ? wallAt(walls, origin) : -1;
+  const wake = walls && PV.wakeSlow < 1;
+  const going = ((wx?.wind_direction ?? 0) + 180) % 360;
 
   for (let i = 0; i < steps; i++) {
     const n = normOf(T, pt.lat, pt.lon);
     flowAt(T, n.x, n.y, wx, st, f);
     if (Math.hypot(f.u, f.v) < 1e-6) break;
-    pt = stepByFlow(pt, f, dt, PV.nose);
+    if (wake) {
+      const k = leeFactor(walls, pt, going, PV.wakeLen, PV.wakeSlow, PV.wakeH);
+      f.u *= k; f.v *= k;
+    }
+    const next = stepByFlow(pt, f, dt, PV.nose);
+    pt = walls ? blockStep(walls, pt, next, skip, PV.wallSlide) : next;
   }
   return pt;
 }
 
 export class ScentSim {
-  constructor() { this.parts = []; this.trail = []; this.pool = []; }
+  /* `walls` is set by whoever draws this cloud; null means open ground. */
+  constructor() { this.parts = []; this.trail = []; this.pool = []; this.walls = null; }
 
   /** Seed one particle set from a laid trail. Each keeps the point it came from
       and the moment that point was walked — its ground source never moves. */
@@ -247,6 +262,7 @@ export class ScentSim {
     const PBUILD = PV.poolBuildS, PSB = PV.poolStrBase, PSR = PV.poolStrRange;
     /* The ground dials, one job each. Read once a frame like everything else. */
     const CARRY = PV.hardCarry, GIVE = PV.hardGive, HOLD = PV.hardHold, WIDEN = PV.hardWiden;
+    const WALLS = this.walls;
     const lifeMs = scentLife(wx, st) * 60000;
     const mix = Math.max(0.5, st?.mix ?? 1);
     const drain = st?.drain ?? 0;
@@ -269,7 +285,7 @@ export class ScentSim {
       // all stop at the same distance.
       const h = s.hard;
       const secs = s.phase * AIR * (s.life ?? 1) / mix * (h ? CARRY : 1);
-      const d = driftFrom(T, { lat: s.hlat, lon: s.hlon }, secs, wx, st);
+      const d = driftFrom(T, { lat: s.hlat, lon: s.hlon }, secs, wx, st, 5, WALLS);
       s.lat = d.lat; s.lon = d.lon;
 
       const dispM = dist({ lat: s.hlat, lon: s.hlon }, d);
@@ -336,7 +352,7 @@ export class ScentSim {
       const poolR = poolRadius(dwellS) * (hp ? WIDEN : 1);
       const g = project({ lat: src.lat, lon: src.lon }, s.ang, s.rad * poolR);
       s.hlat = g.lat; s.hlon = g.lon;
-      const d = driftFrom(T, g, s.phase * AIR * (s.life ?? 1) / mix * (hp ? CARRY : 1), wx, st);
+      const d = driftFrom(T, g, s.phase * AIR * (s.life ?? 1) / mix * (hp ? CARRY : 1), wx, st, 5, WALLS);
       s.lat = d.lat; s.lon = d.lon;
       // Up to ~1.5× a fresh trail particle — the hottest thing on the map.
       s.str = (PSB + PSR * build) * (1 - s.phase * PFADE) * (hp ? GIVE : 1);
