@@ -138,4 +138,16 @@ t('every script in public/ parses as a module', () => {
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
+/* A test file that is never run is worse than no test file: it reads as
+   cover. This caught call.test.mjs sitting in the folder, passing when run by
+   hand, and absent from `npm test`. */
+t('every test file is actually in the npm test script', () => {
+  const script = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).scripts.test;
+  const files = readdirSync(new URL('.', import.meta.url)).filter(f => f.endsWith('.test.mjs'));
+  assert.ok(files.length > 10, 'found the test folder');
+  for (const f of files) {
+    assert.ok(script.includes(`test/${f}`), `${f} exists but npm test never runs it`);
+  }
+});
+
 console.log(`\n${pass} passed total\n`);

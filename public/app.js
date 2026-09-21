@@ -26,12 +26,13 @@ import { trailModel, encodeShared, decodeShared, sharedUrl, toGpx, fileBase,
 import { buildPdf, jpegSize } from './pdf.js';
 import { coachStep, initialCoach, coachPhrase, coachLine, TOL_OPTIONS, COACH_DEFAULTS } from './coach.js';
 import { DEBRIEF, FLAGS, NOTE_TAGS, blankDebrief, debriefDone, debriefLine, labelOf } from './debrief.js';
+import { CONFIDENCE, stampCall, confidenceOf, firstCall, calibration, calibrationLine } from './call.js';
 import { isNative, watchBackground, canHaptic, haptic, watchHeading } from './native.js';
 import { createStore, migrateV1, TARGETS, ODOURS, targetById, targetText, verbs, uid,
          dogStats, ageBand, AGE_BANDS, LEVELS, levelById, dogAge } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-21e';
+const BUILD = '2026-09-21f';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true,
@@ -1987,6 +1988,63 @@ function closeBench() {
   clearMap();
 }
 
+/* ── The call ─────────────────────────────────────────────────────────
+   Asked on the Indication, at the moment of commitment, before the handler
+   walks up and before anything is revealed. The waypoint is already stamped
+   by the time this opens, so however long the answer takes, the mark stays
+   where the handler actually committed.
+
+   Asked once per run, on the first indication only. That is the one the
+   debrief's outcome can honestly be scored against, and asking about marks
+   that will never be scored is how a form stops being filled in. */
+let callWp = null;     // the indication waiting on an answer
+let callSeen = false;  // was the trail on screen when it was made
+
+function openCall(wp) {
+  callWp = wp;
+  callSeen = run.revealed;
+  $('callOpts').innerHTML = CONFIDENCE.map(c =>
+    `<button type="button" class="call-opt" data-conf="${c.v}"><b>${esc(c.label)}</b><i>${esc(c.why)}</i></button>`).join('');
+  $('callSheet').hidden = false;
+}
+
+function closeCall() {
+  callWp = null;
+  $('callSheet').hidden = true;
+}
+
+function pickCall(v) {
+  /* Written onto the waypoint itself, so the call travels with the mark
+     through save, share and replay without a second place to keep in step. */
+  if (callWp) {
+    callWp.call = stampCall(v, callSeen);
+    navigator.vibrate?.(18);
+  }
+  closeCall();
+}
+
+/** What the handler said before they looked, and what it has added up to.
+    Sits above the Judged block because that is the order it happened in. */
+function paintCallBlock(s) {
+  const c = firstCall(s);
+  $('callLabel').hidden = !c;
+  $('callSummary').hidden = !c;
+  $('callCal').hidden = !c;
+  if (!c) return;
+  const band = confidenceOf(c.call.conf);
+  const d = s?.data?.debrief;
+  let tail;
+  if (!d?.outcome) tail = '. Write the debrief and this becomes a data point.';
+  else if (d.outcome === 'found') tail = ' — and you were right.';
+  else if (d.outcome === 'false') tail = ' — and you were wrong.';
+  else tail = `, and the run ended ${labelOf('outcome', d.outcome).toLowerCase()}.`;
+  /* Say plainly when a call cannot count, rather than letting it look banked. */
+  if (d && d.blind === 'open') tail += ' It does not count towards your calibration — you knew the answer.';
+  else if (c.call.seen) tail += ' It does not count — the trail was already on screen.';
+  $('callSummary').textContent = `You called it “${band?.label ?? c.call.conf}”${tail}`;
+  $('callCal').textContent = calibrationLine(calibration(db.sessions()));
+}
+
 /* ── The debrief ──────────────────────────────────────────────────────
    Five taps and an optional line. Everything asked here is something the
    phone cannot know: whether there was anything out there, whether anyone
@@ -3208,6 +3266,7 @@ async function startRun(s) {
   const t = targetById(s.targetId);
   run.session = s;
   run.revealed = false;
+  closeCall();
   run.startedAt = Date.now();
   rec.kind = 'run';
   rec.wps = [];
@@ -3271,13 +3330,22 @@ function toggleReveal() {
 function addWaypoint(kind) {
   const last = rec.pts[rec.pts.length - 1];
   if (!last) return toast('No fix yet');
-  rec.wps.push({ kind, lat: last.lat, lon: last.lon, t: Date.now() });
+  /* Stamped before anything else happens. Whatever is asked next, the mark is
+     already at the place and the moment the handler committed. */
+  const wp = { kind, lat: last.lat, lon: last.lon, t: Date.now() };
+  rec.wps.push(wp);
   setSrc('wps', pointsOf(rec.wps, 'kind'));
   navigator.vibrate?.(35);
   toast(kind);
+  /* Only the first indication, and only while the answer is still hidden:
+     with the trail drawn on the map there is nothing to be sure about. */
+  const isFirstInd = kind === 'Indication'
+    && rec.wps.filter(w => w.kind === 'Indication').length === 1;
+  if (isFirstInd && !run.revealed) openCall(wp);
 }
 
 async function stopRun() {
+  closeCall();
   await stopWatch();
   const coachRecord = coachSummary();
   coachStop();
@@ -3517,6 +3585,7 @@ function renderResult(s) {
   const provisional = !!s.data.plan && !s.data.walked;
   $('btnScanWalked').hidden = !provisional;
   $('btnReplay').hidden = !(s.data.track?.length > 1);
+  paintCallBlock(s);
   paintDebriefBlock(s);
   const note = $('resProvisional');
   note.hidden = !s.data.plan;
@@ -5117,6 +5186,11 @@ function wire() {
   });
   // Sound and speech are only allowed after a touch: the first one anywhere unlocks them.
   document.addEventListener('pointerdown', audioUnlock, { once: true });
+  $('callOpts').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-conf]');
+    if (b) pickCall(b.dataset.conf);
+  });
+  $('callSkip').addEventListener('click', closeCall);
   $('wpRow').addEventListener('click', (e) => {
     const b = e.target.closest('[data-wp]');
     if (b) addWaypoint(b.dataset.wp);

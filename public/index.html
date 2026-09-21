@@ -441,6 +441,16 @@
     <div class="home-head"><span class="label" style="margin-top:0">Coach</span><button class="btn ghost small" id="btnCoachDone">Done</button></div>
     <div id="coachSheetBody"></div>
   </div>
+  <!-- ── The call: asked on the Indication, before anything is revealed ──
+       The mark is already stamped by the time this appears, so a slow answer
+       never moves it. Big targets, because this is answered one-handed with a
+       dog on the other end of a line. -->
+  <div class="call-sheet" id="callSheet" hidden>
+    <span class="label" style="margin-top:0">Before you go and look</span>
+    <p class="call-q">How sure are you?</p>
+    <div class="call-opts" id="callOpts"></div>
+    <button class="btn ghost small" id="callSkip">Skip</button>
+  </div>
 </section>
 
 <!-- ── Result card ─────────────────────────────────────────────────── -->
@@ -453,6 +463,11 @@
     <div class="grid2" id="resGrid"></div>
     <p class="body small muted" id="resCoach"></p>
     <div class="surf-box" id="resGround" hidden></div>
+    <!-- What the handler said at the moment of commitment, before they looked.
+         Sits above the debrief because that is the order it happened in. -->
+    <span class="label" id="callLabel" hidden>Your call</span>
+    <p class="body" id="callSummary" hidden></p>
+    <p class="body small muted" id="callCal" hidden></p>
     <span class="label" id="dbLabel" hidden>Judged</span>
     <p class="body" id="dbSummary" hidden></p>
     <p class="body small muted" id="dbByline" hidden></p>
