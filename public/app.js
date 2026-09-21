@@ -19,7 +19,8 @@ import { encodeTrail, decodeTrail, cardUrl, cardFromText } from './card.js';
 import { decodeTile, tileOf, tileBox } from './mvt.js';
 import { GROUND_LAYERS, buildGround, surfaceAt, surfaceAlong, surfaceRows, withSurface,
          tilesCovering, isHard, GROUND_V, GROUND_RULES, readingSig, readingFits, readingVersion,
-         CONDITIONS, blankSeen, cleanSeen, seenLine } from './ground.js';
+         CONDITIONS, blankSeen, cleanSeen, seenLine, surfaceById,
+         FIX_AS, alongOf, idxAt, makeFix, applyFixes, fixSpan, stretchMetres } from './ground.js';
 import { sync, onSync, initSync, signInWithGoogle, signInWithApple, signOut,
          startLive, pushLive, endLive, watchLive } from './sync.js';
 import { trailModel, encodeShared, decodeShared, sharedUrl, toGpx, fileBase,
@@ -33,7 +34,7 @@ import { createStore, migrateV1, TARGETS, ODOURS, targetById, targetText, verbs,
          dogStats, ageBand, AGE_BANDS, LEVELS, levelById, dogAge } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-21j';
+const BUILD = '2026-09-21k';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true,
@@ -132,10 +133,10 @@ const avaHtml = (ent, cls = '') => {
 const SCREENS = ['scrOnboardHandler', 'scrOnboardDog', 'scrTutorial', 'scrHome', 'scrHandler', 'scrLay',
   'scrConfirm', 'scrShare', 'scrContam', 'scrPick', 'scrScan', 'scrRun', 'scrResult',
   'scrShowMap', 'scrSessions', 'scrSettings', 'scrDraw', 'scrCountdown', 'scrWalk', 'scrWait', 'scrDog',
-  'scrSignIn', 'scrShareOut', 'scrShared', 'scrLive', 'scrBench', 'scrReplay', 'scrDebrief'];
+  'scrSignIn', 'scrShareOut', 'scrShared', 'scrLive', 'scrBench', 'scrReplay', 'scrDebrief', 'scrFix'];
 
 /* The screens that are transparent chrome over the live map. */
-const MAP_SCREENS = ['scrLay', 'scrConfirm', 'scrContam', 'scrRun', 'scrShowMap', 'scrDraw', 'scrWalk', 'scrLive', 'scrBench', 'scrReplay'];
+const MAP_SCREENS = ['scrLay', 'scrConfirm', 'scrContam', 'scrRun', 'scrShowMap', 'scrDraw', 'scrWalk', 'scrLive', 'scrBench', 'scrReplay', 'scrFix'];
 
 /* ── Going back ───────────────────────────────────────────────────────
    Every page except home carries the same arrow, top-left, and it always
@@ -271,6 +272,7 @@ const EMPTY = { type: 'FeatureCollection', features: [] };
 let map, mapReady = false;
 let GL = mapboxgl;   // every control/bounds must come from the SAME library
 const srcData = { runner: EMPTY, steps: EMPTY, dog: EMPTY, paws: EMPTY, wps: EMPTY, drift: EMPTY, start: EMPTY, hides: EMPTY, contam: EMPTY, plan: EMPTY, nose: EMPTY,
+                  fix: EMPTY, fixEnds: EMPTY,
                   routeDone: EMPTY, routeAhead: EMPTY, puck: EMPTY, scent: EMPTY, wind: EMPTY,
                   flow: EMPTY, flowPulse: EMPTY, air: EMPTY, acc: EMPTY };
 
@@ -408,6 +410,16 @@ function addOverlays() {
   add({ id: 'plan-line', type: 'line', source: 'plan',
         layout: { 'line-cap': 'butt', 'line-join': 'round' },
         paint: { 'line-color': '#BFD8FF', 'line-width': 3.2, 'line-opacity': 0.98, 'line-dasharray': [2.2, 1.8] } });
+  /* The stretch being corrected: gold, thick, with a dashed white edge so it
+     reads as "chosen" by shape as well as colour. */
+  add({ id: 'fix-casing', type: 'line', source: 'fix',
+        layout: { 'line-cap': 'butt', 'line-join': 'round' },
+        paint: { 'line-color': '#FFFFFF', 'line-width': 13, 'line-opacity': 0.95, 'line-dasharray': [1.1, 0.8] } });
+  add({ id: 'fix-line', type: 'line', source: 'fix',
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: { 'line-color': '#F1C77A', 'line-width': 7 } });
+  add({ id: 'fix-ends', type: 'circle', source: 'fixEnds',
+        paint: { 'circle-radius': 8, 'circle-color': '#F1C77A', 'circle-stroke-color': '#0B1630', 'circle-stroke-width': 3 } });
   add({ id: 'contam-line', type: 'line', source: 'contam',
         layout: { 'line-cap': 'butt', 'line-join': 'round' },
         paint: { 'line-color': '#C8B8E8', 'line-width': 3.5, 'line-opacity': 0.9, 'line-dasharray': [1, 1.4] } });
@@ -1339,7 +1351,12 @@ async function groundFor(pts) {
    (ground.js). A reading under older rules still fits and is still shown. */
 const surfValid = (s) => readingFits(s?.data);
 /** The session's trail, with hard ground marked for the plume and the band. */
-const trailOf = (s) => (surfValid(s) ? withSurface(s.data.trail, s.data.surf) : s.data.trail);
+function trailOf(s) {
+  const t = s?.data?.trail;
+  const fixes = s?.data?.surfFix;
+  if (!surfValid(s) && !fixes?.length) return t;
+  return withSurface(t, fixes?.length ? applyFixes(t, surfValid(s) ? s.data.surf : null, fixes).letters : s.data.surf);
+}
 
 const surfBusy = new Map();             // session id → the ask in flight
 /* A run with no reading is read once, on its own — that is the first
@@ -1384,7 +1401,27 @@ function seenHtml(s) {
     : '';
 }
 
-function groundHtml(s) {
+/** Corrections, each beside what the map said over the same stretch. */
+function fixesHtml(s, edit) {
+  const t = s.data.trail, fixes = s.data.surfFix ?? [];
+  if (!fixes.length) return '';
+  const along = alongOf(t);
+  return `<span class="label">Corrected by hand</span><div class="fix-list">${fixes.map(f => {
+    const sp = fixSpan(t, f, along);
+    const who = [f.by, fmtWhen(f.at)].filter(Boolean).join(', ');
+    const rm = edit ? `<button type="button" class="btn small" data-unfix="${esc(f.id)}">Remove</button>` : '';
+    if (!sp) {
+      return `<div class="fix-row off"><span><b>${esc(surfaceById(f.as).label)}: no longer on this trail</b>
+        <i>The line was replaced and this stretch is not on it. Kept, not applied. ${esc(who)}</i></span>${rm}</div>`;
+    }
+    const said = surfaceRows(stretchMetres(t, surfValid(s) ? s.data.surf : null, sp.i0, sp.i1))
+      .map(r => `${r.label} ${fmtKm(r.metres)}`).join(', ');
+    return `<div class="fix-row"><span><b>${fmtKm(along[sp.i0])} to ${fmtKm(along[sp.i1])} is ${esc(surfaceById(f.as).label)}</b>
+      <i>The map said: ${esc(said || 'nothing')}. Corrected by ${esc(who || 'hand')}.${f.note ? ` “${esc(f.note)}”` : ''}</i></span>${rm}</div>`;
+  }).join('')}</div>`;
+}
+
+function groundHtml(s, { edit = false } = {}) {
   const rows = surfaceRows(s.data.surfM);
   if (!rows.length) return '';
   const total = rows.reduce((a, r) => a + r.metres, 0);
@@ -1400,11 +1437,13 @@ function groundHtml(s) {
   const prev = s.data.surfPrev && Number.isFinite(s.data.surfAt)
     ? `<p class="body small muted">Re-read ${esc(fmtWhen(s.data.surfAt))}. The earlier reading is kept with the run.</p>`
     : '';
-  return `<span class="label">Ground</span>
+  const fixBtn = edit && s.data.trail?.length > 1
+    ? `<button type="button" class="btn small" data-fixopen="1">Correct a stretch</button>` : '';
+  return `<span class="label">Ground, from the map</span>
     <div class="surf-bar" aria-hidden="true">${rows.map(r => `<i class="gs-${r.id}" style="flex:${r.share.toFixed(4)}"></i>`).join('')}</div>
     <div class="surf-rows">${rows.map(r =>
       `<div><i class="gs-${r.id}"></i><span>${esc(r.label)}</span><b>${fmtKm(r.metres)}</b><em>${Math.round(r.share * 100)}%</em></div>`).join('')}</div>
-    ${built}${seenHtml(s)}${old}${prev}
+    ${built}${seenHtml(s)}${old}${prev}${fixesHtml(s, edit)}${fixBtn}
     <p class="body small muted">Read from the map, not from the ground: a yard, a lawn or a track nobody drew is Not mapped. What tarmac does to scent is an open question, so the model treats it like any other ground unless the tarmac rule is tried on the bench.</p>`;
 }
 /** Show it if it is known; if not, ask, and fill the box in when the answer
@@ -1412,12 +1451,13 @@ function groundHtml(s) {
 function paintGround(id, s) {
   const el = $(id);
   el.dataset.sid = s.id;
-  el.innerHTML = surfValid(s) ? groundHtml(s) : '';
+  const edit = id === 'resGround';
+  el.innerHTML = surfValid(s) ? groundHtml(s, { edit }) : '';
   el.hidden = !el.innerHTML;
   if (surfValid(s)) return;
   fillSurfaces(s).then(f => {
     if (!f || el.dataset.sid !== s.id) return;
-    el.innerHTML = groundHtml(f);
+    el.innerHTML = groundHtml(f, { edit });
     el.hidden = !el.innerHTML;
   });
 }
@@ -2026,6 +2066,106 @@ function closeBench() {
   resetParams();
   plumeStop();
   clearMap();
+}
+
+/* ── Correct a stretch ────────────────────────────────────────────────
+   Two sliders in metres along the trail, with nudges, and the stretch lit on
+   the map as they move. Saved beside the map's reading, never over it. */
+const fixer = { s: null, along: null, as: null };
+
+function sessionById(id) {
+  return [run.session, pendingSession].find(x => x?.id === id) ?? db.sessions().find(x => x.id === id) ?? null;
+}
+
+function openFix(s) {
+  const t = s?.data?.trail;
+  if (!(t?.length > 1)) return;
+  fixer.s = s;
+  fixer.along = alongOf(t);
+  fixer.as = null;
+  const max = Math.max(1, Math.round(fixer.along[fixer.along.length - 1]));
+  for (const id of ['fixFrom', 'fixTo']) $(id).max = String(max);
+  /* Start with a visible stretch in the middle rather than nothing: moving
+     something is easier to understand than making it appear. */
+  $('fixFrom').value = String(Math.round(max * 0.4));
+  $('fixTo').value = String(Math.round(max * 0.6));
+  $('fixNote').value = '';
+  clearMap();
+  setTrail(trailOf(s));
+  setSrc('start', pointsOf([t[0]]));
+  go('scrFix');
+  paintFix();
+  /* Fit the trail into the part of the map the sheet leaves showing. */
+  if (mapReady) {
+    const b = new GL.LngLatBounds();
+    t.forEach(p => b.extend([p.lon, p.lat]));
+    const sheet = $('fixSheet').offsetHeight || 320;
+    map.fitBounds(b, { padding: { top: 90, left: 40, right: 40, bottom: sheet + 30 }, pitch: 0, duration: 600 });
+  }
+}
+
+function fixRange() {
+  const a = Number($('fixFrom').value), b = Number($('fixTo').value);
+  return a <= b ? [a, b] : [b, a];
+}
+
+function paintFix() {
+  const s = fixer.s;
+  if (!s) return;
+  const t = s.data.trail;
+  const [a, b] = fixRange();
+  const i0 = idxAt(fixer.along, a), i1 = idxAt(fixer.along, b);
+  setSrc('fix', i1 > i0 ? lineOf(t.slice(i0, i1 + 1)) : EMPTY);
+  setSrc('fixEnds', pointsOf([t[i0], t[i1]]));
+  const said = surfaceRows(stretchMetres(t, surfValid(s) ? s.data.surf : null, i0, i1))
+    .map(r => `${r.label} ${fmtKm(r.metres)}`).join(', ');
+  $('fixReadout').textContent = i1 > i0
+    ? `${fmtKm(fixer.along[i0])} to ${fmtKm(fixer.along[i1])}: ${fmtKm(fixer.along[i1] - fixer.along[i0])} of trail. The map says ${said || 'nothing here'}.`
+    : 'Move the two sliders apart to choose a stretch.';
+  $('fixAs').innerHTML = FIX_AS.map(id =>
+    `<button type="button" class="chip${fixer.as === id ? ' selected' : ''}" data-as="${id}" aria-pressed="${fixer.as === id}">${esc(surfaceById(id).label)}</button>`).join('');
+  $('fixSave').disabled = !(fixer.as && i1 > i0);
+}
+
+function closeFix() {
+  fixer.s = null;
+  fixer.along = null;
+  clearMap();
+}
+
+function backToResult(s) {
+  const s2 = s ? (sessionById(s.id) ?? s) : null;
+  if (s2) renderResult(s2);
+  go('scrResult');
+}
+
+function saveFix() {
+  const s = fixer.s;
+  if (!s) return;
+  const [a, b] = fixRange();
+  const f = makeFix(s.data.trail, a, b, fixer.as, { note: $('fixNote').value.trim(), by: S.handler?.name ?? null });
+  if (!f) return toast('Choose a stretch and what it really is');
+  const saved = guardSave(s, () => saveSession(s, { data: { ...s.data, surfFix: [...(s.data.surfFix ?? []), f] } }));
+  if (!saved) return;
+  snap();
+  const s2 = db.sessions().find(x => x.id === s.id) ?? s;
+  if (run.session?.id === s.id) run.session = s2;
+  if (pendingSession?.id === s.id) pendingSession = s2;
+  closeFix();
+  backToResult(s2);
+  toast('Correction saved. The map’s reading is kept beside it.');
+}
+
+function removeFix(s, fixId) {
+  const fixes = (s.data.surfFix ?? []).filter(f => f.id !== fixId);
+  const saved = guardSave(s, () => saveSession(s, { data: { ...s.data, surfFix: fixes } }));
+  if (!saved) return;
+  snap();
+  const s2 = db.sessions().find(x => x.id === s.id) ?? s;
+  if (run.session?.id === s.id) run.session = s2;
+  if (pendingSession?.id === s.id) pendingSession = s2;
+  paintGround('resGround', s2);
+  toast('Correction removed. The map’s reading stands.');
 }
 
 /* ── The call ─────────────────────────────────────────────────────────
@@ -5283,6 +5423,36 @@ function wire() {
   $('btnSharedPdf').addEventListener('click', () => sharedModel && savePdf(sharedModel));
   $('btnSharedClose').addEventListener('click', closeShared);
   $('btnSharedKeep').addEventListener('click', keepShared);
+  $('fixFrom').addEventListener('input', paintFix);
+  $('fixTo').addEventListener('input', paintFix);
+  $('scrFix').addEventListener('click', (e) => {
+    const n = e.target.closest('[data-nudge]');
+    if (n) {
+      const el = $(n.dataset.nudge);
+      el.value = String(Math.min(Number(el.max), Math.max(0, Number(el.value) + Number(n.dataset.d))));
+      return paintFix();
+    }
+    const c = e.target.closest('[data-as]');
+    if (c) { fixer.as = c.dataset.as; paintFix(); }
+  });
+  $('fixSave').addEventListener('click', saveFix);
+  $('fixCancel').addEventListener('click', () => { const s = fixer.s; closeFix(); backToResult(s); });
+  /* On the result card: open the correction screen, or remove one. Removing
+     takes a second tap, and the map's reading is still there underneath. */
+  $('resGround').addEventListener('click', (e) => {
+    const s = sessionById($('resGround').dataset.sid);
+    if (!s) return;
+    if (e.target.closest('[data-fixopen]')) return openFix(s);
+    const rm = e.target.closest('[data-unfix]');
+    if (!rm) return;
+    if (!rm.classList.contains('confirm')) {
+      rm.classList.add('confirm');
+      rm.textContent = 'Tap again to remove';
+      setTimeout(() => { if (rm.isConnected) { rm.classList.remove('confirm'); rm.textContent = 'Remove'; } }, 3000);
+      return;
+    }
+    removeFix(s, rm.dataset.unfix);
+  });
   /* Re-reading the ground is something a person asks for. */
   for (const id of ['resGround', 'shareGround']) {
     $(id).addEventListener('click', (e) => {
@@ -5300,7 +5470,7 @@ function wire() {
           b.textContent = 'Re-read the ground';
           return toast('Could not reach the map. Try again with signal.');
         }
-        el.innerHTML = groundHtml(f);
+        el.innerHTML = groundHtml(f, { edit: id === 'resGround' });
         el.hidden = !el.innerHTML;
         toast('Ground re-read. The earlier reading is kept.');
       });

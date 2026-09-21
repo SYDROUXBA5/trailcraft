@@ -655,6 +655,36 @@
   </div>
 </section>
 
+<!-- ── Correct a stretch of ground ──────────────────────────────────────
+     Two sliders along the trail's length, not taps on a satellite map: a
+     finger cannot hit a point on a line, and the map pans under a drag. The
+     stretch lights up on the map as the sliders move. -->
+<section id="scrFix" class="screen glass" hidden>
+  <div class="hud-pill"><span id="fixHudText">Correct a stretch</span></div>
+  <div class="glass-bottom fix-sheet" id="fixSheet">
+    <div class="fix-range">
+      <label for="fixFrom">Starts</label>
+      <button type="button" class="fix-nudge" data-nudge="fixFrom" data-d="-2" aria-label="Start 2 metres earlier">&minus;</button>
+      <input type="range" id="fixFrom" min="0" max="100" step="1" value="40">
+      <button type="button" class="fix-nudge" data-nudge="fixFrom" data-d="2" aria-label="Start 2 metres later">+</button>
+    </div>
+    <div class="fix-range">
+      <label for="fixTo">Ends</label>
+      <button type="button" class="fix-nudge" data-nudge="fixTo" data-d="-2" aria-label="End 2 metres earlier">&minus;</button>
+      <input type="range" id="fixTo" min="0" max="100" step="1" value="60">
+      <button type="button" class="fix-nudge" data-nudge="fixTo" data-d="2" aria-label="End 2 metres later">+</button>
+    </div>
+    <p class="glass-caption" id="fixReadout" aria-live="polite"></p>
+    <span class="fix-label">What it really is</span>
+    <div class="chip-row" id="fixAs"></div>
+    <input id="fixNote" type="text" maxlength="80" placeholder="What you saw there (optional)" autocomplete="off" aria-label="Note">
+    <div class="row-gap">
+      <button type="button" class="btn ghost" id="fixCancel">Cancel</button>
+      <button type="button" class="btn moss grow" id="fixSave" disabled>Save correction</button>
+    </div>
+  </div>
+</section>
+
 <section id="scrBench" class="screen glass" hidden>
   <div class="hud-pill" id="benchHud"><span id="benchHudText">Push a dial</span></div>
   <div class="bench-sheet" id="benchSheet">

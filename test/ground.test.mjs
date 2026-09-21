@@ -3,7 +3,8 @@ import { decodeTile, tileOf, tileBox } from '../public/mvt.js';
 import { SURFACES, buildGround, surfaceAt, surfaceAlong, surfaceRows, withSurface,
          tilesCovering, isHard, GROUND_LAYERS, aroundAt, GROUND_V, GROUND_RULES,
          readingSig, readingFits, readingVersion, groundPrint,
-         CONDITIONS, blankSeen, cleanSeen, seenLine } from '../public/ground.js';
+         CONDITIONS, blankSeen, cleanSeen, seenLine,
+         FIX_AS, alongOf, idxAt, makeFix, fixSpan, applyFixes, stretchMetres } from '../public/ground.js';
 import { PV, setParam, resetParams, applyPreset, PRESETS, presetById, dialById, DEFAULTS } from '../public/params.js';
 import { project, dist, densify, scentField } from '../public/geo.js';
 import { ScentSim } from '../public/sim.js';
@@ -337,6 +338,86 @@ t('conditions are what the handler saw, and only what the app offers', () => {
   assert.equal(seenLine({ wet: null, sun: 'sun' }), 'In sun');
   assert.equal(seenLine({ wet: 'frozen' }), 'Frozen');
   assert.equal(seenLine(null), '');
+});
+
+/* ── Hand corrections ── */
+const line = (n, step = 5, y = 0) => Array.from({ length: n }, (_, i) => at(i * step, y));   // n points, `step` m apart
+
+t('a correction marks a stretch by place, and the map’s reading is never written on', () => {
+  const t = line(41);                                    // 200 m, a point every 5 m
+  const along = alongOf(t);
+  assert.ok(Math.abs(along[40] - 200) < 0.5);
+  assert.equal(idxAt(along, 52), 10);
+  assert.ok(!FIX_AS.includes('u'), 'nothing is corrected TO "not mapped"');
+
+  const f = makeFix(t, 50, 100, 'g', { note: 'x'.repeat(200), by: 'Rémi', at: 1000 });
+  assert.equal(f.as, 'g');
+  assert.equal(f.fromM, 50);
+  assert.equal(f.toM, 100);
+  assert.ok(Math.abs(f.from.lat - t[10].lat) < 1e-6 && Math.abs(f.to.lon - t[20].lon) < 1e-6, 'anchored to places');
+  assert.equal(f.note.length, 80);
+  assert.equal(f.by, 'Rémi');
+  assert.deepEqual(makeFix(t, 100, 50, 'g', { at: 1000 }).fromM, 50, 'the ends can be given either way round');
+  assert.equal(makeFix(t, 50, 100, 'u'), null, 'not to "not mapped"');
+  assert.equal(makeFix(t, 50, 100, 'x'), null);
+  assert.equal(makeFix(t, 50, 51, 'g'), null, 'a stretch has to have length');
+
+  const map = 'u'.repeat(41);
+  const r = applyFixes(t, map, [f]);
+  assert.equal(r.letters.slice(10, 21), 'g'.repeat(11));
+  assert.equal(r.letters.slice(0, 10), 'u'.repeat(10));
+  assert.equal(r.by[15], f.id);
+  assert.equal(r.by[5], null, 'the map still speaks for everything else');
+  assert.deepEqual(r.off, []);
+  assert.equal(map, 'u'.repeat(41), 'the stored reading is untouched');
+
+  const hard = makeFix(t, 90, 150, 'h', { at: 2000 });
+  const both = applyFixes(t, map, [f, hard]);
+  assert.equal(both.letters[18], 'h', 'where two overlap, the later one wins');
+  assert.equal(both.letters[12], 'g');
+  assert.equal(applyFixes(t, null, [f]).letters.length, 41, 'no map reading: corrections still apply over "not mapped"');
+});
+
+t('a correction survives a walked card, and says so when it no longer fits', () => {
+  const drawn = line(41);
+  const f = makeFix(drawn, 50, 100, 'w', { at: 1000 });
+  /* What was really walked: a slightly different line, with a different number of points. */
+  const walked = Array.from({ length: 67 }, (_, i) => at(i * 3, 2.5));
+  const sp = fixSpan(walked, f);
+  assert.ok(sp, 'it still lands');
+  assert.ok(Math.abs(alongOf(walked)[sp.i0] - 50) < 4 && Math.abs(alongOf(walked)[sp.i1] - 100) < 4,
+    'on the same ground, not the same list positions');
+
+  const elsewhere = Array.from({ length: 41 }, (_, i) => at(i * 5, 300));
+  const r = applyFixes(elsewhere, null, [f]);
+  assert.deepEqual(r.off, [f.id], 'reported as off this trail');
+  assert.equal(r.letters, 'u'.repeat(41), 'and applied to nothing');
+});
+
+t('on a trail that doubles back, a correction finds the right pass', () => {
+  /* Out 100 m east and back along the same line, 2 m to the side. */
+  const out = Array.from({ length: 21 }, (_, i) => at(i * 5, 0));
+  const back = Array.from({ length: 20 }, (_, i) => at(95 - i * 5, 2));
+  const t = [...out, ...back];
+  const f = makeFix(t, 130, 170, 'c', { at: 1000 });      // on the way back
+  const sp = fixSpan(t, f);
+  assert.ok(sp.i0 > 20 && sp.i1 > 20, `the return leg (indices ${sp.i0}–${sp.i1}), not the outward one`);
+});
+
+t('what the map said over a stretch, for "the map said X, you said Y"', () => {
+  const t = line(11);                                   // 50 m
+  const m = stretchMetres(t, 'uuuuuhhhhhh', 2, 8);      // 30 m
+  assert.ok(Math.abs((m.u ?? 0) + (m.h ?? 0) - 30) < 0.5);
+  assert.ok(m.u > 0 && m.h > 0);
+  assert.deepEqual(stretchMetres(t, null, 0, 2), { u: 10 });
+});
+
+t('a stretch corrected to hard ground is what the tarmac dials see', () => {
+  const t = line(21);
+  const r = applyFixes(t, 'g'.repeat(21), [makeFix(t, 20, 60, 'h', { at: 1 })]);
+  const marked = withSurface(t, r.letters);
+  assert.ok(marked.slice(4, 13).every(p => p.hard), 'the corrected stretch is marked hard');
+  assert.ok(!marked[0].hard && !marked[20].hard);
 });
 
 t('tiles for a trail: one fine tile for a short trail, coarser ones rather than dozens for a long one', () => {
