@@ -1147,6 +1147,31 @@ body:has(#scrWalk:not([hidden])) { --top-row: calc(var(--safe-t) + 104px); }
   padding: 14px 16px 16px; box-shadow: 0 18px 40px -12px rgba(15, 31, 61, 0.45);
 }
 .coach-sheet .home-head { margin-bottom: 4px; }
+/* ── The call ─────────────────────────────────────────────────────────
+   A momentary sheet over the run controls. It asks one question and takes
+   one tap, because it is answered standing in a field holding a line. The
+   targets are deliberately larger than anything else in the app. */
+.call-sheet {
+  position: fixed; left: 12px; right: 12px; bottom: calc(var(--safe-b) + 12px);
+  max-width: 536px; margin: 0 auto; z-index: 6;
+  background: var(--card); border: 1px solid var(--border); border-radius: var(--r);
+  padding: 14px 16px 16px; box-shadow: 0 18px 44px -10px rgba(15, 31, 61, 0.55);
+}
+.call-q { margin: 2px 0 12px; font: 600 19px/1.25 var(--display, var(--body)); color: var(--ink); }
+.call-opts { display: grid; gap: 9px; margin-bottom: 10px; }
+.call-opt {
+  display: block; width: 100%; text-align: left; min-height: 62px;
+  padding: 11px 16px; border-radius: 15px; cursor: pointer;
+  background: var(--card); border: 1px solid var(--border); color: var(--ink);
+  transition: transform 130ms var(--ease-out), background 130ms var(--ease-out);
+}
+.call-opt:active { transform: scale(0.975); }
+.call-opt b { display: block; font: 700 16.5px var(--body); }
+.call-opt i { display: block; margin-top: 2px; font: 400 12.5px/1.4 var(--body); font-style: normal; color: var(--muted); }
+.call-opt.on { background: var(--moss); border-color: var(--moss); color: #fff; }
+.call-opt.on i { color: rgba(255, 255, 255, 0.82); }
+#callSkip { width: 100%; }
+@media (prefers-reduced-motion: reduce) { .call-opt { transition: none; } .call-opt:active { transform: none; } }
 .coach-card { padding-top: 4px; padding-bottom: 12px; }
 /* The coach card: an emblem and one line of purpose, the kind of run as two
    cards, then what only an assisted run needs, dimmed when the run is blind.
