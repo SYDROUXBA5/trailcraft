@@ -291,6 +291,99 @@ export function readingVersion(data) {
   return Number.isFinite(v) ? v : null;
 }
 
+/* ── Hand corrections ────────────────────────────────────────────────
+   Someone who was there says a stretch was grass, not what the map said.
+   Kept beside the map's reading, never written over it: both are shown,
+   each with its source, and removing a correction brings the map back.
+
+   Anchored to places, not to positions in a list. A walked card replaces
+   the drawn line with one that has a different number of points; an index
+   would then point at the wrong ground. Each end is a lat/lon plus how far
+   along the trail it was, which picks the right pass on a trail that doubles
+   back on itself. If the new line no longer passes within reach of an end,
+   the correction is reported as off this trail — kept, and not applied. */
+export const FIX_AS = SURFACES.filter(s => s.id !== 'u').map(s => s.id);
+const FIX_REACH = 15;                      // metres from the trail an end may sit
+const r6 = (x) => Math.round(x * 1e6) / 1e6;
+
+/** Metres along the trail at each point. */
+export function alongOf(pts) {
+  const out = pts?.length ? [0] : [];
+  for (let i = 1; i < (pts?.length ?? 0); i++) out.push(out[i - 1] + dist(pts[i - 1], pts[i]));
+  return out;
+}
+
+/** The point nearest a distance along the trail. */
+export function idxAt(along, m) {
+  let best = 0;
+  for (let i = 1; i < along.length; i++) if (Math.abs(along[i] - m) < Math.abs(along[best] - m)) best = i;
+  return best;
+}
+
+function anchorIndex(pts, along, end, hintM) {
+  let best = null;
+  for (let i = 0; i < pts.length; i++) {
+    const d = dist(pts[i], end);
+    if (d > FIX_REACH) continue;
+    const score = d + (Number.isFinite(hintM) ? Math.abs(along[i] - hintM) : 0);
+    if (!best || score < best.score) best = { i, score };
+  }
+  return best ? best.i : null;
+}
+
+/** A correction for the stretch between two distances along the trail. */
+export function makeFix(pts, fromM, toM, as, { note = '', by = null, at = Date.now() } = {}) {
+  if (!FIX_AS.includes(as) || !(pts?.length > 1)) return null;
+  const along = alongOf(pts);
+  const i0 = idxAt(along, Math.min(fromM, toM)), i1 = idxAt(along, Math.max(fromM, toM));
+  if (i1 <= i0) return null;
+  const end = (i) => ({ lat: r6(pts[i].lat), lon: r6(pts[i].lon) });
+  return {
+    v: 1, id: `f${at.toString(36)}`, as,
+    from: end(i0), to: end(i1), fromM: Math.round(along[i0]), toM: Math.round(along[i1]),
+    note: String(note ?? '').slice(0, 80), by: by ?? null, at,
+  };
+}
+
+/** Where a correction lands on this trail, or null if it no longer does. */
+export function fixSpan(pts, fix, along = alongOf(pts)) {
+  if (!(pts?.length > 1) || !fix?.from || !fix?.to) return null;
+  const a = anchorIndex(pts, along, fix.from, fix.fromM);
+  const b = anchorIndex(pts, along, fix.to, fix.toM);
+  if (a == null || b == null || a === b) return null;
+  return { i0: Math.min(a, b), i1: Math.max(a, b) };
+}
+
+/** The ground with corrections laid over the map's reading, which is not
+    touched. Later corrections win where two overlap. `by` says, per point,
+    which correction set it (null = the map); `off` lists corrections that
+    no longer sit on this trail. */
+export function applyFixes(pts, letters, fixes) {
+  const n = pts?.length ?? 0;
+  const out = (letters && letters.length === n ? letters : 'u'.repeat(n)).split('');
+  const by = new Array(n).fill(null), off = [];
+  const along = alongOf(pts);
+  for (const f of fixes ?? []) {
+    const sp = FIX_AS.includes(f?.as) ? fixSpan(pts, f, along) : null;
+    if (!sp) { off.push(f?.id ?? null); continue; }
+    for (let i = sp.i0; i <= sp.i1; i++) { out[i] = f.as; by[i] = f.id; }
+  }
+  return { letters: out.join(''), by, off };
+}
+
+/** What the map's reading says over one stretch, metres per surface. */
+export function stretchMetres(pts, letters, i0, i1) {
+  const m = {};
+  for (let i = Math.max(1, i0 + 1); i <= Math.min(i1, (pts?.length ?? 0) - 1); i++) {
+    const d = dist(pts[i - 1], pts[i]) / 2;
+    const a = letters?.[i - 1] ?? 'u', b = letters?.[i] ?? 'u';
+    m[a] = (m[a] ?? 0) + d;
+    m[b] = (m[b] ?? 0) + d;
+  }
+  for (const k of Object.keys(m)) m[k] = Math.round(m[k] * 10) / 10;
+  return m;
+}
+
 /** Rows for a card: surfaces that were crossed, longest first, with their share. */
 export function surfaceRows(metres) {
   const total = Object.values(metres || {}).reduce((a, b) => a + b, 0);

@@ -384,6 +384,47 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.75; cursor: p
 /* A reading made under older rules says so, in the warning colour, beside
    the button that replaces it. */
 .surf-old { color: var(--ember); margin-bottom: 6px; }
+
+/* ── Correct a stretch ───────────────────────────────────────────────── */
+/* The same dark sheet as the bench: white labels floating straight on a
+   satellite image are unreadable wherever the ground is bright. */
+.fix-sheet {
+  gap: 8px; left: 8px; right: 8px;
+  background: rgba(11, 22, 48, 0.92); color: #F4F6FA;
+  border: 1px solid rgba(255, 255, 255, 0.14); border-bottom: 0;
+  border-radius: 20px 20px 0 0;
+  box-shadow: 0 -12px 40px -14px rgba(0, 0, 0, 0.7);
+  -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+}
+.fix-sheet .glass-caption { color: #F4F6FA; text-shadow: none; text-align: left; font-weight: 500; }
+/* Every choice visible: six surfaces wrap onto two rows rather than one
+   hiding off the edge of the screen. */
+.fix-sheet .chip-row { flex-wrap: wrap; overflow: visible; }
+@media (prefers-reduced-transparency: reduce) { .fix-sheet { background: #0B1630; -webkit-backdrop-filter: none; backdrop-filter: none; } }
+.fix-range { display: grid; grid-template-columns: 52px 44px 1fr 44px; align-items: center; gap: 8px; }
+.fix-range label { font: 600 14px var(--body); color: #fff; }
+.fix-range input[type=range] { width: 100%; min-height: 44px; accent-color: #F1C77A; touch-action: pan-y; }
+.fix-nudge {
+  width: 44px; height: 44px; border-radius: 12px; cursor: pointer;
+  background: rgba(11, 22, 48, 0.72); border: 1px solid rgba(255, 255, 255, 0.28); color: #fff;
+  font: 700 20px/1 var(--body); transition: transform 120ms var(--ease-out);
+}
+.fix-nudge:active { transform: scale(0.94); }
+.fix-label { display: block; margin-top: 4px; font: 700 11px var(--body); letter-spacing: 0.08em; text-transform: uppercase; color: rgba(255, 255, 255, 0.82); }
+.fix-sheet .chip-row { margin: 0; }
+.fix-sheet #fixNote { min-height: 44px; }
+.fix-sheet .btn:disabled { opacity: 0.45; cursor: default; }
+/* In the ground box: the map's reading and each correction, side by side. */
+.fix-list { margin: 10px 0 4px; display: grid; gap: 8px; }
+.fix-row { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border-radius: 12px;
+  border: 1px dashed var(--border); }
+.fix-row > span { flex: 1; min-width: 0; }
+.fix-row b { display: block; font: 600 14px var(--body); color: var(--ink); }
+.fix-row i { display: block; font: 400 12.5px/1.45 var(--body); font-style: normal; color: var(--muted); }
+.fix-row.off { opacity: 0.7; }
+.fix-row .btn { flex: none; min-height: 44px; }
+.fix-row .btn.confirm { background: var(--ember); border-color: var(--ember); color: #fff; }
+@media (prefers-reduced-motion: reduce) { .fix-nudge { transition: none; } .fix-nudge:active { transform: none; } }
 /* A named experiment sits above its group's dials, apart from them: pressing
    it is a choice to try someone's rule, not a nudge to one number. */
 .bench-preset { margin: 4px 0 10px; padding: 10px 12px; border-radius: 12px;
