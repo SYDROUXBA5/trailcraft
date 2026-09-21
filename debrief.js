@@ -51,20 +51,21 @@ export const DEBRIEF = [
     why: 'Handler-blind and double-blind are different grades of evidence. A run where you knew is a training run, not a test.',
     sticky: true,
     options: [
-      { v: 'open', label: 'I knew' },
-      { v: 'handler', label: 'I did not' },
+      { v: 'open', label: 'I knew', told: 'The handler knew' },
+      { v: 'handler', label: 'I did not', told: 'The handler did not' },
       { v: 'double', label: 'Nobody there knew' },
     ],
   },
   {
     id: 'help',
     label: 'Help you gave',
+    told: 'Help given',
     why: 'The honest version of the thing that quietly flatters every dog.',
     options: [
       { v: 'none', label: 'None' },
       { v: 'line', label: 'Line handling only' },
       { v: 'verbal', label: 'A word at a decision' },
-      { v: 'led', label: 'I chose the way' },
+      { v: 'led', label: 'I chose the way', told: 'The handler chose the way' },
     ],
   },
   {
@@ -103,6 +104,16 @@ const byId = new Map(DEBRIEF.map(f => [f.id, f]));
 export const fieldById = (id) => byId.get(id) ?? null;
 export const labelOf = (id, v) => byId.get(id)?.options.find(o => o.v === v)?.label ?? null;
 
+/* The same answers as someone else reads them. The labels above are written
+   for the handler filling the form in, so "I did not" is right on their own
+   phone and wrong on the page a student's run arrives on, where the reader
+   is a different person. Anything first-person carries a `told` form. */
+export const toldField = (id) => { const f = byId.get(id); return f ? (f.told ?? f.label) : null; };
+export const toldOf = (id, v) => {
+  const o = byId.get(id)?.options.find(x => x.v === v);
+  return o ? (o.told ?? o.label) : null;
+};
+
 /** A fresh debrief. `last` carries the sticky fields forward: a class runs
     handler-blind all morning and nobody wants to say so eleven times. */
 export function blankDebrief(last = null) {
@@ -138,7 +149,10 @@ export function debriefLine(d) {
 
 /** Rates over a set of debriefed runs, split by how blind they were. */
 export function debriefRates(sessions) {
-  const rows = (sessions ?? []).map(s => s?.data?.debrief).filter(d => d && d.outcome);
+  /* A run kept from someone else's link is their dog and their judgement.
+     Counting it here would quietly blend two handlers into one record. */
+  const rows = (sessions ?? []).filter(s => !s?.data?.imported)
+    .map(s => s?.data?.debrief).filter(d => d && d.outcome);
   const count = (f) => rows.filter(f).length;
   const real = rows.filter(d => d.target === 'real');
   const blanks = rows.filter(d => d.target === 'control');
@@ -160,7 +174,7 @@ export function debriefRates(sessions) {
 /** What this dog has never been asked to do. Stated as a gap, not a score —
     it is the most useful thing a training record can tell anyone. */
 export function varietyGaps(sessions) {
-  const rows = (sessions ?? []).filter(s => s?.data?.debrief?.outcome);
+  const rows = (sessions ?? []).filter(s => !s?.data?.imported && s?.data?.debrief?.outcome);
   const gaps = [];
   if (!rows.length) return gaps;
   const d = rows.map(s => s.data.debrief);

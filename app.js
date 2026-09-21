@@ -32,7 +32,7 @@ import { createStore, migrateV1, TARGETS, ODOURS, targetById, targetText, verbs,
          dogStats, ageBand, AGE_BANDS, LEVELS, levelById, dogAge } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-21f';
+const BUILD = '2026-09-21g';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true,
@@ -3889,6 +3889,7 @@ function sessionFromModel(m) {
       trail: m.trail ?? undefined, hides: m.hides ?? undefined, contamination: m.contamination ?? [],
       weather: m.wx ?? null, track: m.track ?? undefined, trackWaypoints: m.wps ?? [],
       trackStarted: m.runAt ?? undefined, result: m.result ?? undefined, plan: m.plan, walked: m.walked, k: m.k,
+      debrief: m.debrief ?? undefined,
     },
   };
 }
@@ -3930,7 +3931,24 @@ function openShared(m, from = null) {
     + sec.rows.map(([k, v]) => `<div class="fact"><span>${esc(k)}</span><b>${esc(v)}</b></div>`).join('')
     + (sec.note ? `<p class="body small muted">${esc(sec.note)}</p>` : '') + '</div>').join('');
   $('sharedNotes').textContent = notes(m).join(' ');
+  /* A live link is still happening; there is nothing finished to keep. */
+  $('btnSharedKeep').hidden = from === 'scrLive';
   go('scrShared');
+}
+
+/* The first way a record has ever come INTO this phone rather than out of
+   it. Kept runs are marked as someone else's, and that mark is what keeps
+   them out of your own calibration: their calls are not your calls. */
+function keepShared() {
+  if (!sharedModel || sharedFrom === 'scrLive') return;
+  const s = sessionFromModel(sharedModel);
+  const kept = { ...s, id: uid(),
+    data: { ...s.data, imported: { from: sharedModel.handler ?? null, at: Date.now() } } };
+  const saved = guardSave(kept, () => db.addSession(kept));
+  /* guardSave returns null when the phone refused it, and has already said so. */
+  if (!saved) return;
+  $('btnSharedKeep').hidden = true;
+  toast(sharedModel.handler ? `Kept ${sharedModel.handler}’s run` : 'Kept');
 }
 
 function closeShared() {
@@ -5214,6 +5232,7 @@ function wire() {
   $('btnSharedGpx').addEventListener('click', () => sharedModel && saveGpx(sharedModel));
   $('btnSharedPdf').addEventListener('click', () => sharedModel && savePdf(sharedModel));
   $('btnSharedClose').addEventListener('click', closeShared);
+  $('btnSharedKeep').addEventListener('click', keepShared);
   $('btnLive').addEventListener('click', goLive);
   $('btnLiveDetails').addEventListener('click', () => liveView.model && openShared(liveView.model, 'scrLive'));
   $('btnLiveClose').addEventListener('click', closeLive);
