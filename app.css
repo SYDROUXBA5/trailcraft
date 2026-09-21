@@ -1402,8 +1402,17 @@ body:has(#scrWalk:not([hidden])) { --top-row: calc(var(--safe-t) + 104px); }
    glass buttons, a selected trail age, and a danger button in dark mode. */
 .chip.lvl.selected, :root[data-theme="dark"] .btn.danger,
 .screen.glass .btn, .screen.glass .btn.ghost, .screen.glass .btn.moss, .screen.glass .btn.moss-on-dark,
-.screen.glass .btn.ember, .screen.glass .btn.live-btn.alert, .screen.glass .btn.live-btn.on, .map-fab.nudge {
+.screen.glass .btn.ember, .screen.glass .btn.live-btn.alert, .screen.glass .btn.live-btn.on, .map-fab.nudge,
+/* Not buttons, but the two boxes that float over every map screen: the
+   weather box and the status pill. Rémi asked for them to match. */
+.wx-panel, .hud-pill, .hud-pill.off {
   border-width: 1.5px; border-style: solid; border-color: var(--rim);
+}
+/* Increase Contrast is on: a stronger gold, rather than the rim quietly
+   undoing the heavier borders that setting asks for. */
+@media (prefers-contrast: more) {
+  :root { --rim: #8A6A12; }
+  :root[data-theme="dark"] { --rim: #F1D27A; }
 }
 /* An empty "add one" chip stays dashed: that shape is how it says "new". */
 .chip.ghost { border-style: dashed; }
