@@ -25,12 +25,13 @@ import { trailModel, encodeShared, decodeShared, sharedUrl, toGpx, fileBase,
          detailSections, headline, notes, liveMeta, liveModel } from './share.js';
 import { buildPdf, jpegSize } from './pdf.js';
 import { coachStep, initialCoach, coachPhrase, coachLine, TOL_OPTIONS, COACH_DEFAULTS } from './coach.js';
+import { DEBRIEF, FLAGS, NOTE_TAGS, blankDebrief, debriefDone, debriefLine, labelOf } from './debrief.js';
 import { isNative, watchBackground, canHaptic, haptic, watchHeading } from './native.js';
 import { createStore, migrateV1, TARGETS, ODOURS, targetById, targetText, verbs, uid,
          dogStats, ageBand, AGE_BANDS, LEVELS, levelById, dogAge } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-21d';
+const BUILD = '2026-09-21e';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true,
@@ -129,7 +130,7 @@ const avaHtml = (ent, cls = '') => {
 const SCREENS = ['scrOnboardHandler', 'scrOnboardDog', 'scrTutorial', 'scrHome', 'scrHandler', 'scrLay',
   'scrConfirm', 'scrShare', 'scrContam', 'scrPick', 'scrScan', 'scrRun', 'scrResult',
   'scrShowMap', 'scrSessions', 'scrSettings', 'scrDraw', 'scrCountdown', 'scrWalk', 'scrWait', 'scrDog',
-  'scrSignIn', 'scrShareOut', 'scrShared', 'scrLive', 'scrBench', 'scrReplay'];
+  'scrSignIn', 'scrShareOut', 'scrShared', 'scrLive', 'scrBench', 'scrReplay', 'scrDebrief'];
 
 /* The screens that are transparent chrome over the live map. */
 const MAP_SCREENS = ['scrLay', 'scrConfirm', 'scrContam', 'scrRun', 'scrShowMap', 'scrDraw', 'scrWalk', 'scrLive', 'scrBench', 'scrReplay'];
@@ -1986,6 +1987,96 @@ function closeBench() {
   clearMap();
 }
 
+/* ── The debrief ──────────────────────────────────────────────────────
+   Five taps and an optional line. Everything asked here is something the
+   phone cannot know: whether there was anything out there, whether anyone
+   present knew where it was, and how much the handler helped. Those three
+   are what separate a dog that looks good from a dog that is good, and no
+   amount of GPS will ever supply them.
+
+   Nothing is asked that the app already records — no run time, no distance,
+   no weather. A form that asks for what the phone just measured is a form
+   that stops being filled in. */
+let dbFor = null;      // the session being judged
+let dbDraft = null;
+
+function openDebrief(s) {
+  if (!s) return;
+  dbFor = s;
+  /* Sticky fields carry over: a class runs handler-blind all morning and
+     nobody wants to say so eleven times. */
+  const last = db.sessions().find(x => x.id !== s.id && x.data?.debrief)?.data?.debrief ?? null;
+  dbDraft = s.data.debrief ? { ...s.data.debrief } : blankDebrief(last);
+  const d = S.dogs.find(x => x.id === s.dogId);
+  $('dbWho').textContent = `${d?.name ?? 'This run'} · ${fmtWhen(s.startedAt)}`;
+  $('dbNote').value = dbDraft.note || '';
+  paintDebrief();
+  go('scrDebrief');
+}
+
+function paintDebrief() {
+  const d = dbDraft;
+  $('dbFields').innerHTML = DEBRIEF.map(f => `
+    <div class="db-field" data-field="${f.id}">
+      <span class="label">${esc(f.label)}${f.required ? '' : ' <i class="opt">optional</i>'}</span>
+      <p class="why">${esc(f.why)}</p>
+      <div class="db-opts">${f.options.map(o =>
+        `<button type="button" class="db-opt${d[f.id] === o.v ? ' on' : ''}" data-pick="${f.id}" data-v="${o.v}">${esc(o.label)}</button>`).join('')}</div>
+    </div>`).join('');
+  $('dbFlags').innerHTML = FLAGS.map(f =>
+    `<button type="button" class="chip${d.flags.includes(f.v) ? ' selected' : ''}" data-flag="${f.v}">${esc(f.label)}</button>`).join('');
+  $('dbNoteTags').innerHTML = NOTE_TAGS.map(t =>
+    `<button type="button" class="chip${d.noteTag === t.v ? ' selected' : ''}" data-notetag="${t.v}">${esc(t.label)}</button>`).join('');
+  $('dbSave').textContent = debriefDone(d) ? 'Save' : 'Two taps to go';
+}
+
+function saveDebrief() {
+  const d = dbDraft, s = dbFor;
+  if (!d || !s) return;
+  if (!debriefDone(d)) {
+    /* Point at what is missing rather than refusing silently. */
+    for (const f of DEBRIEF) {
+      if (f.required && !d[f.id]) {
+        const el = $('dbFields').querySelector(`[data-field="${f.id}"]`);
+        el?.classList.add('todo');
+        el?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        return toast(`${f.label}?`);
+      }
+    }
+    return;
+  }
+  d.note = $('dbNote').value.trim().slice(0, 140);
+  d.by = S.handler?.name ?? null;
+  d.at = Date.now();
+  const saved = guardSave(s, () => saveSession(s, { data: { ...s.data, debrief: d } }));
+  snap();
+  const s2 = saved ?? db.sessions().find(x => x.id === s.id) ?? s;
+  if (run.session?.id === s.id) run.session = s2;
+  if (pendingSession?.id === s.id) pendingSession = s2;
+  dbFor = null; dbDraft = null;
+  toast('Saved with the run');
+  renderResult(s2);
+  go('scrResult');
+}
+
+/** The Judged block on the result card. Kept apart from the measured
+    numbers above it, and signed, because a judgement has an author. */
+function paintDebriefBlock(s) {
+  const d = s?.data?.debrief;
+  const has = !!d?.outcome;
+  $('dbLabel').hidden = !has;
+  $('dbSummary').hidden = !has;
+  $('dbByline').hidden = !has;
+  $('btnDebrief').textContent = has ? 'Change the debrief' : 'Write the debrief';
+  if (!has) return;
+  const extra = [];
+  if (d.flags?.length) extra.push(d.flags.map(f => FLAGS.find(x => x.v === f)?.label ?? f).join(', '));
+  if (d.note) extra.push(`“${d.note}”`);
+  $('dbSummary').textContent = debriefLine(d) + (extra.length ? ` · ${extra.join(' · ')}` : '');
+  $('dbByline').textContent = d.by
+    ? `Judged by ${d.by}, ${fmtWhen(d.at)}.` : `Judged ${fmtWhen(d.at)}.`;
+}
+
 /* ── Replay ───────────────────────────────────────────────────────────
    The run again, against the scent as it was AT THAT MOMENT — not as it is
    now. That distinction is the whole value of the screen: a handler watching
@@ -3426,6 +3517,7 @@ function renderResult(s) {
   const provisional = !!s.data.plan && !s.data.walked;
   $('btnScanWalked').hidden = !provisional;
   $('btnReplay').hidden = !(s.data.track?.length > 1);
+  paintDebriefBlock(s);
   const note = $('resProvisional');
   note.hidden = !s.data.plan;
   if (s.data.plan) {
@@ -5085,6 +5177,29 @@ function wire() {
      be lost every repaint. `input` fires all the way through a drag, which
      is the whole point: the picture must move under the finger. */
   $('btnReplay').addEventListener('click', () => openReplay(run.session ?? pendingSession));
+  $('btnDebrief').addEventListener('click', () => openDebrief(run.session ?? pendingSession));
+  $('repDebrief').addEventListener('click', () => { const s = replay.s; closeReplay(); openDebrief(s); });
+  $('dbSave').addEventListener('click', saveDebrief);
+  $('dbCancel').addEventListener('click', () => { dbFor = null; dbDraft = null; go('scrResult'); });
+  $('scrDebrief').addEventListener('click', (e) => {
+    const pick = e.target.closest('[data-pick]');
+    if (pick) {
+      dbDraft[pick.dataset.pick] = pick.dataset.v;
+      $('dbFields').querySelector(`[data-field="${pick.dataset.pick}"]`)?.classList.remove('todo');
+      return paintDebrief();
+    }
+    const flag = e.target.closest('[data-flag]');
+    if (flag) {
+      const v = flag.dataset.flag;
+      dbDraft.flags = dbDraft.flags.includes(v) ? dbDraft.flags.filter(x => x !== v) : [...dbDraft.flags, v];
+      return paintDebrief();
+    }
+    const tag = e.target.closest('[data-notetag]');
+    if (tag) {
+      dbDraft.noteTag = dbDraft.noteTag === tag.dataset.notetag ? null : tag.dataset.notetag;
+      return paintDebrief();
+    }
+  });
   $('repBack').addEventListener('click', () => { closeReplay(); go('scrResult'); });
   $('repPlay').addEventListener('click', () => (replay.playing ? replayPause() : replayPlay()));
   $('repSpeed').addEventListener('click', () => {

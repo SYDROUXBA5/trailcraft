@@ -326,6 +326,22 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.75; cursor: p
 .rep-play { font-size: 17px; }
 .rep-play:active, .rep-speed:active { transform: scale(0.96); }
 
+/* ── Debrief ──────────────────────────────────────────────────────────
+   One tap per row, every option visible at once. A form that needs
+   scrolling to answer is a form that gets skipped in the rain. */
+.db-field { margin: 14px 0 2px; }
+.db-field .why { margin: 2px 0 8px; font-size: 12px; line-height: 1.45; color: var(--muted); }
+.db-opts { display: flex; flex-wrap: wrap; gap: 8px; }
+.db-opt {
+  flex: 1 1 auto; min-height: 46px; padding: 8px 14px; border-radius: 14px;
+  background: var(--card); border: 1px solid var(--border); color: var(--ink);
+  font: 600 14.5px var(--body); cursor: pointer;
+  transition: transform 130ms var(--ease-out);
+}
+.db-opt:active { transform: scale(0.97); }
+.db-opt.on { background: var(--moss); border-color: var(--moss); color: #fff; }
+.db-field.todo .db-opts { outline: 2px solid var(--ember); outline-offset: 4px; border-radius: 16px; }
+
 /* ── Scent bench ───────────────────────────────────────
    A sheet with two heights: a peek that shows the handle, the honesty tally
    and the four dials that move the picture most, and a full height for the
