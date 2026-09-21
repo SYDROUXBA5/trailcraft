@@ -14,7 +14,7 @@ import { handlerStats } from './store.js';
 import { plumePalette, stepPalette, windPalette, trackPalette, COLOUR_PRESETS, isHex, mix } from './colours.js';
 import { FLAT, buildTerrain, stability, regime, flowAt, normOf } from './field.js';
 import { predictedOffsets, ScentSim, driftFrom, stepByFlow } from './sim.js';
-import { PARAMS, DIALS, PV, setParam, resetParams, changed, tally, dialById } from './params.js';
+import { PARAMS, DIALS, PV, setParam, resetParams, changed, isDefault, tally, dialById } from './params.js';
 import { encodeTrail, decodeTrail, cardUrl, cardFromText } from './card.js';
 import { decodeTile, tileOf, tileBox } from './mvt.js';
 import { GROUND_LAYERS, buildGround, surfaceAt, surfaceAlong, surfaceRows, withSpread,
@@ -30,7 +30,7 @@ import { createStore, migrateV1, TARGETS, ODOURS, targetById, targetText, verbs,
          dogStats, ageBand, AGE_BANDS, LEVELS, levelById, dogAge } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-21b';
+const BUILD = '2026-09-21c';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true,
@@ -1970,6 +1970,13 @@ function openBench() {
 function closeBench() {
   bench.on = false;
   bench.trail = null;
+  /* The dials do NOT follow you out. predictedOffsets reads the same live
+     values the bench drives, so a run graded after a session on the bench
+     would carry whatever was left set, be banked into the dog's
+     calibration, and be saved with no record of it. A bench is for asking
+     questions; nothing it does may reach a real record. */
+  if (!isDefault()) toast('Dials back to defaults \u2014 the bench never changes a real run');
+  resetParams();
   plumeStop();
   clearMap();
 }
@@ -3156,7 +3163,9 @@ async function computeResult(s, track, wps, startedAt, { bank = true } = {}) {
   const settle = 1 - Math.exp(-Math.max(0, (startedAt - s.startedAt) / 1000) / 900);
   const k = (wx?.wind_speed > 0.5 && mean != null && Math.abs(mean) > 1 && settle > 0.05)
     ? Math.abs(mean) / (wx.wind_speed * settle) : null;
-  if (bank) {
+  const moved = changed();
+  const offBaseline = Object.keys(moved).length > 0;
+  if (bank && !offBaseline) {
     db.addCalibration(dogRow?.id, {
       t: startedAt, predSide, mean, wind: wx?.wind_speed ?? null,
       stability: st?.label ?? null, k,
@@ -3196,6 +3205,11 @@ async function computeResult(s, track, wps, startedAt, { bank = true } = {}) {
     regimeWord: reg?.word ?? null, regimeKey: reg?.key ?? null,
     stability: st?.label ?? null, stabilityPlain: st?.plain ?? null,
     wind: wx ? { speed: wx.wind_speed, from: wx.wind_direction } : null,
+    /* Which model produced this. `mv` is the app that graded it; `mp` is any
+       dial that was not where it shipped, and is absent on every normal run.
+       Without these a result cannot be reproduced, and a picture that cannot
+       be reproduced is not a record of anything. */
+    mv: BUILD, ...(offBaseline ? { mp: moved } : {}),
   };
 }
 
