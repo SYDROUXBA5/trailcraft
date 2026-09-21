@@ -18,7 +18,8 @@ import { PARAMS, DIALS, PV, setParam, resetParams, changed, isDefault, tally, di
 import { encodeTrail, decodeTrail, cardUrl, cardFromText } from './card.js';
 import { decodeTile, tileOf, tileBox } from './mvt.js';
 import { GROUND_LAYERS, buildGround, surfaceAt, surfaceAlong, surfaceRows, withSurface,
-         tilesCovering, isHard, GROUND_V, GROUND_RULES, readingSig, readingFits, readingVersion } from './ground.js';
+         tilesCovering, isHard, GROUND_V, GROUND_RULES, readingSig, readingFits, readingVersion,
+         CONDITIONS, blankSeen, cleanSeen, seenLine } from './ground.js';
 import { sync, onSync, initSync, signInWithGoogle, signInWithApple, signOut,
          startLive, pushLive, endLive, watchLive } from './sync.js';
 import { trailModel, encodeShared, decodeShared, sharedUrl, toGpx, fileBase,
@@ -32,7 +33,7 @@ import { createStore, migrateV1, TARGETS, ODOURS, targetById, targetText, verbs,
          dogStats, ageBand, AGE_BANDS, LEVELS, levelById, dogAge } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-21i';
+const BUILD = '2026-09-21j';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true,
@@ -1374,6 +1375,15 @@ function fillSurfaces(s, { reread = false } = {}) {
   return job;
 }
 
+/** Conditions sit with the ground they describe, and say who supplied them
+    and that the model does not use them. */
+function seenHtml(s) {
+  const line = seenLine(s.data.seen);
+  return line
+    ? `<p class="body small">You saw: <b>${esc(line)}</b>. As you recorded it, not from the forecast. The model does not use this yet.</p>`
+    : '';
+}
+
 function groundHtml(s) {
   const rows = surfaceRows(s.data.surfM);
   if (!rows.length) return '';
@@ -1394,7 +1404,7 @@ function groundHtml(s) {
     <div class="surf-bar" aria-hidden="true">${rows.map(r => `<i class="gs-${r.id}" style="flex:${r.share.toFixed(4)}"></i>`).join('')}</div>
     <div class="surf-rows">${rows.map(r =>
       `<div><i class="gs-${r.id}"></i><span>${esc(r.label)}</span><b>${fmtKm(r.metres)}</b><em>${Math.round(r.share * 100)}%</em></div>`).join('')}</div>
-    ${built}${old}${prev}
+    ${built}${seenHtml(s)}${old}${prev}
     <p class="body small muted">Read from the map, not from the ground: a yard, a lawn or a track nobody drew is Not mapped. What tarmac does to scent is an open question, so the model treats it like any other ground unless the tarmac rule is tried on the bench.</p>`;
 }
 /** Show it if it is known; if not, ask, and fill the box in when the answer
@@ -2087,6 +2097,7 @@ function paintCallBlock(s) {
    that stops being filled in. */
 let dbFor = null;      // the session being judged
 let dbDraft = null;
+let dbSeen = null;      // what they saw: kept apart from what they judged
 
 function openDebrief(s) {
   if (!s) return;
@@ -2095,6 +2106,7 @@ function openDebrief(s) {
      nobody wants to say so eleven times. */
   const last = db.sessions().find(x => x.id !== s.id && x.data?.debrief)?.data?.debrief ?? null;
   dbDraft = s.data.debrief ? { ...s.data.debrief } : blankDebrief(last);
+  dbSeen = s.data.seen ? { ...s.data.seen } : blankSeen();
   const d = S.dogs.find(x => x.id === s.dogId);
   $('dbWho').textContent = `${d?.name ?? 'This run'} · ${fmtWhen(s.startedAt)}`;
   $('dbNote').value = dbDraft.note || '';
@@ -2113,6 +2125,12 @@ function paintDebrief() {
     </div>`).join('');
   $('dbFlags').innerHTML = FLAGS.map(f =>
     `<button type="button" class="chip${d.flags.includes(f.v) ? ' selected' : ''}" data-flag="${f.v}">${esc(f.label)}</button>`).join('');
+  $('dbSeen').innerHTML = CONDITIONS.map(f => `
+    <div class="db-field">
+      <span class="label">${esc(f.label)}</span>
+      <div class="db-opts">${f.options.map(o =>
+        `<button type="button" class="db-opt${dbSeen?.[f.id] === o.v ? ' on' : ''}" data-seen="${f.id}" data-v="${o.v}">${esc(o.label)}</button>`).join('')}</div>
+    </div>`).join('');
   $('dbNoteTags').innerHTML = NOTE_TAGS.map(t =>
     `<button type="button" class="chip${d.noteTag === t.v ? ' selected' : ''}" data-notetag="${t.v}">${esc(t.label)}</button>`).join('');
   $('dbSave').textContent = debriefDone(d) ? 'Save' : 'Two taps to go';
@@ -2136,7 +2154,9 @@ function saveDebrief() {
   d.note = $('dbNote').value.trim().slice(0, 140);
   d.by = S.handler?.name ?? null;
   d.at = Date.now();
-  const saved = guardSave(s, () => saveSession(s, { data: { ...s.data, debrief: d } }));
+  const seen = cleanSeen(dbSeen);
+  const saved = guardSave(s, () => saveSession(s, { data: { ...s.data, debrief: d,
+    ...(seen ? { seen: { ...seen, at: Date.now() } } : {}) } }));
   snap();
   const s2 = saved ?? db.sessions().find(x => x.id === s.id) ?? s;
   if (run.session?.id === s.id) run.session = s2;
@@ -5332,6 +5352,13 @@ function wire() {
     if (pick) {
       dbDraft[pick.dataset.pick] = pick.dataset.v;
       $('dbFields').querySelector(`[data-field="${pick.dataset.pick}"]`)?.classList.remove('todo');
+      return paintDebrief();
+    }
+    const seenBtn = e.target.closest('[data-seen]');
+    if (seenBtn) {
+      /* A second tap clears it: "I did not notice" is an honest answer. */
+      const id = seenBtn.dataset.seen;
+      dbSeen[id] = dbSeen[id] === seenBtn.dataset.v ? null : seenBtn.dataset.v;
       return paintDebrief();
     }
     const flag = e.target.closest('[data-flag]');
