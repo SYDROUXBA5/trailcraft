@@ -325,6 +325,11 @@ function addOverlays() {
     }
     map.setTerrain({ source: 'dem', exaggeration: Number(settings.exagg) });
     try { map.setConfigProperty('basemap', 'showPointOfInterestLabels', false); } catch { /* not Standard */ }
+    /* The satellite style paints a pale highlighted line over every road.
+       Over a photo that already shows the road, it hides the verge, the
+       pavement edge and the path beside it, which is where a trail goes.
+       Street names stay: they are how you say where you are. */
+    try { map.setConfigProperty('basemap', 'showRoadsAndTransit', false); } catch { /* not Standard */ }
   }
   for (const id of Object.keys(srcData)) {
     if (!map.getSource(id)) map.addSource(id, { type: 'geojson', data: srcData[id] });
@@ -353,14 +358,14 @@ function addOverlays() {
   add({ id: 'air-shade', type: 'line', source: 'air',
         layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: { 'line-color': '#0B1630',
-                 'line-width': ['interpolate', ['linear'], ['zoom'], 13, 3, 17, 3.6, 19, 4.6],
-                 'line-opacity': ['min', 1, ['*', ['get', 'a'], 0.5]],
+                 'line-width': ['interpolate', ['linear'], ['zoom'], 13, 4.4, 17, 5, 19, 6.2],
+                 'line-opacity': ['min', 1, ['*', ['get', 'a'], 0.6]],
                  'line-blur': 2 } });
   add({ id: 'air-streaks', type: 'line', source: 'air',
         layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: { 'line-color': '#DCE9FF',
-                 'line-width': ['interpolate', ['linear'], ['zoom'], 13, 1.5, 17, 1.8, 19, 2.4],
-                 'line-opacity': ['min', 1, ['*', ['get', 'a'], 1.5]],
+                 'line-width': ['interpolate', ['linear'], ['zoom'], 13, 2.4, 17, 2.8, 19, 3.4],
+                 'line-opacity': ['min', 1, ['*', ['get', 'a'], 2]],
                  'line-blur': 0.5 } });
 
   /* The air itself, drawn as scent rather than as a stain.
@@ -590,15 +595,26 @@ function paintMe(lat, lon, acc, brg = null) {
    So this keeps a short high-accuracy watch open and re-centres every time a
    TIGHTER fix arrives, never a looser one, until the fix is as good as a
    phone gets or the window closes. */
-const locate = { watch: 0, timer: 0, best: Infinity };
+const locate = { watch: 0, timer: 0, best: Infinity, follow: true, centred: null };
 let lastFix = null;   // the newest position any watch has handed over
 
-function locateMe({ zoom = 17.5, settleMs = 12000, good = 8 } = {}) {
+/* `keepOn` is for a screen you walk around on before anything records —
+   laying a trail. There the watch stays open for as long as the screen is
+   showing and the dot is always the newest fix. It used to stop after 12
+   seconds or as soon as the fix was good, which froze the dot where the
+   screen opened: walk 100 m to where the trail starts and the map still had
+   you 100 m back. The camera follows until you drag the map yourself; the
+   GPS button picks you up again. */
+function locateMe({ zoom = 17.5, settleMs = 12000, good = 8, keepOn = null } = {}) {
   locateStop();
   if (!navigator.geolocation || !window.isSecureContext) return;
   locate.best = Infinity;
+  locate.follow = true;
+  locate.centred = null;
   locate.watch = navigator.geolocation.watchPosition((p) => {
     if (rec.on) return locateStop();          // the recording watch owns the map now
+    if (keepOn && $(keepOn).hidden) return locateStop();   // left the screen
+    if (keepOn) return followFix(p, zoom);
     const acc = p.coords.accuracy ?? 9999;
     if (acc > locate.best) return;            // never move to a worse answer
     locate.best = acc;
@@ -610,7 +626,27 @@ function locateMe({ zoom = 17.5, settleMs = 12000, good = 8 } = {}) {
   }, () => { /* the HUD and the GPS check say why */ },
      { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 });
   clearTimeout(locate.timer);
-  locate.timer = setTimeout(locateStop, settleMs);
+  /* Ten minutes is a long wait at a trail start; after that, save the battery. */
+  locate.timer = setTimeout(locateStop, keepOn ? 10 * 60000 : settleMs);
+}
+
+/** One fix on a live screen: always paint it, and move the camera when the
+    fix got tighter or you have walked somewhere, unless you took the map. */
+function followFix(p, zoom) {
+  const acc = p.coords.accuracy ?? 9999;
+  const { latitude: lat, longitude: lon } = p.coords;
+  lastFix = { lat, lon, t: Date.now() };
+  paintMe(lat, lon, acc);
+  const tighter = acc < locate.best;
+  if (tighter) locate.best = acc;
+  const moved = !locate.centred || dist(locate.centred, { lat, lon }) > Math.max(8, acc / 2);
+  /* A rough fix still moves the dot, with its ring showing how rough; it is
+     not allowed to drag the camera away from a good one. */
+  if (!locate.follow || !(tighter || (moved && acc <= 30))) return;
+  const first = !locate.centred;
+  locate.centred = { lat, lon };
+  /* The first time, set the zoom; after that keep whatever you pinched to. */
+  map.easeTo({ center: [lon, lat], ...(first ? { zoom } : {}), duration: 700, essential: true });
 }
 function locateStop() {
   if (locate.watch) navigator.geolocation?.clearWatch(locate.watch);
@@ -1275,8 +1311,8 @@ function startLay() {
   } else {
     $('btnLayStop').textContent = 'Stop';
   }
-  // On the handler, and staying on them as the fix tightens.
-  locateMe();
+  // On the handler, and staying on them as they walk to where the trail starts.
+  locateMe({ keepOn: 'scrLay' });
 }
 
 function onHideTap(e) {
@@ -1574,7 +1610,10 @@ function plumeStop() {
 /* Few, short and faint. This is the CONDITION the work is happening in, not
    the work: it has to be readable at a glance and then forgettable, or it
    competes with the plume for the one thing the screen is actually for. */
-const AIR_N = 60, AIR_LIFE = 20, AIR_STEP = 0.35, AIR_TAIL = 14, AIR_FRAME_MS = 32;
+/* 110 streaks and longer tails: at 60 thin ones the forecast wind was spread
+   over the whole map but read as nothing on a satellite photo, so the only
+   wind anyone saw was the flow arrows, which start on the trail. */
+const AIR_N = 110, AIR_LIFE = 20, AIR_STEP = 0.35, AIR_TAIL = 18, AIR_FRAME_MS = 32;
 const AIR_FULL_MS = 8;   // wind speed at which a wisp is at its longest and brightest
 const WISP_FADE = [0.12, 0.32, 0.62, 1];   // tail to head
 const air = { on: false, wx: null, st: null, T: FLAT, pts: [], raf: 0, last: 0 };
@@ -2675,6 +2714,7 @@ function stopFollowing() {
 }
 /** A drag means they want to look; stop chasing them around the screen. */
 function releaseFollow() {
+  locate.follow = false;
   if (!nav.follow) return;
   nav.follow = false;
   $('btnRecentre').classList.add('nudge');
@@ -2695,7 +2735,7 @@ function locateTap() {
     if (rec.pts.length) return recentre();
     return toast('No fix yet \u2014 open sky helps');
   }
-  locateMe({ zoom: 17.5 });
+  locateMe({ zoom: 17.5, keepOn: $('scrLay').hidden ? null : 'scrLay' });
 }
 
 /** Paint you onto the map, and the route as walked-behind / bright-ahead. */
