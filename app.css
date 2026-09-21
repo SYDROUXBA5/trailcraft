@@ -309,6 +309,76 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.75; cursor: p
 .gs-c { background: #D8B657; } .gs-h { background: #8C95A6; } .gs-a { background: #3B8BD6; }
 .gs-u { background: #C9D0DC; }
 
+/* ── Scent bench ───────────────────────────────────────
+   A sheet with two heights: a peek that shows the handle, the honesty tally
+   and the four dials that move the picture most, and a full height for the
+   whole rack. The map stays the hero — nothing is fixed above it but the
+   weather box and the pill the app already has. */
+.bench-sheet {
+  position: fixed; left: 8px; right: 8px; bottom: 0; z-index: 12;
+  max-width: 560px; margin: 0 auto;
+  max-height: 46vh; display: flex; flex-direction: column;
+  background: rgba(11, 22, 48, 0.92); color: #F4F6FA;
+  border: 1px solid rgba(255, 255, 255, 0.14); border-bottom: 0;
+  border-radius: 20px 20px 0 0;
+  box-shadow: 0 -12px 40px -14px rgba(0, 0, 0, 0.7);
+  transition: max-height 260ms var(--ease-out);
+}
+@supports (backdrop-filter: blur(20px)) {
+  .bench-sheet { backdrop-filter: blur(20px) saturate(150%); }
+}
+.bench-sheet.open { max-height: 76vh; }
+.bench-grab {
+  flex: none; display: block; width: 100%; padding: 8px 16px 6px;
+  background: none; border: 0; color: inherit; font: inherit; cursor: pointer; text-align: left;
+}
+.bench-bar { display: block; width: 38px; height: 4px; border-radius: 2px; margin: 0 auto 8px;
+  background: rgba(255, 255, 255, 0.34); }
+.bench-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.bench-head b { font: 600 17px var(--display); }
+.bench-head i { font-style: normal; font-size: 11.5px; color: #A8BBDC; }
+.bench-read { display: block; margin-top: 6px; font-size: 13px; color: #C9D8F2; }
+.bench-read b { color: #FFFFFF; font-family: var(--display); font-variant-numeric: tabular-nums; }
+.bench-body { flex: 1; overflow-y: auto; padding: 0 16px; -webkit-overflow-scrolling: touch; }
+.bench-foot { flex: none; display: flex; gap: 10px; padding: 8px 16px calc(var(--safe-b) + 10px); }
+.bench-foot .btn { flex: 1; }
+
+/* A group. Physics groups are plain; the drawing rack is ruled off and
+   tinted, because a knob that only changes the picture must never be
+   mistaken for a finding about scent. */
+.bench-grp { border-top: 1px solid rgba(255, 255, 255, 0.1); padding: 10px 0 4px; }
+.bench-grp:first-child { border-top: 0; }
+.bench-grp > summary { list-style: none; cursor: pointer; display: flex; align-items: baseline; gap: 8px; }
+.bench-grp > summary::-webkit-details-marker { display: none; }
+.bench-grp > summary::after { content: '\203A'; margin-left: auto; font-size: 18px; opacity: 0.5;
+  transition: transform 160ms var(--ease-out); }
+.bench-grp[open] > summary::after { transform: rotate(90deg); }
+.bench-grp b { font: 600 14.5px var(--body); }
+.bench-grp .cnt { font-size: 11px; color: #8FA6CC; }
+.bench-grp .why { margin: 6px 0 2px; font-size: 12px; line-height: 1.45; color: #A8BBDC; }
+.bench-grp.draw { background: rgba(120, 80, 30, 0.16); border-radius: 12px; padding: 10px 12px 6px;
+  margin: 10px 0; border-top: 1px solid rgba(240, 190, 110, 0.3); }
+.bench-grp.draw b { color: #F1C77A; }
+
+/* One dial. Label and live value on top, the slider under it, the note and
+   the provenance badge beneath. */
+.dial { padding: 7px 0 6px; border-top: 1px solid rgba(255, 255, 255, 0.07); }
+.dial:first-of-type { border-top: 0; }
+.dial .top { display: flex; align-items: baseline; gap: 8px; }
+.dial .nm { font: 500 14px var(--body); }
+.dial .val { margin-left: auto; font: 600 14px var(--display); font-variant-numeric: tabular-nums; }
+.dial input[type="range"] { height: 26px; margin: 2px 0 0; }
+.dial .note { font-size: 11.5px; line-height: 1.4; color: #9FB4D6; margin: 1px 0 0;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.dial.moved .nm::after { content: ' \2022'; color: #F5D14A; }
+
+.badge { flex: none; font: 700 9.5px var(--body); letter-spacing: 0.06em; text-transform: uppercase;
+  padding: 2px 6px; border-radius: 5px; }
+.badge.input { background: rgba(90, 170, 120, 0.26); color: #A8E0BE; }
+.badge.yours { background: rgba(245, 209, 74, 0.2); color: #F5D14A; }
+.badge.guess { background: rgba(229, 64, 60, 0.2); color: #FF9C98; }
+.badge.drawing { background: rgba(240, 190, 110, 0.2); color: #F1C77A; }
+
 /* ── Settings ────────────────────────────────────────────────────── */
 .set-card { margin-bottom: 10px; }
 .set-row { display: flex; align-items: center; gap: 12px; min-height: 52px; cursor: pointer; border: 0; background: none; width: 100%; text-align: left; font: inherit; padding: 4px 0; }

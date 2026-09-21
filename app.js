@@ -13,7 +13,8 @@ import { stepPoints } from './geo.js';
 import { handlerStats } from './store.js';
 import { plumePalette, stepPalette, windPalette, trackPalette, COLOUR_PRESETS, isHex, mix } from './colours.js';
 import { FLAT, buildTerrain, stability, regime, flowAt, normOf } from './field.js';
-import { predictedOffsets, ScentSim, driftFrom, stepByFlow, AIRBORNE } from './sim.js';
+import { predictedOffsets, ScentSim, driftFrom, stepByFlow } from './sim.js';
+import { PARAMS, DIALS, PV, setParam, resetParams, changed, tally, dialById } from './params.js';
 import { encodeTrail, decodeTrail, cardUrl, cardFromText } from './card.js';
 import { decodeTile, tileOf, tileBox } from './mvt.js';
 import { GROUND_LAYERS, buildGround, surfaceAt, surfaceAlong, surfaceRows, withSpread,
@@ -29,7 +30,7 @@ import { createStore, migrateV1, TARGETS, ODOURS, targetById, targetText, verbs,
          dogStats, ageBand, AGE_BANDS, LEVELS, levelById, dogAge } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-19q';
+const BUILD = '2026-09-21a';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true,
@@ -128,10 +129,10 @@ const avaHtml = (ent, cls = '') => {
 const SCREENS = ['scrOnboardHandler', 'scrOnboardDog', 'scrTutorial', 'scrHome', 'scrHandler', 'scrLay',
   'scrConfirm', 'scrShare', 'scrContam', 'scrPick', 'scrScan', 'scrRun', 'scrResult',
   'scrShowMap', 'scrSessions', 'scrSettings', 'scrDraw', 'scrCountdown', 'scrWalk', 'scrWait', 'scrDog',
-  'scrSignIn', 'scrShareOut', 'scrShared', 'scrLive'];
+  'scrSignIn', 'scrShareOut', 'scrShared', 'scrLive', 'scrBench'];
 
 /* The screens that are transparent chrome over the live map. */
-const MAP_SCREENS = ['scrLay', 'scrConfirm', 'scrContam', 'scrRun', 'scrShowMap', 'scrDraw', 'scrWalk', 'scrLive'];
+const MAP_SCREENS = ['scrLay', 'scrConfirm', 'scrContam', 'scrRun', 'scrShowMap', 'scrDraw', 'scrWalk', 'scrLive', 'scrBench'];
 
 /* ── Going back ───────────────────────────────────────────────────────
    Every page except home carries the same arrow, top-left, and it always
@@ -177,7 +178,10 @@ function go(id, { back = false } = {}) {
   // The map only needs to be right when something transparent sits over it.
   if (MAP_SCREENS.includes(id)) {
     map?.resize();
-    weatherPanelFor(run.session ?? pendingSession);
+    /* The bench supplies its own weather from the dials. Letting the screen
+       go looking for a forecast means that answer lands a second later and
+       overwrites what the dials are asking about. */
+    if (id !== 'scrBench') weatherPanelFor(run.session ?? pendingSession);
     mapChromeShow(true);
     stepsRun(true);
     if (!db.kv.get('mapTutDone') && !mapTut.open) openMapTut();
@@ -1792,6 +1796,174 @@ function airFrame(now) {
   air.raf = requestAnimationFrame(airFrame);
 }
 
+/* ── The scent bench ──────────────────────────────────────────────────
+   The model as an instrument: a trail on the map, and every number the model
+   runs on as a dial underneath. It exists because an audit found the model
+   carried about ninety numbers, almost none of them measured, and no way for
+   anyone to see which was which or what each one did.
+
+   So the sheet is drawn FROM the registry (params.js), not written out by
+   hand. A dial that exists in the model appears here; one that does not,
+   does not. And every dial wears where it came from, because forty sliders
+   with no provenance would read as "configurable, therefore right".
+
+   Two redraw tiers. The particle cloud recomputes on its own 400 ms tick and
+   picks up most dials for free. The BAND does not — it is drawn once per
+   session render — so anything touching the band needs an explicit repaint,
+   or a live dial looks dead, which is worse than no dial. */
+const bench = { on: false, trail: null, wx: null, open: false };
+
+/** A demo trail: a dog-leg on open ground near wherever the map is looking,
+    so the wind can be turned against it and the band watched swinging. */
+function benchTrail(centre) {
+  const legs = [[20, 170], [70, 150], [95, 120], [60, 190]];   // bearing, metres
+  const pts = [{ lat: centre.lat, lon: centre.lon }];
+  for (const [brg, m] of legs) {
+    const step = 4;
+    for (let d = step; d <= m; d += step) pts.push(project(pts[pts.length - 1], brg, step));
+  }
+  return pts;
+}
+
+/** The weather the bench is asking about, built from the dials rather than a
+    forecast. Same shape the rest of the model expects. */
+function benchWx() {
+  return {
+    wind_speed: PV.wind, wind_direction: PV.dir, wind_gusts: Math.max(PV.wind, PV.gust),
+    temp: PV.air, soil_temp: PV.soil, humidity: PV.hum, precipitation: PV.rain,
+    dew_point: PV.air - 2, time: null,
+  };
+}
+
+/** Stamp the trail's clock so "trail age" means what the dial says, and the
+    last point carries the dwell so the end pool is the size it claims. */
+function benchStamp() {
+  const now = Date.now();
+  const ageMs = PV.age * 60000;
+  const n = bench.trail.length;
+  bench.trail.forEach((p, i) => { p.t = now - ageMs + (i / Math.max(1, n - 1)) * Math.min(ageMs, n * 900); });
+  bench.trail[n - 1].dwellS = PV.dwell * 60;
+  return bench.trail;
+}
+
+function benchPaint() {
+  if (!bench.on || !bench.trail) return;
+  const trail = benchStamp();
+  const wx = benchWx();
+  bench.wx = wx;
+  const st = stability(wx.soil_temp, wx.temp);
+
+  setTrail(trail);
+  setSrc('start', pointsOf([trail[0]]));
+
+  /* Tier two: the band is not on the plume tick, so it is repainted here on
+     every change. Without this the geo dials would look inert while being
+     perfectly alive. */
+  const field = scentField(trail, wx, Date.now());
+  setSrc('drift', field.length ? plumePolygon(field) : EMPTY);
+
+  plumeStart(trail, wx, plume.T);
+  showWeather(wx);
+
+  benchReadout(st, field, trail, Math.round(scentLifeOf(wx, st)));
+}
+
+/** Which side of the line the band sits on, by majority along the trail. The
+    side is the only thing this model says that could turn out to be wrong,
+    so it belongs in the readout beside the metres. */
+function benchSide(field) {
+  let n = 0;
+  for (const f of field) n += f.regime.cross > 0.15 ? 1 : f.regime.cross < -0.15 ? -1 : 0;
+  return n > field.length * 0.15 ? 'right' : n < -field.length * 0.15 ? 'left' : null;
+}
+
+/** The full line at the width it needs, and one word in the pill. The pill
+    sits in a narrow column between the weather box and the compass, so a
+    whole sentence in it wraps to six lines and covers the map. */
+function benchReadout(st, field, trail, life) {
+  const i = Math.floor(field.length / 2);
+  const off = field.length ? dist(trail[i], field[i].centre) : 0;
+  const w = field.length ? field[i].halfWidth : 0;
+  const side = benchSide(field);
+  $('benchHudText').textContent = st.label;
+  $('benchRead').innerHTML = `${side ? `<b>${side}</b> of the line \u00b7 ` : 'no side \u00b7 '}` +
+    `<b>${off.toFixed(0)} m</b> off the line · <b>±${w.toFixed(0)} m</b> wide · workable <b>${life} min</b>`;
+}
+
+/* scentLife is not exported under that name here; field.js owns it and the
+   plume already uses it, so ask it the same way the plume does. */
+const scentLifeOf = (wx, st) => {
+  const hum = wx?.humidity ?? 70, wind = wx?.wind_speed ?? 0, rain = wx?.precipitation ?? 0, soil = wx?.soil_temp;
+  const fHum = PV.humA + hum / PV.humB;
+  const fWind = 1 / (1 + wind / PV.windHalf);
+  const fHot = soil == null ? 1 : 1 / (1 + Math.max(0, soil - PV.hotKnee) / PV.hotScale);
+  const fRain = rain <= 0 ? 1 : rain < PV.rainDrizzle ? PV.rainBoost : 1 / (1 + (rain - PV.rainDrizzle) * PV.rainDecay);
+  return Math.max(PV.lifeFloor, PV.lifeBase * fHum * fWind * fHot * fRain * (st?.life ?? 1));
+};
+
+const BADGE = { input: 'measured', yours: 'yours', guess: 'guess', drawing: 'drawing only' };
+
+function dialHtml(d) {
+  const v = PV[d.id];
+  const moved = v !== d.def;
+  return `<div class="dial${moved ? ' moved' : ''}" data-dial="${d.id}">
+    <div class="top"><span class="nm">${esc(d.label)}</span>
+      <span class="badge ${d.prov}">${BADGE[d.prov]}</span>
+      <span class="val" data-val="${d.id}">${fmtDial(d, v)}</span></div>
+    <input type="range" min="${d.min}" max="${d.max}" step="${d.step}" value="${v}" data-set="${d.id}" aria-label="${esc(d.label)}">
+    <p class="note">Moves ${esc(d.moves)}.${d.note ? ' ' + esc(d.note) : ''}</p>
+  </div>`;
+}
+const fmtDial = (d, v) => `${Number(v).toFixed(d.step < 0.05 ? 3 : d.step < 1 ? 2 : 0)}${d.unit ? ' ' + d.unit : ''}`;
+
+function paintBench() {
+  const t = tally();
+  $('benchTally').textContent = `${t.input} measured · ${t.yours} yours · ${t.guess} guessed`;
+  $('benchBody').innerHTML = PARAMS.map((g, i) => {
+    const n = g.dials.filter(d => PV[d.id] !== d.def).length;
+    return `<details class="bench-grp${g.kind === 'drawing' ? ' draw' : ''}"${i === 0 ? ' open' : ''}>
+      <summary><b>${esc(g.title)}</b><span class="cnt">${g.dials.length} dials${n ? ` · ${n} moved` : ''}</span></summary>
+      <p class="why">${esc(g.why)}${g.id === 'flow' && plume.T?.flat
+        ? ' <b style="color:#F1C77A">Flat here \u2014 nothing in this group bites until the map has elevation for this spot.</b>' : ''}</p>
+      ${g.dials.map(dialHtml).join('')}
+    </details>`;
+  }).join('');
+}
+
+/** Everything except reseeding the cloud: the band, the weather the plume is
+    running against, and the readout. Safe to call on every frame of a drag. */
+function benchPaintLight() {
+  if (!bench.on || !bench.trail) return;
+  const wx = benchWx();
+  bench.wx = wx;
+  plume.wx = wx;
+  plume.st = stability(wx.soil_temp, wx.temp);
+  const st = plume.st;
+  const field = scentField(bench.trail, wx, Date.now());
+  setSrc('drift', field.length ? plumePolygon(field) : EMPTY);
+  paintFlow();
+  airStart(wx, plume.T);
+  showWeather(wx);
+  benchReadout(st, field, bench.trail, Math.round(scentLifeOf(wx, st)));
+}
+
+function openBench() {
+  bench.on = true;
+  clearMap();
+  const c = map.getCenter();
+  bench.trail = benchTrail({ lat: c.lat, lon: c.lng });
+  paintBench();
+  go('scrBench');
+  fitTo(bench.trail, []);
+  benchPaint();
+}
+function closeBench() {
+  bench.on = false;
+  bench.trail = null;
+  plumeStop();
+  clearMap();
+}
+
 /* ── Wind tracers ─────────────────────────────────────────────────────
    Few enough to move every frame, which is the whole point of them: the
    heatmap can only be redrawn a few times a second, and a plume that never
@@ -1821,7 +1993,7 @@ function tracersStop() {
 function tracerSpawn(fresh = false) {
   const line = plume.trail;
   const g = line[Math.floor(Math.random() * line.length)];
-  return { glat: g.lat, glon: g.lon, age: fresh ? 0 : Math.random() * AIRBORNE };
+  return { glat: g.lat, glon: g.lon, age: fresh ? 0 : Math.random() * PV.airborne };
 }
 function tracerFrame(now) {
   if (!plume.sim || !plume.trail?.length) return tracersStop();
@@ -1832,12 +2004,12 @@ function tracerFrame(now) {
   const feats = [];
   for (const p of windDots.list) {
     p.age += dt;
-    if (p.age >= AIRBORNE) Object.assign(p, tracerSpawn(true));
+    if (p.age >= PV.airborne) Object.assign(p, tracerSpawn(true));
     const d = driftFrom(plume.T, { lat: p.glat, lon: p.glon }, p.age, plume.wx, plume.st, 3);
     feats.push({
       type: 'Feature',
       // Brightest as it leaves the ground, gone by the time it has spread.
-      properties: { a: Math.max(0, 1 - p.age / AIRBORNE) ** 1.4 },
+      properties: { a: Math.max(0, 1 - p.age / PV.airborne) ** 1.4 },
       geometry: { type: 'Point', coordinates: [d.lon, d.lat] },
     });
   }
@@ -1929,7 +2101,7 @@ function paintFlow() {
   for (let a = 0; a < N; a++) {
     const seed = line[Math.floor(((a + 0.5) / N) * (line.length - 1))];
     if (!seed) continue;
-    const reach = AIRBORNE * 0.55 * (seed.spread ?? 1);       // hard ground carries it half as far
+    const reach = PV.airborne * 0.55 * (seed.spread ?? 1);     // hard ground carries it half as far
     const pts = [];
     for (let k = 0; k <= FLOW_SAMPLES; k++) {
       pts.push(driftFrom(plume.T, seed, (k / FLOW_SAMPLES) * reach, plume.wx, plume.st, 3));
@@ -4737,6 +4909,38 @@ function wire() {
   $('btnAllSessions').addEventListener('click', () => { renderSessions(); go('scrSessions'); });
   $('btnTutorial').addEventListener('click', () => openTutorial(true));
   $('btnMapTut').addEventListener('click', openMapTut);
+
+  /* The bench. Delegated, because the sheet is drawn from the registry and
+     re-drawn whenever a group folds — listeners bound to each slider would
+     be lost every repaint. `input` fires all the way through a drag, which
+     is the whole point: the picture must move under the finger. */
+  $('btnBench').addEventListener('click', openBench);
+  $('benchDone').addEventListener('click', () => { closeBench(); go('scrSettings'); });
+  $('benchGrab').addEventListener('click', () => {
+    bench.open = !bench.open;
+    $('benchSheet').classList.toggle('open', bench.open);
+    $('benchGrab').setAttribute('aria-expanded', String(bench.open));
+    styleGap();
+  });
+  $('benchReset').addEventListener('click', () => {
+    resetParams();
+    paintBench();
+    benchPaint();
+    toast('Every dial back to the number it shipped with');
+  });
+  $('benchBody').addEventListener('input', (e) => {
+    const id = e.target.dataset?.set;
+    if (!id || !setParam(id, e.target.value)) return;
+    const d = dialById(id);
+    const out = $('benchBody').querySelector(`[data-val="${id}"]`);
+    if (out) out.textContent = fmtDial(d, PV[id]);
+    e.target.closest('.dial')?.classList.toggle('moved', PV[id] !== d.def);
+    /* The particle cloud is rebuilt only when a dial changes what a particle
+       IS — count, spacing, life. Everything else the running tick absorbs,
+       and reseeding on every frame of a drag would strobe. */
+    if (['perPoint', 'poolParts', 'sampleM', 'age', 'dwell'].includes(id)) benchPaint();
+    else benchPaintLight();
+  });
   $('mapTutNext').addEventListener('click', () => { if (mapTut.i >= MAP_TUT.length - 1) closeMapTut(); else { mapTut.i++; paintMapTut(); } });
   $('mapTutSkip').addEventListener('click', closeMapTut);
   $('btnGpsCheck').addEventListener('click', gpsCheck);

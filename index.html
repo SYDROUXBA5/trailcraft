@@ -593,6 +593,26 @@
   </div>
 </section>
 
+<!-- ── Scent bench: the model as an instrument ─────────────────────── -->
+<section id="scrBench" class="screen glass" hidden>
+  <div class="hud-pill" id="benchHud"><span id="benchHudText">Push a dial</span></div>
+  <div class="bench-sheet" id="benchSheet">
+    <button class="bench-grab" id="benchGrab" aria-label="Show more dials" aria-expanded="false">
+      <span class="bench-bar"></span>
+      <span class="bench-head">
+        <b>Scent bench</b>
+        <i id="benchTally"></i>
+      </span>
+      <span class="bench-read" id="benchRead"></span>
+    </button>
+    <div class="bench-body" id="benchBody"></div>
+    <div class="bench-foot">
+      <button class="btn ghost small" id="benchReset">Back to defaults</button>
+      <button class="btn ghost small" id="benchDone">Done</button>
+    </div>
+  </div>
+</section>
+
 <!-- ── Settings ────────────────────────────────────────────────────── -->
 <!-- ── Sign in ─────────────────────────────────────────────────────── -->
 <section id="scrSignIn" class="screen paper" hidden>
@@ -729,6 +749,7 @@
     <span class="label">Help</span>
     <button class="btn card-btn" id="btnTutorial">Show the tutorial again</button>
     <button class="btn card-btn" id="btnMapTut">Show the map gestures</button>
+    <button class="btn card-btn" id="btnBench">Open the scent bench</button>
     <button class="btn card-btn" id="btnGpsCheck">Check GPS on this phone</button>
     <p class="body small" id="gpsReport" hidden></p>
     <details class="advanced">

@@ -20,6 +20,8 @@
    tidiness, it is the reason the maths can be checked in Node instead of being
    eyeballed on a phone in a field. */
 
+import { PV, stabilityStops } from './params.js';
+
 /* ── Terrain ──────────────────────────────────────────────────────── */
 
 /** A terrain with no relief. Used when the DEM is unavailable — the flow then
@@ -144,6 +146,7 @@ export function wxAt(weather, when) {
 
 /** @param {number} soilT ground temperature °C @param {number} airT air temperature °C */
 export function stability(soilT, airT) {
+  const S = stabilityStops();
   if (soilT == null || airT == null) {
     return { dT: 0, key: 'unknown', label: 'unknown', mix: 1, drain: 0, life: 1,
              plain: 'No ground temperature recorded, so stability is unknown.' };
@@ -151,15 +154,15 @@ export function stability(soilT, airT) {
   const dT = soilT - airT;
   const R = (key, label, mix, drain, life, plain) => ({ dT, key, label, mix, drain, life, plain });
 
-  if (dT >  3) return R('convective+', 'strongly convective', 1.9, 0,   0.34,
+  if (dT > S.bounds[0]) return R('convective+', 'strongly convective', S.mix[0], S.drain[0], S.life[0],
     'Ground is much warmer than the air. Scent lifts fast and breaks into pockets — expect the dog high-headed and casting wide.');
-  if (dT >  1) return R('convective',  'convective',          1.4, 0,   0.58,
+  if (dT > S.bounds[1]) return R('convective',  'convective',          S.mix[1], S.drain[1], S.life[1],
     'Ground is warmer than the air. Scent rises and disperses; the workable band widens quickly.');
-  if (dT > -1) return R('neutral',     'neutral',             1.0, 0.1, 1.0,
+  if (dT > S.bounds[2]) return R('neutral',     'neutral',             S.mix[2], S.drain[2], S.life[2],
     'Ground and air are close. Textbook downwind cone.');
-  if (dT > -3) return R('stable',      'stable',              0.62, 0.7, 1.7,
+  if (dT > S.bounds[3]) return R('stable',      'stable',              S.mix[3], S.drain[3], S.life[3],
     'Ground is cooler than the air. A lid on the air — scent stays low and holds its line.');
-  return         R('inversion',   'strong inversion',    0.40, 1.0, 2.6,
+  return         R('inversion',   'strong inversion',    S.mix[4], S.drain[4], S.life[4],
     'Strong inversion. Scent hugs the ground and runs downhill into hollows; trails stay workable far longer than usual.');
 }
 
@@ -167,10 +170,8 @@ export function stability(soilT, airT) {
 
 /* Downslope scent-creep weight per stability regime — how much of the
    ground-hugging scent film survives to slide downhill. */
-const CREEP = {
-  'convective+': 0.08, convective: 0.16, neutral: 0.38,
-  stable: 0.55, inversion: 0.65, unknown: 0.30,
-};
+/* Live from the bench (params.js stabilityStops). The defaults are the
+   values this model shipped with; every one of them was chosen, not measured. */
 
 /** Metres per second the synoptic wind blows, as an east/south vector. */
 export function synoptic(speedMs, fromDeg) {
@@ -204,19 +205,19 @@ export function flowAt(T, x, y, wx, st, out = { u: 0, v: 0 }) {
       /* Deflection. Deliberately gentle — this is Somerset, not an alpine face.
          Turned up much past this the field spins into vortices, which looks more
          impressive and is less true. */
-      const k = 0.52 * Math.min(1, gm * 1.7);
+      const k = PV.deflect * Math.min(1, gm * PV.slopeSat);
       u -= k * up * ux;
       v -= k * up * uy;
       const cx = -uy, cy = ux;                                  // along the contour
       const sgn = (u * cx + v * cy) >= 0 ? 1 : -1;              // whichever way it was already going
-      u += k * Math.abs(up) * cx * sgn * 0.34;
-      v += k * Math.abs(up) * cy * sgn * 0.34;
+      u += k * Math.abs(up) * cx * sgn * PV.contour;
+      v += k * Math.abs(up) * cy * sgn * PV.contour;
 
       /* Drainage. Under a stable layer the cold air is a river: at dawn with
          the ground 3 °C colder than the air, the wind number can say 0.8 m/s
          from the north while the air at nose height runs downhill regardless. */
       if (st && st.drain > 0 && st.dT < 0) {
-        const d = Math.min(1.6, 2.6 * gm * st.drain * (-st.dT) * 0.5);
+        const d = Math.min(PV.drainCap, PV.drainGain * gm * st.drain * (-st.dT) * 0.5);
         u -= ux * d;
         v -= uy * d;
       }
@@ -228,14 +229,14 @@ export function flowAt(T, x, y, wx, st, out = { u: 0, v: 0 }) {
          wind, but never zero on a hillside: strongest in stable air, still
          present in neutral, mostly lifted away once the sun has the ground
          cooking. */
-      const creep = Math.min(0.9, gm * 4.5 * (CREEP[st?.key] ?? 0.3));
+      const creep = Math.min(PV.creepCap, gm * PV.creepGain * (stabilityStops().creep[st?.key] ?? 0.3));
       u -= ux * creep;
       v -= uy * creep;
     }
 
     // Shelter and speed-up: ridges expose, hollows go slack.
     const ex = sample(T.expo, n, x, y);
-    const m = Math.max(0.28, Math.min(1.7, 1 + ex * 0.052));
+    const m = Math.max(PV.expoFloor, Math.min(PV.expoCeil, 1 + ex * PV.expoGain));
     u *= m; v *= m;
   }
 
@@ -265,12 +266,13 @@ export function scentLife(wx, st) {
   const rain = wx?.precipitation ?? 0;
   const soil = wx?.soil_temp;
 
-  const fHum  = 0.42 + hum / 78;
-  const fWind = 1 / (1 + wind / 4.2);
-  const fHot  = soil == null ? 1 : 1 / (1 + Math.max(0, soil - 15) / 16);
-  const fRain = rain <= 0 ? 1 : rain < 0.6 ? 1.25 : 1 / (1 + (rain - 0.6) * 1.4);
+  const fHum  = PV.humA + hum / PV.humB;
+  const fWind = 1 / (1 + wind / PV.windHalf);
+  const fHot  = soil == null ? 1 : 1 / (1 + Math.max(0, soil - PV.hotKnee) / PV.hotScale);
+  const fRain = rain <= 0 ? 1 : rain < PV.rainDrizzle ? PV.rainBoost
+              : 1 / (1 + (rain - PV.rainDrizzle) * PV.rainDecay);
 
-  return Math.max(8, 82 * fHum * fWind * fHot * fRain * (st?.life ?? 1));
+  return Math.max(PV.lifeFloor, PV.lifeBase * fHum * fWind * fHot * fRain * (st?.life ?? 1));
 }
 
 /* ── Sun ──────────────────────────────────────────────────────────── */
@@ -331,9 +333,12 @@ export function regime(T, trailPts, wx, st) {
   const step = 1 / 8;
   for (let y = step / 2; y < 1; y += step) for (let x = step / 2; x < 1; x += step) {
     const gm = Math.hypot(sample(T.gx, T.n, x, y), sample(T.gy, T.n, x, y));
+    /* The same two formulas as flowAt. They MUST read the same dials: an
+       earlier version kept its own copies, so a bench could move the map
+       while this verdict word went on saying something else. */
     const drain = (st.drain > 0 && st.dT < 0)
-      ? Math.min(1.6, 2.6 * gm * st.drain * (-st.dT) * 0.5) : 0;
-    const creep = Math.min(0.9, gm * 4.5 * (CREEP[st.key] ?? 0.3));
+      ? Math.min(PV.drainCap, PV.drainGain * gm * st.drain * (-st.dT) * 0.5) : 0;
+    const creep = Math.min(PV.creepCap, gm * PV.creepGain * (stabilityStops().creep[st.key] ?? 0.3));
     downMag = Math.max(downMag, drain + creep);
   }
   return downMag > windMag
