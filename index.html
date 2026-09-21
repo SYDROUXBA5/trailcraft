@@ -460,6 +460,7 @@
     <div class="page-bottom">
       <button class="btn ember" id="btnScanWalked" hidden>Scan the walked trail card</button>
       <button class="btn moss" id="btnShowMap">Show on map</button>
+      <button class="btn moss" id="btnReplay" hidden>Replay this run</button>
       <button class="btn" id="btnShareOut">Share this run</button>
       <button class="btn ghost" id="btnResDone">Done</button>
     </div>
@@ -594,6 +595,23 @@
 </section>
 
 <!-- ── Scent bench: the model as an instrument ─────────────────────── -->
+<!-- Replay: the run as it happened, against the scent as it was ----- -->
+<section id="scrReplay" class="screen glass" hidden>
+  <div class="hud-pill" id="repHud"><span id="repHudText">Replay</span></div>
+  <div class="glass-bottom">
+    <p class="glass-caption" id="repCaption"></p>
+    <div class="rep-row">
+      <button class="rep-play" id="repPlay" aria-label="Play">&#9654;</button>
+      <input type="range" id="repScrub" min="0" max="1000" value="1000" step="1" aria-label="Run time">
+      <button class="rep-speed" id="repSpeed" aria-label="Playback speed">4&times;</button>
+    </div>
+    <div class="row-gap">
+      <button class="btn ghost" id="repDebrief" hidden>Write the debrief</button>
+      <button class="btn ghost" id="repBack">Done</button>
+    </div>
+  </div>
+</section>
+
 <section id="scrBench" class="screen glass" hidden>
   <div class="hud-pill" id="benchHud"><span id="benchHudText">Push a dial</span></div>
   <div class="bench-sheet" id="benchSheet">
