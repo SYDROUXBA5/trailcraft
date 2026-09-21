@@ -500,7 +500,7 @@ export function detailSections(m, u = {}) {
       if (jd.note) rows.push(['For next time', jd.note]);
     }
     out.push({ title: jd?.by ? `Judged by ${jd.by}` : 'Judged by the handler', rows,
-      note: jd?.outcome ? 'The handler’s own judgement, not something the phone measured.' : undefined });
+      note: jd?.outcome ? 'Written by the handler after the run. None of it comes from the phone.' : undefined });
   }
 
   /* What the handler saw on the ground: an observation, not a judgement, and
@@ -508,7 +508,7 @@ export function detailSections(m, u = {}) {
   const seen = seenLine(m.seen);
   if (seen) {
     out.push({ title: 'Seen on the ground', rows: [['Conditions', seen]],
-      note: 'As the handler saw them on the day, not taken from the forecast.' });
+      note: 'What the handler saw on the day, written down by hand.' });
   }
 
   const wx = m.wx, wind = r?.wind ?? (wx ? { speed: wx.wind_speed, from: wx.wind_direction } : null);

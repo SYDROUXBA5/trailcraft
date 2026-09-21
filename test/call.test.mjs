@@ -102,15 +102,15 @@ t('a band reports a rate only once there is enough behind it', () => {
 t('well-calibrated and under-claiming both read correctly', () => {
   const ok = calibration(band('fairly', 10, 7));          // claims 0.70, hits 0.70
   assert.equal(ok.bands.find(b => b.v === 'fairly').verdict, 'about right');
-  assert.equal(calibrationLine(ok), 'Your confidence matches your hit rate across every band.');
+  assert.equal(calibrationLine(ok), 'How sure you say you are matches how often you’re right.');
 
   const cold = calibration(band('unsure', 10, 9));        // claims 0.50, hits 0.90
   assert.equal(cold.bands.find(b => b.v === 'unsure').verdict, 'running cold');
-  assert.ok(calibrationLine(cold).includes('better than you claim'));
+  assert.ok(calibrationLine(cold).includes('better than you give yourself credit for'));
 
   const hot = calibration(band('sure', 6, 4));
   assert.equal(calibrationLine(hot),
-    'When you say “Certain” you are right 4 times in 6 — 67%. That word is promising more than it delivers.');
+    'When you say “Certain”, you’re right 4 times in 6 (67%). That’s less often than “Certain” should mean.');
 });
 
 t('an empty or thin record says so instead of inventing a finding', () => {
@@ -118,11 +118,11 @@ t('an empty or thin record says so instead of inventing a finding', () => {
   assert.equal(none.calls, 0);
   assert.equal(none.ready, false);
   assert.equal(none.bias, null);
-  assert.equal(calibrationLine(none), 'No blind calls recorded yet.');
-  assert.equal(calibrationLine(null), 'No blind calls recorded yet.');
+  assert.equal(calibrationLine(none), 'No blind calls yet.');
+  assert.equal(calibrationLine(null), 'No blind calls yet.');
 
   const thin = calibration(band('sure', 1, 1));
-  assert.equal(calibrationLine(thin), '1 blind call recorded — not enough yet to say how well you read it.');
+  assert.equal(calibrationLine(thin), '1 blind call so far. Too few yet to say how well you read your dog.');
   assert.ok(calibrationLine(calibration(band('sure', 3, 1))).startsWith('3 blind calls'));
   assert.equal(calibration(null).calls, 0);
 });

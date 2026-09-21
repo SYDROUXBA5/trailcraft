@@ -334,7 +334,7 @@ t('conditions are what the handler saw, and only what the app offers', () => {
   assert.equal(cleanSeen('wet'), null);
   assert.equal(cleanSeen(null), null);
 
-  assert.equal(seenLine({ wet: 'wet', sun: 'shade' }), 'Wet, In shade');
+  assert.equal(seenLine({ wet: 'wet', sun: 'shade' }), 'Wet, in shade', 'one sentence, so one capital');
   assert.equal(seenLine({ wet: null, sun: 'sun' }), 'In sun');
   assert.equal(seenLine({ wet: 'frozen' }), 'Frozen');
   assert.equal(seenLine(null), '');

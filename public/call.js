@@ -32,9 +32,9 @@ export const CALL_V = 1;
     it is deliberately modest: "certain" is 0.9, not 1.0, because nobody is
     ever certain and a band that can only be wrong is useless. */
 export const CONFIDENCE = [
-  { v: 'sure', label: 'Certain', p: 0.90, why: 'You would put money on it.' },
-  { v: 'fairly', label: 'Fairly sure', p: 0.70, why: 'You think so, but you would not be shocked.' },
-  { v: 'unsure', label: 'Not sure', p: 0.50, why: 'Calling it because the dog did, not because you know.' },
+  { v: 'sure', label: 'Certain', p: 0.90, why: 'You’d put money on it.' },
+  { v: 'fairly', label: 'Fairly sure', p: 0.70, why: 'You think so, but you wouldn’t bet on it.' },
+  { v: 'unsure', label: 'Not sure', p: 0.50, why: 'You’re calling it because the dog did.' },
 ];
 
 const byV = new Map(CONFIDENCE.map(c => [c.v, c]));
@@ -150,15 +150,16 @@ export function calibrationLine(cal) {
   if (!cal || !cal.ready) {
     const n = cal?.calls ?? 0;
     return n
-      ? `${n} blind call${n === 1 ? '' : 's'} recorded — not enough yet to say how well you read it.`
-      : 'No blind calls recorded yet.';
+      ? `${n} blind call${n === 1 ? '' : 's'} so far. Too few yet to say how well you read your dog.`
+      : 'No blind calls yet.';
   }
   const worst = cal.bands
     .filter(b => b.enough && b.verdict !== 'about right')
     .sort((a, b) => Math.abs(b.gap) - Math.abs(a.gap))[0];
-  if (!worst) return 'Your confidence matches your hit rate across every band.';
+  if (!worst) return 'How sure you say you are matches how often you’re right.';
   const pct = Math.round(worst.rate * 100);
+  const said = `When you say “${worst.label}”, you’re right ${worst.right} times in ${worst.n} (${pct}%).`;
   return worst.verdict === 'running hot'
-    ? `When you say “${worst.label}” you are right ${worst.right} times in ${worst.n} — ${pct}%. That word is promising more than it delivers.`
-    : `When you say “${worst.label}” you are right ${worst.right} times in ${worst.n} — ${pct}%. You are reading it better than you claim.`;
+    ? `${said} That’s less often than “${worst.label}” should mean.`
+    : `${said} You read your dog better than you give yourself credit for.`;
 }

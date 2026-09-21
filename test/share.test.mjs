@@ -347,7 +347,7 @@ await t('the page and the report show the judgement, with the call first', async
     'third person — the reader is not the handler');
   assert.ok(!sec.rows.some(([k]) => k === 'Help you gave'), 'not "you" on someone else’s page');
   assert.ok(sec.rows.some(([k, v]) => k === 'Flagged' && v === 'Too hot'));
-  assert.ok(sec.note.includes('not something the phone measured'));
+  assert.ok(sec.note.includes('None of it comes from the phone'));
 
   const titles = detailSections(back).map(x => x.title);
   assert.ok(titles.indexOf('Run') < titles.indexOf('Judged by Rémi'), 'measured above judged');
@@ -363,8 +363,8 @@ await t('what the handler saw on the ground travels, and a forged value does not
   const back = await decodeShared(await encodeShared(trailModel(s, people)));
   assert.deepEqual(back.seen, { v: 1, wet: 'damp', sun: 'shade' });
   const sec = detailSections(back).find(x => x.title === 'Seen on the ground');
-  assert.deepEqual(sec.rows, [['Conditions', 'Damp, In shade']]);
-  assert.ok(sec.note.includes('not taken from the forecast'));
+  assert.deepEqual(sec.rows, [['Conditions', 'Damp, in shade']]);
+  assert.ok(sec.note.includes('written down by hand'));
 
   const none = await decodeShared(await encodeShared(trailModel(judged(), people)));
   assert.equal(none.seen, null);
