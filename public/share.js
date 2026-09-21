@@ -10,6 +10,8 @@
 import { simplify, pathLen, cardinal, fmtDist, fmtShort, fmtSpeed, fmtTemp, fmtWeight, fmtCoord } from './geo.js';
 import { through, b64url, unb64url, needStreams } from './card.js';
 import { targetById, ageBand, dogAge } from './store.js';
+import { DEBRIEF, FLAGS, NOTE_TAGS, toldField, toldOf } from './debrief.js';
+import { CONFIDENCE, labelOf as callLabel } from './call.js';
 
 const MAGIC = 'TS1.';
 const fin = Number.isFinite;
@@ -43,6 +45,7 @@ export function trailModel(s, { dog = null, handler = null, layer = null, k = nu
     wx: d.weather ?? null,
     result: d.result ?? null,
     coach: d.coach ?? null,
+    debrief: d.debrief ?? null,
     k: fin(k) ? k : null,
     thinnedM: 0,
   };
@@ -66,6 +69,11 @@ function packPts(pts) {
   if (dw.length) o.dw = dw;
   const kd = pts.flatMap((p, i) => (typeof p.kind === 'string' ? [[i, p.kind]] : []));
   if (kd.length) o.kd = kd;
+  /* The handler's call, made before they looked. Without this column it was
+     stripped from every shared run, and the one thing that cannot be
+     reconstructed afterwards never left the phone. */
+  const cl = pts.flatMap((p, i) => (p.call?.conf ? [[i, p.call.conf, p.call.seen ? 1 : 0]] : []));
+  if (cl.length) o.cl = cl;
   return o;
 }
 
@@ -82,6 +90,11 @@ function unpackPts(o) {
   });
   for (const [i, s] of Array.isArray(o.dw) ? o.dw : []) if (pts[i] && fin(s)) pts[i].dwellS = s;
   for (const [i, k] of Array.isArray(o.kd) ? o.kd : []) if (pts[i]) pts[i].kind = String(k).slice(0, 40);
+  /* Only a confidence the app itself offers gets through; anything else in a
+     crafted link is dropped rather than shown. */
+  for (const [i, c, seen] of Array.isArray(o.cl) ? o.cl : []) {
+    if (pts[i] && CALL_VS.has(c)) pts[i].call = { conf: c, seen: seen === 1 };
+  }
   const sane = pts.every(p => fin(p.lat) && fin(p.lon) && Math.abs(p.lat) <= 90 && Math.abs(p.lon) <= 180);
   return sane ? pts : null;
 }
@@ -103,6 +116,41 @@ const roundDeep = (v) => (fin(v) ? round(v, 2)
   : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, roundDeep(x)]))
   : v);
 
+/* ── The judgement ────────────────────────────────────────────────────
+   What the handler said about the run, travelling with it. Every value is
+   checked against the app's own option lists on the way back in: a link is a
+   stranger's input, and a debrief field is shown to whoever opens it. */
+const CALL_VS = new Set(CONFIDENCE.map(c => c.v));
+const DEBRIEF_VS = new Map(DEBRIEF.map(f => [f.id, new Set(f.options.map(o => o.v))]));
+const FLAG_VS = new Set(FLAGS.map(f => f.v));
+const TAG_VS = new Set(NOTE_TAGS.map(t => t.v));
+
+function packDebrief(d) {
+  if (!d?.outcome) return undefined;
+  const o = {};
+  for (const f of DEBRIEF) if (d[f.id]) o[f.id] = d[f.id];
+  if (d.flags?.length) o.flags = d.flags;
+  if (d.note) o.note = String(d.note).slice(0, 140);
+  if (d.noteTag) o.noteTag = d.noteTag;
+  if (d.by) o.by = String(d.by).slice(0, 60);
+  if (fin(d.at)) o.at = d.at;
+  return o;
+}
+
+function unpackDebrief(o) {
+  if (!o || typeof o !== 'object') return null;
+  const d = { v: 1, flags: [], note: '', noteTag: null };
+  for (const [id, ok] of DEBRIEF_VS) d[id] = ok.has(o[id]) ? o[id] : null;
+  /* Without an outcome there is no judgement to show, whatever else came. */
+  if (!d.outcome) return null;
+  d.flags = (Array.isArray(o.flags) ? o.flags : []).filter(f => FLAG_VS.has(f));
+  d.note = typeof o.note === 'string' ? o.note.slice(0, 140) : '';
+  d.noteTag = TAG_VS.has(o.noteTag) ? o.noteTag : null;
+  d.by = str(o.by);
+  d.at = fin(o.at) ? o.at : null;
+  return d;
+}
+
 function pack(m) {
   const o = {
     kind: m.kind, target: m.target, laidAt: m.laidAt, runAt: m.runAt,
@@ -114,6 +162,7 @@ function pack(m) {
     wx: packWx(m.wx), result: m.result ? roundDeep(m.result) : undefined,
     coach: m.coach ? { assisted: !!m.coach.assisted, tolM: m.coach.tolM, scent: !!m.coach.scent, calls: m.coach.calls,
       shadow: m.coach.shadow ? pick(m.coach.shadow, ['tolM', 'plain', 'scent']) : undefined } : undefined,
+    debrief: packDebrief(m.debrief),
     k: m.k, thinnedM: m.thinnedM || undefined,
   };
   return Object.fromEntries(Object.entries(o).filter(([, v]) => v != null));
@@ -156,6 +205,7 @@ function unpack(o) {
         scent: fin(o.coach.shadow.scent) ? o.coach.shadow.scent : null,
       } : null,
     } : null,
+    debrief: unpackDebrief(o.debrief),
     k: fin(o.k) ? o.k : null,
     thinnedM: fin(o.thinnedM) ? o.thinnedM : 0,
   };
@@ -235,7 +285,7 @@ export function sharedFromText(text) {
 /* ── GPX ──────────────────────────────────────────────────────────── */
 
 const xml = (v) => String(v ?? '')
-  .replace(/[ --]/g, '')
+  .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, '')
   .replace(/[<>&'"]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' }[c]));
 const isoTime = (ms) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, 'Z');
 const deg = (x) => x.toFixed(7);
@@ -426,6 +476,27 @@ export function detailSections(m, u = {}) {
     }
     if (fin(m.dog?.lineM) && m.dog.lineM > 0) rows.push(['Line', fmtShort(m.dog.lineM, imp)]);
     out.push({ title: 'Run', rows });
+  }
+
+  /* What the handler judged, kept apart from what the phone measured above it.
+     The call comes first because it was made first: before they looked. */
+  const call = (m.wps ?? []).find(w => w.kind === 'Indication' && w.call?.conf)?.call;
+  const jd = m.debrief;
+  if (call || jd?.outcome) {
+    const rows = [];
+    if (call) rows.push(['Their call, before looking', callLabel(call.conf)
+      + (call.seen ? ' (trail already on screen)' : '')]);
+    if (jd?.outcome) {
+      for (const f of DEBRIEF) {
+        /* Third person: whoever opens this is not the handler who answered. */
+        const v = toldOf(f.id, jd[f.id]);
+        if (v) rows.push([toldField(f.id), v]);
+      }
+      if (jd.flags?.length) rows.push(['Flagged', jd.flags.map(f => FLAGS.find(x => x.v === f)?.label ?? f).join(', ')]);
+      if (jd.note) rows.push(['For next time', jd.note]);
+    }
+    out.push({ title: jd?.by ? `Judged by ${jd.by}` : 'Judged by the handler', rows,
+      note: jd?.outcome ? 'The handler’s own judgement, not something the phone measured.' : undefined });
   }
 
   const wx = m.wx, wind = r?.wind ?? (wx ? { speed: wx.wind_speed, from: wx.wind_direction } : null);

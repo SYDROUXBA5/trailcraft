@@ -75,6 +75,9 @@ export function firstCall(session) {
     the trail was not on screen, nobody present knew the answer, and the run
     ended in a way that says plainly whether the call was right or wrong. */
 export function scorable(session) {
+  /* A run kept from someone else's link carries THEIR call. Folding it into
+     your calibration would quietly measure a different person. */
+  if (session?.data?.imported) return null;
   const c = firstCall(session);
   if (!c || c.call.seen) return null;
   const d = session?.data?.debrief;
@@ -129,7 +132,7 @@ export function calibration(sessions) {
     calibration reads as "you have not run blind much" rather than as a fault
     in the app. */
 export function calibrationLosses(sessions) {
-  const all = (sessions ?? []).filter(s => firstCall(s));
+  const all = (sessions ?? []).filter(s => !s?.data?.imported && firstCall(s));
   return {
     total: all.length,
     seen: all.filter(s => firstCall(s).call.seen).length,

@@ -142,4 +142,19 @@ t('discarded runs are counted, so a thin curve is explained not hidden', () => {
   assert.deepEqual(calibrationLosses([]), { total: 0, seen: 0, notBlind: 0, noDebrief: 0 });
 });
 
+t('a run kept from someone else’s link never counts as your call', () => {
+  const theirs = (s) => ({ ...s, data: { ...s.data, imported: { from: 'A student', at: 1 } } });
+  assert.equal(scorable(theirs(sess())), null, 'their call is not your call');
+
+  /* Six of their confident misses must not make you look overconfident. */
+  const mine = band('sure', 5, 5);
+  const cal = calibration([...mine, ...band('sure', 6, 0).map(theirs)]);
+  assert.equal(cal.calls, 5, 'only your own runs are counted');
+  /* Folded in, their misses would make it 5 of 11 — "running hot". */
+  assert.equal(cal.bands.find(b => b.v === 'sure').verdict, 'about right', '5 of 5 against a 0.9 claim');
+
+  assert.equal(calibrationLosses([sess(), theirs(sess({ blind: 'open' }))]).total, 1,
+    'and they are not counted as your losses either');
+});
+
 console.log(`\n${pass} passed total\n`);

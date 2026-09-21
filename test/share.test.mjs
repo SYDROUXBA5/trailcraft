@@ -263,4 +263,98 @@ await t('live: the meta holds the trail but not the run, and chunks rebuild the 
   assert.match(headline(empty), /not yet run/);
 });
 
+/* ── The judgement travels with the run ──────────────────────────────
+   Until this, the debrief and the handler's call were stripped from every
+   shared run: the only parts of the record a person had to supply were the
+   only parts that could never leave the phone. */
+
+const judged = ({ seen = false, debrief = true } = {}) => {
+  const s = session({ trailN: 40, trackN: 80 });
+  s.data.trackWaypoints = [{ ...s.data.track[50], kind: 'Indication', call: { v: 1, conf: 'sure', seen, at: 1 } }];
+  if (debrief) {
+    s.data.debrief = { v: 1, outcome: 'found', target: 'real', blind: 'handler', help: 'none',
+      response: 'clear', flags: ['hot'], note: 'Cast wider at the gate.', noteTag: 'handler', by: 'Rémi', at: T0 };
+  }
+  return s;
+};
+
+await t('the handler’s judgement and their call travel with the run', async () => {
+  const back = await decodeShared(await encodeShared(trailModel(judged(), people)));
+  const d = back.debrief;
+  assert.equal(d.outcome, 'found');
+  assert.equal(d.target, 'real');
+  assert.equal(d.blind, 'handler', 'who knew the answer — the field that decides whether the run proves anything');
+  assert.equal(d.help, 'none');
+  assert.equal(d.response, 'clear');
+  assert.deepEqual(d.flags, ['hot']);
+  assert.equal(d.note, 'Cast wider at the gate.');
+  assert.equal(d.noteTag, 'handler');
+  assert.equal(d.by, 'Rémi');
+  assert.deepEqual(back.wps[0].call, { conf: 'sure', seen: false }, 'the call made before looking');
+  assert.equal(back.wps[0].kind, 'Indication');
+});
+
+await t('a call made with the trail on screen still says so on the far side', async () => {
+  const back = await decodeShared(await encodeShared(trailModel(judged({ seen: true }), people)));
+  assert.equal(back.wps[0].call.seen, true, 'or a reading would arrive looking like a blind call');
+});
+
+await t('a run with no judgement carries none, and says nothing about one', async () => {
+  const s = session({ trailN: 40, trackN: 80 });
+  const back = await decodeShared(await encodeShared(trailModel(s, people)));
+  assert.equal(back.debrief, null);
+  assert.equal(back.wps[0].call, undefined);
+  assert.ok(!detailSections(back).some(sec => sec.title.startsWith('Judged')));
+});
+
+await t('a hand-made link cannot smuggle a judgement in', async () => {
+  const forge = async (obj) => 'TS1.' + b64url(await through(
+    new TextEncoder().encode(JSON.stringify(obj)), new CompressionStream('deflate-raw')));
+  const trail = { lat: [51200000, 10], lon: [-2600000, 10] };
+
+  const noOutcome = await decodeShared(await forge({ kind: 'trail', trail, debrief: { outcome: '<script>', target: 'real' } }));
+  assert.equal(noOutcome.debrief, null, 'an outcome the app never offers means no judgement at all');
+
+  const odd = await decodeShared(await forge({ kind: 'trail', trail, debrief: {
+    outcome: 'found', target: 'nonsense', blind: 'double', help: 42,
+    flags: ['fouled', 'evil', { x: 1 }], note: 'x'.repeat(500), noteTag: 'bogus', by: { a: 1 }, at: 'yesterday',
+  } }));
+  const d = odd.debrief;
+  assert.equal(d.outcome, 'found');
+  assert.equal(d.target, null, 'a value not in the list is dropped, not shown');
+  assert.equal(d.blind, 'double');
+  assert.equal(d.help, null);
+  assert.deepEqual(d.flags, ['fouled'], 'only flags the app offers');
+  assert.equal(d.note.length, 140);
+  assert.equal(d.noteTag, null);
+  assert.equal(d.by, null);
+  assert.equal(d.at, null);
+
+  const call = await decodeShared(await forge({ kind: 'trail', trail,
+    wps: { lat: [51200000], lon: [-2600000], kd: [[0, 'Indication']], cl: [[0, 'lol', 0], [9, 'sure', 0]] } }));
+  assert.equal(call.wps[0].call, undefined, 'a confidence the app never offers is dropped');
+  assert.equal(call.wps.length, 1, 'and a call pointing past the end cannot conjure a mark');
+});
+
+await t('the page and the report show the judgement, with the call first', async () => {
+  const back = await decodeShared(await encodeShared(trailModel(judged(), people)));
+  const sec = detailSections(back).find(x => x.title.startsWith('Judged'));
+  assert.ok(sec, 'there is a judged section');
+  assert.equal(sec.title, 'Judged by Rémi', 'a judgement has an author');
+  assert.deepEqual(sec.rows[0], ['Their call, before looking', 'Certain'], 'made first, shown first');
+  assert.ok(sec.rows.some(([k, v]) => k === 'How did it end' && v === 'Found it'));
+  assert.ok(sec.rows.some(([k, v]) => k === 'Who knew the answer' && v === 'The handler did not'),
+    'third person — the reader is not the handler');
+  assert.ok(!sec.rows.some(([k]) => k === 'Help you gave'), 'not "you" on someone else’s page');
+  assert.ok(sec.rows.some(([k, v]) => k === 'Flagged' && v === 'Too hot'));
+  assert.ok(sec.note.includes('not something the phone measured'));
+
+  const titles = detailSections(back).map(x => x.title);
+  assert.ok(titles.indexOf('Run') < titles.indexOf('Judged by Rémi'), 'measured above judged');
+
+  const onScreen = await decodeShared(await encodeShared(trailModel(judged({ seen: true }), people)));
+  assert.equal(detailSections(onScreen).find(x => x.title.startsWith('Judged')).rows[0][1],
+    'Certain (trail already on screen)');
+});
+
 console.log(`\n${pass} passed total`);

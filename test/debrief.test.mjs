@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { DEBRIEF, FLAGS, NOTE_TAGS, DEBRIEF_V, blankDebrief, debriefDone, debriefLine,
-         labelOf, fieldById, debriefRates, varietyGaps } from '../public/debrief.js';
+         labelOf, fieldById, debriefRates, varietyGaps, toldField, toldOf } from '../public/debrief.js';
 
 let pass = 0;
 const t = (name, fn) => { fn(); pass++; console.log(`  ok  ${name}`); };
@@ -114,6 +114,37 @@ t('flags and note tags are short, unique and optional', () => {
   assert.equal(d.noteTag, null);
   assert.equal(d.note, '');
   assert.equal(debriefDone({ outcome: 'found', target: 'real' }), true, 'neither is ever required');
+});
+
+t('a run kept from someone else’s link is never counted as yours', () => {
+  const theirs = (d) => ({ data: { debrief: d, imported: { from: 'A student', at: 1 } } });
+  const r = debriefRates([run(full()), theirs(full({ outcome: 'missed' })), theirs(full({ outcome: 'false' }))]);
+  assert.equal(r.runs, 1, 'only your own run');
+  assert.equal(r.findRate, 1, 'their misses do not lower your find rate');
+  assert.equal(r.falseCalls, 0);
+  /* Their blind double-blank run must not tick off your variety gaps. */
+  const gaps = varietyGaps([run(full({ blind: 'open', target: 'real' })),
+    theirs(full({ blind: 'double', target: 'control', outcome: 'blank' }))]);
+  assert.ok(gaps.some(x => x.includes('knew the answer')), 'you still have never run blind');
+  assert.ok(gaps.some(x => x.includes('blank')), 'and still never run a blank');
+});
+
+t('what someone else reads never says I or you', () => {
+  /* A student's run arrives on the instructor's phone. "Help you gave: I chose
+     the way" would tell the instructor they did something they did not. */
+  const firstPerson = /\b(I|you|your|me|my)\b/i;
+  for (const f of DEBRIEF) {
+    assert.ok(!firstPerson.test(toldField(f.id)), `field "${toldField(f.id)}" is third person`);
+    for (const o of f.options) {
+      assert.ok(!firstPerson.test(toldOf(f.id, o.v)), `${f.id}.${o.v} "${toldOf(f.id, o.v)}" is third person`);
+    }
+  }
+  assert.equal(toldField('help'), 'Help given');
+  assert.equal(toldOf('blind', 'handler'), 'The handler did not');
+  assert.equal(toldOf('outcome', 'found'), 'Found it', 'neutral labels are used as they are');
+  assert.equal(labelOf('blind', 'handler'), 'I did not', 'the handler’s own form is unchanged');
+  assert.equal(toldOf('blind', 'nonsense'), null);
+  assert.equal(toldField('nonsense'), null);
 });
 
 console.log(`\n${pass} passed total\n`);
