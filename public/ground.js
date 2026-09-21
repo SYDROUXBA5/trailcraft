@@ -49,7 +49,8 @@ export const GROUND_RULES = {
 
 /** Which layers and properties the app must ask the tiles for. */
 export const GROUND_LAYERS = {
-  streets: { landuse: ['class'], road: ['class', 'type', 'surface', 'structure'], building: [], water: [] },
+  streets: { landuse: ['class'], road: ['class', 'type', 'surface', 'structure'],
+             building: ['height', 'min_height', 'underground'], water: [] },
   terrain: { landcover: ['class'] },
 };
 
@@ -101,7 +102,7 @@ const bboxOf = (rings, pad = 0) => {
  *        `box: [w, s, e, n]` — the ground it speaks for.
  */
 export function buildGround(tiles) {
-  const areas = [], lines = [], zones = [], boxes = { streets: [], terrain: [] };
+  const areas = [], lines = [], zones = [], walls = [], boxes = { streets: [], terrain: [] };
   for (const t of tiles || []) {
     if (t.box && boxes[t.kind]) boxes[t.kind].push(t.box);
     for (const f of t.landuse || []) {
@@ -114,7 +115,17 @@ export function buildGround(tiles) {
     /* A building is something the trail went past, not ground it was laid on.
        A fix inside one is GPS drift against a wall, and what was underfoot
        there is not known. */
-    for (const f of t.building || []) if (f.type === 3) zones.push({ rings: f.geom, box: bboxOf(f.geom) });
+    for (const f of t.building || []) {
+      if (f.type !== 3) continue;
+      zones.push({ rings: f.geom, box: bboxOf(f.geom) });
+      /* And a wall at nose height (walls.js), unless it is underground or
+         raised off the ground: a covered passage the map gives a minimum
+         height is somewhere air passes underneath. */
+      const under = f.props.underground === 'true' || f.props.underground === true;
+      if (under || Number(f.props.min_height) > 2) continue;
+      const h = Number(f.props.height);
+      walls.push({ rings: f.geom, h: Number.isFinite(h) && h > 0 ? h : null });
+    }
     for (const f of t.water || []) if (f.type === 3) areas.push({ rank: 1, as: 'a', rings: f.geom, box: bboxOf(f.geom) });
     for (const f of t.landcover || []) {
       if (f.type === 3 && COVER[f.props.class]) areas.push({ rank: 5, as: COVER[f.props.class], rings: f.geom, box: bboxOf(f.geom) });
@@ -129,7 +140,7 @@ export function buildGround(tiles) {
     }
   }
   areas.sort((a, b) => a.rank - b.rank);
-  return { areas, lines, zones, boxes };
+  return { areas, lines, zones, walls, boxes };
 }
 
 /** Even-odd across every ring, so holes and multi-part areas need no sorting out. */

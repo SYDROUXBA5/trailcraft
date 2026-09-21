@@ -17,6 +17,7 @@ import { predictedOffsets, ScentSim, driftFrom, stepByFlow } from './sim.js';
 import { PARAMS, DIALS, PV, setParam, resetParams, changed, isDefault, tally, dialById, PRESETS, applyPreset } from './params.js';
 import { encodeTrail, decodeTrail, cardUrl, cardFromText } from './card.js';
 import { decodeTile, tileOf, tileBox } from './mvt.js';
+import { wallIndex, bandInWalls } from './walls.js';
 import { GROUND_LAYERS, buildGround, surfaceAt, surfaceAlong, surfaceRows, withSurface,
          tilesCovering, isHard, GROUND_V, GROUND_RULES, readingSig, readingFits, readingVersion,
          CONDITIONS, blankSeen, cleanSeen, seenLine, surfaceById,
@@ -34,7 +35,7 @@ import { createStore, migrateV1, TARGETS, ODOURS, targetById, targetText, verbs,
          dogStats, ageBand, AGE_BANDS, LEVELS, levelById, dogAge } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-21n';
+const BUILD = '2026-09-21o';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true,
@@ -272,7 +273,7 @@ const EMPTY = { type: 'FeatureCollection', features: [] };
 let map, mapReady = false;
 let GL = mapboxgl;   // every control/bounds must come from the SAME library
 const srcData = { runner: EMPTY, steps: EMPTY, dog: EMPTY, paws: EMPTY, wps: EMPTY, drift: EMPTY, start: EMPTY, hides: EMPTY, contam: EMPTY, plan: EMPTY, nose: EMPTY,
-                  fix: EMPTY, fixEnds: EMPTY,
+                  fix: EMPTY, fixEnds: EMPTY, bandWall: EMPTY,
                   routeDone: EMPTY, routeAhead: EMPTY, puck: EMPTY, scent: EMPTY, wind: EMPTY,
                   flow: EMPTY, flowPulse: EMPTY, air: EMPTY, acc: EMPTY };
 
@@ -343,6 +344,11 @@ function addOverlays() {
   add({ id: 'drift-edge', type: 'line', source: 'drift',
         layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: { 'line-color': '#62B6FF', 'line-width': 1.6, 'line-opacity': 0.55, 'line-dasharray': [1.5, 1.8] } });
+  /* Where the band's centre runs through a building. The band is drawn
+     straight and cannot bend round one; this marks where it does not. */
+  add({ id: 'band-wall', type: 'line', source: 'bandWall',
+        layout: { 'line-cap': 'butt', 'line-join': 'round' },
+        paint: { 'line-color': '#FFFFFF', 'line-width': 3, 'line-opacity': 0.95, 'line-dasharray': [0.6, 1.2] } });
   /* The wind, everywhere. Not the scent — the air the scent is riding on.
      Thin white streaks across the whole view, each one a parcel of air being
      moved by the SAME flow field the plume is built from, so where the
@@ -1344,7 +1350,8 @@ function dropHideAtFeet() {
    where the model stops being sure, never a hard-edged corridor. And it is
    drawn only when there is real weather to drive it: no weather, no plume,
    because a guessed plume is worse than none. */
-const plume = { sim: null, tick: 0, T: FLAT, wx: null, st: null, trail: null, tAt: 0, tLen: 0, clock: null };
+const plume = { sim: null, tick: 0, T: FLAT, wx: null, st: null, trail: null, tAt: 0, tLen: 0, clock: null,
+                walls: null, wAt: 0, wLen: 0, bandWalls: 0, lastField: null };
 
 /* ── The ground under the trail ───────────────────────────────────────
    Woods, grass, crop, hard surface: read from the same map data the map is
@@ -1536,6 +1543,50 @@ async function plumeTerrain(force = false) {
   } catch { /* flat is honest when the DEM will not answer */ }
 }
 
+/* ── Buildings, for the drawn scent ───────────────────────────────────
+   The outlines the map already carries, as walls (walls.js). Fetched for the
+   ground round the trail, far enough out to cover where its scent can drift,
+   and refreshed as a live trail grows, like the terrain. */
+async function wallsFor(pts) {
+  if (!settings.mbToken || !pts?.length) return null;
+  const tiles = await Promise.all(tilesCovering(pts, tileOf, { padDeg: 0.0012, max: 16 })
+    .map(t => groundTile('streets', t.z, t.x, t.y)));
+  return wallIndex(buildGround(tiles).walls, pts[0]);
+}
+async function plumeWalls(force = false) {
+  if (!plume.trail?.length) return;
+  const len = pathLen(plume.trail);
+  const stale = force || !plume.wAt
+    || (Date.now() - plume.wAt > 45000 && len - plume.wLen > 120);
+  if (!stale) return;
+  plume.wAt = Date.now();
+  plume.wLen = len;
+  try {
+    const W = await wallsFor(plume.trail);
+    if (!plume.sim) return;
+    plume.walls = W;
+    plume.sim.walls = W;
+    /* They usually arrive after the band was first drawn: redraw what reads
+       it, or the readout says nothing about buildings until a dial moves. */
+    if (bench.on) benchPaintLight();
+    else if (replay.s) paintReplay();
+    else if (plume.lastField) paintBandWalls(plume.lastField);
+  } catch { /* no buildings is what the model had before */ }
+}
+/** Mark where the band's centre runs through a building; returns how many. */
+function paintBandWalls(field) {
+  plume.lastField = field;
+  const r = plume.walls && field?.length ? bandInWalls(plume.walls, field) : { count: 0, pieces: [] };
+  setSrc('bandWall', r.pieces.length
+    ? { type: 'FeatureCollection', features: r.pieces.map(p => lineOf(p).features[0]).filter(Boolean) }
+    : EMPTY);
+  plume.bandWalls = r.count;
+  return r.count;
+}
+const bandWallNote = () => (plume.bandWalls
+  ? ` The band runs through ${plume.bandWalls} building${plume.bandWalls === 1 ? '' : 's'}: it’s drawn straight and can’t bend round them.`
+  : '');
+
 function plumeStart(trail, wx, T) {
   plumeStop();
   if (!settings.plume || !wx) return;
@@ -1553,6 +1604,8 @@ function plumeStart(trail, wx, T) {
   plume.T = T || FLAT;
   plume.tAt = 0; plume.tLen = 0;
   plumeTerrain(true);
+  plume.walls = null; plume.wAt = 0; plume.wLen = 0; plume.bandWalls = 0; plume.lastField = null;
+  plumeWalls(true);
   airStart(wx, plume.T);
   showWeather(wx);
   /* 400 ms, not faster. The parcels move at wind speed — metres in a second
@@ -1588,6 +1641,8 @@ function plumeStop() {
   tracersStop();
   clearInterval(plume.tick); plume.tick = 0;
   plume.sim = null; plume.trail = null;
+  plume.walls = null; plume.bandWalls = 0; plume.lastField = null;
+  setSrc('bandWall', EMPTY);
   setSrc('scent', EMPTY);
   setSrc('flow', EMPTY);
   setSrc('flowPulse', EMPTY);
@@ -1994,6 +2049,7 @@ function benchPaint() {
      perfectly alive. */
   const field = scentField(trail, wx, Date.now());
   setSrc('drift', field.length ? plumePolygon(field) : EMPTY);
+  paintBandWalls(field);
 
   plumeStart(trail, wx, plume.T);
   showWeather(wx);
@@ -2020,7 +2076,8 @@ function benchReadout(st, field, trail, life) {
   const side = benchSide(field);
   $('benchHudText').textContent = st.label;
   $('benchRead').innerHTML = `${side ? `<b>${side}</b> of the line \u00b7 ` : 'no side \u00b7 '}` +
-    `<b>${off.toFixed(0)} m</b> off the line · <b>±${w.toFixed(0)} m</b> wide · workable <b>${life} min</b>`;
+    `<b>${off.toFixed(0)} m</b> off the line · <b>±${w.toFixed(0)} m</b> wide · workable <b>${life} min</b>`
+    + (plume.bandWalls ? `<br>${esc(bandWallNote().trim())}` : '');
 }
 
 /* scentLife is not exported under that name here; field.js owns it and the
@@ -2077,6 +2134,7 @@ function benchPaintLight() {
   const st = plume.st;
   const field = scentField(bench.trail, wx, Date.now());
   setSrc('drift', field.length ? plumePolygon(field) : EMPTY);
+  paintBandWalls(field);
   paintFlow();
   airStart(wx, plume.T);
   showWeather(wx);
@@ -2432,6 +2490,7 @@ function paintReplay() {
   if (s.data.weather) {
     const field = scentField(trailOf(s), s.data.weather, at);
     setSrc('drift', field.length ? plumePolygon(field) : EMPTY);
+    paintBandWalls(field);
   }
 
   const el = Math.max(0, Math.round((at - replay.from) / 1000));
@@ -2441,7 +2500,8 @@ function paintReplay() {
     ? signedOffsets(s.data.trail, [here]).filter(Number.isFinite)[0] : null;
   $('repHudText').textContent = `${Math.floor(el / 60)}:${String(el % 60).padStart(2, '0')}`;
   $('repCaption').textContent = `Trail ${ageMin} min old here`
-    + (off == null ? '' : ` · dog ${fmtM(Math.abs(off))} ${off >= 0 ? 'right' : 'left'} of the line`);
+    + (off == null ? '' : ` · dog ${fmtM(Math.abs(off))} ${off >= 0 ? 'right' : 'left'} of the line`)
+    + (plume.bandWalls ? '.' + bandWallNote() : '');
   const f = replay.to > replay.from ? (at - replay.from) / (replay.to - replay.from) : 1;
   const sc = $('repScrub');
   if (document.activeElement !== sc) sc.value = String(Math.round(f * 1000));
@@ -2515,7 +2575,7 @@ function tracerFrame(now) {
   for (const p of windDots.list) {
     p.age += dt;
     if (p.age >= PV.airborne) Object.assign(p, tracerSpawn(true));
-    const d = driftFrom(plume.T, { lat: p.glat, lon: p.glon }, p.age, plume.wx, plume.st, 3);
+    const d = driftFrom(plume.T, { lat: p.glat, lon: p.glon }, p.age, plume.wx, plume.st, 3, plume.walls);
     feats.push({
       type: 'Feature',
       // Brightest as it leaves the ground, gone by the time it has spread.
@@ -2614,7 +2674,7 @@ function paintFlow() {
     const reach = PV.airborne * 0.55 * (seed.hard ? PV.hardCarry : 1);   // the bench's transport dial, 1 by default
     const pts = [];
     for (let k = 0; k <= FLOW_SAMPLES; k++) {
-      pts.push(driftFrom(plume.T, seed, (k / FLOW_SAMPLES) * reach, plume.wx, plume.st, 3));
+      pts.push(driftFrom(plume.T, seed, (k / FLOW_SAMPLES) * reach, plume.wx, plume.st, 3, plume.walls));
     }
     const cum = [0];
     for (let k = 1; k < pts.length; k++) cum.push(cum[k - 1] + dist(pts[k - 1], pts[k]));
@@ -2680,6 +2740,7 @@ function plumeFrame() {
   })) });
   paintFlow();
   plumeTerrain();
+  plumeWalls();
   air.T = plume.T;
 }
 
