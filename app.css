@@ -1408,3 +1408,7 @@ body:has(#scrWalk:not([hidden])) { --top-row: calc(var(--safe-t) + 104px); }
 /* An empty "add one" chip stays dashed: that shape is how it says "new". */
 .chip.ghost { border-style: dashed; }
 
+/* A white rim on the Recent cards: Rémi's call, 21 Sept 2026. Dark theme
+   only. In light mode the cards are already white on a near-white page, and
+   a white rim would erase the edge they have. */
+:root[data-theme="dark"] .recent .card { border: 1.5px solid rgba(255, 255, 255, 0.85); }
