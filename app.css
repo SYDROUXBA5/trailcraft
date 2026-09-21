@@ -381,6 +381,9 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.75; cursor: p
    mistaken for a finding about scent. */
 .bench-grp { border-top: 1px solid rgba(255, 255, 255, 0.1); padding: 10px 0 4px; }
 .bench-grp:first-child { border-top: 0; }
+/* A reading made under older rules says so, in the warning colour, beside
+   the button that replaces it. */
+.surf-old { color: var(--ember); margin-bottom: 6px; }
 /* A named experiment sits above its group's dials, apart from them: pressing
    it is a choice to try someone's rule, not a nudge to one number. */
 .bench-preset { margin: 4px 0 10px; padding: 10px 12px; border-radius: 12px;
