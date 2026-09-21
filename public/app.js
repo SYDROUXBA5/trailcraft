@@ -18,7 +18,7 @@ import { PARAMS, DIALS, PV, setParam, resetParams, changed, isDefault, tally, di
 import { encodeTrail, decodeTrail, cardUrl, cardFromText } from './card.js';
 import { decodeTile, tileOf, tileBox } from './mvt.js';
 import { GROUND_LAYERS, buildGround, surfaceAt, surfaceAlong, surfaceRows, withSurface,
-         tilesCovering, isHard } from './ground.js';
+         tilesCovering, isHard, GROUND_V, GROUND_RULES, readingSig, readingFits, readingVersion } from './ground.js';
 import { sync, onSync, initSync, signInWithGoogle, signInWithApple, signOut,
          startLive, pushLive, endLive, watchLive } from './sync.js';
 import { trailModel, encodeShared, decodeShared, sharedUrl, toGpx, fileBase,
@@ -32,7 +32,7 @@ import { createStore, migrateV1, TARGETS, ODOURS, targetById, targetText, verbs,
          dogStats, ageBand, AGE_BANDS, LEVELS, levelById, dogAge } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-21h';
+const BUILD = '2026-09-21i';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true,
@@ -1307,7 +1307,6 @@ const plume = { sim: null, tick: 0, T: FLAT, wx: null, st: null, trail: null, tA
    has no such data behind it. */
 const TILESETS = { streets: 'mapbox.mapbox-streets-v8', terrain: 'mapbox.mapbox-terrain-v2' };
 const groundTiles = new Map();          // 'kind/z/x/y' → Promise of a decoded tile
-const SURF_V = 1;
 
 function groundTile(kind, z, x, y) {
   const key = `${kind}/${z}/${x}/${y}`;
@@ -1335,29 +1334,36 @@ async function groundFor(pts) {
   return buildGround(tiles);
 }
 
-/* The letters belong to one exact trail. A walked card replaces the drawn
-   line with a different one, and letters for the old line would then colour
-   the wrong ground — so they carry the trail's fingerprint. */
-const surfSig = (pts) => `${SURF_V}:${pts.length}:${pts[0].lat.toFixed(5)},${pts[0].lon.toFixed(5)}:${pts[pts.length - 1].lat.toFixed(5)},${pts[pts.length - 1].lon.toFixed(5)}`;
-const surfValid = (s) => { const t = s?.data?.trail; return !!t && t.length > 1 && s.data.surfSig === surfSig(t) && s.data.surf?.length === t.length; };
+/* The letters belong to one exact trail, read under one set of rules
+   (ground.js). A reading under older rules still fits and is still shown. */
+const surfValid = (s) => readingFits(s?.data);
 /** The session's trail, with hard ground marked for the plume and the band. */
 const trailOf = (s) => (surfValid(s) ? withSurface(s.data.trail, s.data.surf) : s.data.trail);
 
 const surfBusy = new Map();             // session id → the ask in flight
-function fillSurfaces(s) {
+/* A run with no reading is read once, on its own — that is the first
+   reading, not a re-analysis. Replacing a reading that exists only happens
+   when someone presses Re-read, and the one it replaces is kept. */
+function fillSurfaces(s, { reread = false } = {}) {
   const pts = s?.data?.trail;
   if (!pts || pts.length < 2 || !settings.mbToken || navigator.onLine === false) return Promise.resolve(null);
-  if (surfValid(s)) return Promise.resolve(s);
+  if (!reread && surfValid(s)) return Promise.resolve(s);
   if (surfBusy.has(s.id)) return surfBusy.get(s.id);
   const job = (async () => {
     try {
       const ground = await groundFor(pts);
       if (!ground || s.data.trail !== pts) return null;              // the trail was replaced while we asked
-      const { letters, metres } = surfaceAlong(ground, pts);
-      Object.assign(s.data, { surf: letters, surfM: metres, surfSig: surfSig(pts) });   // whoever holds this session sees it
+      const { letters, metres, around } = surfaceAlong(ground, pts);
+      const prev = reread && surfValid(s)
+        ? { surfSig: s.data.surfSig, surf: s.data.surf, surfM: s.data.surfM,
+            surfA: s.data.surfA ?? null, surfAt: s.data.surfAt ?? null }
+        : s.data.surfPrev;
+      const reading = { surf: letters, surfM: metres, surfA: around, surfAt: Date.now(), surfSig: readingSig(pts),
+        ...(prev ? { surfPrev: prev } : {}) };
+      Object.assign(s.data, reading);   // whoever holds this session sees it
       const kept = db.sessions().find(x => x.id === s.id);
       if (kept && kept.data.trail?.length === pts.length) {
-        db.updateSession(s.id, { data: { ...kept.data, surf: letters, surfM: metres, surfSig: surfSig(pts) } });
+        db.updateSession(s.id, { data: { ...kept.data, ...reading } });
         snap();
       }
       return s;
@@ -1371,11 +1377,25 @@ function fillSurfaces(s) {
 function groundHtml(s) {
   const rows = surfaceRows(s.data.surfM);
   if (!rows.length) return '';
+  const total = rows.reduce((a, r) => a + r.metres, 0);
+  const v = readingVersion(s.data) ?? 1;
+  /* Surroundings, kept apart from the ground itself. */
+  const built = Number.isFinite(s.data.surfA) && s.data.surfA >= 1 && total > 0
+    ? `<p class="body small">Through built-up surroundings: <b>${fmtKm(s.data.surfA)}</b> (${Math.round((s.data.surfA / total) * 100)}%). Where the trail went, not what it was laid on.</p>`
+    : '';
+  const old = v < GROUND_V
+    ? `<p class="body small surf-old">Read with older rules. ${esc(GROUND_RULES[v] ?? '')}</p>
+       <button type="button" class="btn small" data-reread="1">Re-read the ground</button>`
+    : '';
+  const prev = s.data.surfPrev && Number.isFinite(s.data.surfAt)
+    ? `<p class="body small muted">Re-read ${esc(fmtWhen(s.data.surfAt))}. The earlier reading is kept with the run.</p>`
+    : '';
   return `<span class="label">Ground</span>
     <div class="surf-bar" aria-hidden="true">${rows.map(r => `<i class="gs-${r.id}" style="flex:${r.share.toFixed(4)}"></i>`).join('')}</div>
     <div class="surf-rows">${rows.map(r =>
       `<div><i class="gs-${r.id}"></i><span>${esc(r.label)}</span><b>${fmtKm(r.metres)}</b><em>${Math.round(r.share * 100)}%</em></div>`).join('')}</div>
-    <p class="body small muted">Read from the map, not from the ground: a track or a yard nobody drew is missed. Scent is drawn half as wide over hard surface.</p>`;
+    ${built}${old}${prev}
+    <p class="body small muted">Read from the map, not from the ground: a yard, a lawn or a track nobody drew is Not mapped. What tarmac does to scent is an open question, so the model treats it like any other ground unless the tarmac rule is tried on the bench.</p>`;
 }
 /** Show it if it is known; if not, ask, and fill the box in when the answer
     comes — provided the box is still showing the same trail. */
@@ -5243,6 +5263,29 @@ function wire() {
   $('btnSharedPdf').addEventListener('click', () => sharedModel && savePdf(sharedModel));
   $('btnSharedClose').addEventListener('click', closeShared);
   $('btnSharedKeep').addEventListener('click', keepShared);
+  /* Re-reading the ground is something a person asks for. */
+  for (const id of ['resGround', 'shareGround']) {
+    $(id).addEventListener('click', (e) => {
+      const b = e.target.closest('[data-reread]');
+      if (!b) return;
+      const el = $(id), sid = el.dataset.sid;
+      const s = [run.session, pendingSession].find(x => x?.id === sid) ?? db.sessions().find(x => x.id === sid);
+      if (!s) return;
+      b.disabled = true;
+      b.textContent = 'Reading the map…';
+      fillSurfaces(s, { reread: true }).then(f => {
+        if (el.dataset.sid !== sid) return;
+        if (!f) {
+          b.disabled = false;
+          b.textContent = 'Re-read the ground';
+          return toast('Could not reach the map. Try again with signal.');
+        }
+        el.innerHTML = groundHtml(f);
+        el.hidden = !el.innerHTML;
+        toast('Ground re-read. The earlier reading is kept.');
+      });
+    });
+  }
   $('btnLive').addEventListener('click', goLive);
   $('btnLiveDetails').addEventListener('click', () => liveView.model && openShared(liveView.model, 'scrLive'));
   $('btnLiveClose').addEventListener('click', closeLive);

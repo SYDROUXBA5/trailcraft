@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { decodeTile, tileOf, tileBox } from '../public/mvt.js';
 import { SURFACES, buildGround, surfaceAt, surfaceAlong, surfaceRows, withSurface,
-         tilesCovering, isHard, GROUND_LAYERS } from '../public/ground.js';
+         tilesCovering, isHard, GROUND_LAYERS, aroundAt, GROUND_V, GROUND_RULES,
+         readingSig, readingFits, readingVersion, groundPrint } from '../public/ground.js';
 import { PV, setParam, resetParams, applyPreset, PRESETS, presetById, dialById, DEFAULTS } from '../public/params.js';
 import { project, dist, densify, scentField } from '../public/geo.js';
 import { ScentSim } from '../public/sim.js';
@@ -69,7 +70,7 @@ const everywhere = [-3, 51, -2, 52];
 const parish = () => buildGround([
   { kind: 'streets', box: everywhere,
     landuse: [poly('residential', 0, 0, 400, 400), poly('park', 100, 100, 200, 200), poly('wood', 500, 0, 900, 400),
-              poly('agriculture', 0, 500, 400, 900)],
+              poly('agriculture', 0, 500, 400, 900), poly('parking', 1000, 800, 1100, 900)],
     building: [{ type: 3, props: {}, geom: ring(20, 20, 40, 40) }],
     water: [{ type: 3, props: {}, geom: ring(400, 0, 440, 400) }],
     road: [lineF({ class: 'street' }, [700, -50], [700, 450]),                       // a lane through the wood
@@ -82,9 +83,10 @@ const parish = () => buildGround([
 
 t('ground: sealed roads first, then what the map drew, most specific first, then the coarse cover', () => {
   const g = parish();
-  assert.equal(surfaceAt(g, at(300, 300)), 'h', 'a housing estate is hard ground');
+  assert.equal(surfaceAt(g, at(300, 300)), 'u', 'a housing area says where, not what: the lawn or the drive is not known');
   assert.equal(surfaceAt(g, at(120, 180)), 'g', 'a park inside it is grass');
-  assert.equal(surfaceAt(g, at(30, 30)), 'h', 'a building');
+  assert.equal(surfaceAt(g, at(30, 30)), 'u', 'a building is something passed, not ground underfoot');
+  assert.equal(surfaceAt(g, at(1050, 850)), 'h', 'a car park is sealed ground the map actually drew');
   assert.equal(surfaceAt(g, at(550, 200)), 'w');
   assert.equal(surfaceAt(g, at(703, 200)), 'h', 'a tarmac lane through the wood is still tarmac');
   assert.equal(surfaceAt(g, at(712, 200)), 'w', 'and a dozen metres off it is wood again');
@@ -95,10 +97,49 @@ t('ground: sealed roads first, then what the map drew, most specific first, then
   assert.equal(surfaceAt(g, at(420, 200)), 'h', 'the bridge over it, not the water under it');
   assert.equal(surfaceAt(g, at(200, 700)), 'c');
   assert.equal(surfaceAt(g, at(1200, 200)), 'g', 'open country falls back on the coarse land cover');
-  assert.equal(surfaceAt(g, at(1200, 700)), 'h', 'blank on both maps is built-up ground');
+  assert.equal(surfaceAt(g, at(1200, 700)), 'u', 'blank on both maps is Not mapped — never tarmac by default');
 });
 
-t('ground: a blank only means town where both maps were loaded; otherwise it is not mapped', () => {
+t('surroundings are measured apart from the ground', () => {
+  const g = parish();
+  assert.equal(aroundAt(g, at(300, 300)), true, 'inside a housing area');
+  assert.equal(aroundAt(g, at(120, 180)), true, 'a park in a town is grass underfoot AND built-up around');
+  assert.equal(aroundAt(g, at(30, 30)), true, 'a building');
+  assert.equal(aroundAt(g, at(550, 200)), false, 'the wood');
+  assert.equal(aroundAt(g, at(1050, 850)), false, 'a car park on its own is ground, not a zone');
+  assert.equal(aroundAt(null, at(0, 0)), false);
+
+  // 100 m through the estate, clear of the park: all built-up, none of it known underfoot.
+  const pts = [250, 300, 350].map((x, i) => ({ ...at(x, 300), t: i * 30000 }));
+  const r = surfaceAlong(g, pts);
+  assert.ok(Math.abs(r.around - 100) < 1, `${r.around} m through built-up surroundings`);
+  assert.equal(r.metres.h, undefined, 'and none of it counted as tarmac');
+  assert.ok(Math.abs(r.metres.u - 100) < 1, 'it is Not mapped');
+  assert.equal(surfaceAlong(g, []).around, 0);
+});
+
+t('a reading carries the rules it was made under, and an old one still fits', () => {
+  assert.equal(GROUND_V, 2);
+  for (const v of [1, 2]) assert.ok(GROUND_RULES[v]?.length > 20, `rules v${v} are written down`);
+  const trail = [at(0, 0), at(50, 0), at(100, 0)];
+  const letters = 'ggg';
+  /* Exactly the signature the app wrote before rules had a version of their own. */
+  const v1 = `1:${trail.length}:${trail[0].lat.toFixed(5)},${trail[0].lon.toFixed(5)}:${trail[2].lat.toFixed(5)},${trail[2].lon.toFixed(5)}`;
+  assert.equal(readingFits({ trail, surf: letters, surfSig: v1 }), true, 'a reading saved before this change still fits');
+  assert.equal(readingVersion({ surfSig: v1 }), 1, 'and knows it was read under rules v1');
+  assert.equal(readingSig(trail), `2:${groundPrint(trail)}`);
+  assert.equal(readingVersion({ surfSig: readingSig(trail) }), 2);
+  assert.equal(readingFits({ trail, surf: letters, surfSig: readingSig(trail) }), true);
+
+  const walked = [at(0, 0), at(40, 10), at(100, 0)].map(p => ({ ...p, lat: p.lat + 0.0001 }));
+  assert.equal(readingFits({ trail: walked, surf: letters, surfSig: v1 }), false, 'not once the trail is replaced');
+  assert.equal(readingFits({ trail, surf: 'gg', surfSig: v1 }), false, 'nor with the wrong number of letters');
+  assert.equal(readingFits({ trail, surf: letters }), false);
+  assert.equal(readingFits(null), false);
+  assert.equal(readingVersion({}), null);
+});
+
+t('ground: a blank is Not mapped whether or not the tiles loaded', () => {
   const streetsOnly = buildGround([{ kind: 'streets', box: everywhere, landuse: [poly('wood', 0, 0, 100, 100)] }]);
   assert.equal(surfaceAt(streetsOnly, at(50, 50)), 'w');
   assert.equal(surfaceAt(streetsOnly, at(500, 500)), 'u');

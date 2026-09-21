@@ -38,16 +38,30 @@ const BY_ID = new Map(SURFACES.map(s => [s.id, s]));
 export const surfaceById = (id) => BY_ID.get(id) ?? BY_ID.get('u');
 export const isHard = (id) => id === 'h';
 
+/** Which rules read the ground. Stored with every reading, so a run read
+    under old rules is shown for what it is instead of being quietly
+    rewritten the next time someone looks at it. */
+export const GROUND_V = 2;
+export const GROUND_RULES = {
+  1: 'Blank map, built-up areas (houses, schools, industry) and buildings were all counted as hard surface.',
+  2: 'Only what the map draws as sealed (roads, paved paths, car parks) is hard. Blank map is Not mapped; built-up areas and buildings are surroundings, not ground.',
+};
+
 /** Which layers and properties the app must ask the tiles for. */
 export const GROUND_LAYERS = {
   streets: { landuse: ['class'], road: ['class', 'type', 'surface', 'structure'], building: [], water: [] },
   terrain: { landcover: ['class'] },
 };
 
-/* Vegetation the map has drawn wins over the broad built-up areas it sits
-   in: a park inside a town is grass, not town. */
+/* What the ground is made of, where the map actually says. */
 const GREEN = { wood: 'w', scrub: 's', grass: 'g', park: 'g', pitch: 'g', cemetery: 'g', agriculture: 'c' };
-const BUILT = new Set(['residential', 'commercial_area', 'industrial', 'parking', 'airport',
+const SEALED_USE = new Set(['parking']);
+/* What surrounds the trail, which is a different question. A "residential"
+   area is a boundary drawn round houses, gardens, lawns and drives: it says
+   the trail went through a town, not what the ground underfoot was made of.
+   Rules v1 read these as tarmac, which filled every gap in the map with a
+   guess — the one thing the spec forbids. */
+const ZONES = new Set(['residential', 'commercial_area', 'industrial', 'airport',
   'hospital', 'school', 'facility']);
 const COVER = { wood: 'w', scrub: 's', grass: 'g', crop: 'c' };
 
@@ -87,15 +101,20 @@ const bboxOf = (rings, pad = 0) => {
  *        `box: [w, s, e, n]` — the ground it speaks for.
  */
 export function buildGround(tiles) {
-  const areas = [], lines = [], boxes = { streets: [], terrain: [] };
+  const areas = [], lines = [], zones = [], boxes = { streets: [], terrain: [] };
   for (const t of tiles || []) {
     if (t.box && boxes[t.kind]) boxes[t.kind].push(t.box);
     for (const f of t.landuse || []) {
       if (f.type !== 3) continue;
-      const as = GREEN[f.props.class] ?? (BUILT.has(f.props.class) ? 'h' : null);
-      if (as) areas.push({ rank: GREEN[f.props.class] ? 3 : 4, as, rings: f.geom, box: bboxOf(f.geom) });
+      const cls = f.props.class;
+      const as = GREEN[cls] ?? (SEALED_USE.has(cls) ? 'h' : null);
+      if (as) areas.push({ rank: GREEN[cls] ? 3 : 4, as, rings: f.geom, box: bboxOf(f.geom) });
+      if (ZONES.has(cls)) zones.push({ rings: f.geom, box: bboxOf(f.geom) });
     }
-    for (const f of t.building || []) if (f.type === 3) areas.push({ rank: 2, as: 'h', rings: f.geom, box: bboxOf(f.geom) });
+    /* A building is something the trail went past, not ground it was laid on.
+       A fix inside one is GPS drift against a wall, and what was underfoot
+       there is not known. */
+    for (const f of t.building || []) if (f.type === 3) zones.push({ rings: f.geom, box: bboxOf(f.geom) });
     for (const f of t.water || []) if (f.type === 3) areas.push({ rank: 1, as: 'a', rings: f.geom, box: bboxOf(f.geom) });
     for (const f of t.landcover || []) {
       if (f.type === 3 && COVER[f.props.class]) areas.push({ rank: 5, as: COVER[f.props.class], rings: f.geom, box: bboxOf(f.geom) });
@@ -110,7 +129,7 @@ export function buildGround(tiles) {
     }
   }
   areas.sort((a, b) => a.rank - b.rank);
-  return { areas, lines, boxes };
+  return { areas, lines, zones, boxes };
 }
 
 /** Even-odd across every ring, so holes and multi-part areas need no sorting out. */
@@ -154,12 +173,17 @@ export function surfaceAt(ground, pt) {
   for (const a of ground.areas) {
     if (within(a.box, lon, lat) && inside(a.rings, lon, lat)) return a.as;
   }
-  /* The land cover knows wood, scrub, grass and crop and leaves everything
-     else blank — which, where people train dogs, is a town: yards, squares,
-     the ground between buildings that nobody drew. Blank only means that
-     where both maps were actually loaded; a missing tile means nothing. */
-  const has = (list) => (list || []).some(box => within(box, lon, lat));
-  return has(ground.boxes?.streets) && has(ground.boxes?.terrain) ? 'h' : 'u';
+  /* Nothing drawn here. It might be a yard, a lawn, a farm track or a
+     square; the map does not say, so neither does this. */
+  return 'u';
+}
+
+/** Is this point inside something built up — a housing area, a school, a
+    building? Surroundings, kept apart from what the ground is made of. */
+export function aroundAt(ground, pt) {
+  if (!ground?.zones) return false;
+  const { lat, lon } = pt;
+  return ground.zones.some(z => within(z.box, lon, lat) && inside(z.rings, lon, lat));
 }
 
 /**
@@ -170,8 +194,8 @@ export function surfaceAt(ground, pt) {
  *          them would never be seen.
  */
 export function surfaceAlong(ground, pts, step = 2) {
-  if (!pts || !pts.length) return { letters: '', metres: {} };
-  if (pts.length === 1) return { letters: surfaceAt(ground, pts[0]), metres: {} };
+  if (!pts || !pts.length) return { letters: '', metres: {}, around: 0 };
+  if (pts.length === 1) return { letters: surfaceAt(ground, pts[0]), metres: {}, around: 0 };
   /* Sampled here rather than with densify(): each fix has to find its own
      sample again afterwards, and a projected copy of it is never quite equal. */
   const fine = [pts[0]], at = [0];
@@ -189,15 +213,41 @@ export function surfaceAlong(ground, pts, step = 2) {
      edge, not two metres of something else. Three in a row is a road. */
   const seen = raw.map((s, i) => (i > 0 && i < raw.length - 1 && raw[i - 1] === raw[i + 1] ? raw[i - 1] : s));
 
+  const zoned = fine.map(p => aroundAt(ground, p));
   const metres = {};
+  let around = 0;
   for (let i = 1; i < fine.length; i++) {
     const d = dist(fine[i - 1], fine[i]) / 2;
     metres[seen[i - 1]] = (metres[seen[i - 1]] ?? 0) + d;
     metres[seen[i]] = (metres[seen[i]] ?? 0) + d;
+    around += (zoned[i - 1] ? d : 0) + (zoned[i] ? d : 0);
   }
   for (const k of Object.keys(metres)) metres[k] = Math.round(metres[k] * 10) / 10;
   const letters = at.map(i => seen[i]).join('');
-  return { letters, metres };
+  return { letters, metres, around: Math.round(around * 10) / 10 };
+}
+
+/* ── A reading belongs to one trail, read under one set of rules ──────
+   The signature is "<rules version>:<trail fingerprint>". A walked card
+   replaces the drawn line, and letters for the old line would colour the
+   wrong ground, so the fingerprint must match. The version need not: an old
+   reading still describes this trail, just by older rules, and is shown as
+   such. Replacing it is a choice someone makes, never a side effect. */
+export const groundPrint = (pts) => `${pts.length}:${pts[0].lat.toFixed(5)},${pts[0].lon.toFixed(5)}`
+  + `:${pts[pts.length - 1].lat.toFixed(5)},${pts[pts.length - 1].lon.toFixed(5)}`;
+export const readingSig = (pts, v = GROUND_V) => `${v}:${groundPrint(pts)}`;
+
+/** Does the stored reading describe this trail (by any rules)? */
+export function readingFits(data) {
+  const t = data?.trail, sig = data?.surfSig;
+  if (!t || t.length < 2 || typeof sig !== 'string' || !sig.includes(':')) return false;
+  return sig.slice(sig.indexOf(':') + 1) === groundPrint(t) && data.surf?.length === t.length;
+}
+
+/** Which rules the stored reading was made under, or null if there is none. */
+export function readingVersion(data) {
+  const v = parseInt(String(data?.surfSig ?? ''), 10);
+  return Number.isFinite(v) ? v : null;
 }
 
 /** Rows for a card: surfaces that were crossed, longest first, with their share. */
