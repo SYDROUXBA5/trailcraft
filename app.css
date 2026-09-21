@@ -381,6 +381,12 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.75; cursor: p
    mistaken for a finding about scent. */
 .bench-grp { border-top: 1px solid rgba(255, 255, 255, 0.1); padding: 10px 0 4px; }
 .bench-grp:first-child { border-top: 0; }
+/* A named experiment sits above its group's dials, apart from them: pressing
+   it is a choice to try someone's rule, not a nudge to one number. */
+.bench-preset { margin: 4px 0 10px; padding: 10px 12px; border-radius: 12px;
+  background: rgba(241, 199, 122, 0.08); border: 1px dashed rgba(241, 199, 122, 0.45); }
+.bench-preset .btn { margin-bottom: 6px; }
+.bench-preset .why { margin: 0; }
 .bench-grp > summary { list-style: none; cursor: pointer; display: flex; align-items: baseline; gap: 8px; }
 .bench-grp > summary::-webkit-details-marker { display: none; }
 .bench-grp > summary::after { content: '\203A'; margin-left: auto; font-size: 18px; opacity: 0.5;

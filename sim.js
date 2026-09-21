@@ -152,11 +152,10 @@ export class ScentSim {
              the plume — the one shape a plume never has. */
           life: RESIDENCE(),
           dwellS: p.dwellS ?? 0,           // seconds spent standing here
-          /* How far this ground lets scent spread, against grass as 1. Hard
-             ground is handed in as 0.5 (ground.js): its parcels are carried
-             half as far and drawn half as strong, so a stretch of tarmac
-             reads as a thinner band, not as the same scent packed tighter. */
-          spread: p.spread ?? 1,
+          /* On tarmac or not. What that does is looked up from the bench's
+             ground dials each frame — carried, gives off, holds, spreads —
+             all 1 by default, so tarmac changes nothing until tried. */
+          hard: !!p.hard,
           str: 0,
         });
       }
@@ -165,13 +164,13 @@ export class ScentSim {
          over the disc that dwell earned. The end of the trail is handled by
          the live pool below — this is for pauses along the way. */
       if ((p.dwellS ?? 0) >= PV.dwellThresh) {
-        const R = poolRadius(p.dwellS) * (p.spread ?? 1);
+        const R = poolRadius(p.dwellS) * (p.hard ? PV.hardWiden : 1);
         for (let k = 0; k < 10; k++) {
           const g = project(p, Math.random() * 360, Math.sqrt(Math.random()) * R);
           this.parts.push({
             lat: g.lat, lon: g.lon, hlat: g.lat, hlon: g.lon, born: p.t,
             phase: (k + Math.random()) / 10, seed: Math.random() * 6.28318,
-            life: RESIDENCE(), dwellS: p.dwellS, spread: p.spread ?? 1, str: 0,
+            life: RESIDENCE(), dwellS: p.dwellS, hard: !!p.hard, str: 0,
           });
         }
       }
@@ -246,6 +245,8 @@ export class ScentSim {
     const PONSET = PV.pocketOnset, PFLOOR = PV.pocketFloor, LINGER = PV.lingerGain;
     const DBS = PV.dwellBoostS, DBC = PV.dwellBoostCap;
     const PBUILD = PV.poolBuildS, PSB = PV.poolStrBase, PSR = PV.poolStrRange;
+    /* The ground dials, one job each. Read once a frame like everything else. */
+    const CARRY = PV.hardCarry, GIVE = PV.hardGive, HOLD = PV.hardHold, WIDEN = PV.hardWiden;
     const lifeMs = scentLife(wx, st) * 60000;
     const mix = Math.max(0.5, st?.mix ?? 1);
     const drain = st?.drain ?? 0;
@@ -266,8 +267,8 @@ export class ScentSim {
       // travels less far horizontally before it stops mattering — and each
       // parcel carries its own residence time on top of that, so they do not
       // all stop at the same distance.
-      const sp = s.spread ?? 1;
-      const secs = s.phase * AIR * (s.life ?? 1) / mix * sp;
+      const h = s.hard;
+      const secs = s.phase * AIR * (s.life ?? 1) / mix * (h ? CARRY : 1);
       const d = driftFrom(T, { lat: s.hlat, lon: s.hlon }, secs, wx, st);
       s.lat = d.lat; s.lon = d.lon;
 
@@ -277,7 +278,7 @@ export class ScentSim {
         // Perpendicular wander, amplitude from gustiness and how far the
         // particle has travelled — sin averages to zero, so the MEAN offset
         // the verdict grades is untouched.
-        const amp = Math.min(MCAP, dispM * gustiness * MAMP);
+        const amp = Math.min(MCAP, dispM * gustiness * MAMP) * (h ? WIDEN : 1);
         const sway = amp * Math.sin(breathe + s.seed * 3.1 + s.phase * 6.28318);
         const brg = bearing({ lat: s.hlat, lon: s.hlon }, d);
         const p2 = project({ lat: s.lat, lon: s.lon }, (brg + 90) % 360, sway);
@@ -302,7 +303,8 @@ export class ScentSim {
          residence time above: parcels from the same piece of ground reach
          very different distances, and the far ones are both fainter and much
          rarer, which is how a plume actually ends. */
-      s.str = Math.exp(-age / (lifeMs * linger)) * (1 - s.phase * TFADE) * pocket * dwellBoost * sp;
+      s.str = Math.exp(-age / (lifeMs * linger * (h ? HOLD : 1))) * (1 - s.phase * TFADE) * pocket * dwellBoost
+        * (h ? GIVE : 1);
     }
 
     /* The end pool. Two deliberate differences from the trail plume:
@@ -326,14 +328,18 @@ export class ScentSim {
         s.lat = src.lat; s.lon = src.lon;
         continue;
       }
-      const sp = src.spread ?? 1;                       // someone waiting on tarmac pools less widely too
-      const poolR = poolRadius(dwellS) * sp;
+      /* Someone standing on tarmac: the same dials as the trail. The pool used
+         to shrink here but keep its full strength, so a tarmac pool drew
+         BRIGHTER than the trail beside it — one figure applied in two places
+         and forgotten in a third. */
+      const hp = !!src.hard;
+      const poolR = poolRadius(dwellS) * (hp ? WIDEN : 1);
       const g = project({ lat: src.lat, lon: src.lon }, s.ang, s.rad * poolR);
       s.hlat = g.lat; s.hlon = g.lon;
-      const d = driftFrom(T, g, s.phase * AIR * (s.life ?? 1) / mix * sp, wx, st);
+      const d = driftFrom(T, g, s.phase * AIR * (s.life ?? 1) / mix * (hp ? CARRY : 1), wx, st);
       s.lat = d.lat; s.lon = d.lon;
       // Up to ~1.5× a fresh trail particle — the hottest thing on the map.
-      s.str = (PSB + PSR * build) * (1 - s.phase * PFADE);
+      s.str = (PSB + PSR * build) * (1 - s.phase * PFADE) * (hp ? GIVE : 1);
     }
     return this.parts;
   }
