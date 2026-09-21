@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import { decodeTile, tileOf, tileBox } from '../public/mvt.js';
 import { SURFACES, buildGround, surfaceAt, surfaceAlong, surfaceRows, withSurface,
          tilesCovering, isHard, GROUND_LAYERS, aroundAt, GROUND_V, GROUND_RULES,
-         readingSig, readingFits, readingVersion, groundPrint } from '../public/ground.js';
+         readingSig, readingFits, readingVersion, groundPrint,
+         CONDITIONS, blankSeen, cleanSeen, seenLine } from '../public/ground.js';
 import { PV, setParam, resetParams, applyPreset, PRESETS, presetById, dialById, DEFAULTS } from '../public/params.js';
 import { project, dist, densify, scentField } from '../public/geo.js';
 import { ScentSim } from '../public/sim.js';
@@ -313,6 +314,29 @@ t('a pool on tarmac follows the same dials as the trail, and no longer draws bri
     const ratio = end(true) / end(false);
     assert.ok(Math.abs(ratio - 0.5) < 1e-9, `a weaker-giving surface gives a weaker pool (${ratio.toFixed(3)})`);
   } finally { resetParams(); }
+});
+
+t('conditions are what the handler saw, and only what the app offers', () => {
+  assert.deepEqual(CONDITIONS.map(c => c.id), ['wet', 'sun'], 'wet or dry, and sun or shade — asked separately');
+  for (const c of CONDITIONS) {
+    assert.ok(c.options.length >= 3);
+    assert.equal(new Set(c.options.map(o => o.v)).size, c.options.length);
+  }
+  /* Nothing here may be filled in from the forecast. */
+  assert.ok(!/forecast|temperature|humidity|°/i.test(JSON.stringify(CONDITIONS)), 'no forecast words in what is asked');
+
+  assert.deepEqual(blankSeen(), { v: 1, wet: null, sun: null });
+  assert.equal(cleanSeen(blankSeen()), null, 'nothing recorded is not a record');
+  assert.deepEqual(cleanSeen({ wet: 'wet', sun: 'shade' }), { v: 1, wet: 'wet', sun: 'shade' });
+  assert.deepEqual(cleanSeen({ wet: 'soaking', sun: 'shade' }), { v: 1, wet: null, sun: 'shade' }, 'an unknown value is dropped');
+  assert.equal(cleanSeen({ wet: '<b>', sun: 42 }), null);
+  assert.equal(cleanSeen('wet'), null);
+  assert.equal(cleanSeen(null), null);
+
+  assert.equal(seenLine({ wet: 'wet', sun: 'shade' }), 'Wet, In shade');
+  assert.equal(seenLine({ wet: null, sun: 'sun' }), 'In sun');
+  assert.equal(seenLine({ wet: 'frozen' }), 'Frozen');
+  assert.equal(seenLine(null), '');
 });
 
 t('tiles for a trail: one fine tile for a short trail, coarser ones rather than dozens for a long one', () => {

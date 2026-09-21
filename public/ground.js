@@ -178,6 +178,47 @@ export function surfaceAt(ground, pt) {
   return 'u';
 }
 
+/* ── Conditions: what the handler SAW ────────────────────────────────
+   The third kind of ground fact, and the only one a person supplies. The
+   map says what the ground is made of and what surrounds it; only someone
+   standing there knows whether it was wet, or in the sun.
+
+   Never derived from the forecast. A forecast air temperature is not the
+   temperature of a pavement in the sun, and forecast humidity is not a wet
+   verge. Recorded as seen and kept as seen — and not fed into the model,
+   because nothing yet says what either should do to it. */
+export const CONDITIONS = [
+  { id: 'wet', label: 'The ground', options: [
+    { v: 'dry', label: 'Dry' },
+    { v: 'damp', label: 'Damp' },
+    { v: 'wet', label: 'Wet' },
+    { v: 'frozen', label: 'Frozen' },
+  ] },
+  { id: 'sun', label: 'Sun on the trail', options: [
+    { v: 'sun', label: 'In sun' },
+    { v: 'mixed', label: 'Some of each' },
+    { v: 'shade', label: 'In shade' },
+  ] },
+];
+const SEEN_OK = new Map(CONDITIONS.map(c => [c.id, new Set(c.options.map(o => o.v))]));
+
+export const blankSeen = () => ({ v: 1, wet: null, sun: null });
+
+/** Only values the app offers; anything else becomes "not recorded". Used on
+    the way into storage and on the way in from a shared link alike. */
+export function cleanSeen(o) {
+  if (!o || typeof o !== 'object') return null;
+  const c = { v: 1 };
+  for (const [id, ok] of SEEN_OK) c[id] = ok.has(o[id]) ? o[id] : null;
+  return c.wet || c.sun ? c : null;
+}
+
+/** "Wet, in shade" — or '' when nothing was recorded. */
+export function seenLine(c) {
+  const bits = CONDITIONS.map(f => f.options.find(o => o.v === c?.[f.id])?.label).filter(Boolean);
+  return bits.join(', ').replace(/^./, ch => ch.toUpperCase());
+}
+
 /** Is this point inside something built up — a housing area, a school, a
     building? Surroundings, kept apart from what the ground is made of. */
 export function aroundAt(ground, pt) {

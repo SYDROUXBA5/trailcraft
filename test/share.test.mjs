@@ -357,4 +357,24 @@ await t('the page and the report show the judgement, with the call first', async
     'Certain (trail already on screen)');
 });
 
+await t('what the handler saw on the ground travels, and a forged value does not', async () => {
+  const s = judged();
+  s.data.seen = { v: 1, wet: 'damp', sun: 'shade', at: T0 };
+  const back = await decodeShared(await encodeShared(trailModel(s, people)));
+  assert.deepEqual(back.seen, { v: 1, wet: 'damp', sun: 'shade' });
+  const sec = detailSections(back).find(x => x.title === 'Seen on the ground');
+  assert.deepEqual(sec.rows, [['Conditions', 'Damp, In shade']]);
+  assert.ok(sec.note.includes('not taken from the forecast'));
+
+  const none = await decodeShared(await encodeShared(trailModel(judged(), people)));
+  assert.equal(none.seen, null);
+  assert.ok(!detailSections(none).some(x => x.title === 'Seen on the ground'));
+
+  const forge = async (obj) => 'TS1.' + b64url(await through(
+    new TextEncoder().encode(JSON.stringify(obj)), new CompressionStream('deflate-raw')));
+  const odd = await decodeShared(await forge({ kind: 'trail', trail: { lat: [51200000, 10], lon: [-2600000, 10] },
+    seen: { wet: 'soaking', sun: '<img>' } }));
+  assert.equal(odd.seen, null, 'values the app never offers are not shown to anyone');
+});
+
 console.log(`\n${pass} passed total`);

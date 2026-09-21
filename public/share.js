@@ -12,6 +12,7 @@ import { through, b64url, unb64url, needStreams } from './card.js';
 import { targetById, ageBand, dogAge } from './store.js';
 import { DEBRIEF, FLAGS, NOTE_TAGS, toldField, toldOf } from './debrief.js';
 import { CONFIDENCE, labelOf as callLabel } from './call.js';
+import { cleanSeen, seenLine } from './ground.js';
 
 const MAGIC = 'TS1.';
 const fin = Number.isFinite;
@@ -46,6 +47,7 @@ export function trailModel(s, { dog = null, handler = null, layer = null, k = nu
     result: d.result ?? null,
     coach: d.coach ?? null,
     debrief: d.debrief ?? null,
+    seen: d.seen ?? null,
     k: fin(k) ? k : null,
     thinnedM: 0,
   };
@@ -163,6 +165,7 @@ function pack(m) {
     coach: m.coach ? { assisted: !!m.coach.assisted, tolM: m.coach.tolM, scent: !!m.coach.scent, calls: m.coach.calls,
       shadow: m.coach.shadow ? pick(m.coach.shadow, ['tolM', 'plain', 'scent']) : undefined } : undefined,
     debrief: packDebrief(m.debrief),
+    seen: m.seen ? { wet: m.seen.wet ?? undefined, sun: m.seen.sun ?? undefined } : undefined,
     k: m.k, thinnedM: m.thinnedM || undefined,
   };
   return Object.fromEntries(Object.entries(o).filter(([, v]) => v != null));
@@ -206,6 +209,7 @@ function unpack(o) {
       } : null,
     } : null,
     debrief: unpackDebrief(o.debrief),
+    seen: cleanSeen(o.seen),
     k: fin(o.k) ? o.k : null,
     thinnedM: fin(o.thinnedM) ? o.thinnedM : 0,
   };
@@ -497,6 +501,14 @@ export function detailSections(m, u = {}) {
     }
     out.push({ title: jd?.by ? `Judged by ${jd.by}` : 'Judged by the handler', rows,
       note: jd?.outcome ? 'The handler’s own judgement, not something the phone measured.' : undefined });
+  }
+
+  /* What the handler saw on the ground: an observation, not a judgement, and
+     not a forecast. */
+  const seen = seenLine(m.seen);
+  if (seen) {
+    out.push({ title: 'Seen on the ground', rows: [['Conditions', seen]],
+      note: 'As the handler saw them on the day, not taken from the forecast.' });
   }
 
   const wx = m.wx, wind = r?.wind ?? (wx ? { speed: wx.wind_speed, from: wx.wind_direction } : null);
