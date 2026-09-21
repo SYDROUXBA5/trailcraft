@@ -192,7 +192,7 @@ export const PARAMS = [
     D('widthCap', 'Widest band', 'm', 10, 120, 5, 50, 'guess', 'uncertainty', 'a ceiling on the width', 'Rarely binds.'),
   ]),
 
-  G('ground', 'The ground', 'One number used to do five jobs here. It is now five, all at 1, so tarmac changes nothing until you move one. “Try the tarmac rule” sets the old figure.', 'physics', [
+  G('ground', 'The ground', 'This used to be one number doing five jobs. Now it’s five dials, all at 1, so tarmac changes nothing until you move one. “Try the tarmac rule” puts the old figure back.', 'physics', [
     D('hardHold', 'Hard — holds', '×', 0.2, 1.5, 0.05, 1.0, 'guess', 'retention', 'how much scent the surface keeps',
       'OFF by default. One weak study found asphalt worked for 1–3 h against 8–11 h on grass — that is about THIS dial, not the others.'),
     D('hardGive', 'Hard — gives off', '×', 0.2, 1.5, 0.05, 1.0, 'guess', 'release', 'how strongly it draws', 'OFF by default.'),
@@ -250,10 +250,10 @@ export function resetParams() { Object.assign(PV, DEFAULTS); }
    chosen on the bench, and the bench puts everything back when it closes. */
 export const PRESETS = [
   {
-    id: 'tarmacRule', group: 'ground', label: 'Try the tarmac rule',
-    why: 'The trainer’s working rule the app used to apply to every run: scent on tarmac carried half as far, '
-      + 'drawn half as strong, pools half as wide. It does NOT narrow the band the way the old figure did — '
-      + 'that made the model look surer over ground it understands less.',
+    id: 'tarmacRule', group: 'ground', label: 'Try the tarmac rule', short: 'Tarmac rule',
+    why: 'The working rule the app used to apply to every run. On tarmac, scent carries half as far and draws '
+      + 'half as strong, and a standing pool covers half the ground. The band keeps its full width: the old '
+      + 'figure narrowed it, which made the model look surest on the ground it understands least.',
     set: { hardCarry: 0.5, hardGive: 0.5, hardWiden: 0.5 },
   },
 ];

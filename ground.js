@@ -43,8 +43,8 @@ export const isHard = (id) => id === 'h';
     rewritten the next time someone looks at it. */
 export const GROUND_V = 2;
 export const GROUND_RULES = {
-  1: 'Blank map, built-up areas (houses, schools, industry) and buildings were all counted as hard surface.',
-  2: 'Only what the map draws as sealed (roads, paved paths, car parks) is hard. Blank map is Not mapped; built-up areas and buildings are surroundings, not ground.',
+  1: 'Blank bits of map, built-up areas (houses, schools, industry) and buildings all counted as hard surface.',
+  2: 'Only what the map draws as sealed counts as hard: roads, paved paths, car parks. Blank map stays Not mapped. Built-up areas and buildings count as surroundings.',
 };
 
 /** Which layers and properties the app must ask the tiles for. */
@@ -213,10 +213,10 @@ export function cleanSeen(o) {
   return c.wet || c.sun ? c : null;
 }
 
-/** "Wet, in shade" — or '' when nothing was recorded. */
+/** "Wet, in shade", or '' when nothing was recorded. */
 export function seenLine(c) {
   const bits = CONDITIONS.map(f => f.options.find(o => o.v === c?.[f.id])?.label).filter(Boolean);
-  return bits.join(', ').replace(/^./, ch => ch.toUpperCase());
+  return bits.map((b, i) => (i ? b.toLowerCase() : b)).join(', ');
 }
 
 /** Is this point inside something built up — a housing area, a school, a

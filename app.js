@@ -1397,7 +1397,7 @@ function fillSurfaces(s, { reread = false } = {}) {
 function seenHtml(s) {
   const line = seenLine(s.data.seen);
   return line
-    ? `<p class="body small">You saw: <b>${esc(line)}</b>. As you recorded it, not from the forecast. The model does not use this yet.</p>`
+    ? `<p class="body small">You recorded: <b>${esc(line.toLowerCase())}</b>. The model doesn’t use this yet.</p>`
     : '';
 }
 
@@ -1411,12 +1411,12 @@ function fixesHtml(s, edit) {
     const who = [f.by, fmtWhen(f.at)].filter(Boolean).join(', ');
     const rm = edit ? `<button type="button" class="btn small" data-unfix="${esc(f.id)}">Remove</button>` : '';
     if (!sp) {
-      return `<div class="fix-row off"><span><b>${esc(surfaceById(f.as).label)}: no longer on this trail</b>
-        <i>The line was replaced and this stretch is not on it. Kept, not applied. ${esc(who)}</i></span>${rm}</div>`;
+      return `<div class="fix-row off"><span><b>${esc(surfaceById(f.as).label)}, but no longer on this trail</b>
+        <i>The line was replaced and doesn’t pass here now, so this correction is saved but not used. ${esc(who)}</i></span>${rm}</div>`;
     }
     const said = surfaceRows(stretchMetres(t, surfValid(s) ? s.data.surf : null, sp.i0, sp.i1))
       .map(r => `${r.label} ${fmtKm(r.metres)}`).join(', ');
-    return `<div class="fix-row"><span><b>${fmtKm(along[sp.i0])} to ${fmtKm(along[sp.i1])} is ${esc(surfaceById(f.as).label)}</b>
+    return `<div class="fix-row"><span><b>${fmtKm(along[sp.i0])} to ${fmtKm(along[sp.i1])} was ${esc(surfaceById(f.as).label.toLowerCase())}</b>
       <i>The map said: ${esc(said || 'nothing')}. Corrected by ${esc(who || 'hand')}.${f.note ? ` “${esc(f.note)}”` : ''}</i></span>${rm}</div>`;
   }).join('')}</div>`;
 }
@@ -1428,14 +1428,14 @@ function groundHtml(s, { edit = false } = {}) {
   const v = readingVersion(s.data) ?? 1;
   /* Surroundings, kept apart from the ground itself. */
   const built = Number.isFinite(s.data.surfA) && s.data.surfA >= 1 && total > 0
-    ? `<p class="body small">Through built-up surroundings: <b>${fmtKm(s.data.surfA)}</b> (${Math.round((s.data.surfA / total) * 100)}%). Where the trail went, not what it was laid on.</p>`
+    ? `<p class="body small">Through built-up areas: <b>${fmtKm(s.data.surfA)}</b> (${Math.round((s.data.surfA / total) * 100)}%). That’s where the trail went. It doesn’t say what was underfoot.</p>`
     : '';
   const old = v < GROUND_V
-    ? `<p class="body small surf-old">Read with older rules. ${esc(GROUND_RULES[v] ?? '')}</p>
+    ? `<p class="body small surf-old">Read with the old rules. ${esc(GROUND_RULES[v] ?? '')}</p>
        <button type="button" class="btn small" data-reread="1">Re-read the ground</button>`
     : '';
   const prev = s.data.surfPrev && Number.isFinite(s.data.surfAt)
-    ? `<p class="body small muted">Re-read ${esc(fmtWhen(s.data.surfAt))}. The earlier reading is kept with the run.</p>`
+    ? `<p class="body small muted">Re-read ${esc(fmtWhen(s.data.surfAt))}. The earlier reading is saved with the run.</p>`
     : '';
   const fixBtn = edit && s.data.trail?.length > 1
     ? `<button type="button" class="btn small" data-fixopen="1">Correct a stretch</button>` : '';
@@ -1444,7 +1444,7 @@ function groundHtml(s, { edit = false } = {}) {
     <div class="surf-rows">${rows.map(r =>
       `<div><i class="gs-${r.id}"></i><span>${esc(r.label)}</span><b>${fmtKm(r.metres)}</b><em>${Math.round(r.share * 100)}%</em></div>`).join('')}</div>
     ${built}${seenHtml(s)}${old}${prev}${fixesHtml(s, edit)}${fixBtn}
-    <p class="body small muted">Read from the map, not from the ground: a yard, a lawn or a track nobody drew is Not mapped. What tarmac does to scent is an open question, so the model treats it like any other ground unless the tarmac rule is tried on the bench.</p>`;
+    <p class="body small muted">This comes from the map. A yard, a lawn or a track nobody drew shows as Not mapped. Nobody knows yet what tarmac does to scent, so the model treats it like any other ground unless you try the tarmac rule on the bench.</p>`;
 }
 /** Show it if it is known; if not, ask, and fill the box in when the answer
     comes — provided the box is still showing the same trail. */
@@ -2120,7 +2120,7 @@ function paintFix() {
   const said = surfaceRows(stretchMetres(t, surfValid(s) ? s.data.surf : null, i0, i1))
     .map(r => `${r.label} ${fmtKm(r.metres)}`).join(', ');
   $('fixReadout').textContent = i1 > i0
-    ? `${fmtKm(fixer.along[i0])} to ${fmtKm(fixer.along[i1])}: ${fmtKm(fixer.along[i1] - fixer.along[i0])} of trail. The map says ${said || 'nothing here'}.`
+    ? `${fmtKm(fixer.along[i0])} to ${fmtKm(fixer.along[i1])} (${fmtKm(fixer.along[i1] - fixer.along[i0])} of trail). The map says: ${said || 'nothing here'}.`
     : 'Move the two sliders apart to choose a stretch.';
   $('fixAs').innerHTML = FIX_AS.map(id =>
     `<button type="button" class="chip${fixer.as === id ? ' selected' : ''}" data-as="${id}" aria-pressed="${fixer.as === id}">${esc(surfaceById(id).label)}</button>`).join('');
@@ -2144,7 +2144,7 @@ function saveFix() {
   if (!s) return;
   const [a, b] = fixRange();
   const f = makeFix(s.data.trail, a, b, fixer.as, { note: $('fixNote').value.trim(), by: S.handler?.name ?? null });
-  if (!f) return toast('Choose a stretch and what it really is');
+  if (!f) return toast('Pick a stretch and what it really was.');
   const saved = guardSave(s, () => saveSession(s, { data: { ...s.data, surfFix: [...(s.data.surfFix ?? []), f] } }));
   if (!saved) return;
   snap();
@@ -2153,7 +2153,7 @@ function saveFix() {
   if (pendingSession?.id === s.id) pendingSession = s2;
   closeFix();
   backToResult(s2);
-  toast('Correction saved. The map’s reading is kept beside it.');
+  toast('Correction saved. The map’s own reading is still there.');
 }
 
 function removeFix(s, fixId) {
@@ -2165,7 +2165,7 @@ function removeFix(s, fixId) {
   if (run.session?.id === s.id) run.session = s2;
   if (pendingSession?.id === s.id) pendingSession = s2;
   paintGround('resGround', s2);
-  toast('Correction removed. The map’s reading stands.');
+  toast('Correction removed. Back to the map’s reading.');
 }
 
 /* ── The call ─────────────────────────────────────────────────────────
@@ -2214,13 +2214,13 @@ function paintCallBlock(s) {
   const band = confidenceOf(c.call.conf);
   const d = s?.data?.debrief;
   let tail;
-  if (!d?.outcome) tail = '. Write the debrief and this becomes a data point.';
-  else if (d.outcome === 'found') tail = ' — and you were right.';
-  else if (d.outcome === 'false') tail = ' — and you were wrong.';
-  else tail = `, and the run ended ${labelOf('outcome', d.outcome).toLowerCase()}.`;
+  if (!d?.outcome) tail = '. Write the debrief to find out if you were right.';
+  else if (d.outcome === 'found') tail = ', and you were right.';
+  else if (d.outcome === 'false') tail = ', and you were wrong.';
+  else tail = `. The debrief says: ${labelOf('outcome', d.outcome)}.`;
   /* Say plainly when a call cannot count, rather than letting it look banked. */
-  if (d && d.blind === 'open') tail += ' It does not count towards your calibration — you knew the answer.';
-  else if (c.call.seen) tail += ' It does not count — the trail was already on screen.';
+  if (d && d.blind === 'open') tail += ' This one doesn’t count towards your record, because you knew the answer.';
+  else if (c.call.seen) tail += ' This one doesn’t count, because the trail was already on screen.';
   $('callSummary').textContent = `You called it “${band?.label ?? c.call.conf}”${tail}`;
   $('callCal').textContent = calibrationLine(calibration(db.sessions()));
 }
@@ -5468,11 +5468,11 @@ function wire() {
         if (!f) {
           b.disabled = false;
           b.textContent = 'Re-read the ground';
-          return toast('Could not reach the map. Try again with signal.');
+          return toast('Couldn’t reach the map. Try again when you have signal.');
         }
         el.innerHTML = groundHtml(f, { edit: id === 'resGround' });
         el.hidden = !el.innerHTML;
-        toast('Ground re-read. The earlier reading is kept.');
+        toast('Ground re-read. The earlier reading is saved.');
       });
     });
   }
@@ -5582,7 +5582,7 @@ function wire() {
     const pre = PRESETS.find(p => p.id === b.dataset.preset);
     $('benchBody').querySelectorAll('details.bench-grp').forEach((el, i) => { el.open = PARAMS[i]?.id === pre.group; });
     benchPaint();
-    toast(`${pre.label}: on for this bench only`);
+    toast(`${pre.short ?? pre.label} on until you close the bench.`);
   });
   $('benchBody').addEventListener('input', (e) => {
     const id = e.target.dataset?.set;
