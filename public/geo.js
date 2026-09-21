@@ -177,6 +177,8 @@ export function simplify(pts, tolM = 4) {
    are in the data. The width of the band is the honest part — it says "somewhere
    in here", and it grows as the trail ages. */
 
+import { PV } from './params.js';
+
 export const DRIFT_PER_MS = 2.0;   // metres of offset per m/s of 10 m wind
 
 /** Bearing a→b in degrees. */
@@ -203,14 +205,15 @@ export function windRegime(heading, windFromDeg) {
 
 /** How far the workable line sits from the true line. Saturates: the ground
     keeps emitting, so the offset settles rather than growing without bound. */
-export function scentOffset(windMs, ageS, k = DRIFT_PER_MS) {
-  const settle = 1 - Math.exp(-Math.max(0, ageS) / 900);   // ~15 min to steady state
-  return Math.min(60, (windMs ?? 0) * k * settle);
+export function scentOffset(windMs, ageS, k = PV.driftPerMs) {
+  const settle = 1 - Math.exp(-Math.max(0, ageS) / PV.settleS);
+  return Math.min(PV.offsetCap, (windMs ?? 0) * k * settle);
 }
 
 /** Half-width of the plume — the uncertainty. Grows with age and wind. */
 export function plumeWidth(ageS, windMs) {
-  return Math.min(50, 2 + 0.06 * Math.sqrt(Math.max(0, ageS)) * (1 + (windMs ?? 0) / 6));
+  return Math.min(PV.widthCap,
+    PV.widthBase + PV.widthGrow * Math.sqrt(Math.max(0, ageS)) * (1 + (windMs ?? 0) / PV.widthWind));
 }
 
 /** Per-point scent field: where the workable line sits, and how wide it is. */

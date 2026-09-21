@@ -18,6 +18,7 @@
 
 import { project, bearing, dist } from './geo.js';
 import { flowAt, normOf, scentLife } from './field.js';
+import { PV } from './params.js';
 
 /** Seconds a particle stays workable once it has left the ground. Airborne
     residence is what sets the offset scale: at 0.8 m/s, 50 s puts the plume
@@ -51,10 +52,12 @@ export function RESIDENCE() {
   const u = Math.max(1e-6, Math.random());
   return Math.min(1.9, Math.max(0.18, -Math.log(u) * 0.62));
 }
+/* The live values the bench drives. AIRBORNE, NOSE and PEAK_SECS above stay
+   as the documented defaults; nothing on a live path reads them any more. */
 
 /** Particles per trail point. Enough to read as a plume, few enough to stay at
     60 fps on a phone, which is where this actually has to run. */
-const PER_POINT = 7;
+const PER_POINT = () => PV.perPoint;
 
 /* The end of the trail is not a point — it is a POOL. The runner does not
    vanish at the last footprint: in this sport they stand there waiting to be
@@ -66,11 +69,11 @@ const PER_POINT = 7;
    is actually going read as the faintest. A person waiting to be found is a
    source that does not move and does not stop: the cloud around them wants
    the parcel count to match what it is. */
-const POOL_PARTS = 700;
+const POOL_PARTS = () => PV.poolParts;
 /** Dwell seconds → pool radius in metres. Diffusive growth: fast at first,
     then slowing, capped where a real search-area stops growing. */
 export function poolRadius(dwellS) {
-  return Math.min(26, 2 + 2.4 * Math.sqrt(Math.max(0, dwellS) / 60));
+  return Math.min(PV.poolCap, PV.poolBase + PV.poolGrow * Math.sqrt(Math.max(0, dwellS) / 60));
 }
 
 /**
@@ -107,7 +110,7 @@ export function driftFrom(T, origin, secs, wx, st, steps = 5) {
     const n = normOf(T, pt.lat, pt.lon);
     flowAt(T, n.x, n.y, wx, st, f);
     if (Math.hypot(f.u, f.v) < 1e-6) break;
-    pt = stepByFlow(pt, f, dt, NOSE);
+    pt = stepByFlow(pt, f, dt, PV.nose);
   }
   return pt;
 }
@@ -130,12 +133,13 @@ export class ScentSim {
       make the plume flicker, so new ground is appended instead. */
   append(points) {
     for (const p of points || []) {
-      for (let k = 0; k < PER_POINT; k++) {
+      const per = PER_POINT();
+      for (let k = 0; k < per; k++) {
         this.parts.push({
           lat: p.lat, lon: p.lon,          // current position
           hlat: p.lat, hlon: p.lon,        // ground source, fixed
           born: p.t,
-          phase: (k + Math.random()) / PER_POINT,   // spread across the airborne life
+          phase: (k + Math.random()) / per,         // spread across the airborne life
           // A fixed random identity. Meander and convective patchiness must be
           // stable per particle — re-rolled each frame they would flicker, and
           // a flickering plume reads as a bug, not as air.
@@ -160,7 +164,7 @@ export class ScentSim {
          the wider and stronger the patch it leaves. Scatter extra particles
          over the disc that dwell earned. The end of the trail is handled by
          the live pool below — this is for pauses along the way. */
-      if ((p.dwellS ?? 0) >= 45) {
+      if ((p.dwellS ?? 0) >= PV.dwellThresh) {
         const R = poolRadius(p.dwellS) * (p.spread ?? 1);
         for (let k = 0; k < 10; k++) {
           const g = project(p, Math.random() * 360, Math.sqrt(Math.random()) * R);
@@ -202,11 +206,12 @@ export class ScentSim {
     const srcs = this.poolSources();
     for (let i = 0; i < srcs.length; i++) {
       const src = srcs[i];
-      for (let k = 0; k < POOL_PARTS; k++) {
+      const parts = POOL_PARTS();
+      for (let k = 0; k < parts; k++) {
         this.pool.push({
           lat: src.lat, lon: src.lon, hlat: src.lat, hlon: src.lon,
           born: src.t, src: i,
-          phase: (k + Math.random()) / POOL_PARTS,
+          phase: (k + Math.random()) / parts,
           seed: Math.random() * 6.28318,
           ang: Math.random() * 360,             // where on the disc it sits
           rad: Math.sqrt(Math.random()),        // sqrt → uniform over the disc
@@ -234,6 +239,13 @@ export class ScentSim {
    * @param {number} now epoch ms — the replay clock, not the real one
    */
   advance(T, wx, st, now) {
+    /* Hoisted: this loop touches thousands of particles a frame, and a
+       property read per constant per particle is a real cost on a phone. */
+    const AIR = PV.airborne, TFADE = PV.trailFade, PFADE = PV.poolFade;
+    const MAMP = PV.meanderAmp, MCAP = PV.meanderCap, BREATHE = PV.breatheMs ?? 8000;
+    const PONSET = PV.pocketOnset, PFLOOR = PV.pocketFloor, LINGER = PV.lingerGain;
+    const DBS = PV.dwellBoostS, DBC = PV.dwellBoostCap;
+    const PBUILD = PV.poolBuildS, PSB = PV.poolStrBase, PSR = PV.poolStrRange;
     const lifeMs = scentLife(wx, st) * 60000;
     const mix = Math.max(0.5, st?.mix ?? 1);
     const drain = st?.drain ?? 0;
@@ -244,7 +256,7 @@ export class ScentSim {
        one snakes, and the snaking breathes on a ~8 s cycle. */
     const wind = wx?.wind_speed ?? 0;
     const gustiness = Math.max(0, ((wx?.wind_gusts ?? wind) - wind) / Math.max(0.5, wind));
-    const breathe = now / 8000;
+    const breathe = now / BREATHE;
 
     for (const s of this.parts) {
       const age = now - s.born;
@@ -255,7 +267,7 @@ export class ScentSim {
       // parcel carries its own residence time on top of that, so they do not
       // all stop at the same distance.
       const sp = s.spread ?? 1;
-      const secs = s.phase * AIRBORNE * (s.life ?? 1) / mix * sp;
+      const secs = s.phase * AIR * (s.life ?? 1) / mix * sp;
       const d = driftFrom(T, { lat: s.hlat, lon: s.hlon }, secs, wx, st);
       s.lat = d.lat; s.lon = d.lon;
 
@@ -265,7 +277,7 @@ export class ScentSim {
         // Perpendicular wander, amplitude from gustiness and how far the
         // particle has travelled — sin averages to zero, so the MEAN offset
         // the verdict grades is untouched.
-        const amp = Math.min(12, dispM * gustiness * 0.4);
+        const amp = Math.min(MCAP, dispM * gustiness * MAMP);
         const sway = amp * Math.sin(breathe + s.seed * 3.1 + s.phase * 6.28318);
         const brg = bearing({ lat: s.hlat, lon: s.hlon }, d);
         const p2 = project({ lat: s.lat, lon: s.lon }, (brg + 90) % 360, sway);
@@ -280,17 +292,17 @@ export class ScentSim {
          - POCKETS: convective air tears the plume into patches; each particle
            keeps a fixed share of the damage so the patches hold still. */
       const slack = 1 - Math.min(1, dispM / Math.max(1.5, secs * 0.45));
-      const linger = 1 + drain * slack * 0.9;
-      const pocket = mix > 1.25 ? 0.55 + 0.45 * (0.5 + 0.5 * Math.sin(s.seed * 13.7)) : 1;
+      const linger = 1 + drain * slack * LINGER;
+      const pocket = mix > PONSET ? PFLOOR + (1 - PFLOOR) * (0.5 + 0.5 * Math.sin(s.seed * 13.7)) : 1;
       // Standing still deposits more: emission scales with the dwell the
       // fix stream folded into this point.
-      const dwellBoost = 1 + Math.min(3, (s.dwellS ?? 0) / 60);
+      const dwellBoost = 1 + Math.min(DBC, (s.dwellS ?? 0) / DBS);
       /* `phase` is already how far through its own airborne life a parcel
          is, so it carries the fade on its own. What ragged the edge is the
          residence time above: parcels from the same piece of ground reach
          very different distances, and the far ones are both fainter and much
          rarer, which is how a plume actually ends. */
-      s.str = Math.exp(-age / (lifeMs * linger)) * (1 - s.phase * 0.72) * pocket * dwellBoost * sp;
+      s.str = Math.exp(-age / (lifeMs * linger)) * (1 - s.phase * TFADE) * pocket * dwellBoost * sp;
     }
 
     /* The end pool. Two deliberate differences from the trail plume:
@@ -304,7 +316,7 @@ export class ScentSim {
       if (!src) { s.str = 0; continue; }
       const dwellS = (now - src.t) / 1000;
       if (dwellS <= 0) { s.str = 0; continue; }
-      const build = 1 - Math.exp(-dwellS / 600);
+      const build = 1 - Math.exp(-dwellS / PBUILD);
       /* Not in the air yet: this parcel joins later in the wait. Park it back
          on the source rather than leaving it wherever it last was, or a pool
          asked about an EARLIER moment reports the spread of a later one. */
@@ -318,10 +330,10 @@ export class ScentSim {
       const poolR = poolRadius(dwellS) * sp;
       const g = project({ lat: src.lat, lon: src.lon }, s.ang, s.rad * poolR);
       s.hlat = g.lat; s.hlon = g.lon;
-      const d = driftFrom(T, g, s.phase * AIRBORNE * (s.life ?? 1) / mix * sp, wx, st);
+      const d = driftFrom(T, g, s.phase * AIR * (s.life ?? 1) / mix * sp, wx, st);
       s.lat = d.lat; s.lon = d.lon;
       // Up to ~1.5× a fresh trail particle — the hottest thing on the map.
-      s.str = (0.55 + 0.95 * build) * (1 - s.phase * 0.45);
+      s.str = (PSB + PSR * build) * (1 - s.phase * PFADE);
     }
     return this.parts;
   }
@@ -381,7 +393,7 @@ export function predictedOffsets(T, trail, wx, st, workedAt) {
        before it stops mattering; convection lifts it out, so it drifts less.
        Clamped, because neither effect is worth more than a factor of two on a
        number this uncertain. */
-    const secs = PEAK_SECS / Math.max(0.6, Math.min(1.6, st?.mix ?? 1));
+    const secs = PV.peakSecs / Math.max(0.6, Math.min(1.6, st?.mix ?? 1));
     const d = driftFrom(T, p, secs, wx, st);
     const n = normOf(T, p.lat, p.lon);
     const f = flowAt(T, n.x, n.y, wx, st);
@@ -389,8 +401,8 @@ export function predictedOffsets(T, trail, wx, st, workedAt) {
 
     // Settle: the ground keeps emitting, so the offset reaches a steady state
     // rather than growing for as long as the trail is old.
-    const settle = 1 - Math.exp(-ageS / 900);
-    const m = sp * NOSE * secs * settle;
-    return { at: p, to: d, metres: Math.min(60, m), bearing: sp > 1e-6 ? bearing(p, d) : null };
+    const settle = 1 - Math.exp(-ageS / PV.settleS);
+    const m = sp * PV.nose * secs * settle;
+    return { at: p, to: d, metres: Math.min(PV.offsetCap, m), bearing: sp > 1e-6 ? bearing(p, d) : null };
   });
 }
