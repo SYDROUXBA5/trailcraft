@@ -309,6 +309,23 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.75; cursor: p
 .gs-c { background: #D8B657; } .gs-h { background: #8C95A6; } .gs-a { background: #3B8BD6; }
 .gs-u { background: #C9D0DC; }
 
+/* -- Replay controls ---------------------------------------------- */
+.rep-row { display: flex; align-items: center; gap: 12px; }
+.rep-row input[type="range"] { flex: 1; height: 40px; }
+.rep-play, .rep-speed {
+  flex: none; min-width: 52px; height: 44px; border-radius: 14px;
+  background: rgba(11, 22, 48, 0.82); border: 1px solid rgba(255, 255, 255, 0.18);
+  color: #F4F6FA; font: 600 15px var(--body); cursor: pointer;
+  box-shadow: 0 4px 14px -4px rgba(0, 0, 0, 0.6);
+}
+@supports (backdrop-filter: blur(12px)) {
+  .rep-play, .rep-speed { backdrop-filter: blur(12px) saturate(140%); }
+}
+/* The scrubber is the one control a thumb has to land on accurately. */
+.rep-row input[type="range"] { accent-color: #F5D14A; }
+.rep-play { font-size: 17px; }
+.rep-play:active, .rep-speed:active { transform: scale(0.96); }
+
 /* ── Scent bench ───────────────────────────────────────
    A sheet with two heights: a peek that shows the handle, the honesty tally
    and the four dials that move the picture most, and a full height for the
@@ -1214,6 +1231,9 @@ body:has(#scrWalk:not([hidden])) { --top-row: calc(var(--safe-t) + 104px); }
 .hud-pill { border-radius: 22px; }
 .hud-pill.off .rec-dot { background: #FFFFFF; }
 .map-fab { color: #F4F6FA; }
+/* Captions on a map screen sit on the satellite picture, not on a card, so
+   they are always light with a hard shadow regardless of the theme. */
+.screen.glass .glass-caption { color: #FFFFFF; text-shadow: 0 1px 5px rgba(0, 0, 0, 0.85), 0 0 14px rgba(0, 0, 0, 0.5); }
 
 /* The marks: one glass track, each mark a lighter segment — the shape of a
    segmented control, without pretending to be one. */

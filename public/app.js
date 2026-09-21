@@ -30,7 +30,7 @@ import { createStore, migrateV1, TARGETS, ODOURS, targetById, targetText, verbs,
          dogStats, ageBand, AGE_BANDS, LEVELS, levelById, dogAge } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-21c';
+const BUILD = '2026-09-21d';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true,
@@ -129,10 +129,10 @@ const avaHtml = (ent, cls = '') => {
 const SCREENS = ['scrOnboardHandler', 'scrOnboardDog', 'scrTutorial', 'scrHome', 'scrHandler', 'scrLay',
   'scrConfirm', 'scrShare', 'scrContam', 'scrPick', 'scrScan', 'scrRun', 'scrResult',
   'scrShowMap', 'scrSessions', 'scrSettings', 'scrDraw', 'scrCountdown', 'scrWalk', 'scrWait', 'scrDog',
-  'scrSignIn', 'scrShareOut', 'scrShared', 'scrLive', 'scrBench'];
+  'scrSignIn', 'scrShareOut', 'scrShared', 'scrLive', 'scrBench', 'scrReplay'];
 
 /* The screens that are transparent chrome over the live map. */
-const MAP_SCREENS = ['scrLay', 'scrConfirm', 'scrContam', 'scrRun', 'scrShowMap', 'scrDraw', 'scrWalk', 'scrLive', 'scrBench'];
+const MAP_SCREENS = ['scrLay', 'scrConfirm', 'scrContam', 'scrRun', 'scrShowMap', 'scrDraw', 'scrWalk', 'scrLive', 'scrBench', 'scrReplay'];
 
 /* ── Going back ───────────────────────────────────────────────────────
    Every page except home carries the same arrow, top-left, and it always
@@ -267,7 +267,7 @@ function setMapStyle(key) {
 const EMPTY = { type: 'FeatureCollection', features: [] };
 let map, mapReady = false;
 let GL = mapboxgl;   // every control/bounds must come from the SAME library
-const srcData = { runner: EMPTY, steps: EMPTY, dog: EMPTY, paws: EMPTY, wps: EMPTY, drift: EMPTY, start: EMPTY, hides: EMPTY, contam: EMPTY, plan: EMPTY,
+const srcData = { runner: EMPTY, steps: EMPTY, dog: EMPTY, paws: EMPTY, wps: EMPTY, drift: EMPTY, start: EMPTY, hides: EMPTY, contam: EMPTY, plan: EMPTY, nose: EMPTY,
                   routeDone: EMPTY, routeAhead: EMPTY, puck: EMPTY, scent: EMPTY, wind: EMPTY,
                   flow: EMPTY, flowPulse: EMPTY, air: EMPTY, acc: EMPTY };
 
@@ -478,6 +478,11 @@ function addOverlays() {
   add({ id: 'hide-dots', type: 'circle', source: 'hides',
         paint: { 'circle-radius': 9, 'circle-color': '#C99A2E',
                  'circle-stroke-width': 2.5, 'circle-stroke-color': '#FFFFFF' } });
+  add({ id: 'nose-halo', type: 'circle', source: 'nose',
+        paint: { 'circle-radius': 15, 'circle-color': '#FFFFFF', 'circle-opacity': 0.22, 'circle-blur': 0.6 } });
+  add({ id: 'nose-dot', type: 'circle', source: 'nose',
+        paint: { 'circle-radius': 8, 'circle-color': '#FFFFFF',
+                 'circle-stroke-width': 3, 'circle-stroke-color': '#0B1630' } });
   add({ id: 'start-dot', type: 'circle', source: 'start',
         paint: { 'circle-radius': 9, 'circle-color': '#2F9E44',
                  'circle-stroke-width': 2.5, 'circle-stroke-color': '#FFFFFF' } });
@@ -1288,7 +1293,7 @@ function dropHideAtFeet() {
    where the model stops being sure, never a hard-edged corridor. And it is
    drawn only when there is real weather to drive it: no weather, no plume,
    because a guessed plume is worse than none. */
-const plume = { sim: null, tick: 0, T: FLAT, wx: null, st: null, trail: null, tAt: 0, tLen: 0 };
+const plume = { sim: null, tick: 0, T: FLAT, wx: null, st: null, trail: null, tAt: 0, tLen: 0, clock: null };
 
 /* ── The ground under the trail ───────────────────────────────────────
    Woods, grass, crop, hard surface: read from the same map data the map is
@@ -1981,6 +1986,116 @@ function closeBench() {
   clearMap();
 }
 
+/* ── Replay ───────────────────────────────────────────────────────────
+   The run again, against the scent as it was AT THAT MOMENT — not as it is
+   now. That distinction is the whole value of the screen: a handler watching
+   the dog swing wide at four minutes wants to see the plume that was
+   actually there at four minutes, not the one that has since drifted another
+   forty metres downwind.
+
+   The engine has always been able to answer this. ScentSim.advance() takes
+   the clock as an argument, and the comment above it has said "the replay
+   clock, not the real one" since it was written. Nothing had ever passed it
+   one. Here that argument finally gets used: plume.clock overrides
+   Date.now(), and scrubbing is simply setting it. */
+const replay = { s: null, from: 0, to: 0, at: 0, playing: false, speed: 4, raf: 0, last: 0 };
+const REPLAY_SPEEDS = [1, 4, 10, 30];
+
+function openReplay(s) {
+  const track = s?.data?.track;
+  if (!(track?.length > 1)) return toast('No run recorded on this one');
+  replay.s = s;
+  replay.from = track[0].t;
+  replay.to = track[track.length - 1].t;
+  replay.at = replay.to;
+  replay.speed = 4;
+  replayPause();
+
+  clearMap();
+  setTrail(trailOf(s));
+  setSrc('start', pointsOf([s.data.trail[0]]));
+  if (s.data.planTrail?.length > 1) setSrc('plan', lineOf(s.data.planTrail));
+  if (s.data.weather) plumeStart(trailOf(s), s.data.weather, plume.T);
+  $('repSpeed').textContent = `${replay.speed}×`;
+
+  go('scrReplay');
+  fitTo(s.data.trail || [], track, s.data.planTrail || []);
+  paintReplay();
+}
+
+function closeReplay() {
+  replayPause();
+  replay.s = null;
+  plume.clock = null;          // hand the plume back to the real clock
+  plumeStop();
+  clearMap();
+}
+
+/** Everything as it stood at `replay.at`. */
+function paintReplay() {
+  const s = replay.s;
+  if (!s) return;
+  const at = replay.at;
+  const track = s.data.track;
+
+  // The dog's track, only as far as it had got by then.
+  let i = 0;
+  while (i < track.length && track[i].t <= at) i++;
+  const sofar = track.slice(0, Math.max(2, i));
+  setDogTrack(sofar);
+  setSrc('nose', pointsOf([sofar[sofar.length - 1]]));
+
+  // Marks appear when they were pressed, not before.
+  setSrc('wps', pointsOf((s.data.trackWaypoints || []).filter(w => w.t <= at), 'kind'));
+
+  /* The scent as it was. plumeFrame reads plume.clock, so setting it and
+     painting one frame shows that instant instead of this one. */
+  if (plume.sim) { plume.clock = at; plumeFrame(); }
+  if (s.data.weather) {
+    const field = scentField(trailOf(s), s.data.weather, at);
+    setSrc('drift', field.length ? plumePolygon(field) : EMPTY);
+  }
+
+  const el = Math.max(0, Math.round((at - replay.from) / 1000));
+  const ageMin = Math.max(0, Math.round((at - s.startedAt) / 60000));
+  const here = sofar[sofar.length - 1];
+  const off = s.data.trail?.length > 1
+    ? signedOffsets(s.data.trail, [here]).filter(Number.isFinite)[0] : null;
+  $('repHudText').textContent = `${Math.floor(el / 60)}:${String(el % 60).padStart(2, '0')}`;
+  $('repCaption').textContent = `Trail ${ageMin} min old here`
+    + (off == null ? '' : ` · dog ${fmtM(Math.abs(off))} ${off >= 0 ? 'right' : 'left'} of the line`);
+  const f = replay.to > replay.from ? (at - replay.from) / (replay.to - replay.from) : 1;
+  const sc = $('repScrub');
+  if (document.activeElement !== sc) sc.value = String(Math.round(f * 1000));
+}
+
+function replayPlay() {
+  if (replay.playing || !replay.s) return;
+  if (replay.at >= replay.to) replay.at = replay.from;      // at the end, start again
+  replay.playing = true;
+  replay.last = performance.now();
+  $('repPlay').innerHTML = '&#10073;&#10073;';
+  $('repPlay').setAttribute('aria-label', 'Pause');
+  const step = (now) => {
+    if (!replay.playing) return;
+    const dt = Math.min(500, now - replay.last);      // a backgrounded tab must not leap
+    replay.last = now;
+    replay.at = Math.min(replay.to, replay.at + dt * replay.speed);
+    paintReplay();
+    if (replay.at >= replay.to) return replayPause();
+    replay.raf = requestAnimationFrame(step);
+  };
+  replay.raf = requestAnimationFrame(step);
+}
+
+function replayPause() {
+  replay.playing = false;
+  cancelAnimationFrame(replay.raf);
+  replay.raf = 0;
+  const b = $('repPlay');
+  if (b) { b.innerHTML = '&#9654;'; b.setAttribute('aria-label', 'Play'); }
+}
+
 /* ── Wind tracers ─────────────────────────────────────────────────────
    Few enough to move every frame, which is the whole point of them: the
    heatmap can only be redrawn a few times a second, and a plume that never
@@ -2176,7 +2291,7 @@ function paintFlowPulse(now) {
 
 function plumeFrame() {
   if (!plume.sim) return;
-  const now = Date.now();
+  const now = plume.clock ?? Date.now();
   plume.sim.prune(now, plume.wx, plume.st, { max: 9000 });
   plume.sim.advance(plume.T, plume.wx, plume.st, now);
   const live = plume.sim.drawable().filter(s => s.str >= 0.03);
@@ -3310,6 +3425,7 @@ function renderResult(s) {
      real one — nor to teach the dog's calibration anything. */
   const provisional = !!s.data.plan && !s.data.walked;
   $('btnScanWalked').hidden = !provisional;
+  $('btnReplay').hidden = !(s.data.track?.length > 1);
   const note = $('resProvisional');
   note.hidden = !s.data.plan;
   if (s.data.plan) {
@@ -4968,6 +5084,24 @@ function wire() {
      re-drawn whenever a group folds — listeners bound to each slider would
      be lost every repaint. `input` fires all the way through a drag, which
      is the whole point: the picture must move under the finger. */
+  $('btnReplay').addEventListener('click', () => openReplay(run.session ?? pendingSession));
+  $('repBack').addEventListener('click', () => { closeReplay(); go('scrResult'); });
+  $('repPlay').addEventListener('click', () => (replay.playing ? replayPause() : replayPlay()));
+  $('repSpeed').addEventListener('click', () => {
+    const i = (REPLAY_SPEEDS.indexOf(replay.speed) + 1) % REPLAY_SPEEDS.length;
+    replay.speed = REPLAY_SPEEDS[i];
+    $('repSpeed').textContent = `${replay.speed}\u00d7`;
+  });
+  /* Dragging is scrubbing: take the clock off the playhead the moment a
+     finger lands, or play and drag fight each other. */
+  $('repScrub').addEventListener('pointerdown', replayPause);
+  $('repScrub').addEventListener('input', (e) => {
+    if (!replay.s) return;
+    const f = Number(e.target.value) / 1000;
+    replay.at = replay.from + f * (replay.to - replay.from);
+    paintReplay();
+  });
+
   $('btnBench').addEventListener('click', openBench);
   $('benchDone').addEventListener('click', () => { closeBench(); go('scrSettings'); });
   $('benchGrab').addEventListener('click', () => {
