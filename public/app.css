@@ -6,6 +6,7 @@
 :root {
   --paper: #F6F7FA;
   --card: #FFFFFF;
+  --rim: #DDB95A;
   --border: #D8DEEA;
   --ink: #0F1F3D;
   --moss: #14284B;
@@ -1047,6 +1048,7 @@ body:has(#scrWalk:not([hidden])) { --top-row: calc(var(--safe-t) + 104px); }
 :root[data-theme="dark"] {
   --paper: #0B1630;
   --card: #13223F;
+  --rim: rgba(241, 210, 122, 0.7);
   --border: #25395E;
   --ink: #F1F4F9;
   --moss: #3561A8;
@@ -1059,6 +1061,7 @@ body:has(#scrWalk:not([hidden])) { --top-row: calc(var(--safe-t) + 104px); }
   :root:not([data-theme="light"]) {
     --paper: #0B1630;
     --card: #13223F;
+    --rim: rgba(241, 210, 122, 0.7);
     --border: #25395E;
     --ink: #F1F4F9;
     --moss: #3561A8;
@@ -1383,3 +1386,25 @@ body:has(#scrWalk:not([hidden])) { --top-row: calc(var(--safe-t) + 104px); }
 .screen.first-launch .back-btn { display: none; }   /* nothing to go back to yet */
 .screen.tutorial .back-btn { background: rgba(255, 255, 255, 0.12); color: #fff; border-color: rgba(255, 255, 255, 0.22); box-shadow: none; }
 :root[data-theme="dark"] .back-btn { box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 2px 6px rgba(0, 0, 0, 0.4); }
+
+/* ── A light gold rim on every button ────────────────────────────────
+   Rémi's call, 21 Sept 2026. One token and one rule, last in the file, so
+   no variant (filled, ghost, selected, on the map) can lose it by being
+   more specific earlier. List rows in Settings are rows, not buttons, and
+   keep their own look. So do the Sign in with Apple and Google buttons:
+   both companies require their button to look exactly their way, and an
+   altered Apple button is a reason for App Store rejection. The focus ring
+   is an outline, so this never hides it. */
+.btn, .btn.moss, .btn.ember, .btn.danger, .btn.ghost, .btn.moss-on-dark, .btn.live-btn.on, .btn.live-btn.alert,
+.chip, .chip.selected, .chip.ghost, .wp-pill, .db-opt, .db-opt.on, .call-opt, .call-opt.on,
+.fix-nudge, .rep-play, .rep-speed, .map-fab, .map-style, .style-pick button,
+/* More specific rules elsewhere that set their own border: the map screens'
+   glass buttons, a selected trail age, and a danger button in dark mode. */
+.chip.lvl.selected, :root[data-theme="dark"] .btn.danger,
+.screen.glass .btn, .screen.glass .btn.ghost, .screen.glass .btn.moss, .screen.glass .btn.moss-on-dark,
+.screen.glass .btn.ember, .screen.glass .btn.live-btn.alert, .screen.glass .btn.live-btn.on, .map-fab.nudge {
+  border-width: 1.5px; border-style: solid; border-color: var(--rim);
+}
+/* An empty "add one" chip stays dashed: that shape is how it says "new". */
+.chip.ghost { border-style: dashed; }
+
