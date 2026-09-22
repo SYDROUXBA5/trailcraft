@@ -22,7 +22,8 @@ import { GROUND_LAYERS, buildGround, surfaceAt, surfaceAlong, surfaceRows, withS
          tilesCovering, isHard, GROUND_V, GROUND_RULES, readingSig, readingFits, readingVersion,
          CONDITIONS, blankSeen, cleanSeen, seenLine, surfaceById,
          FIX_AS, alongOf, idxAt, makeFix, applyFixes, fixSpan, stretchMetres } from './ground.js';
-import { sync, onSync, initSync, signInWithGoogle, signInWithApple, signOut, deleteAccount,
+import { sync, onSync, initSync, signInWithGoogle, signInWithApple, signOut, deleteAccount, useThisAccount,
+         adoptRecords, reclaim,
          signUpWithEmail, signInWithEmail, resetPassword,
          startLive, pushLive, endLive, watchLive } from './sync.js';
 import { trailModel, encodeShared, decodeShared, sharedUrl, toGpx, fileBase,
@@ -37,7 +38,7 @@ import { createStore, migrateV1, TARGETS, ODOURS, targetById, targetText, verbs,
          dogStats, ageBand, AGE_BANDS, LEVELS, levelById, dogAge } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-22g';
+const BUILD = '2026-09-22h';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true,
@@ -4422,13 +4423,17 @@ const liveView = { model: null, tick: 0, fitted: false };
 
 function paintLiveBtn() {
   const b = $('btnLive');
-  b.hidden = !sync.configured;
+  if (!b) return;
+  b.hidden = !sync.configured || sync.status === 'other' || sync.status === 'ask';
   b.classList.toggle('on', !!liveState);
   b.textContent = liveState ? '● Live — send the link again' : 'Share live';
 }
 
 async function goLive() {
   if (!sync.user) return toast('Sign in (Settings → Account) to share a run live');
+  if (sync.status === 'other' || sync.status === 'ask') {
+    return toast('Settle whose records are on this phone first (Settings → Account)');
+  }
   if (!run.session) return;
   if (!liveState) {
     try {
@@ -5423,6 +5428,20 @@ function renderAccount() {
     const err = sync.status === 'error' && sync.error ? `<p class="body small signin-error">${esc(sync.error)}</p>` : '';
     card.innerHTML = `<p class="body small muted">Sign in to back up your dogs and trails, and have them on any phone.</p>${err}
       <button type="button" class="btn moss" data-account="signin"${busy ? ' disabled' : ''}>${busy ? 'Connecting…' : 'Sign in'}</button>`;
+  } else if (sync.status === 'other' || sync.status === 'ask') {
+    /* Signed in, but whose records are on this phone is not settled. Nothing
+       has been sent to this account, and nothing will be until it is. */
+    const u = sync.user;
+    const mine = sync.status === 'ask';
+    const what = `${S.sessions.length} session${S.sessions.length === 1 ? '' : 's'} and ${S.dogs.length} dog${S.dogs.length === 1 ? '' : 's'}`;
+    card.innerHTML = `<div class="account-who">${avaHtml({ name: u.name || u.email || '?' })}<div><b>${esc(u.name || 'Signed in')}</b><i>${esc(u.email || '')}</i></div></div>
+      <p class="body small">${mine
+        ? `This phone already had ${what} on it before you signed in. Nothing has been backed up yet.`
+        : `The ${what} on this phone belong to a different account. Nothing has been sent to this one.`}</p>
+      ${mine ? '<button type="button" class="btn moss" data-account="adopt">These are mine — back them up</button>' : ''}
+      <button type="button" class="btn ghost" data-account="signout">Sign out</button>
+      <button type="button" class="btn ghost small del-link" data-account="fresh">Clear this phone and use this account</button>
+      <button type="button" class="btn ghost small del-link" data-account="delete">Delete my account</button>`;
   } else {
     const u = sync.user;
     const dot = sync.status === 'synced' ? 'ok' : sync.status === 'error' ? 'bad' : 'busy';
@@ -5439,7 +5458,8 @@ function renderAccount() {
   }
   // The privacy line says what is actually true right now.
   const where = $('dataWhere');
-  if (where) where.textContent = sync.user
+  const backing = sync.user && sync.status !== 'other' && sync.status !== 'ask';
+  if (where) where.textContent = backing
     ? 'Everything lives on this phone, and is backed up to your account. Only you can read it.'
     : 'Everything lives on this phone. Nothing is uploaded.';
 }
@@ -5450,9 +5470,18 @@ onSync((st) => {
   if (err) { err.textContent = st.error || ''; err.hidden = !st.error || $('scrSignIn').hidden; }
   /* Signed in from the sign-in screen and the account had records: they are
      on the phone now, so carry on as if they had always been there. */
-  if (st.user && st.status === 'synced' && !$('scrSignIn').hidden) {
+  paintLiveBtn();                 // a live link is refused until the records are settled
+  if (st.user && ['synced', 'other', 'ask'].includes(st.status) && !$('scrSignIn').hidden) {
     db.kv.set('signInAnswered', true);
     snap();
+    if (st.status === 'other' || st.status === 'ask') {
+      /* Straight to the account card, which is where the question is asked. */
+      renderSettings();
+      go('scrSettings');
+      return toast(st.status === 'ask'
+        ? 'Signed in. Say in Settings whether the records already on this phone are yours'
+        : 'Signed in. This phone’s records belong to another account, so nothing was backed up');
+    }
     if (signInFirstLaunch) return boot();
     renderSettings();
     go('scrSettings');
@@ -6067,6 +6096,23 @@ function wire() {
     if (!b) return;
     if (b.dataset.account === 'signin') return openSignIn();
     if (b.dataset.account === 'delete') return openDeleteAccount();
+    if (b.dataset.account === 'adopt') {
+      const who = sync.user?.email || 'your account';
+      if (!confirm(`Back up the ${S.sessions.length} sessions and ${S.dogs.length} dogs on this phone to ${who}? Do this only if they are yours.`)) return;
+      const ok = await adoptRecords().catch(() => false);
+      snap();
+      renderSettings();
+      return toast(ok ? 'Backing up to your account' : 'That did not work — try again in a moment');
+    }
+    if (b.dataset.account === 'fresh') {
+      const who = sync.user?.email || 'this account';
+      if (!confirm(`Clear this phone and use ${who}? The ${S.sessions.length} sessions and ${S.dogs.length} dogs on it are not this account's, so they are not uploaded. They go. Export everything first if you want to keep them.`)) return;
+      const ok = await useThisAccount().catch(() => false);
+      if (!ok) { snap(); renderSettings(); return toast('That did not work — nothing was changed'); }
+      /* The old account's copy in the database's own cache went with it, which
+         means the database is shut down: the app starts again from clean. */
+      return location.reload();
+    }
     if (b.dataset.account === 'signout') {
       if (!confirm('Sign out? Your trails stay on this phone; they just stop backing up.')) return;
       await signOut();
@@ -6108,6 +6154,7 @@ function wire() {
     const backup = sync.user ? ' Your account backup is not touched: signing in again brings it back.' : '';
     if (!confirm(`Wipe everything? ${S.sessions.length} sessions, ${S.dogs.length} dogs and all profiles. Export first if you want to keep them.${backup}`)) return;
     db.wipeAll();
+    reclaim();          // the owner mark lives in the same store and went with it
     snap();
     boot();
   });
