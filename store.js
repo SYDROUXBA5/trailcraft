@@ -71,7 +71,7 @@ export const verbs = (t) => t.kind === 'person'
 
 const K = {
   handlers: 'tc.handlers', dogs: 'tc.dogs', layers: 'tc.layers',
-  sessions: 'tc.sessions2', kv: 'tc.kv',
+  sessions: 'tc.sessions2', kv: 'tc.kv', draft: 'tc.draft',
 };
 
 /** A save that did not happen. `full` means the phone refused for lack of
@@ -152,8 +152,16 @@ export function createStore(backend) {
     set(k, v) { const o = read(K.kv, {}); o[k] = v; write(K.kv, o); },
   };
 
+  /* The recording in progress (draft.js). Its own key, because it is rewritten
+     every few seconds while walking and must not drag the rest along with it. */
+  const draft = {
+    read: () => read(K.draft, null),
+    save(d) { write(K.draft, d); },
+    clear() { backend.removeItem(K.draft); },
+  };
+
   const store = {
-    handlers, dogs, layers, kv,
+    handlers, dogs, layers, kv, draft,
 
     /* Deleting a handler orphans nothing silently: their dogs go with them,
        exactly as the native app does it. */
