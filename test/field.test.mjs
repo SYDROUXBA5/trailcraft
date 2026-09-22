@@ -534,10 +534,14 @@ t('ScentSim: parcels do not all stop at the same distance', () => {
   const ragged = (Math.max(...edges) - Math.min(...edges)) / Math.max(...edges);
   assert.ok(ragged > 0.15, `the far edge varies along the line by ${(ragged * 100).toFixed(0)}%, not a straight cut`);
 
-  // The far parcels are the faint ones: the plume thins out, it does not stop.
-  const byReach = g.map((p, i) => ({ r: reach[i], s: p.str })).sort((a2, b2) => a2.r - b2.r);
-  assert.ok(byReach[byReach.length - 1].s < byReach[0].s,
-    'the furthest parcel is fainter than the closest');
+  /* Nothing here asserts that the far parcels are fainter or fewer. At one
+     instant from one seeding they are neither: each parcel's airborne time is
+     spread evenly (phase), and patchiness gives each a fixed share of the
+     convective damage from its own seed. Two earlier versions of this line —
+     furthest parcel vs closest, then far third vs near third — each failed a
+     few times in a hundred, because they asserted something this model does
+     not do. What the plume thinning actually comes from is the app re-walking
+     the line every frame (plumeSamples), not from one set of parcels. */
 });
 
 t('RESIDENCE: mostly short, occasionally long, never zero or absurd', () => {

@@ -168,6 +168,45 @@ t('deleting an account proves it is them, then removes live runs, the backup, an
   assert.ok(/fb\.collection\(run\.ref, 'chunks'\)[\s\S]*deleteDoc\(run\.ref\)/.test(syncJs), 'a live run’s pieces go before the run');
 });
 
+t('every screen in the markup is one the app can actually show', () => {
+  /* go() hides every screen in SCREENS and shows the one asked for. A section
+     missing from that list is built, filled in and left hidden — the app looks
+     like it froze. That shipped twice, so it is pinned here. */
+  const inList = new Set((js.match(/const SCREENS = \[([\s\S]*?)\];/)?.[1] || '')
+    .match(/'([^']+)'/g)?.map(s2 => s2.slice(1, -1)) || []);
+  const inMarkup = [...html.matchAll(/<section id="(scr[A-Za-z]+)"[^>]*class="[^"]*\bscreen\b/g)].map(m => m[1]);
+  assert.ok(inMarkup.length > 25, `found ${inMarkup.length} screens in the markup`);
+  for (const id of inMarkup) assert.ok(inList.has(id), `${id} is in index.html but not in SCREENS, so go('${id}') shows nothing`);
+  for (const id of inList) assert.ok(inMarkup.includes(id), `SCREENS names ${id}, which no longer exists`);
+});
+
+t('an unfinished recording is written down, and nothing reloads over it', () => {
+  assert.match(js, /function onFix[\s\S]{0,2000}keepDraft\(\);/, 'every fix keeps the draft up to date');
+  assert.match(js, /const busy = unsavedWork\(\);/, 'an update waits for unsaved work, not just for the GPS');
+  assert.match(js, /function unsavedWork\(\)[\s\S]{0,200}rec\.on[\s\S]{0,200}draftAlive/,
+    'unsaved means recording OR a walk still on the phone');
+  /* The walk goes into the session before anything that can hang: grading
+     asks the weather service, and the run must not depend on it. */
+  const stop = js.slice(js.indexOf('async function stopRun'), js.indexOf('/* ── The result'));
+  const rawSave = stop.indexOf('saveSession(s, raw)');
+  assert.ok(rawSave > 0 && rawSave < stop.indexOf('computeResult('), 'the track is saved before it is graded');
+  assert.ok(stop.lastIndexOf('dropDraft()') > stop.indexOf('saveSession(s, patch)'),
+    'the draft is dropped after the graded save, not before it');
+  assert.match(stop, /if \(saved\) dropDraft\(\);/, 'and only if the phone really took it');
+  assert.match(js, /if \(guardSave\(s, \(\) => db\.addSession\(s\)\)\) dropDraft\(\);/,
+    'a refused save keeps the draft: it is the only durable copy');
+  assert.match(js, /currentScreen === 'scrHome' && !unsavedWork\(\)/,
+    'the service worker’s own reload waits for unsaved work too');
+  assert.match(js, /function paintHides\(\) \{\s*\n\s*keepDraft\(true\);/, 'hides are written down as they are placed');
+  for (const [where, what] of [['async function confirmLay', 'dropDraft();'], ['function discardLay', 'dropDraft();']]) {
+    const body = js.slice(js.indexOf(where), js.indexOf(where) + 1200);
+    assert.ok(body.includes(what), `${where} clears the draft`);
+  }
+  assert.match(js, /if \(S\.handler && offerRecovery\(\)\) return;/,
+    'boot offers it back, once there is a handler to save it for');
+  assert.ok(htmlIds.has('scrRecover') && htmlIds.has('btnRecoverKeep') && htmlIds.has('btnRecoverDrop'));
+});
+
 t('a phone carrying another account’s records uploads nothing until it is answered', () => {
   const body = syncJs.slice(syncJs.indexOf('async function applyUser'), syncJs.indexOf('export async function deleteAccount'));
   const plan = body.indexOf('syncPlan('), claim = body.indexOf("kv.set('ownerUid'"), full = body.indexOf('fullSync(');

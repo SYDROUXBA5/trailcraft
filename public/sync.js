@@ -425,6 +425,15 @@ export async function startLive(meta) {
 
 export const liveNow = () => live?.id ?? null;
 
+/** Pick a live run back up after the app died mid-run, so the last points and
+    the result still reach whoever is watching. Its chunks are unknown, so they
+    are simply written again — the same points, the same ids, no duplicates. */
+export function resumeLive(id, startedAt) {
+  if (!fs || !sync.user || !id) return false;
+  live = { id, startedAt: startedAt ?? Date.now(), chunks: new Map(), expiresAt: Date.now() + LIVE_TTL, wpsN: -1 };
+  return true;
+}
+
 /** Send what has changed: the minute-chunks with new points (or a standing
     spot whose wait grew), and the marks when there is a new one. Not
     awaited — Firestore queues it offline and the handler is never kept. */

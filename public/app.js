@@ -10,6 +10,7 @@ import {
   pathLen, cardinal, dist, dwellFold, bearing, project, fmtDist, fmtShort, fmtSpeed, fmtTemp, unitShort, fmtWeight, kgToShown, shownToKg, fmtCoord, scentField, plumePolygon, densify, timestamps, signedOffsets, meanSigned, sideOfDrift, sideAgreement, lineCorrect, departure, timestampsEndingAt, progressAlong, splitLine, smoothBearing, medianAbs, sideShares,
 } from './geo.js';
 import { stepPoints, contamTimed } from './geo.js';
+import { packDraft, unpackDraft, draftAlive, draftStats } from './draft.js';
 import { handlerStats } from './store.js';
 import { plumePalette, stepPalette, windPalette, trackPalette, COLOUR_PRESETS, isHex, mix } from './colours.js';
 import { FLAT, buildTerrain, stability, regime, flowAt, normOf } from './field.js';
@@ -25,7 +26,7 @@ import { GROUND_LAYERS, buildGround, surfaceAt, surfaceAlong, surfaceRows, withS
 import { sync, onSync, initSync, signInWithGoogle, signInWithApple, signOut, deleteAccount, useThisAccount,
          adoptRecords, reclaim,
          signUpWithEmail, signInWithEmail, resetPassword,
-         startLive, pushLive, endLive, watchLive } from './sync.js';
+         startLive, pushLive, endLive, watchLive, resumeLive } from './sync.js';
 import { trailModel, encodeShared, decodeShared, sharedUrl, toGpx, fileBase,
          detailSections, headline, notes, liveMeta, liveModel } from './share.js';
 import { buildPdf, jpegSize } from './pdf.js';
@@ -38,7 +39,7 @@ import { createStore, migrateV1, TARGETS, ODOURS, targetById, targetText, verbs,
          dogStats, ageBand, AGE_BANDS, LEVELS, levelById, dogAge } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-22h';
+const BUILD = '2026-09-22i';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true,
@@ -137,7 +138,8 @@ const avaHtml = (ent, cls = '') => {
 const SCREENS = ['scrOnboardHandler', 'scrOnboardDog', 'scrTutorial', 'scrHome', 'scrHandler', 'scrLay',
   'scrConfirm', 'scrShare', 'scrContam', 'scrPick', 'scrScan', 'scrRun', 'scrResult',
   'scrShowMap', 'scrSessions', 'scrSettings', 'scrDraw', 'scrCountdown', 'scrWalk', 'scrWait', 'scrDog',
-  'scrSignIn', 'scrShareOut', 'scrShared', 'scrLive', 'scrBench', 'scrReplay', 'scrDebrief', 'scrFix'];
+  'scrSignIn', 'scrShareOut', 'scrShared', 'scrLive', 'scrBench', 'scrReplay', 'scrDebrief', 'scrFix',
+  'scrDelete', 'scrRecover'];
 
 /* The screens that are transparent chrome over the live map. */
 const MAP_SCREENS = ['scrLay', 'scrConfirm', 'scrContam', 'scrRun', 'scrShowMap', 'scrDraw', 'scrWalk', 'scrLive', 'scrBench', 'scrReplay', 'scrFix'];
@@ -1347,6 +1349,7 @@ function onHideTap(e) {
   paintHides();
 }
 function paintHides() {
+  keepDraft(true);          // a hide is placed by tapping, not by a GPS fix
   setSrc('hides', pointsOf(rec.hides));
   const n = rec.hides.length;
   $('layHudText').textContent = n ? `${n} hide${n === 1 ? '' : 's'} placed` : 'Place each hide';
@@ -2966,6 +2969,7 @@ function onFix(pos) {
   if (verdict === 'dwell') {
     last.dwellS = (last.dwellS ?? 0) + Math.max(0, (pt.t - (last._seen ?? last.t)) / 1000);
     last._seen = pt.t;
+    keepDraft();        // standing still is the strongest source: it is part of the walk
     return;
   }
   pt.dwellS = 0;
@@ -2987,6 +2991,42 @@ function onFix(pos) {
     }
   }
   if (rec.pts.length === 1 && !nav.follow) map.easeTo({ center: [lon, lat], zoom: 17 });
+  keepDraft();
+}
+
+/* ── The recording, written down as it happens (draft.js) ────────────
+   Every few seconds, not every fix: a fix arrives about once a second, and
+   rewriting the whole track that often is enough to make a phone stutter. */
+const DRAFT_EVERY = 4000;
+
+function keepDraft(force = false) {
+  if (!rec.kind) return;
+  const now = Date.now();
+  if (!force && now - (rec.draftAt || 0) < DRAFT_EVERY) return;
+  rec.draftAt = now;
+  const d = packDraft({
+    kind: rec.kind,
+    startedAt: rec.kind === 'run' ? run.startedAt : rec.started,
+    sessionId: rec.kind === 'run' ? run.session?.id ?? null : null,
+    targetId: S.target?.id ?? null, layerId: S.layer?.id ?? null,
+    dogId: S.dog?.id ?? null, odour: S.odour ?? null,
+    liveId: liveState?.id ?? null, liveUrl: liveState?.url ?? null,
+    pts: rec.pts, wps: rec.wps, hides: rec.hides,
+  }, now);
+  /* A full phone must not stop the walk: the recording carries on in memory,
+     exactly as it did before there was a draft at all. */
+  if (d) try { db.draft.save(d); } catch { /* no room */ }
+}
+
+function dropDraft() {
+  rec.draftAt = 0;
+  try { db.draft.clear(); } catch { /* nothing to clear */ }
+}
+
+/** Is there work on this phone that has not been saved yet? */
+function unsavedWork() {
+  if (rec.on) return true;
+  try { return draftAlive(unpackDraft(db.draft.read())); } catch { return false; }
 }
 
 async function startWatch(hudId) {
@@ -3054,9 +3094,10 @@ async function layStop() {
   if (rec.kind === 'hide') {
     map.off('click', onHideTap);
     map.getCanvas().style.cursor = '';
-    if (!rec.hides.length) return go('scrHome');
+    if (!rec.hides.length) { dropDraft(); return go('scrHome'); }
     $('confirmText').textContent = `${rec.hides.length} hide${rec.hides.length === 1 ? '' : 's'} set`;
     fitTo(rec.hides);
+    keepDraft(true);          // waiting to be confirmed is unsaved work
     return go('scrConfirm');
   }
   await stopWatch();
@@ -3068,6 +3109,7 @@ async function layStop() {
     `${fmtKm(pathLen(rec.pts))} · ${fmtDur(rec.pts[rec.pts.length - 1].t - rec.pts[0].t)}`;
   setTrail(rec.pts);
   fitTo(rec.pts);
+  keepDraft(true);          // it is waiting to be confirmed: that is unsaved work
   go('scrConfirm');
 }
 
@@ -3088,7 +3130,10 @@ async function confirmLay() {
       ? { hides: rec.hides, weather: null }
       : { trail: rec.pts, waypoints: rec.wps, weather: null, contamination: [] },
   };
-  guardSave(s, () => db.addSession(s));
+  /* Only once the phone has really taken it. If the save was refused — a full
+     phone, which is the likeliest reason it crashed in the first place — the
+     draft stays: it is the only durable copy, and Retry needs it. */
+  if (guardSave(s, () => db.addSession(s))) dropDraft();
   snap();
   pendingSession = s;
   plumeStop();              // the share screen is paper; the map is behind it
@@ -3106,6 +3151,7 @@ async function confirmLay() {
 }
 
 function discardLay() {
+  dropDraft();
   plumeStop();
   clearMap();
   pendingSession = null;
@@ -3789,13 +3835,20 @@ async function stopRun() {
   plumeStop();
   airStop();
   const s = run.session;
-  if (!s) { liveEnd(null); return go('scrHome'); }
+  if (!s) { liveEnd(null); dropDraft(); return go('scrHome'); }
   if (rec.pts.length < 2) {
     liveEnd(null);
+    dropDraft();
     toast('Too short to grade — nothing saved');
     return go('scrHome');
   }
   rec.pts.forEach(p => delete p._seen);
+  keepDraft(true);
+  /* The walk is written to the session BEFORE it is graded. Grading asks the
+     weather service for the wind during the run, and anything that goes to
+     the network can hang or fail — the walk itself must not depend on it. */
+  const raw = { data: { ...s.data, track: rec.pts, trackStarted: run.startedAt, trackWaypoints: rec.wps } };
+  guardSave({ ...s, ...raw }, () => saveSession(s, raw));
   /* A plan-graded run is provisional: the drawn line is a sketch, so it
      neither banks calibration nor gets the last word — the walked card does. */
   const provisional = !!s.data.plan && !s.data.walked;
@@ -3813,6 +3866,7 @@ async function stopRun() {
   const saved = guardSave({ ...s, ...patch }, () => saveSession(s, patch));
   snap();
   run.session = saved ?? { ...s, ...patch };
+  if (saved) dropDraft();   // graded and kept; a refused save keeps its draft
   renderResult(run.session);
   go('scrResult');
 }
@@ -5495,7 +5549,9 @@ async function checkForUpdate() {
     if (!r.ok) return;
     const remote = (await r.text()).trim();
     if (!remote || remote === BUILD) return;
-    const busy = rec.on;
+    /* Not just "recording": a trail waiting on Confirm, or a run between
+       Stop and its result, is unsaved work and a reload would take it. */
+    const busy = unsavedWork();
     const tried = sessionStorage.getItem('tc.updateTried');
     if (busy || tried === remote) return toast(`Update ${remote} ready — close and reopen the app`);
     sessionStorage.setItem('tc.updateTried', remote);
@@ -5624,6 +5680,7 @@ function wire() {
   $('btnLayStop').addEventListener('click', layStop);
   $('btnLayCancel').addEventListener('click', async () => {
     await stopWatch();
+    dropDraft();            // thrown away on purpose: never offered back
     stopFollowing();
     plumeStop();
     if (rec.kind === 'hide') { map.off('click', onHideTap); map.getCanvas().style.cursor = ''; }
@@ -6064,6 +6121,8 @@ function wire() {
     applyTheme();
   });
   $('btnGoogle').addEventListener('click', () => signInWithGoogle());
+  $('btnRecoverKeep').addEventListener('click', recoverKeep);
+  $('btnRecoverDrop').addEventListener('click', recoverDrop);
   $('btnDeleteGo').addEventListener('click', submitDelete);
   $('btnDeleteCancel').addEventListener('click', () => { $('delPassword').value = ''; go('scrSettings'); });
   $('delPassword').addEventListener('keydown', (e) => { if (e.key === 'Enter') submitDelete(); });
@@ -6173,10 +6232,96 @@ async function importFromLink() {
 }
 
 /* ── Boot ─────────────────────────────────────────────────────────── */
+/* ── Offering an unfinished recording back ──────────────────────────── */
+let recovering = null;
+
+function offerRecovery() {
+  const d = (() => { try { return unpackDraft(db.draft.read()); } catch { return null; } })();
+  if (!draftAlive(d)) { if (d) dropDraft(); return false; }
+  recovering = d;
+  const st = draftStats(d);
+  $('recoverWhat').textContent = d.kind === 'hide'
+    ? `${st.hides} hide${st.hides === 1 ? '' : 's'} set, not saved.`
+    : `${fmtKm(st.metres)} ${d.kind === 'run' ? 'run' : 'trail'}, ${fmtDur(st.lastedMs)}, not saved.`;
+  $('recoverWhen').textContent = `Recorded ${fmtWhen(st.startedAt)}.`;
+  go('scrRecover');
+  return true;
+}
+
+async function recoverKeep() {
+  const d = recovering;
+  if (!d) return boot();
+  if (!S.handler) { toast('Set yourself up first, then this comes back'); return boot(); }
+  /* Back to exactly where the recording stopped, using the same paths a
+     finished one takes — nothing here is a second way of saving a walk. */
+  rec.kind = d.kind;
+  rec.pts = d.pts;
+  rec.wps = d.wps;
+  rec.hides = d.hides;
+  rec.started = d.startedAt;
+  rec.on = false;
+  recovering = null;
+
+  /* Who and what it was for: the run is graded for that dog, and the trail is
+     saved for that target and layer, exactly as it would have been. A phone too
+     full to remember that is not a reason to lose the walk. */
+  try {
+    if (d.targetId) db.kv.set('lastTargetId', d.targetId);
+    if (d.layerId) db.kv.set('lastLayerId', d.layerId);
+    if (d.dogId) db.kv.set('lastDogId', d.dogId);
+  } catch { /* the walk matters more than which chip was selected */ }
+  snap();
+
+  if (d.kind === 'run') {
+    const s = d.sessionId ? db.sessions().find(x => x.id === d.sessionId) : null;
+    if (!s) { dropDraft(); toast('That run’s trail is no longer on this phone'); return boot(); }
+    run.session = s;
+    run.startedAt = d.startedAt;
+    /* Whoever was watching it live gets the end of the run and the result,
+       rather than a track that simply stopped. */
+    if (d.liveId && sync.user) {
+      resumeLive(d.liveId, d.startedAt);
+      liveState = { id: d.liveId, url: d.liveUrl || '', timer: 0 };
+    }
+    try {
+      return await stopRun();             // grades and saves it, as Stop would have
+    } catch {
+      /* The walk itself was written into the session before grading, so it is
+         safe; the draft goes rather than being offered again for ever. */
+      dropDraft();
+      toast('The run is saved, but grading it did not work');
+      return boot();
+    }
+  }
+  if (d.kind === 'hide') {
+    paintHides();
+    $('confirmText').textContent = `${rec.hides.length} hide${rec.hides.length === 1 ? '' : 's'} set`;
+    fitTo(rec.hides);
+    return go('scrConfirm');
+  }
+  $('confirmText').textContent =
+    `${fmtKm(pathLen(rec.pts))} · ${fmtDur(rec.pts[rec.pts.length - 1].t - rec.pts[0].t)}`;
+  setTrail(rec.pts);
+  fitTo(rec.pts);
+  go('scrConfirm');
+}
+
+function recoverDrop() {
+  const st = draftStats(recovering);
+  const what = recovering?.kind === 'hide' ? `${st.hides} hides` : fmtKm(st?.metres ?? 0);
+  if (!confirm(`Throw away ${what}? It cannot be got back.`)) return;
+  recovering = null;
+  dropDraft();
+  boot();
+}
+
 function boot() {
   applyTheme();          // the head script already painted it; this keeps it in step
   snap();
   if (openFromHash()) return;   // a trail someone sent: that first, the app's own business after
+  /* Only once there is a handler to own it: recovery goes through the same
+     save paths, and those need to know whose walk this is. */
+  if (S.handler && offerRecovery()) return;
   /* A brand-new phone is offered sign-in before anything else, because if
      there is an account, everything the handler set up on their last phone
      comes back and onboarding is not needed at all. Offered once: "use
@@ -6253,7 +6398,7 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
   const hadSw = !!navigator.serviceWorker.controller;
   navigator.serviceWorker.addEventListener('controllerchange', () => {
     if (!hadSw) return;
-    if (currentScreen === 'scrHome' && !rec.on) location.reload();
+    if (currentScreen === 'scrHome' && !unsavedWork()) location.reload();
     else toast('A new version is ready \u2014 it loads next time you open the app');
   });
 }
