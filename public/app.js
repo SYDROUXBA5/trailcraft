@@ -35,7 +35,7 @@ import { createStore, migrateV1, TARGETS, ODOURS, targetById, targetText, verbs,
          dogStats, ageBand, AGE_BANDS, LEVELS, levelById, dogAge } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-21o';
+const BUILD = '2026-09-22a';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true,
@@ -1992,7 +1992,9 @@ function airFrame(now) {
    picks up most dials for free. The BAND does not — it is drawn once per
    session render — so anything touching the band needs an explicit repaint,
    or a live dial looks dead, which is worse than no dial. */
-const bench = { on: false, trail: null, wx: null, open: false };
+/* `mine` is a trail laid on the bench, kept for the rest of this visit so
+   reopening the bench goes back to it; `laying` holds the taps in progress. */
+const bench = { on: false, trail: null, wx: null, open: false, mine: null, laying: null };
 
 /** A demo trail: a dog-leg on open ground near wherever the map is looking,
     so the wind can be turned against it and the band watched swinging. */
@@ -2145,13 +2147,15 @@ function openBench() {
   bench.on = true;
   clearMap();
   const c = map.getCenter();
-  bench.trail = benchTrail({ lat: c.lat, lon: c.lng });
+  bench.trail = bench.mine ?? benchTrail({ lat: c.lat, lon: c.lng });
+  $('benchDemoBtn').hidden = !bench.mine;
   paintBench();
   go('scrBench');
   fitTo(bench.trail, []);
   benchPaint();
 }
 function closeBench() {
+  benchLayStop();
   bench.on = false;
   bench.trail = null;
   /* The dials do NOT follow you out. predictedOffsets reads the same live
@@ -2163,6 +2167,95 @@ function closeBench() {
   resetParams();
   plumeStop();
   clearMap();
+}
+
+/* ── Laying a trail on the bench ──────────────────────────────────────
+   Anywhere on the map: tap the start, then each corner. The line is filled
+   in every 4 m like the demo, and the ground under it is read from the map,
+   so a stretch of real tarmac is tarmac to the dials and the buildings round
+   it are the real ones. */
+function benchLayStart() {
+  bench.laying = [];
+  plumeStop();
+  clearMap();
+  $('benchSheet').hidden = true;
+  $('benchLay').hidden = false;
+  $('benchHudText').textContent = 'Lay your trail';
+  map.getCanvas().style.cursor = 'crosshair';
+  map.on('click', onBenchLayTap);
+  benchLayPaint();
+}
+
+function onBenchLayTap(e) {
+  if (!bench.laying) return;
+  const pt = { lat: e.lngLat.lat, lon: e.lngLat.lng };
+  const prev = bench.laying[bench.laying.length - 1];
+  if (prev && dist(prev, pt) > 5000) return toast('That corner is km away. Zoom in.');
+  bench.laying.push(pt);
+  navigator.vibrate?.(15);
+  benchLayPaint();
+}
+
+function benchLayPaint() {
+  const pts = bench.laying ?? [];
+  setTrail(pts);
+  setSrc('start', pointsOf(pts.slice(0, 1)));
+  setSrc('wps', pointsOf(pts.slice(1).map((p, i) => ({ ...p, kind: String(i + 1) })), 'kind'));
+  const n = pts.length;
+  $('benchLayText').textContent = n === 0 ? 'Tap where the trail starts'
+    : n === 1 ? 'Now tap the first corner'
+    : `${n - 1} corner${n === 2 ? '' : 's'} · ${fmtKm(pathLen(pts))}. Keep tapping, or use it.`;
+  $('benchLayUndo').disabled = n === 0;
+  $('benchLayUse').disabled = n < 2;
+}
+
+/** Put the map back to taking ordinary gestures, and the dials back. */
+function benchLayStop() {
+  if (!bench.laying) return;
+  bench.laying = null;
+  map.off('click', onBenchLayTap);
+  map.getCanvas().style.cursor = '';
+  setSrc('wps', EMPTY);
+  $('benchLay').hidden = true;
+  $('benchSheet').hidden = false;
+}
+
+function benchLayUse() {
+  const taps = bench.laying;
+  if (!taps || taps.length < 2) return;
+  benchLayStop();
+  const trail = densify(taps.map(p => ({ lat: p.lat, lon: p.lon })), 4);
+  bench.mine = trail;
+  bench.trail = trail;
+  $('benchDemoBtn').hidden = false;
+  fitTo(trail, []);
+  benchPaint();
+  /* The real ground under it, when the map answers: tarmac marked as tarmac
+     for the ground dials. Until then it is ordinary ground, as the model
+     treats anything it has not read. */
+  groundFor(trail).then(g => {
+    if (!g || bench.trail !== trail) return;
+    const { letters } = surfaceAlong(g, trail);
+    trail.forEach((p, i) => { if (isHard(letters[i])) p.hard = true; });
+    if (bench.on) benchPaint();
+  }).catch(() => {});
+}
+
+function benchLayCancel() {
+  benchLayStop();
+  clearMap();
+  benchPaint();
+}
+
+function benchUseDemo() {
+  benchLayStop();
+  bench.mine = null;
+  const c = map.getCenter();
+  bench.trail = benchTrail({ lat: c.lat, lon: c.lng });
+  $('benchDemoBtn').hidden = true;
+  clearMap();
+  fitTo(bench.trail, []);
+  benchPaint();
 }
 
 /* ── Correct a stretch ────────────────────────────────────────────────
@@ -5669,6 +5762,11 @@ function wire() {
     $('benchGrab').setAttribute('aria-expanded', String(bench.open));
     styleGap();
   });
+  $('benchLayBtn').addEventListener('click', benchLayStart);
+  $('benchDemoBtn').addEventListener('click', benchUseDemo);
+  $('benchLayUndo').addEventListener('click', () => { bench.laying?.pop(); benchLayPaint(); });
+  $('benchLayCancel').addEventListener('click', benchLayCancel);
+  $('benchLayUse').addEventListener('click', benchLayUse);
   $('benchReset').addEventListener('click', () => {
     resetParams();
     paintBench();

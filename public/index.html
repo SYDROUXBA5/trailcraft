@@ -696,11 +696,26 @@
       </span>
       <span class="bench-read" id="benchRead"></span>
     </button>
+    <!-- Where the trail is: the demo, or one you lay anywhere on the map. -->
+    <div class="bench-trail">
+      <button type="button" class="btn small" id="benchLayBtn">Lay my own trail</button>
+      <button type="button" class="btn ghost small" id="benchDemoBtn" hidden>Back to the demo trail</button>
+    </div>
     <div class="bench-body" id="benchBody"></div>
     <div class="bench-foot">
       <button class="btn ghost small" id="benchReset">Back to defaults</button>
       <button class="btn ghost small" id="benchDone">Done</button>
     </div>
+  </div>
+  <!-- Laying a trail on the bench: the dials step aside and the map takes the
+       taps. Start first, then each corner, the same as drawing a plan. -->
+  <div class="glass-bottom fix-sheet bench-lay" id="benchLay" hidden>
+    <p class="glass-caption" id="benchLayText" aria-live="polite">Tap where the trail starts</p>
+    <div class="row-gap">
+      <button type="button" class="btn ghost" id="benchLayUndo" disabled>Undo</button>
+      <button type="button" class="btn ghost" id="benchLayCancel">Cancel</button>
+    </div>
+    <button type="button" class="btn moss" id="benchLayUse" disabled>Use this trail</button>
   </div>
 </section>
 
