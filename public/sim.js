@@ -19,7 +19,7 @@
 import { project, bearing, dist } from './geo.js';
 import { flowAt, normOf, scentLife } from './field.js';
 import { PV } from './params.js';
-import { blockStep, wallAt, leeFactor } from './walls.js';
+import { blockStep, leeFactor, outside } from './walls.js';
 
 /** Seconds a particle stays workable once it has left the ground. Airborne
     residence is what sets the offset scale: at 0.8 m/s, 50 s puts the plume
@@ -105,13 +105,13 @@ export function stepByFlow(p, f, secs, carry = 1) {
    drawn cloud, tracers and arrows pass them; the grading (predictedOffsets)
    never does, so a building on the map moves what you see and never a score. */
 export function driftFrom(T, origin, secs, wx, st, steps = 5, walls = null) {
-  let pt = { lat: origin.lat, lon: origin.lon };
-  if (!(secs > 0)) return pt;
+  /* A trail point inside a footprint starts from just outside its nearest
+     wall (walls.js), and from there every wall applies. Before the first
+     step too: a parcel just leaving the ground is the brightest one drawn. */
+  let pt = walls ? outside(walls, origin) : { lat: origin.lat, lon: origin.lon };
+  if (!(secs > 0)) return { lat: pt.lat, lon: pt.lon };
   const dt = secs / steps;
   const f = { u: 0, v: 0 };
-  /* A trail point inside a footprint is GPS against a wall: that building
-     does not trap the scent laid "inside" it. */
-  const skip = walls ? wallAt(walls, origin) : -1;
   const wake = walls && PV.wakeSlow < 1;
   const going = ((wx?.wind_direction ?? 0) + 180) % 360;
 
@@ -124,7 +124,7 @@ export function driftFrom(T, origin, secs, wx, st, steps = 5, walls = null) {
       f.u *= k; f.v *= k;
     }
     const next = stepByFlow(pt, f, dt, PV.nose);
-    pt = walls ? blockStep(walls, pt, next, skip, PV.wallSlide) : next;
+    pt = walls ? blockStep(walls, pt, next, -1, PV.wallSlide) : next;
   }
   return pt;
 }
@@ -285,10 +285,18 @@ export class ScentSim {
       // all stop at the same distance.
       const h = s.hard;
       const secs = s.phase * AIR * (s.life ?? 1) / mix * (h ? CARRY : 1);
-      const d = driftFrom(T, { lat: s.hlat, lon: s.hlon }, secs, wx, st, 5, WALLS);
+      /* Where this parcel's scent really starts: moved out of a building its
+         trail point falls inside (walls.js). Worked out once per set of walls,
+         not every frame; the ground source never moves. */
+      let home = { lat: s.hlat, lon: s.hlon };
+      if (WALLS) {
+        if (s.hw !== WALLS) { s.hw = WALLS; s.ho = outside(WALLS, home); }
+        home = s.ho;
+      }
+      const d = driftFrom(T, home, secs, wx, st, 5, WALLS);
       s.lat = d.lat; s.lon = d.lon;
 
-      const dispM = dist({ lat: s.hlat, lon: s.hlon }, d);
+      const dispM = dist(home, d);
 
       if (dispM > 0.5 && gustiness > 0.02) {
         // Perpendicular wander, amplitude from gustiness and how far the
@@ -296,9 +304,12 @@ export class ScentSim {
         // the verdict grades is untouched.
         const amp = Math.min(MCAP, dispM * gustiness * MAMP) * (h ? WIDEN : 1);
         const sway = amp * Math.sin(breathe + s.seed * 3.1 + s.phase * 6.28318);
-        const brg = bearing({ lat: s.hlat, lon: s.hlon }, d);
+        const brg = bearing(home, d);
         const p2 = project({ lat: s.lat, lon: s.lon }, (brg + 90) % 360, sway);
-        s.lat = p2.lat; s.lon = p2.lon;
+        /* The sway is a move like any other: a wall stops it too. Left
+           unchecked it pushed gusty scent into houses. */
+        const p3 = WALLS ? blockStep(WALLS, { lat: s.lat, lon: s.lon }, p2, -1, PV.wallSlide) : p2;
+        s.lat = p3.lat; s.lon = p3.lon;
       }
 
       /* Ground source fades as the trail ages; the particle also thins as it

@@ -3,7 +3,7 @@
 
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { wallIndex, wallAt, blockStep, leeFactor, bandInWalls } from '../public/walls.js';
+import { wallIndex, wallAt, blockStep, leeFactor, bandInWalls, outside } from '../public/walls.js';
 import { driftFrom, ScentSim } from '../public/sim.js';
 import { buildGround } from '../public/ground.js';
 import { FLAT, stability } from '../public/field.js';
@@ -185,6 +185,57 @@ t('where the band runs through a building is found, not hidden', () => {
   assert.equal(r.pieces.length, 1);
   assert.equal(r.pieces[0].length, 3, 'the three centre points inside the house');
   assert.deepEqual(bandInWalls(null, field), { count: 0, pieces: [] });
+});
+
+/* ── The three ways scent got onto roofs in Wells, 22 Sept 2026 ──
+   Checked against real map buildings round the bench trail: a fifth of the
+   drawn cloud sat inside buildings. A line drawn along a street clips houses,
+   gusts pushed parcels sideways after the wall check, and the map draws
+   building parts as outlines inside other outlines. */
+
+t('a trail point inside a building starts from just outside it', () => {
+  const W = house();
+  const p = outside(W, at(3, 10));                        // 3 m in from the west wall
+  assert.equal(wallAt(W, p), -1, 'out');
+  assert.ok(xy(p)[0] < 0 && xy(p)[0] > -1.5, `beside the nearest wall (x ${xy(p)[0].toFixed(2)})`);
+  const q = at(-5, 5);
+  assert.equal(outside(W, q), q, 'a point already outside is left exactly where it is');
+  assert.equal(outside(null, q), q);
+});
+
+t('out of a building part and the building round it, and out of a whole terrace', () => {
+  /* A small outline drawn inside a big one, the way the map draws extensions. */
+  const N = wallIndex([box(0, 0, 40, 40), box(15, 15, 25, 25)], REF);
+  assert.equal(wallAt(N, outside(N, at(20, 20))), -1, 'clear of both outlines');
+
+  /* Six terraced houses sharing walls, point in the middle one. */
+  const T = wallIndex([0, 8, 16, 24, 32, 40].map(x => box(x, 0, x + 8, 12)), REF);
+  assert.equal(wallAt(T, outside(T, at(20, 6))), -1, 'clear of the terrace');
+});
+
+t('a gusty cloud laid through a terrace has nothing inside any house', () => {
+  resetParams();
+  const T = wallIndex([0, 8, 16, 24, 32, 40].map(x => box(x, 0, x + 8, 12)), REF);
+  /* A line drawn along the street that clips the front of every house. */
+  const trail = Array.from({ length: 30 }, (_, i) => ({ ...at(-4 + i * 2, 10), t: i * 2000 }));
+  const gusty = { wind_speed: 5, wind_direction: 200, wind_gusts: 11, temp: 12, soil_temp: 12 };
+  const count = (walls) => {
+    const sim = new ScentSim().seed([...trail, ...trail]);
+    sim.walls = walls;
+    sim.advance(FLAT, gusty, stability(12, 12), 90000);
+    return sim.parts.filter(p => p.str >= 0.02 && wallAt(T, p) >= 0).length;
+  };
+  assert.ok(count(null) > 0, 'without walls the cloud sits over the roofs');
+  assert.equal(count(T), 0, 'with walls, none of it — sway and all');
+});
+
+t('the flow arrows and tracers start outside a building too', () => {
+  resetParams();
+  const W = house();
+  for (const secs of [0, 2, 10, 40]) {
+    const p = driftFrom(FLAT, at(10, 10), secs, { ...wx, wind_gusts: 12 }, st, 3, W);
+    assert.equal(wallAt(W, p), -1, `after ${secs} s the scent is not inside the house`);
+  }
 });
 
 console.log(`\n${pass} passed total\n`);
