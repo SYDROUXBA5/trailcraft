@@ -236,4 +236,23 @@ t('a run restored on another phone still knows what the handler called', () => {
   assert.equal(back.data.result.found, true);
 });
 
+/* The call was lost because the packing had a list of fields and nobody
+   remembered to add to it. There is no list to forget now, and this is what
+   says so — including for whatever gets hung on a point next. */
+t('whatever a point carries travels with it, except the app’s own working notes', () => {
+  const pts = [
+    { lat: 51.2094, lon: -2.6449, t: 1000, kind: 'Indication', note: 'by the gate',
+      call: { v: 1, conf: 0.5, seen: true, at: 1100 }, somethingNew: 42, _seen: 1000 },
+    { lat: 51.2095, lon: -2.6447, t: 2000, dwellS: 9 },
+  ];
+  const back = unpackPoints(packPoints(pts));
+  assert.equal(back.length, 2);
+  assert.equal(back[0].note, 'by the gate');
+  assert.equal(back[0].somethingNew, 42, 'a field this test invented survives, so tomorrow’s will too');
+  assert.deepEqual(back[0].call, { v: 1, conf: 0.5, seen: true, at: 1100 });
+  assert.equal(back[0]._seen, undefined, 'working notes are the one thing dropped');
+  assert.equal(back[1].dwellS, 9);
+  assert.equal(back[1].note, undefined, 'and a point without a field does not gain one');
+});
+
 console.log(`\n${pass} passed total\n`);

@@ -50,30 +50,43 @@ export function pruneTombstones(rows, now = Date.now(), keepMs = 90 * 86400e3) {
 
 /* ── Packing for Firestore ─────────────────────────────────────────── */
 
-/* Everything a point can carry. A field missing from this list is silently
-   dropped by the backup, which is how the handler's call on an indication —
-   the thing their calibration is built from — used to be lost on the way to
-   another phone. `call` is a small map ({ v, conf, seen, at }); a column of
-   maps is fine in Firestore, only nested arrays are not. */
+/* The fields every point is expected to carry, in the order the columns are
+   written. This is documentation and column order, NOT a filter: anything else
+   a point happens to hold is carried too (see below). */
 const POINT_KEYS = ['lat', 'lon', 't', 'acc', 'alt', 'dwellS', 'kind', 'call'];
 const isPoint = (p) => p && typeof p === 'object' && Number.isFinite(p.lat) && Number.isFinite(p.lon);
 
+/* Working notes the app hangs on a point while it is being drawn or walked —
+   `_seen` and anything else beginning with an underscore. They mean nothing
+   tomorrow and nothing on another phone, so they are the one thing not kept. */
+const working = (k) => k.startsWith('_');
+
 /** Points as parallel columns: lossless, and far smaller than an array of
-    small objects, which Firestore bills and limits by the byte. */
+    small objects, which Firestore bills and limits by the byte.
+
+    Every field is carried, not a chosen few. A fixed list meant that adding
+    something to a point — the handler's call on an indication — quietly failed
+    to survive the trip to another phone, and nothing said so: the mark came
+    back, the answer did not. Whatever a point holds now goes with it. */
 export function packPoints(pts) {
   const out = { __pts: pts.length };
-  for (const k of POINT_KEYS) {
+  const keys = [...POINT_KEYS];
+  for (const p of pts) {
+    for (const k of Object.keys(p || {})) if (!working(k) && !keys.includes(k)) keys.push(k);
+  }
+  for (const k of keys) {
     if (pts.some(p => p?.[k] != null)) out[k] = pts.map(p => (p?.[k] ?? null));
   }
   return out;
 }
 
 export function unpackPoints(packed) {
+  const keys = Object.keys(packed).filter(k => k !== '__pts');
   return Array.from({ length: packed.__pts }, (_, i) => {
     const p = {};
-    for (const k of POINT_KEYS) {
+    for (const k of keys) {
       const col = packed[k];
-      if (col && col[i] != null) p[k] = col[i];
+      if (Array.isArray(col) && col[i] != null) p[k] = col[i];
     }
     return p;
   });
