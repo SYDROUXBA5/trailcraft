@@ -150,4 +150,60 @@ t('every test file is actually in the npm test script', () => {
   }
 });
 
+/* ── Deleting an account, and the privacy page (App Store needs both) ── */
+const syncJs = readFileSync(new URL('../public/sync.js', import.meta.url), 'utf8');
+const rules = readFileSync(new URL('../firestore.rules', import.meta.url), 'utf8');
+const privacy = readFileSync(new URL('../public/privacy.html', import.meta.url), 'utf8');
+
+t('deleting an account proves it is them, then removes live runs, the backup, and last the account', () => {
+  const body = syncJs.slice(syncJs.indexOf('async function removeAccount'), syncJs.indexOf('async function removeAll'));
+  assert.match(syncJs, /if \(deleting\) return/, 'one deletion at a time');
+  const at = (s) => { const i = body.indexOf(s); assert.ok(i > 0, `deleteAccount calls ${s}`); return i; };
+  assert.ok(at('reauthenticateWith') < at('await userRun') && at('await userRun') < at('stopMirror'),
+    'they prove it is them, then any backup still running finishes, then nothing more uploads');
+  assert.ok(at('stopMirror') < at('removeLive('), 'the phone stops uploading before the backup goes');
+  assert.ok(at('removeLive(') < at('removeAll(') && at('removeAll(') < at('deleteUser('),
+    'the account goes last, so a failure never strands a backup without one');
+  assert.ok(body.includes("'calibration'"), 'what the model learned goes too');
+  assert.ok(/fb\.collection\(run\.ref, 'chunks'\)[\s\S]*deleteDoc\(run\.ref\)/.test(syncJs), 'a live run’s pieces go before the run');
+});
+
+t('only a live run’s owner can list or delete it; strangers still only read an unexpired link', () => {
+  const live = rules.slice(rules.indexOf('match /live/{liveId}'), rules.indexOf('match /{document=**}'));
+  assert.match(live, /allow delete: if request\.auth != null && resource\.data\.uid == request\.auth\.uid;/);
+  assert.match(live, /allow get: if resource\.data\.expiresAt > request\.time\.toMillis\(\)\s*\|\| \(request\.auth != null && resource\.data\.uid == request\.auth\.uid\);/);
+  assert.match(live, /allow list: if request\.auth != null && resource\.data\.uid == request\.auth\.uid;/,
+    'a stranger can open a run by its id, but never list them');
+  const runRules = live.slice(0, live.indexOf('match /chunks'));
+  assert.ok(!/allow read:/.test(runRules), 'no plain read on a run: it would let anyone list them');
+  assert.ok(!/allow [a-z, ]*: if true/.test(rules), 'nothing is open to everyone');
+  assert.match(rules, /match \/\{document=\*\*\} \{ allow read, write: if false; \}/, 'everything else stays shut');
+});
+
+t('the privacy page names who runs it, how to reach them, and every service the app talks to', () => {
+  assert.match(privacy, /Rémi Droux/);
+  assert.match(privacy, /mailto:contact@naifubushcraft\.com/);
+  const named = {
+    'api.mapbox.com': 'Mapbox', 'tile.openstreetmap.org': 'OpenStreetMap', 'api.open-meteo.com': 'Open-Meteo',
+    'fonts.googleapis.com': 'Google Fonts', 'fonts.gstatic.com': 'Google Fonts', 'cdn.jsdelivr.net': 'jsDelivr',
+    'www.gstatic.com': 'Firebase', 'sydrouxba5.github.io': 'GitHub Pages',
+  };
+  const dir = new URL('../public/', import.meta.url);
+  const hosts = new Set();
+  for (const f of readdirSync(dir).filter(f => /\.(js|html)$/.test(f) && f !== 'privacy.html' && f !== 'token.js')) {
+    for (const m of readFileSync(new URL(f, dir), 'utf8').matchAll(/https:\/\/([a-z0-9.-]+\.[a-z]{2,})/g)) hosts.add(m[1]);
+  }
+  for (const h of hosts) {
+    assert.ok(h in named, `the app now talks to ${h}: say so on privacy.html, then add it here`);
+    if (named[h]) assert.ok(privacy.includes(named[h]), `privacy.html names ${named[h]} (${h})`);
+  }
+  assert.match(privacy, /stored in London/, 'where the backup lives');
+});
+
+t('Settings and the sign-in screen link to the privacy page, opening outside the app', () => {
+  const links = [...html.matchAll(/<a class="privacy-link" href="([^"]+)" target="_blank" rel="noopener">/g)].map(m => m[1]);
+  assert.equal(links.length, 2);
+  for (const l of links) assert.equal(l, 'https://sydrouxba5.github.io/trailcraft/privacy.html');
+});
+
 console.log(`\n${pass} passed total\n`);

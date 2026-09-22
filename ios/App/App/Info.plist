@@ -29,9 +29,9 @@
 	<key>NSCameraUsageDescription</key>
 	<string>To scan a Trail Card from another phone.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>So recording keeps going with the phone in your pocket and the screen dark. Location is only used while you record, and it stays on this phone unless you share it.</string>
+	<string>So recording keeps going with the phone in your pocket and the screen dark. Your positions stay on this phone unless you back them up or share them.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Trailcraft records the trail you lay and the run your dog makes. Location is only used while you record, and it stays on this phone unless you share it.</string>
+	<string>Trailcraft records the trail you lay and the run your dog makes, and reads the weather where you are. Your positions stay on this phone unless you back them up or share them.</string>
 	<key>NSMotionUsageDescription</key>
 	<string>To show which way you are facing on the compass, next to the wind.</string>
 	<key>NSPhotoLibraryUsageDescription</key>

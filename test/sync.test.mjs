@@ -178,6 +178,8 @@ t('every sign-in failure says what happened in words a handler can act on', () =
     'auth/network-request-failed': 'No signal',
     'auth/api-key-not-valid': 'setup guide',
     'auth/operation-not-allowed': 'switched on yet',
+    'auth/requires-recent-login': 'sign back in',
+    'auth/popup-blocked': 'Allow pop-ups',
   };
   for (const [code, words] of Object.entries(cases)) {
     const m = authMessage(code);

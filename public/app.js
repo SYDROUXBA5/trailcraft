@@ -22,7 +22,7 @@ import { GROUND_LAYERS, buildGround, surfaceAt, surfaceAlong, surfaceRows, withS
          tilesCovering, isHard, GROUND_V, GROUND_RULES, readingSig, readingFits, readingVersion,
          CONDITIONS, blankSeen, cleanSeen, seenLine, surfaceById,
          FIX_AS, alongOf, idxAt, makeFix, applyFixes, fixSpan, stretchMetres } from './ground.js';
-import { sync, onSync, initSync, signInWithGoogle, signInWithApple, signOut,
+import { sync, onSync, initSync, signInWithGoogle, signInWithApple, signOut, deleteAccount,
          signUpWithEmail, signInWithEmail, resetPassword,
          startLive, pushLive, endLive, watchLive } from './sync.js';
 import { trailModel, encodeShared, decodeShared, sharedUrl, toGpx, fileBase,
@@ -37,7 +37,7 @@ import { createStore, migrateV1, TARGETS, ODOURS, targetById, targetText, verbs,
          dogStats, ageBand, AGE_BANDS, LEVELS, levelById, dogAge } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-22e';
+const BUILD = '2026-09-22f';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true,
@@ -305,6 +305,9 @@ function buildMap() {
     style: noToken ? RASTER_FALLBACK : (MAP_STYLES[settings.mapStyle] ?? MAP_STYLES.satellite).url,
     center: [-2.6449, 51.2094], zoom: 15, pitch: 55, maxPitch: 85,
     attributionControl: { compact: true },
+    /* Mapbox's own speed reports stay off. Its count of map loads, which it
+       bills by, cannot be switched off; the privacy page says so. */
+    ...(GL === mapboxgl ? { performanceMetricsCollection: false } : {}),
   });
   /* No GeolocateControl. The arrow puck already shows where you are with the
      real accuracy ring around it, and the re-centre button brings the camera
@@ -3697,7 +3700,13 @@ async function startRun(s) {
   rec.kind = 'run';
   rec.wps = [];
   clearMap();
-  liveState = null;
+  /* A share left open by a run that never finished is closed now, or this
+     run's points would go on flowing into that old link. */
+  if (liveState) {
+    clearInterval(liveState.timer);
+    liveState = null;
+    endLive({}).catch(() => {});
+  }
   paintLiveBtn();
   fillSurfaces(s);              // ready by the time Reveal wants the plume
   coachStart(s);
@@ -3779,8 +3788,9 @@ async function stopRun() {
   plumeStop();
   airStop();
   const s = run.session;
-  if (!s) return go('scrHome');
+  if (!s) { liveEnd(null); return go('scrHome'); }
   if (rec.pts.length < 2) {
+    liveEnd(null);
     toast('Too short to grade — nothing saved');
     return go('scrHome');
   }
@@ -5363,6 +5373,39 @@ async function forgotPassword() {
   if (sent) toast(`If there’s an account for ${email.trim()}, a reset link is on its way.`);
 }
 
+/* ── Delete the account ─────────────────────────────────────────────── */
+function openDeleteAccount() {
+  if (!sync.user) return;
+  const pw = !!sync.user.password;
+  $('delPwRow').hidden = !pw;
+  $('delGoogleNote').hidden = pw;
+  $('delPassword').value = '';
+  $('delError').hidden = true;
+  go('scrDelete');
+}
+
+async function submitDelete() {
+  if ($('btnDeleteGo').disabled) return;          // Enter while a deletion is already running
+  const err = (msg) => { $('delError').textContent = msg || ''; $('delError').hidden = !msg; };
+  err('');
+  const password = $('delPassword').value;
+  if (sync.user?.password && !password) { err('Type your password.'); return $('delPassword').focus(); }
+  const btn = $('btnDeleteGo');
+  btn.disabled = true;
+  btn.textContent = 'Deleting…';
+  try {
+    const r = await deleteAccount({ password });
+    if (!r.ok) return err(r.error);
+    $('delPassword').value = '';
+    renderSettings();
+    go('scrSettings');
+    toast('Account deleted. Your trails are still on this phone.');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Delete my account';
+  }
+}
+
 function when(t) {
   const m = Math.round((Date.now() - t) / 60000);
   return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} d ago`;
@@ -5391,7 +5434,8 @@ function renderAccount() {
       : avaHtml({ name: u.name || u.email || '?' });
     card.innerHTML = `<div class="account-who">${face}<div><b>${esc(u.name || 'Signed in')}</b><i>${esc(u.email || '')}</i></div></div>
       <div class="sync-line"><span class="sync-dot ${dot}"></span><span>${line}</span></div>
-      <button type="button" class="btn ghost" data-account="signout">Sign out</button>`;
+      <button type="button" class="btn ghost" data-account="signout">Sign out</button>
+      <button type="button" class="btn ghost small del-link" data-account="delete">Delete my account</button>`;
   }
   // The privacy line says what is actually true right now.
   const where = $('dataWhere');
@@ -5991,6 +6035,9 @@ function wire() {
     applyTheme();
   });
   $('btnGoogle').addEventListener('click', () => signInWithGoogle());
+  $('btnDeleteGo').addEventListener('click', submitDelete);
+  $('btnDeleteCancel').addEventListener('click', () => { $('delPassword').value = ''; go('scrSettings'); });
+  $('delPassword').addEventListener('keydown', (e) => { if (e.key === 'Enter') submitDelete(); });
   $('tabSignUp').addEventListener('click', () => setAuthMode('up'));
   $('tabSignIn').addEventListener('click', () => setAuthMode('in'));
   $('authForm').addEventListener('submit', submitAuth);
@@ -6019,6 +6066,7 @@ function wire() {
     const b = e.target.closest('[data-account]');
     if (!b) return;
     if (b.dataset.account === 'signin') return openSignIn();
+    if (b.dataset.account === 'delete') return openDeleteAccount();
     if (b.dataset.account === 'signout') {
       if (!confirm('Sign out? Your trails stay on this phone; they just stop backing up.')) return;
       await signOut();
@@ -6057,7 +6105,8 @@ function wire() {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   });
   $('btnWipe').addEventListener('click', () => {
-    if (!confirm(`Wipe everything? ${S.sessions.length} sessions, ${S.dogs.length} dogs and all profiles. Export first if you want to keep them.`)) return;
+    const backup = sync.user ? ' Your account backup is not touched: signing in again brings it back.' : '';
+    if (!confirm(`Wipe everything? ${S.sessions.length} sessions, ${S.dogs.length} dogs and all profiles. Export first if you want to keep them.${backup}`)) return;
     db.wipeAll();
     snap();
     boot();

@@ -161,6 +161,9 @@ export function authMessage(code = '') {
   if (c.includes('network')) return 'No signal. It will try again when you have some.';
   if (c.includes('unauthorized-domain')) return 'This web address is not allowed to sign in yet. See the setup guide.';
   if (c.includes('operation-not-allowed')) return 'This way of signing in isn’t switched on yet.';
+  if (c.includes('requires-recent-login')) return 'For your safety, sign out, sign back in, then try again.';
+  if (c.includes('user-mismatch')) return 'That’s a different account. Use the one you’re deleting.';
+  if (c.includes('popup-blocked')) return 'The browser blocked Google’s check. Allow pop-ups for this page and try again.';
   if (c.includes('permission-denied')) return 'The cloud refused the save. Check the security rules.';
   if (c.includes('quota')) return 'The free cloud allowance is used up for today.';
   return 'Sign-in did not work. Try again.';
