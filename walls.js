@@ -80,6 +80,60 @@ function insideRings(rings, x, y) {
   return hit;
 }
 
+/**
+ * A point inside a building, moved to just outside its nearest wall.
+ *
+ * A trail point inside a footprint is a walker on the pavement beside it
+ * whom GPS, or a line drawn by finger, put a few metres out. Their scent
+ * starts where they really were, and every wall applies to it from there.
+ * (The first version let such scent ignore that building for its whole
+ * flight instead; in a town, where a line drawn along a street clips houses,
+ * that let about a fifth of the drawn cloud fly through them.)
+ */
+export function outside(W, p) {
+  if (!W || !p) return p;
+  let id = wallAt(W, p);
+  if (id < 0) return p;
+  let [x, y] = toXY(W, p);
+  for (let tries = 0; tries < 3 && id >= 0; tries++) {        // a terrace: out of one, into the next
+    let best = null;
+    for (const r of W.walls[id].rings) {
+      for (let i = 0, j = r.length - 1; i < r.length; j = i++) {
+        const ax = r[j][0], ay = r[j][1], sx = r[i][0] - ax, sy = r[i][1] - ay;
+        const L2 = sx * sx + sy * sy;
+        if (!L2) continue;
+        const u = Math.max(0, Math.min(1, ((x - ax) * sx + (y - ay) * sy) / L2));
+        const qx = ax + u * sx, qy = ay + u * sy, d = Math.hypot(qx - x, qy - y);
+        if (!best || d < best.d) best = { d, qx, qy, nx: -sy / Math.sqrt(L2), ny: sx / Math.sqrt(L2) };
+      }
+    }
+    if (!best) break;
+    let ox = best.qx - x, oy = best.qy - y;
+    const ol = Math.hypot(ox, oy);
+    if (ol > 1e-6) { ox /= ol; oy /= ol; }
+    else {                                                   // exactly on the wall: go out along its normal
+      ox = best.nx; oy = best.ny;
+      if (wallAt(W, toLL(W, best.qx + ox * GAP, best.qy + oy * GAP)) === id) { ox = -ox; oy = -oy; }
+    }
+    x = best.qx + ox * GAP * 2;
+    y = best.qy + oy * GAP * 2;
+    id = wallAt(W, toLL(W, x, y));
+  }
+  if (id < 0) return toLL(W, x, y);
+  /* Still inside: the map draws building parts as outlines inside other
+     outlines, and stepping out of one can land in the next. Search outwards
+     from the original point for the nearest open ground instead. */
+  const [x0, y0] = toXY(W, p);
+  for (const r of [1, 2, 3, 5, 8, 12, 18, 25, 35, 50]) {
+    for (let k = 0; k < 16; k++) {
+      const a = (k / 16) * 2 * Math.PI;
+      const q = toLL(W, x0 + r * Math.cos(a), y0 + r * Math.sin(a));
+      if (wallAt(W, q) < 0) return q;
+    }
+  }
+  return toLL(W, x, y);                                      // nothing open within 50 m: leave it
+}
+
 /** Which building a point is inside, or -1. */
 export function wallAt(W, p) {
   if (!W || !p) return -1;
