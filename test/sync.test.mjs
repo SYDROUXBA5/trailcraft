@@ -209,4 +209,31 @@ t('signing in never merges one handler’s records into another’s account', ()
   assert.equal(syncPlan(undefined, undefined), 'signed-out');
 });
 
+/* A whole run, as the backup carries it. The handler's call on the indication
+   is what their calibration is built from: a restore that quietly drops it
+   would show a handler a confidence history that is not theirs. */
+t('a run restored on another phone still knows what the handler called', () => {
+  const session = {
+    id: 's1', updatedAt: 5, targetId: 'person', startedAt: 1000,
+    data: {
+      trail: [{ lat: 51.2094, lon: -2.6449, t: 1000 }, { lat: 51.2095, lon: -2.6447, t: 2000, dwellS: 12 }],
+      track: [{ lat: 51.2094, lon: -2.6448, t: 3000, acc: 4, alt: 30 }],
+      trackWaypoints: [
+        { kind: 'Indication', lat: 51.2095, lon: -2.6446, t: 3500, call: { v: 1, conf: 0.9, seen: false, at: 3600 } },
+        { kind: 'Cast', lat: 51.2096, lon: -2.6445, t: 3800 },
+      ],
+      result: { found: true },
+    },
+  };
+  const back = fromCloud(toCloud(session));
+  const wps = back.data.trackWaypoints;
+  assert.equal(wps.length, 2);
+  assert.equal(wps[0].kind, 'Indication');
+  assert.deepEqual(wps[0].call, { v: 1, conf: 0.9, seen: false, at: 3600 }, 'the call comes back whole');
+  assert.equal(wps[1].call, undefined, 'a mark with no call gains none');
+  assert.equal(back.data.trail[1].dwellS, 12, 'and the rest of the walk is unchanged');
+  assert.equal(back.data.track[0].acc, 4);
+  assert.equal(back.data.result.found, true);
+});
+
 console.log(`\n${pass} passed total\n`);

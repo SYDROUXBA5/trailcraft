@@ -88,4 +88,11 @@ t('the offer is written from the walk itself, not from when it was written down'
   assert.equal(draftStats(null), null);
 });
 
+t('a crash does not lose what the handler called', () => {
+  const wps = [{ kind: 'Indication', lat: 51.2095, lon: -2.6446, t: NOW + 60e3, call: { v: 1, conf: 0.7, seen: false, at: NOW + 61e3 } }];
+  const d = unpackDraft(packDraft({ kind: 'run', startedAt: NOW, sessionId: 's1', pts: walk(90), wps }, NOW));
+  assert.deepEqual(d.wps[0].call, { v: 1, conf: 0.7, seen: false, at: NOW + 61e3 });
+  assert.equal(d.wps[0].kind, 'Indication');
+});
+
 console.log(`\n${pass} passed total\n`);
