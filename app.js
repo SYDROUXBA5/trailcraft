@@ -39,7 +39,7 @@ import { createStore, migrateV1, TARGETS, ODOURS, targetById, targetText, verbs,
          dogStats, ageBand, AGE_BANDS, LEVELS, levelById, dogAge } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-22i';
+const BUILD = '2026-09-22j';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true,
@@ -6315,8 +6315,20 @@ function recoverDrop() {
   boot();
 }
 
+/* One time only. Runs whose call was made before the backup could carry it
+   have a cloud copy without it, and on a tie the cloud copy wins — so the
+   phone's copies are made newer, and go up complete. */
+function restampCalls() {
+  if (db.kv.get('callsRestamped')) return;
+  db.kv.set('callsRestamped', true);
+  for (const s of db.sessions()) {
+    if ((s.data?.trackWaypoints || []).some(w => w?.call)) db.updateSession(s.id, {});
+  }
+}
+
 function boot() {
   applyTheme();          // the head script already painted it; this keeps it in step
+  try { restampCalls(); } catch { /* a full phone: the calls are still on it */ }
   snap();
   if (openFromHash()) return;   // a trail someone sent: that first, the app's own business after
   /* Only once there is a handler to own it: recovery goes through the same

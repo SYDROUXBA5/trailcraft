@@ -50,7 +50,12 @@ export function pruneTombstones(rows, now = Date.now(), keepMs = 90 * 86400e3) {
 
 /* ── Packing for Firestore ─────────────────────────────────────────── */
 
-const POINT_KEYS = ['lat', 'lon', 't', 'acc', 'alt', 'dwellS', 'kind'];
+/* Everything a point can carry. A field missing from this list is silently
+   dropped by the backup, which is how the handler's call on an indication —
+   the thing their calibration is built from — used to be lost on the way to
+   another phone. `call` is a small map ({ v, conf, seen, at }); a column of
+   maps is fine in Firestore, only nested arrays are not. */
+const POINT_KEYS = ['lat', 'lon', 't', 'acc', 'alt', 'dwellS', 'kind', 'call'];
 const isPoint = (p) => p && typeof p === 'object' && Number.isFinite(p.lat) && Number.isFinite(p.lon);
 
 /** Points as parallel columns: lossless, and far smaller than an array of
