@@ -1,6 +1,6 @@
 /* Offline shell. Trails happen where there is no signal, so the app itself must
    survive with none. Map tiles cache opportunistically as you pan an area. */
-const V = 'trailcraft-v107';
+const V = 'trailcraft-v108';
 /* Every module the app cannot start without. app.js is an ES module and its
    imports are separate requests — listing only app.js precaches a shell that
    cannot boot, which shows up as a working app that dies the first time it is
@@ -10,11 +10,17 @@ const V = 'trailcraft-v107';
    serves from a domain root on the LAN and from /trailcraft/ on GitHub Pages
    without either deployment breaking the other. */
 const SHELL = [
-  './', 'index.html', 'app.css', 'manifest.webmanifest', 'token.js',
+  './', 'index.html', 'app.css',
   'app.js', 'geo.js', 'colours.js', 'draft.js', 'mvt.js', 'ground.js', 'params.js', 'debrief.js', 'call.js', 'field.js', 'walls.js', 'sim.js', 'card.js', 'store.js',
   'sync-core.js', 'sync.js', 'firebase-config.js', 'share.js', 'pdf.js', 'coach.js', 'native.js',
-  'vendor/qrcode.js', 'vendor/jsQR.js', 'build.txt',
+  'vendor/qrcode.js', 'vendor/jsQR.js',
 ];
+/* Wanted, but not worth failing an update over, and none of them stops the app
+   starting: the Mapbox token exists only on this Mac's own copy (it is never
+   deployed, so the web app would 404 on it every time), the manifest only
+   matters when adding to the home screen, and build.txt is always read from the
+   network anyway. */
+const EXTRAS = ['token.js', 'manifest.webmanifest', 'build.txt'];
 const VENDOR = [
   'https://api.mapbox.com/mapbox-gl-js/v3.14.0/mapbox-gl.js',
   'https://api.mapbox.com/mapbox-gl-js/v3.14.0/mapbox-gl.css',
@@ -22,16 +28,34 @@ const VENDOR = [
   'https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.min.css',
 ];
 
+/* An update installs ALL of the shell or none of it. Letting the odd file fail
+   and carrying on gave a worker that activated, deleted the last working cache,
+   and then could not start the app at all without signal — the update turned a
+   working offline app into a blank screen, in the one place it is needed.
+   addAll is all-or-nothing: if any of it fails the install fails, this worker is
+   thrown away, and the one already installed carries on serving. */
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(V)
-    .then(c => Promise.all([...SHELL, ...VENDOR].map(u => c.add(u).catch(() => {}))))
-    .then(() => self.skipWaiting()));
+  e.waitUntil((async () => {
+    const c = await caches.open(V);
+    await c.addAll(SHELL);
+    await Promise.all([...EXTRAS, ...VENDOR].map(u => c.add(u).catch(() => {})));
+    await self.skipWaiting();
+  })());
 });
 
 self.addEventListener('activate', (e) => {
-  e.waitUntil(caches.keys()
-    .then(keys => Promise.all(keys.filter(k => k !== V).map(k => caches.delete(k))))
-    .then(() => self.clients.claim()));
+  e.waitUntil((async () => {
+    /* Belt and braces: the old cache is only thrown away once this one is
+       proved complete. A cache that cannot start the app is worse than an old
+       one that can. */
+    const c = await caches.open(V);
+    const whole = (await Promise.all(SHELL.map(u => c.match(u)))).every(Boolean);
+    if (whole) {
+      const keys = await caches.keys();
+      await Promise.all(keys.filter(k => k !== V).map(k => caches.delete(k)));
+    }
+    await self.clients.claim();
+  })());
 });
 
 const cacheable = (url) =>
@@ -55,7 +79,12 @@ self.addEventListener('fetch', (e) => {
           if (res.ok) { const copy = res.clone(); caches.open(V).then(c => c.put(e.request, copy)); }
           return res;
         })
-        .catch(() => caches.match(e.request).then(hit => hit || caches.match('index.html')))
+        /* The page itself falls back to the shell; a missing script does not.
+           Handing index.html to an import request answers a module with a page
+           of HTML, and the error that follows says nothing about what is wrong. */
+        .catch(() => caches.match(e.request)
+          .then(hit => hit || (e.request.mode === 'navigate' ? caches.match('index.html') : undefined))
+          .then(res => res || Response.error()))
     );
     return;
   }
