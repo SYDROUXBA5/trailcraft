@@ -140,6 +140,13 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.75; cursor: p
 }
 .chip:active { transform: scale(0.96); }
 .chip.selected { background: var(--moss); border-color: var(--moss); color: #fff; }
+/* Two plain choices side by side (contamination: before or after the main trail). */
+.order-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.order-row .chip { justify-content: center; min-height: 48px; padding: 8px 12px; text-align: center; line-height: 1.2; }
+/* A trail's own name, typed after it is laid. */
+.name-field { display: flex; flex-direction: column; gap: 6px; margin: 0 0 14px; }
+.name-field input { min-height: 48px; font-size: 16px; }
+.card .card-name { font: 700 16px var(--body); color: var(--ink); margin: 2px 0 4px; overflow-wrap: anywhere; }
 .chip.selected i { color: rgba(255, 255, 255, 0.75); }
 .chip.plain { padding: 8px 18px; display: inline-flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 0; }
 .chip.plain b { font-family: var(--display); font-weight: 600; font-size: 16px; }

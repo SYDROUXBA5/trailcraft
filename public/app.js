@@ -9,7 +9,7 @@
 import {
   pathLen, cardinal, dist, dwellFold, bearing, project, fmtDist, fmtShort, fmtSpeed, fmtTemp, unitShort, fmtWeight, kgToShown, shownToKg, fmtCoord, scentField, plumePolygon, densify, timestamps, signedOffsets, meanSigned, sideOfDrift, sideAgreement, lineCorrect, departure, timestampsEndingAt, progressAlong, splitLine, smoothBearing, medianAbs, sideShares,
 } from './geo.js';
-import { stepPoints } from './geo.js';
+import { stepPoints, contamTimed } from './geo.js';
 import { handlerStats } from './store.js';
 import { plumePalette, stepPalette, windPalette, trackPalette, COLOUR_PRESETS, isHex, mix } from './colours.js';
 import { FLAT, buildTerrain, stability, regime, flowAt, normOf } from './field.js';
@@ -37,7 +37,7 @@ import { createStore, migrateV1, TARGETS, ODOURS, targetById, targetText, verbs,
          dogStats, ageBand, AGE_BANDS, LEVELS, levelById, dogAge } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-22d';
+const BUILD = '2026-09-22e';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true,
@@ -276,7 +276,7 @@ let map, mapReady = false;
 let GL = mapboxgl;   // every control/bounds must come from the SAME library
 const srcData = { runner: EMPTY, steps: EMPTY, dog: EMPTY, paws: EMPTY, wps: EMPTY, drift: EMPTY, start: EMPTY, hides: EMPTY, contam: EMPTY, plan: EMPTY, nose: EMPTY,
                   fix: EMPTY, fixEnds: EMPTY, bandWall: EMPTY,
-                  routeDone: EMPTY, routeAhead: EMPTY, puck: EMPTY, scent: EMPTY, wind: EMPTY,
+                  routeDone: EMPTY, routeAhead: EMPTY, puck: EMPTY, scent: EMPTY, contamScent: EMPTY, wind: EMPTY,
                   flow: EMPTY, flowPulse: EMPTY, air: EMPTY, acc: EMPTY };
 
 const SAT_STYLE = 'mapbox://styles/mapbox/standard-satellite';
@@ -394,6 +394,19 @@ function addOverlays() {
         paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 13, 0.7, 17, 1.5, 19, 2.6],
                  'circle-color': ['interpolate', ['linear'], ['get', 's'],
                    0, '#C9761E', 0.45, '#F2B03C', 1, '#FFE7A8'],
+                 'circle-opacity': ['+', 0.25, ['*', ['get', 's'], 0.7]],
+                 'circle-blur': 0.18 } });
+  /* A contamination trail's own scent, in the violet of its line. Same air,
+     same rules; a different person, so it never shares the main trail's colour. */
+  add({ id: 'contam-glow', type: 'circle', source: 'contamScent',
+        paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 13, 2.2, 17, 5, 19, 9],
+                 'circle-color': '#9C7FE8',
+                 'circle-opacity': ['*', ['get', 's'], 0.20],
+                 'circle-blur': 1 } });
+  add({ id: 'contam-dots', type: 'circle', source: 'contamScent',
+        paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 13, 0.7, 17, 1.5, 19, 2.6],
+                 'circle-color': ['interpolate', ['linear'], ['get', 's'],
+                   0, '#6E52C4', 0.45, '#A48BF0', 1, '#E6DDFF'],
                  'circle-opacity': ['+', 0.25, ['*', ['get', 's'], 0.7]],
                  'circle-blur': 0.18 } });
 
@@ -1273,6 +1286,7 @@ function sessionCard(s) {
   const d = S.dogs.find(x => x.id === s.dogId);
   return `<div class="card" data-open-session="${s.id}">
     <div class="meta"><span>${fmtWhen(s.startedAt)}</span><span>${esc(d?.name ?? '')}${d ? ' · ' : ''}${esc(targetText(s))}</span></div>
+    ${s.name ? `<div class="card-name">${esc(s.name)}</div>` : ''}
     <div class="story">${esc(s.summary)}</div>
   </div>`;
 }
@@ -1568,6 +1582,7 @@ async function plumeWalls(force = false) {
     if (!plume.sim) return;
     plume.walls = W;
     plume.sim.walls = W;
+    if (plume.contam) plume.contam.walls = W;
     /* They usually arrive after the band was first drawn: redraw what reads
        it, or the readout says nothing about buildings until a dial moves. */
     if (bench.on) benchPaintLight();
@@ -1589,10 +1604,11 @@ const bandWallNote = () => (plume.bandWalls
   ? ` The band runs through ${plume.bandWalls} building${plume.bandWalls === 1 ? '' : 's'}: it’s drawn straight and can’t bend round them.`
   : '');
 
-function plumeStart(trail, wx, T) {
+function plumeStart(trail, wx, T, contamination = null) {
   plumeStop();
   if (!settings.plume || !wx) return;
   plume.sim = new ScentSim();
+  plume.contam = contamSim(contamination);
   /* Every few metres, not every GPS fix. A fix arrives when the walker moves,
      so at a slow pace the emission points stand far enough apart to read as
      separate puffs. Sampling the SAME line more finely does not change the
@@ -1630,6 +1646,16 @@ function plumeSamples(trail) {
   return out;
 }
 
+/** The contamination trails' own cloud: their own parcels, so they can be
+    drawn in their own colour. A line with no walked times has no scent age. */
+function contamSim(list) {
+  const lines = (list || []).filter(c => c?.points?.length > 1 && c.points.every(p => Number.isFinite(p.t)));
+  if (!lines.length) return null;
+  const c = new ScentSim();
+  c.seed(lines.flatMap(l => plumeSamples(l.points)));
+  return c;
+}
+
 /** New ground, one fix at a time — append, never reseed, or it flickers. */
 function plumeAdd(pt) {
   if (!plume.sim) return;
@@ -1642,10 +1668,11 @@ function plumeAdd(pt) {
 function plumeStop() {
   tracersStop();
   clearInterval(plume.tick); plume.tick = 0;
-  plume.sim = null; plume.trail = null;
+  plume.sim = null; plume.trail = null; plume.contam = null;
   plume.walls = null; plume.bandWalls = 0; plume.lastField = null;
   setSrc('bandWall', EMPTY);
   setSrc('scent', EMPTY);
+  setSrc('contamScent', EMPTY);
   setSrc('flow', EMPTY);
   setSrc('flowPulse', EMPTY);
   flow.arcs = [];
@@ -2546,7 +2573,7 @@ function openReplay(s) {
   setTrail(trailOf(s));
   setSrc('start', pointsOf([s.data.trail[0]]));
   if (s.data.planTrail?.length > 1) setSrc('plan', lineOf(s.data.planTrail));
-  if (s.data.weather) plumeStart(trailOf(s), s.data.weather, plume.T);
+  if (s.data.weather) plumeStart(trailOf(s), s.data.weather, plume.T, s.data.contamination);
   $('repSpeed').textContent = `${replay.speed}×`;
 
   go('scrReplay');
@@ -2822,17 +2849,22 @@ function paintFlowPulse(now) {
   setSrc('flowPulse', { type: 'FeatureCollection', features: feats });
 }
 
+const parcelsGeo = (sim) => ({ type: 'FeatureCollection', features: sim.drawable().filter(s => s.str >= 0.03).map(s => ({
+  type: 'Feature',
+  properties: { s: parcelWeight(s) },
+  geometry: { type: 'Point', coordinates: [s.lon, s.lat] },
+})) });
 function plumeFrame() {
   if (!plume.sim) return;
   const now = plume.clock ?? Date.now();
   plume.sim.prune(now, plume.wx, plume.st, { max: 9000 });
   plume.sim.advance(plume.T, plume.wx, plume.st, now);
-  const live = plume.sim.drawable().filter(s => s.str >= 0.03);
-  setSrc('scent', { type: 'FeatureCollection', features: live.map(s => ({
-    type: 'Feature',
-    properties: { s: parcelWeight(s) },
-    geometry: { type: 'Point', coordinates: [s.lon, s.lat] },
-  })) });
+  setSrc('scent', parcelsGeo(plume.sim));
+  if (plume.contam) {
+    plume.contam.prune(now, plume.wx, plume.st, { max: 5000 });
+    plume.contam.advance(plume.T, plume.wx, plume.st, now);
+    setSrc('contamScent', parcelsGeo(plume.contam));
+  }
   paintFlow();
   plumeTerrain();
   plumeWalls();
@@ -3168,6 +3200,8 @@ function renderShare(s) {
   const isHide = targetById(s.targetId).kind === 'hide';
   const isPlan = !!s.data.plan;
   $('shareTitle').textContent = isHide ? 'Hide set' : isPlan ? 'Trail planned' : 'Trail laid';
+  $('shareNameLabel').textContent = isHide ? 'Name this search' : 'Name this trail';
+  $('shareName').value = s.name || '';
   $('btnRunHere').textContent = isHide ? 'Search it on this phone' : 'Run it on this phone';
   $('btnContam').hidden = isHide;
   /* A plan is a drawn sketch with no walked times behind it — modelling scent
@@ -3256,7 +3290,15 @@ async function renderShareQr(s) {
 }
 
 /* ── Contamination trails (drawn before the run) ──────────────────── */
-const contam = { pts: [], forSession: null };
+const contam = { pts: [], forSession: null, order: 'before' };
+
+function paintContamOrder() {
+  for (const b of $('contamOrder').querySelectorAll('[data-order]')) {
+    const on = b.dataset.order === contam.order;
+    b.classList.toggle('selected', on);
+    b.setAttribute('aria-checked', String(on));
+  }
+}
 
 function openContam(s) {
   contam.pts = [];
@@ -3265,13 +3307,12 @@ function openContam(s) {
   setSrc('contam', lineOf([]));
   setSrc('wps', EMPTY);
   fitTo(s.data.trail);
-  // Who walked it: any known person; when: an hour ago by default.
+  // Who walked it: any known person. When is before or after the main trail.
   $('contamWho').innerHTML =
     S.layers.map(l => `<option value="${l.id}">${esc(l.name)}</option>`).join('')
     + `<option value="">${esc(S.handler?.name ?? 'Me')}</option>`;
-  const d = new Date(Date.now() - 60 * 60000);
-  d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
-  $('contamWhen').value = d.toISOString().slice(0, 16);
+  contam.order = 'before';
+  paintContamOrder();
   map.getCanvas().style.cursor = 'crosshair';
   map.on('click', onContamTap);
   paintContam();
@@ -3301,19 +3342,18 @@ function closeContam() {
 function saveContam() {
   const s = db.sessions().find(x => x.id === contam.forSession);
   if (!s) return go('scrHome');
-  const whenVal = $('contamWhen').value;
-  const laidAt = whenVal ? new Date(whenVal).getTime() : Date.now() - 3600e3;
-  if (!Number.isFinite(laidAt)) return toast('That time is not valid');
   const whoId = $('contamWho').value || null;
   const who = whoId ? (db.layers.byId(whoId)?.name ?? 'Someone') : (S.handler?.name ?? 'Me');
-  // densify + timestamps give the drawn line the clock the engine runs on.
-  const points = timestamps(densify(contam.pts, 5), laidAt, 1.3);
-  const list = [...(s.data.contamination || []), { who, laidAt, points }];
+  // Timed from the main trail (geo.js), which gives the drawn line the clock the engine runs on.
+  const order = contam.order === 'after' ? 'after' : 'before';
+  const points = contamTimed(s.data.trail, contam.pts, order);
+  const laidAt = points[0]?.t ?? Date.now();
+  const list = [...(s.data.contamination || []), { who, order, laidAt, points }];
   db.updateSession(s.id, { data: { ...s.data, contamination: list } });
   snap();
   closeContam();
   pendingSession = db.sessions().find(x => x.id === s.id);
-  toast(`Contamination trail saved — ${who}, ${fmtWhen(laidAt)}`);
+  toast(`Contamination trail saved: ${who}, laid ${order} the main trail`);
   go('scrShare');
   renderShare(pendingSession);
 }
@@ -3699,7 +3739,7 @@ function toggleReveal() {
     setTrail(run.revealed ? s.data.trail : null);
     /* The plume is the trail, drawn in air. Showing it before Reveal would
        hand the handler the answer, so it waits for the same button. */
-    if (run.revealed) plumeStart(trailOf(s), s.data.weather);
+    if (run.revealed) plumeStart(trailOf(s), s.data.weather, undefined, s.data.contamination);
     else plumeStop();
     setSrc('contam', run.revealed
       ? { type: 'FeatureCollection',
@@ -4035,7 +4075,7 @@ function showOnMap(from = 'scrResult') {
       const field = scentField(trailOf(s), wx, s.data.trackStarted ?? undefined);
       if (field.length) setSrc('drift', plumePolygon(field));
       // ...and the air itself, moving, as it was when the dog worked it.
-      plumeStart(trailOf(s), wx);
+      plumeStart(trailOf(s), wx, undefined, s.data.contamination);
       showWeather(wx);
     }
   } else {
@@ -4271,6 +4311,7 @@ function sessionFromModel(m) {
   return {
     id: 'shared', targetId: m.kind === 'search' ? 'article' : 'person',
     startedAt: m.laidAt ?? Date.now(), dogId: null, handlerId: null, layerId: null, summary: headline(m),
+    name: m.name ?? null,
     data: {
       trail: m.trail ?? undefined, hides: m.hides ?? undefined, contamination: m.contamination ?? [],
       weather: m.wx ?? null, track: m.track ?? undefined, trackWaypoints: m.wps ?? [],
@@ -4310,6 +4351,8 @@ function openShared(m, from = null) {
   sharedFrom = from;
   run.session = null;
   $('sharedHead').textContent = headline(m);
+  $('sharedName').textContent = m.name || '';
+  $('sharedName').hidden = !m.name;
   $('sharedMeta').textContent = metaLine(m);
   paintSharedMini(m);
   $('sharedDetails').innerHTML = detailSections(m, unitsForText()).map(sec =>
@@ -5533,10 +5576,33 @@ function wire() {
     }
   });
   $('btnRunHere').addEventListener('click', () => pendingSession && startRun(pendingSession));
+  /* Saved when the box is left (tapping any button leaves it first), so a
+     name is never lost to Run or Done. */
+  const saveShareName = () => {
+    const s = pendingSession;
+    if (!s || s.id === 'shared') return;
+    const name = $('shareName').value.trim().slice(0, 60) || null;
+    if ((s.name || null) === name) return;
+    pendingSession = db.updateSession(s.id, { name }) || { ...s, name };
+    snap();
+  };
+  $('shareName').addEventListener('change', saveShareName);
+  $('shareName').addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    saveShareName();
+    e.target.blur();
+  });
   $('btnShareDone').addEventListener('click', () => { clearMap(); go('scrHome'); });
 
   // Contamination
   $('contamUndo').addEventListener('click', () => { contam.pts.pop(); paintContam(); });
+  $('contamOrder').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-order]');
+    if (!b) return;
+    contam.order = b.dataset.order;
+    paintContamOrder();
+  });
   $('contamCancel').addEventListener('click', () => {
     closeContam();
     setSrc('contam', EMPTY);

@@ -30,6 +30,7 @@ export function trailModel(s, { dog = null, handler = null, layer = null, k = nu
   const t = targetById(s?.targetId);
   return {
     kind: t.kind === 'hide' ? 'search' : 'trail',
+    name: str(s?.name),
     target: t.label,
     laidAt: s?.startedAt ?? null,
     runAt: d.trackStarted ?? null,
@@ -155,7 +156,7 @@ function unpackDebrief(o) {
 
 function pack(m) {
   const o = {
-    kind: m.kind, target: m.target, laidAt: m.laidAt, runAt: m.runAt,
+    kind: m.kind, name: m.name ?? undefined, target: m.target, laidAt: m.laidAt, runAt: m.runAt,
     dog: m.dog ? pick(m.dog, DOG_KEYS) : undefined,
     handler: m.handler, layer: m.layer,
     plan: m.plan ? 1 : undefined, walked: m.walked ? 1 : undefined,
@@ -185,6 +186,7 @@ function unpack(o) {
   } : null;
   return {
     kind,
+    name: str(o.name),
     target: str(o.target) ?? (kind === 'search' ? 'A hide' : 'A person'),
     laidAt: fin(o.laidAt) ? o.laidAt : null,
     runAt: fin(o.runAt) ? o.runAt : null,

@@ -3,7 +3,7 @@ import {
   dist, project, pathLen, cardinal, driftMetres, driftPolygon, meanOffset, filterFixes, densify, timestamps, crossTrackSigned, signedOffsets, meanSigned, sideOfDrift, sideAgreement, lineCorrect, dwellFold, foldFixes, departure, progressAlong, splitLine, smoothBearing, fmtDist, fmtShort, fmtSpeed, fmtTemp, timestampsEndingAt, fmtWeight, kgToShown, shownToKg, fmtCoord, medianAbs, sideShares,
 } from '../public/geo.js';
 
-import { stepPoints, dist as distM } from '../public/geo.js';
+import { stepPoints, dist as distM, contamTimed, CONTAM_GAP } from '../public/geo.js';
 
 let pass = 0;
 const t = (name, fn) => { fn(); pass++; console.log(`  ok  ${name}`); };
@@ -587,5 +587,35 @@ t('stepPoints: a print every stride along the track, the bearing of travel on ea
   assert.deepEqual(stepPoints([a], 3), []);
   assert.deepEqual(stepPoints(null, 3), []);
 });
+
+/* Contamination is timed from the main trail: the handler picks before or after, not a clock. */
+{
+  const T0 = Date.UTC(2026, 8, 22, 9, 0);
+  const main = timestamps(densify([WELLS, project(WELLS, 90, 300)], 5), T0, 1.3);
+  const tEnd = main[main.length - 1].t;
+  const cross = [project(WELLS, 0, 80), project(project(WELLS, 90, 150), 180, 80)];
+
+  t('contamination laid before is finished before the main trail starts', () => {
+    const c = contamTimed(main, cross, 'before', tEnd + 20 * 60e3);
+    assert.ok(c.length > 2);
+    assert.equal(c[c.length - 1].t, T0 - CONTAM_GAP, 'it ends the gap before the main trail begins');
+    assert.ok(c.every((p, i) => !i || p.t > c[i - 1].t), 'walked in order');
+  });
+
+  t('contamination laid after starts once the main trail ends, and is fresher', () => {
+    const later = contamTimed(main, cross, 'after', tEnd + 60 * 60e3);
+    assert.equal(later[0].t, tEnd + 60e3, 'long after: a minute after the main trail ends');
+    const soon = contamTimed(main, cross, 'after', tEnd + 30e3);
+    assert.equal(soon[0].t, tEnd, 'straight after: never before the main trail ends');
+    for (const c of [later, soon]) assert.ok(c[0].t >= tEnd && c[0].t > main[0].t);
+  });
+
+  t('contamination with no main trail times falls back to now, and a single tap is no trail', () => {
+    const now = T0 + 5 * 60e3;
+    const c = contamTimed([{ lat: 51.2, lon: -2.6 }], cross, 'before', now);
+    assert.equal(c[c.length - 1].t, now - CONTAM_GAP);
+    assert.deepEqual(contamTimed(main, [cross[0]], 'after', now), []);
+  });
+}
 
 console.log(`\n${pass} passed total\n`);

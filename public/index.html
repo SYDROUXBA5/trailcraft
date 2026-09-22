@@ -352,6 +352,10 @@
 <section id="scrShare" class="screen paper" hidden>
   <div class="page">
     <h1 class="display" id="shareTitle">Trail laid</h1>
+    <label class="name-field" for="shareName">
+      <span class="field-label" id="shareNameLabel">Name this trail</span>
+      <input id="shareName" type="text" maxlength="60" autocomplete="off" autocapitalize="sentences" enterkeyhint="done" placeholder="Optional, e.g. Church lane loop">
+    </label>
     <div class="card">
       <div class="minimap" id="shareMiniWrap">
         <img id="shareMiniImg" alt="" hidden>
@@ -383,8 +387,11 @@
     <div class="contam-form card">
       <label class="field-label" for="contamWho">Who walked it</label>
       <select id="contamWho"></select>
-      <label class="field-label" for="contamWhen">When</label>
-      <input id="contamWhen" type="datetime-local">
+      <span class="field-label" id="contamOrderLabel">Laid</span>
+      <div class="order-row" id="contamOrder" role="radiogroup" aria-labelledby="contamOrderLabel">
+        <button type="button" class="chip" role="radio" data-order="before" aria-checked="true">Before the main trail</button>
+        <button type="button" class="chip" role="radio" data-order="after" aria-checked="false">After the main trail</button>
+      </div>
     </div>
     <div class="row-gap">
       <button class="btn ghost" id="contamUndo">Undo</button>
@@ -572,6 +579,7 @@
 <section id="scrShared" class="screen paper" hidden>
   <div class="page">
     <span class="label">Shared from Trailcraft</span>
+    <span class="label" id="sharedName" hidden></span>
     <h1 class="display" id="sharedHead"></h1>
     <p class="body small muted" id="sharedMeta"></p>
     <div class="card">

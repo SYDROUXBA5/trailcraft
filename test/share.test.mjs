@@ -377,4 +377,16 @@ await t('what the handler saw on the ground travels, and a forged value does not
   assert.equal(odd.seen, null, 'values the app never offers are not shown to anyone');
 });
 
+await t('a trail’s name travels with it, and a blank or odd one does not', async () => {
+  const named = { ...session({ trailN: 20 }), name: '  Church lane loop  ' };
+  const m = trailModel(named, people);
+  assert.equal(m.name, 'Church lane loop');
+  const back = await decodeShared(await encodeShared(m));
+  assert.equal(back.name, 'Church lane loop');
+  assert.equal(trailModel({ ...named, name: '   ' }, people).name, null);
+  assert.equal(trailModel({ ...named, name: 42 }, people).name, null);
+  const plain = await decodeShared(await encodeShared(trailModel(session({ trailN: 20 }), people)));
+  assert.equal(plain.name, null, 'an unnamed trail stays unnamed');
+});
+
 console.log(`\n${pass} passed total`);
