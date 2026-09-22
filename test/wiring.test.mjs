@@ -72,6 +72,16 @@ t('every module the app imports is cached for offline use', () => {
   const sw = readFileSync(new URL('../public/sw.js', import.meta.url), 'utf8');
   const shell = sw.slice(sw.indexOf('const SHELL'), sw.indexOf('];', sw.indexOf('const SHELL')));
   const cached = new Set([...shell.matchAll(/'([\w./-]+\.js)'/g)].map(m => m[1]));
+  /* All of it, or none of it: a half-cached update that activates anyway
+     deletes the last working copy and leaves nothing to start from. */
+  assert.match(sw, /await c\.addAll\(SHELL\);/, 'the shell installs all-or-nothing');
+  assert.ok(!/addAll\(SHELL\)\s*\.catch/.test(sw) && !/SHELL\.map\([^)]*catch/.test(sw),
+    'and its failures are never swallowed');
+  assert.ok(!cached.has('token.js'),
+    'the Mapbox token is not deployed, so requiring it would fail every web install');
+  assert.match(sw, /const whole = \(await Promise\.all\(SHELL\.map/, 'the old cache goes only once the new one is whole');
+  assert.match(sw, /e\.request\.mode === 'navigate' \? caches\.match\('index\.html'\)/,
+    'only a page falls back to the page: a missing script must not come back as HTML');
 
   const pub = new URL('../public/', import.meta.url);
   const imported = new Set(['app.js']);
