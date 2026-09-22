@@ -168,6 +168,23 @@ t('deleting an account proves it is them, then removes live runs, the backup, an
   assert.ok(/fb\.collection\(run\.ref, 'chunks'\)[\s\S]*deleteDoc\(run\.ref\)/.test(syncJs), 'a live run’s pieces go before the run');
 });
 
+t('a phone carrying another account’s records uploads nothing until it is answered', () => {
+  const body = syncJs.slice(syncJs.indexOf('async function applyUser'), syncJs.indexOf('export async function deleteAccount'));
+  const plan = body.indexOf('syncPlan('), claim = body.indexOf("kv.set('ownerUid'"), full = body.indexOf('fullSync(');
+  assert.ok(plan > 0 && plan < full, 'whose records these are is settled before any sync');
+  assert.match(body, /if \(plan === 'other' \|\| plan === 'ask'\) \{[^}]*return;/,
+    'it returns: nothing is read from or written to that account');
+  assert.ok(claim > 0 && claim < full, 'the account claims the records before the first upload, not after');
+  assert.match(syncJs, /export async function useThisAccount[\s\S]{0,400}db\.wipeAll\(\)[\s\S]{0,160}kv\.set\('ownerUid'/,
+    'starting fresh clears the phone first, then claims it');
+  assert.match(syncJs, /export async function startLive[\s\S]{0,400}sync\.status === 'other' \|\| sync\.status === 'ask'[\s\S]{0,200}throw/,
+    'a live link cannot publish records the account has not been given');
+  assert.match(syncJs, /if \(db\.kv\.get\('ownerUid', null\) === u\.uid\) db\.kv\.set\('ownerUid', null\);/,
+    'deleting one account never un-owns another account’s records');
+  assert.match(js, /db\.wipeAll\(\);\s*\n\s*reclaim\(\);/,
+    'wiping the phone takes the owner mark with it, so the account claims it again');
+});
+
 t('only a live run’s owner can list or delete it; strangers still only read an unexpired link', () => {
   const live = rules.slice(rules.indexOf('match /live/{liveId}'), rules.indexOf('match /{document=**}'));
   assert.match(live, /allow delete: if request\.auth != null && resource\.data\.uid == request\.auth\.uid;/);

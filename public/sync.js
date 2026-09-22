@@ -11,7 +11,8 @@
 
 import { firebaseConfig, appleSignInEnabled } from './firebase-config.js';
 import { isNative } from './native.js';
-import { mergeRecords, mergeCalibration, toCloud, fromCloud, approxBytes, DOC_LIMIT, packPoints, unpackPoints,
+import { syncPlan,
+         mergeRecords, mergeCalibration, toCloud, fromCloud, approxBytes, DOC_LIMIT, packPoints, unpackPoints,
          authMessage } from './sync-core.js';
 
 const SDK = 'https://www.gstatic.com/firebasejs/12.3.0';
@@ -21,7 +22,7 @@ export const sync = {
   configured: !!firebaseConfig,
   apple: !!firebaseConfig && appleSignInEnabled,
   user: null,               // { uid, name, email, photo }
-  status: 'off',            // off | loading | signed-out | syncing | synced | error
+  status: 'off',            // off | loading | signed-out | other | syncing | synced | error
   lastSync: 0,
   error: null,
 };
@@ -176,6 +177,46 @@ export async function resetPassword(email) {
   }
 }
 
+const hasRecords = () => !!(db?.rawSessions?.().length || db?.handlers?.raw?.().length || db?.dogs?.raw?.().length);
+
+/** "These are mine": the records already on the phone become this account's
+    and are backed up. The one place a set of records changes hands, and it
+    takes a tap to say so. */
+export async function adoptRecords() {
+  const u = auth?.currentUser;
+  if (!u) return false;
+  db.kv.set('ownerUid', u.uid);
+  await onUser(u);
+  return sync.status !== 'ask';
+}
+
+/** "Use this account, start fresh here": the phone's records are not this
+    account's, so they go rather than being uploaded into it. The old
+    account's copy in Firestore's own cache goes with them, which needs the
+    database shut down — so the caller reloads the app afterwards. */
+export async function useThisAccount() {
+  const u = auth?.currentUser;
+  if (!u) return false;
+  try {
+    stopMirror?.(); stopMirror = null;
+    db.wipeAll();                    // takes the old owner with it
+    db.kv.set('ownerUid', u.uid);
+    const f = await loadFirebase();
+    try { await f.terminate(fs); await f.clearIndexedDbPersistence(fs); } catch { /* cache stays; the records are gone */ }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Wiping the phone takes the owner mark with it (it lives in the same
+    store), so the account that is signed in says again that these are its
+    records — or the next account to sign in would be offered them. */
+export function reclaim() {
+  const u = auth?.currentUser;
+  if (u && db) db.kv.set('ownerUid', u.uid);
+}
+
 export async function signOut() {
   if (!auth) return;
   const f = await loadFirebase();
@@ -193,8 +234,17 @@ async function applyUser(u) {
     password: (u.providerData || []).some(p => p.providerId === 'password') } : null;
   if (!u) { sync.status = 'signed-out'; emit(); return; }
 
+  /* Records already belonging to another account are never merged into this
+     one (sync-core.js syncPlan). Nothing is read or written until the handler
+     says what to do with them — renderAccount asks. */
+  const plan = syncPlan(db.kv.get('ownerUid', null), u.uid, hasRecords());
+  if (plan === 'other' || plan === 'ask') { sync.status = plan; sync.error = null; emit(); return; }
+
   sync.status = 'syncing'; emit();
   try {
+    /* Claimed before the first upload, not after it: the merge starts sending
+       straight away, and half-sent records still belong to this account. */
+    db.kv.set('ownerUid', u.uid);
     await fullSync(u.uid);
     stopMirror = db.onChange((table, rec) => mirror(u.uid, table, rec));
     sync.status = 'synced';
@@ -251,6 +301,9 @@ async function removeAccount(u, password) {
     await removeLive(u.uid);
     for (const name of [...TABLES, 'calibration']) await removeAll(userCol(u.uid, name));
     await f.deleteUser(u);                         // the auth watcher then shows the phone signed out
+    /* Only if these records were this account's. Deleting a different account
+       must not un-own them, or the next sign-in would take them up. */
+    if (db.kv.get('ownerUid', null) === u.uid) db.kv.set('ownerUid', null);
   } catch (e) {
     /* The account is still there, so put its backup back in step with the phone. */
     onUser(auth.currentUser);
@@ -355,6 +408,11 @@ const liveId = () => {
 /** Publish a run. `meta` is share.js's liveMeta(): the trail, not the run. */
 export async function startLive(meta) {
   if (!fs || !sync.user) throw new Error('Sign in to share live');
+  /* The records on this phone are not this account's until that is settled,
+     and a live link would publish them under it. */
+  if (sync.status === 'other' || sync.status === 'ask') {
+    throw new Error('Settle whose records these are (Settings → Account) before sharing live');
+  }
   const f = await loadFirebase();
   const id = liveId();
   const expiresAt = Date.now() + LIVE_TTL;

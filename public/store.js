@@ -65,7 +65,9 @@ export const verbs = (t) => t.kind === 'person'
 /* ── Store ──────────────────────────────────────────────────────────
    Tables: handlers [{id,name,photo}], dogs [{id,handlerId,name,photo,level,lineM}],
    layers [{id,name,photo}] (shared across handlers), sessions (newest first).
-   kv: lastHandlerId, lastDogId, lastLayerId, lastTargetId, tutorialDone, layerOnly. */
+   kv: lastHandlerId, lastDogId, lastLayerId, lastTargetId, tutorialDone, layerOnly,
+   ownerUid (the account these records belong to, so signing in with another
+   one never uploads them into it — sync-core.js syncPlan). */
 
 const K = {
   handlers: 'tc.handlers', dogs: 'tc.dogs', layers: 'tc.layers',

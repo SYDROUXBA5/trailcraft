@@ -128,6 +128,23 @@ export function mergeCalibration(localRows = [], remoteRows = [], cap = 50) {
    Checked on the phone before anything is sent, so a typo is caught next to
    the field it is in rather than after a round trip. The server still has
    the last word; these only catch what is obviously wrong. */
+/** Whose records are on this phone, and so what signing in may do with them.
+
+    No owner and an empty phone: nothing to lose, so the account takes it.
+    No owner but records already here: they were saved before anyone signed
+    in, and on a shared phone they may be someone else's, so backing them up
+    is a decision the handler makes once, not something that just happens.
+    The same owner: the usual sync.
+    A different owner: STOP. Merging would upload one person's dogs, trails
+    and the places they walked into another person's account, which on a
+    shared phone is a handler's records landing in a stranger's backup. The
+    handler decides instead: sign out, or clear the phone and start fresh. */
+export function syncPlan(owner, uid, hasRecords = false) {
+  if (!uid) return 'signed-out';
+  if (owner) return owner === uid ? 'sync' : 'other';
+  return hasRecords ? 'ask' : 'adopt';
+}
+
 export const AUTH_MIN_PASSWORD = 8;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 

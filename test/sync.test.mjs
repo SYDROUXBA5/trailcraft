@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import {
   mergeRecords, visible, tombstone, pruneTombstones,
   packPoints, unpackPoints, toCloud, fromCloud, approxBytes, DOC_LIMIT, mergeCalibration,
-  checkAuthFields, authMessage, AUTH_MIN_PASSWORD,
+  checkAuthFields, authMessage, AUTH_MIN_PASSWORD, syncPlan,
 } from '../public/sync-core.js';
 
 let pass = 0;
@@ -193,6 +193,20 @@ t('every sign-in failure says what happened in words a handler can act on', () =
   /* A wrong password and an unknown email read the same, so the form never
      tells a stranger which emails have accounts. */
   assert.equal(authMessage('auth/wrong-password'), authMessage('auth/user-not-found'));
+});
+
+/* One phone, two people: the second one's sign-in must not hoover up the first's records. */
+t('signing in never merges one handler’s records into another’s account', () => {
+  assert.equal(syncPlan(null, 'A', false), 'adopt', 'an empty phone is simply taken over');
+  assert.equal(syncPlan(null, 'A', true), 'ask', 'records saved before anyone signed in are uploaded only on purpose');
+  assert.equal(syncPlan('A', 'A', true), 'sync', 'their own records sync as usual');
+  assert.equal(syncPlan('A', 'B', true), 'other', 'someone else’s records are left alone');
+  assert.equal(syncPlan('A', 'B', false), 'other', 'and are still theirs even with nothing showing');
+  assert.equal(syncPlan('', 'B', true), 'ask', 'an empty owner is nobody, not a stranger');
+  assert.equal(syncPlan(null, 'A'), 'adopt', 'an unknown phone is treated as empty by callers that do not say');
+  assert.equal(syncPlan('A', null), 'signed-out');
+  assert.equal(syncPlan(null, null), 'signed-out');
+  assert.equal(syncPlan(undefined, undefined), 'signed-out');
 });
 
 console.log(`\n${pass} passed total\n`);
