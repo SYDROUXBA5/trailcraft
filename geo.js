@@ -558,6 +558,26 @@ export function timestampsEndingAt(pts, endMs, paceMs = 1.3) {
   return timestamps(pts, endMs - secs * 1000, paceMs);
 }
 
+/* A contamination trail is timed from the main trail, not from a clock the
+   handler has to set. Laid before: it is finished CONTAM_GAP before the main
+   trail starts, so it is always the older scent. Laid after: it starts a
+   minute after the main trail ends, or sooner if it would otherwise still be
+   being walked now, and never before the main trail ends, so it is always
+   the fresher scent. */
+export const CONTAM_GAP = 10 * 60e3;
+export function contamTimed(main, pts, order, now = Date.now(), paceMs = 1.3) {
+  const d = densify(pts || [], 5);
+  if (d.length < 2) return [];
+  const t0 = main?.[0]?.t, t1 = main?.[main.length - 1]?.t;
+  const start = Number.isFinite(t0) ? t0 : now;
+  const end = Number.isFinite(t1) ? t1 : now;
+  if (order === 'after') {
+    const walkMs = (pathLen(d) / Math.max(0.1, paceMs)) * 1000;
+    return timestamps(d, Math.max(end, Math.min(end + 60e3, now - walkMs)), paceMs);
+  }
+  return timestampsEndingAt(d, start - CONTAM_GAP, paceMs);
+}
+
 /* Weight, kept in kilograms and shown in whichever the handler reads. */
 const LB = 2.20462262;
 export const kgToShown = (kg, imperial) => (Number.isFinite(kg) ? (imperial ? kg * LB : kg) : null);
