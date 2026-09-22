@@ -11,7 +11,14 @@
 
    To switch it on, follow docs/SIGN-IN-SETUP.md and paste the config object
    Firebase gives you in place of null. */
-export const firebaseConfig = null;
+export const firebaseConfig = {
+  apiKey: "AIzaSyCobn2sfejyN3O8-Cd-oyG2y2cTF_Ol88c",
+  authDomain: "trailcraft-51b80.firebaseapp.com",
+  projectId: "trailcraft-51b80",
+  storageBucket: "trailcraft-51b80.firebasestorage.app",
+  messagingSenderId: "218893323658",
+  appId: "1:218893323658:web:dc1bbb2c4cfe079da6cc73"
+};
 
 /* Flip to true once "Sign in with Apple" is set up in your Apple Developer
    account and enabled in Firebase. Until then the Apple button stays hidden
