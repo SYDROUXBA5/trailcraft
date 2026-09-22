@@ -123,3 +123,46 @@ export function mergeCalibration(localRows = [], remoteRows = [], cap = 50) {
   }
   return [...seen.values()].sort((a, b) => a.t - b.t).slice(-cap);
 }
+
+/* ── Accounts by email ────────────────────────────────────────────────
+   Checked on the phone before anything is sent, so a typo is caught next to
+   the field it is in rather than after a round trip. The server still has
+   the last word; these only catch what is obviously wrong. */
+export const AUTH_MIN_PASSWORD = 8;
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+
+/** { ok, errors: { name?, email?, password? } } for 'up' (create) or 'in'. */
+export function checkAuthFields({ mode = 'up', name = '', email = '', password = '' } = {}) {
+  const errors = {};
+  const n = String(name ?? '').trim(), e = String(email ?? '').trim(), pw = String(password ?? '');
+  if (mode === 'up' && !n) errors.name = 'Add your name, so your records say who laid them.';
+  if (!e) errors.email = 'Type your email.';
+  else if (!EMAIL_RE.test(e)) errors.email = 'That email doesn’t look right.';
+  if (!pw) errors.password = mode === 'up' ? `Choose a password of at least ${AUTH_MIN_PASSWORD} characters.` : 'Type your password.';
+  else if (mode === 'up' && pw.trim().length < AUTH_MIN_PASSWORD) errors.password = `At least ${AUTH_MIN_PASSWORD} characters, please.`;
+  else if (pw.length > 128) errors.password = 'That password is too long.';
+  return { ok: Object.keys(errors).length === 0, errors };
+}
+
+/** What a sign-in failure means, in words a handler can act on. null means
+    "they closed it themselves", which is not an error. */
+export function authMessage(code = '') {
+  const c = String(code);
+  if (c.includes('popup-closed') || c.includes('cancelled')) return null;
+  if (c.includes('email-already-in-use')) return 'There’s already an account with that email. Sign in instead.';
+  if (c.includes('invalid-email')) return 'That email doesn’t look right.';
+  if (c.includes('weak-password')) return `That password is too easy to guess. Use at least ${AUTH_MIN_PASSWORD} characters.`;
+  if (c.includes('invalid-credential') || c.includes('invalid-login-credentials')
+    || c.includes('wrong-password') || c.includes('user-not-found')) return 'That email and password don’t match an account.';
+  if (c.includes('missing-password')) return 'Type your password.';
+  if (c.includes('too-many-requests')) return 'Too many tries. Wait a few minutes, or reset your password.';
+  if (c.includes('user-disabled')) return 'This account has been switched off.';
+  if (c.includes('api-key') || c.includes('not-configured')) return 'Accounts aren’t set up yet. See the setup guide.';
+  if (c.includes('network')) return 'No signal. It will try again when you have some.';
+  if (c.includes('unauthorized-domain')) return 'This web address is not allowed to sign in yet. See the setup guide.';
+  if (c.includes('operation-not-allowed')) return 'This way of signing in isn’t switched on yet.';
+  if (c.includes('permission-denied')) return 'The cloud refused the save. Check the security rules.';
+  if (c.includes('quota')) return 'The free cloud allowance is used up for today.';
+  return 'Sign-in did not work. Try again.';
+}
+

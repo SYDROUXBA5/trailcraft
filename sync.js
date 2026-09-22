@@ -10,7 +10,8 @@
    it cannot load — offline, blocked, not set up — the app does not notice. */
 
 import { firebaseConfig, appleSignInEnabled } from './firebase-config.js';
-import { mergeRecords, mergeCalibration, toCloud, fromCloud, approxBytes, DOC_LIMIT, packPoints, unpackPoints } from './sync-core.js';
+import { mergeRecords, mergeCalibration, toCloud, fromCloud, approxBytes, DOC_LIMIT, packPoints, unpackPoints,
+         authMessage } from './sync-core.js';
 
 const SDK = 'https://www.gstatic.com/firebasejs/12.3.0';
 const TABLES = ['handlers', 'dogs', 'layers', 'sessions'];
@@ -30,17 +31,8 @@ export function onSync(fn) { watchers.add(fn); fn(sync); return () => watchers.d
 const emit = () => { for (const fn of watchers) { try { fn(sync); } catch { /* never break sync */ } } };
 
 /* Firebase's error codes are for developers. A handler in a field needs to
-   know what happened and whether to do anything about it. */
-function plain(e) {
-  const code = e?.code || '';
-  if (code.includes('popup-closed') || code.includes('cancelled')) return null;   // they closed it: not an error
-  if (code.includes('network')) return 'No signal — it will try again when you have some';
-  if (code.includes('unauthorized-domain')) return 'This web address is not allowed to sign in yet — see the setup guide';
-  if (code.includes('operation-not-allowed')) return 'That sign-in method is not switched on in Firebase yet';
-  if (code.includes('permission-denied')) return 'The cloud refused the save — check the security rules';
-  if (code.includes('quota')) return 'The free cloud allowance is used up for today';
-  return 'Sign-in did not work — try again';
-}
+   know what happened and whether to do anything about it (sync-core.js). */
+const plain = (e) => authMessage(e?.code || '');
 
 async function loadFirebase() {
   if (fb) return fb;
@@ -116,6 +108,64 @@ export async function signInWithApple() {
   p.addScope('email');
   p.addScope('name');
   return signInWith(p);
+}
+
+/* ── Email and password ───────────────────────────────────────────────
+   Works everywhere, including inside the iPhone app, where Google refuses
+   to sign anyone in from an app's built-in browser. Each returns the user,
+   or null with sync.error saying why in plain words. */
+async function authReady() {
+  if (!firebaseConfig) { sync.error = authMessage('not-configured'); emit(); return null; }
+  await ready;
+  if (!auth) { sync.error = authMessage('not-configured'); emit(); return null; }
+  sync.error = null; emit();
+  return loadFirebase();
+}
+
+export async function signUpWithEmail({ name, email, password }) {
+  const f = await authReady();
+  if (!f) return null;
+  try {
+    const cred = await f.createUserWithEmailAndPassword(auth, String(email).trim(), password);
+    const n = String(name ?? '').trim();
+    if (n) {
+      await f.updateProfile(cred.user, { displayName: n }).catch(() => {});
+      /* The sign-in event can fire before the name is set: carry it over. */
+      if (sync.user?.uid === cred.user.uid) { sync.user = { ...sync.user, name: n }; emit(); }
+    }
+    f.sendEmailVerification(cred.user).catch(() => { /* the account works without it */ });
+    return cred.user;
+  } catch (e) {
+    sync.error = plain(e); emit();
+    return null;
+  }
+}
+
+export async function signInWithEmail({ email, password }) {
+  const f = await authReady();
+  if (!f) return null;
+  try {
+    return (await f.signInWithEmailAndPassword(auth, String(email).trim(), password)).user;
+  } catch (e) {
+    sync.error = plain(e); emit();
+    return null;
+  }
+}
+
+/** Sends a reset link. True unless it could not be sent at all: whether an
+    account exists for that address is deliberately not revealed. */
+export async function resetPassword(email) {
+  const f = await authReady();
+  if (!f) return false;
+  try {
+    await f.sendPasswordResetEmail(auth, String(email).trim());
+    return true;
+  } catch (e) {
+    const code = e?.code || '';
+    if (code.includes('user-not-found')) return true;
+    sync.error = plain(e); emit();
+    return false;
+  }
 }
 
 export async function signOut() {
