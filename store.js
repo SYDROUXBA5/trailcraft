@@ -264,6 +264,8 @@ export function createStore(backend) {
 
     wipeAll() {
       for (const k of Object.values(K)) backend.removeItem(k);
+      /* The first version's records too, or the next launch imports them again. */
+      for (const k of ['tc.team', 'tc.sessions']) backend.removeItem(k);
     },
   };
   return store;

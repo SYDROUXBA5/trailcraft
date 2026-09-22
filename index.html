@@ -778,9 +778,42 @@
       <li><b>Only you can read it.</b> Your account sees your records and nobody else's.</li>
       <li><b>Your email signs you in.</b> It isn’t used for anything else.</li>
     </ul>
+    <a class="privacy-link" href="https://sydrouxba5.github.io/trailcraft/privacy.html" target="_blank" rel="noopener">How your data is handled</a>
 
     <div class="page-bottom">
       <button type="button" class="btn ghost" id="btnSkipSignIn">Use without an account</button>
+    </div>
+  </div>
+</section>
+
+<!-- ── Delete the account ──────────────────────────────────────────── -->
+<section id="scrDelete" class="screen paper" hidden>
+  <div class="page">
+    <h1 class="display">Delete your account</h1>
+    <div class="card delete-card">
+      <p class="body">This deletes your Trailcraft account and everything backed up with it:</p>
+      <ul class="signin-facts">
+        <li>your handlers, dogs and the people who lay trails</li>
+        <li>every session, with its trail, track and weather</li>
+        <li>what the app has learned about your dogs</li>
+        <li>any live run you shared. Its link stops working.</li>
+      </ul>
+      <p class="body small muted">This phone keeps its own copy. To remove that too, use Wipe this phone in Settings.</p>
+      <label class="auth-field" id="delPwRow">
+        <span>Your password</span>
+        <span class="pw-wrap">
+          <input id="delPassword" type="password" autocomplete="current-password" maxlength="128">
+        </span>
+        <i class="auth-hint">To make sure it’s you.</i>
+      </label>
+      <p class="body small muted" id="delGoogleNote" hidden>You’ll be asked to sign in again to confirm it’s you.</p>
+      <p class="body small muted">Signed in on another phone as well? Sign out there first, or it can put your records back.</p>
+      <p class="body small signin-error" id="delError" role="alert" hidden></p>
+    </div>
+    <p class="body small center"><b>This can’t be undone.</b></p>
+    <div class="page-bottom">
+      <button class="btn danger" id="btnDeleteGo">Delete my account</button>
+      <button class="btn ghost" id="btnDeleteCancel">Keep my account</button>
     </div>
   </div>
 </section>
@@ -912,6 +945,7 @@
     </details>
     <span class="label">Your data</span>
     <p class="body small muted" id="dataWhere">Everything lives on this phone. Nothing is uploaded.</p>
+    <a class="privacy-link" href="https://sydrouxba5.github.io/trailcraft/privacy.html" target="_blank" rel="noopener">How your data is handled</a>
     <button class="btn card-btn" id="btnExportAll">Export everything as JSON</button>
     <button class="btn danger" id="btnWipe">Wipe this phone</button>
     <p class="body small muted center" id="buildNote"></p>

@@ -1181,6 +1181,12 @@ body:has(#scrWalk:not([hidden])) { --top-row: calc(var(--safe-t) + 104px); }
   width: 7px; height: 7px; border-radius: 50%; background: var(--moss);
 }
 .signin-facts b { color: var(--ink); font-weight: 700; }
+.privacy-link { display: inline-flex; align-items: center; min-height: 44px; margin: 4px 2px;
+  font: 600 14px var(--body); color: var(--ink); text-underline-offset: 3px; }
+.delete-card { display: flex; flex-direction: column; gap: 12px; }
+.delete-card .signin-facts { margin-top: 0; }
+.account .del-link { align-self: center; color: #B3372B; }
+:root[data-theme="dark"] .account .del-link { color: #F08A7E; }
 
 /* ── The account card in Settings ─────────────────────────────────── */
 .account { display: flex; flex-direction: column; gap: 12px; }

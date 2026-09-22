@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Trailcraft privacy</title>
+<meta name="description" content="What Trailcraft keeps, where it goes, and how to delete it.">
+<style>
+  :root {
+    --paper: #F6F7FA; --card: #FFFFFF; --ink: #0F1F3D; --muted: #5B6A85;
+    --border: #D8DEEA; --accent: #14284B; --gold: #B8902E;
+    color-scheme: light dark;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #0B1630; --card: #13223F; --ink: #F1F4F9; --muted: #A3B0C8;
+      --border: #25395E; --accent: #9DB8E8; --gold: #E2BE63;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #0B1630; --card: #13223F; --ink: #F1F4F9; --muted: #A3B0C8;
+    --border: #25395E; --accent: #9DB8E8; --gold: #E2BE63;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--paper); color: var(--ink);
+    font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    -webkit-text-size-adjust: 100%;
+  }
+  main { max-width: 680px; margin: 0 auto; padding: 40px 16px 72px; }
+  .eyebrow { font-size: 12px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--gold); margin: 0; }
+  h1 { font-size: clamp(30px, 7vw, 40px); line-height: 1.1; letter-spacing: -0.02em; margin: 6px 0 12px; }
+  h2 { font-size: 20px; line-height: 1.3; letter-spacing: -0.01em; margin: 36px 0 8px; }
+  p, li { color: var(--ink); }
+  .lede { font-size: 18px; color: var(--muted); margin: 0 0 20px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 16px 18px; margin: 12px 0; }
+  .card p { margin: 0; }
+  .card p + p { margin-top: 8px; }
+  ul { padding-left: 20px; margin: 8px 0; }
+  li + li { margin-top: 6px; }
+  dl { margin: 8px 0; }
+  dt { font-weight: 700; margin-top: 14px; }
+  dd { margin: 2px 0 0; color: var(--muted); }
+  a { color: var(--accent); text-underline-offset: 3px; }
+  a:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; border-radius: 4px; }
+  .small { font-size: 14px; color: var(--muted); }
+  footer { margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--border); }
+</style>
+</head>
+<body>
+<main>
+  <p class="eyebrow">Trailcraft</p>
+  <h1>Your data</h1>
+  <p class="lede">What Trailcraft keeps, where it goes, and how to delete it.</p>
+
+  <div class="card">
+    <p><b>Your trails stay on your phone</b> unless you create an account or share something.</p>
+    <p>There are no ads and no analytics, and nothing is sold. The only count kept is Mapbox’s own count of map loads, described below.</p>
+  </div>
+
+  <h2>Who is responsible</h2>
+  <p>Trailcraft is made by Rémi Droux, who is responsible for your data under UK data protection law.
+     For any question or request, email <a href="mailto:contact@naifubushcraft.com">contact@naifubushcraft.com</a>.</p>
+
+  <h2>What stays on your phone</h2>
+  <p>Everything you enter is saved in the app on your phone:</p>
+  <ul>
+    <li>the handlers, their dogs and the people who lay trails or set hides, with any photos you add;</li>
+    <li>every session: the trail or hides, the dog’s track, the time, the weather, the result and your notes;</li>
+    <li>what the app has learned from your runs, and your settings.</li>
+  </ul>
+
+  <h2>Your location</h2>
+  <p>Trailcraft uses your location while you record (laying a trail, setting a hide, running a dog), when you ask the map to find you,
+     and when a map opens, to show where you are and fetch the weather there.
+     If you allow it, recording carries on with the phone in your pocket and the screen off.
+     Your positions are saved with the session on your phone. They leave it only in the ways described below.</p>
+  <p>The app also asks for the camera (to scan a Trail Card from another phone), your photos (to pick a photo for a dog or a handler, or a picture of a Trail Card)
+     and motion (for the compass). Camera and motion readings never leave the phone.
+     A photo you pick is saved with that dog or handler, so it is part of your backup if you have an account. It is not in anything you share.</p>
+
+  <h2>Services the app talks to</h2>
+  <p>To show the app, draw the map and read the weather, it asks these services for what it needs. Like any website, they see your internet address when it does.</p>
+  <dl>
+    <dt>Mapbox</dt>
+    <dd>Map pictures, map details (paths, ground and buildings) and height. It is sent the area of map being shown,
+        and the area around a trail when the app reads its ground or draws a picture of it for a card or report.
+        Mapbox’s map software, which the app downloads from Mapbox, tells Mapbox each time a map loads, with an anonymous number. Mapbox uses this count for its billing.
+        <a href="https://www.mapbox.com/legal/privacy" target="_blank" rel="noopener">Mapbox privacy policy</a></dd>
+    <dt>OpenStreetMap</dt>
+    <dd>A plain street map, used when Mapbox is not available. It is sent the area of map being shown.
+        <a href="https://osmfoundation.org/wiki/Privacy_Policy" target="_blank" rel="noopener">OpenStreetMap privacy policy</a></dd>
+    <dt>Open-Meteo</dt>
+    <dd>The wind, temperature and ground temperature. It is sent a position to about 10 metres: the trail’s, or yours when a map opens.
+        <a href="https://open-meteo.com/en/terms" target="_blank" rel="noopener">Open-Meteo terms and privacy</a></dd>
+    <dt>GitHub Pages</dt>
+    <dd>Hosts the web version of the app, and the page a shared link opens.</dd>
+    <dt>Google Fonts, Google Firebase and jsDelivr</dt>
+    <dd>The lettering, the account software and a spare map program, downloaded when the app starts, like any web page’s.
+        They are sent nothing about you or your dogs unless you create an account (see below).</dd>
+  </dl>
+
+  <h2>If you create an account</h2>
+  <p>An account is optional. It backs up your records so they follow you to a new phone.
+     It runs on Google Firebase, and the backup is stored in London.</p>
+  <ul>
+    <li><b>Your account:</b> your email address and name, and your photo if you sign in with Google.
+        Your password is checked by Firebase. It is never stored where Trailcraft can read it.</li>
+    <li><b>Your backup:</b> a copy of your handlers, dogs and trail layers (with their photos), your sessions, and what the app has learned. Your settings are not backed up.
+        Only your account can read it. The database refuses everyone else.</li>
+  </ul>
+  <p class="small"><a href="https://firebase.google.com/support/privacy" target="_blank" rel="noopener">Firebase privacy and security</a></p>
+
+  <h2>When you share</h2>
+  <dl>
+    <dt>A trail link</dt>
+    <dd>The trail is packed inside the link itself, after the “#”, which browsers never send to any server.
+        Anyone you give the link to can see what is in it: the trail’s name, when it was laid and run, the trail, the dog’s track, the dog’s name and details, the handler’s and the layer’s names, the weather, the result and the notes.</dd>
+    <dt>A Trail Card (QR code)</dt>
+    <dd>Goes straight from one phone’s screen to the other phone’s camera. Nothing is uploaded.</dd>
+    <dt>A live run (needs an account)</dt>
+    <dd>When you start sharing, the run’s details are uploaded: the trail or hides, any contamination trails, the dog’s name and details, the handler’s and the layer’s names and the weather.
+        Then the dog’s track as it happens, and the result at the end. With it goes a random number that tells the database which account owns the run, so only you can change it.
+        Anyone with the link can see all of this until 24 hours after the run ends. What was uploaded is removed when you delete your account.</dd>
+    <dt>PDF reports and GPX files</dt>
+    <dd>Files you save or send yourself. Trailcraft keeps no copy anywhere else.</dd>
+  </dl>
+
+  <h2>Your choices</h2>
+  <ul>
+    <li><b>Use it without an account.</b> Nothing is uploaded unless you share it.</li>
+    <li><b>Sign out.</b> The backup stops. Everything stays on your phone.</li>
+    <li><b>Delete your account.</b> In the app: Settings, then Delete my account. This removes the account, the whole backup and any live runs you shared, straight away.
+        If you are signed in on another phone too, sign out there first, or it can put your records back.</li>
+    <li><b>Wipe this phone.</b> In the app: Settings, then Wipe this phone. This removes your handlers, dogs and sessions from the phone.
+        It does not touch your account backup: signing in again brings it back.</li>
+    <li><b>Location.</b> You can switch it off for Trailcraft at any time in your phone’s settings.</li>
+  </ul>
+  <p>You can also ask for a copy of your data, or for it to be corrected or deleted, by emailing
+     <a href="mailto:contact@naifubushcraft.com">contact@naifubushcraft.com</a>.
+     If you are unhappy with how your data is handled, you can complain to the Information Commissioner’s Office at
+     <a href="https://ico.org.uk" target="_blank" rel="noopener">ico.org.uk</a>.</p>
+
+  <h2>Children</h2>
+  <p>Trailcraft is made for dog handlers and trainers. It is not meant for children under 13.</p>
+
+  <footer>
+    <p class="small">Last updated 22 September 2026. If this changes, the new version will be on this page with a new date.</p>
+  </footer>
+</main>
+</body>
+</html>

@@ -182,9 +182,15 @@ export async function signOut() {
   await f.signOut(auth);
 }
 
-async function onUser(u) {
+/* One account change at a time: a deletion waits for a backup still running,
+   so nothing it uploads can land after the removal. */
+let userRun = Promise.resolve();
+const onUser = (u) => (userRun = userRun.then(() => applyUser(u)).catch(() => {}));
+
+async function applyUser(u) {
   stopMirror?.(); stopMirror = null;
-  sync.user = u ? { uid: u.uid, name: u.displayName, email: u.email, photo: u.photoURL } : null;
+  sync.user = u ? { uid: u.uid, name: u.displayName, email: u.email, photo: u.photoURL,
+    password: (u.providerData || []).some(p => p.providerId === 'password') } : null;
   if (!u) { sync.status = 'signed-out'; emit(); return; }
 
   sync.status = 'syncing'; emit();
@@ -199,6 +205,77 @@ async function onUser(u) {
     sync.error = plain(e) || 'Could not sync — your trails are still safe on this phone';
   }
   emit();
+}
+
+/* ── Deleting the account ──────────────────────────────────────────────
+   Everything the account holds goes, in this order: the live runs it shared
+   (their pieces, then the run), every backed-up table, then the account.
+   A failure part-way leaves an account that still works, never a backup
+   with no account left to reach it. The phone keeps its own copy: that is
+   the handler's, on their phone, and "Wipe this phone" is its button.
+   Firebase only deletes an account whose owner has just proved it is them,
+   so that comes first: the password for an email account, Google's own
+   check for a Google one (Google sign-in exists only on the web). */
+let deleting = false;
+export async function deleteAccount({ password = '' } = {}) {
+  if (deleting) return { ok: false, error: null };
+  const u = auth?.currentUser;
+  if (!u) return { ok: false, error: 'You aren’t signed in.' };
+  if (live) return { ok: false, error: 'Finish your live run first.' };
+  deleting = true;
+  try { return await removeAccount(u, password); } finally { deleting = false; }
+}
+
+async function removeAccount(u, password) {
+  const f = await loadFirebase();
+  const via = (u.providerData || []).map(p => p.providerId);
+  try {
+    if (via.includes('password')) {
+      await f.reauthenticateWithCredential(u, f.EmailAuthProvider.credential(u.email, password));
+    } else if (isHomeScreenApp()) {
+      /* A popup never answers a home-screen web app (see signInWith). */
+      return { ok: false, error: 'To delete this account, open Trailcraft in Safari rather than from the home screen, sign in, and delete it there.' };
+    } else if (via.includes('apple.com')) {
+      await f.reauthenticateWithPopup(u, new f.OAuthProvider('apple.com'));
+    } else {
+      const g = new f.GoogleAuthProvider();
+      g.setCustomParameters({ prompt: 'select_account', login_hint: u.email || '' });
+      await f.reauthenticateWithPopup(u, g);
+    }
+  } catch (e) {
+    return { ok: false, error: plain(e) };        // null when they closed the window: nothing to say
+  }
+  await userRun;                                  // a backup still running finishes first
+  stopMirror?.(); stopMirror = null;              // nothing may upload again while the backup goes
+  try {
+    await removeLive(u.uid);
+    for (const name of [...TABLES, 'calibration']) await removeAll(userCol(u.uid, name));
+    await f.deleteUser(u);                         // the auth watcher then shows the phone signed out
+  } catch (e) {
+    /* The account is still there, so put its backup back in step with the phone. */
+    onUser(auth.currentUser);
+    const c = e?.code || '';
+    return { ok: false, error: c.includes('permission-denied') || c.includes('requires-recent-login') ? plain(e)
+      : 'The account could not be deleted. Nothing was lost. Try again when you have signal.' };
+  }
+  return { ok: true };
+}
+
+async function removeAll(col) {
+  const snap = await fb.getDocs(col);
+  for (let i = 0; i < snap.docs.length; i += 400) {
+    const batch = fb.writeBatch(fs);
+    for (const d of snap.docs.slice(i, i + 400)) batch.delete(d.ref);
+    await batch.commit();
+  }
+}
+
+async function removeLive(uid) {
+  const runs = await fb.getDocs(fb.query(fb.collection(fs, 'live'), fb.where('uid', '==', uid)));
+  for (const run of runs.docs) {
+    await removeAll(fb.collection(run.ref, 'chunks'));   // the pieces first: their rule reads the run
+    await fb.deleteDoc(run.ref);
+  }
 }
 
 const userCol = (uid, name) => fb.collection(fs, 'users', uid, name);
