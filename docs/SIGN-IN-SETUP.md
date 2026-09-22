@@ -36,6 +36,21 @@ Firebase's free plan is far more than one handler will ever use.
 2. **Sign-in method** tab → **Google** → switch **Enable** on.
 3. Pick your email as the **support email** → **Save**.
 
+## 3b. Switch on email and password
+
+This is the sign-in the iPhone app uses: Google refuses to sign anyone in
+from inside an app's built-in browser, so the app hides that button there.
+
+1. Still in **Authentication → Sign-in method** → **Add new provider** →
+   **Email/Password** → switch the first **Enable** on. Leave **Email link
+   (passwordless sign-in)** off → **Save**.
+2. **Settings** tab → **User actions**: leave **Email enumeration
+   protection** on. It stops anyone using the sign-up form to find out who
+   has an account.
+3. Optional: **Templates** tab → **Email address verification** and
+   **Password reset** → set the sender name to **Trailcraft**, so those
+   emails don't arrive from a string of letters.
+
 ## 4. Allow the app's address to sign in
 
 1. Still in Authentication → **Settings** tab → **Authorised domains**.

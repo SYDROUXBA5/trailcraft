@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import {
   mergeRecords, visible, tombstone, pruneTombstones,
   packPoints, unpackPoints, toCloud, fromCloud, approxBytes, DOC_LIMIT, mergeCalibration,
+  checkAuthFields, authMessage, AUTH_MIN_PASSWORD,
 } from '../public/sync-core.js';
 
 let pass = 0;
@@ -133,6 +134,63 @@ t('calibration: runs from both phones are kept, none twice, none lost', () => {
   assert.equal(mergeCalibration(many, []).length, 50, 'capped at the fifty the store keeps');
   assert.equal(mergeCalibration(many, [])[0].t, 10, 'and it is the oldest that go');
   assert.deepEqual(mergeCalibration(null, undefined), []);
+});
+
+/* ── Email accounts: checked on the phone, explained in plain words ── */
+
+t('creating an account needs a name, a real-looking email and a long enough password', () => {
+  const ok = checkAuthFields({ mode: 'up', name: 'Rémi', email: 'remi@example.com', password: 'longenough' });
+  assert.equal(ok.ok, true);
+  assert.deepEqual(ok.errors, {});
+
+  const bad = checkAuthFields({ mode: 'up', name: '  ', email: 'remi@', password: 'short' });
+  assert.equal(bad.ok, false);
+  assert.ok(bad.errors.name, 'a blank name is caught');
+  assert.ok(bad.errors.email, 'a half-typed email is caught');
+  assert.ok(bad.errors.password.includes(String(AUTH_MIN_PASSWORD)), 'the password rule says the number');
+
+  assert.ok(checkAuthFields({ mode: 'up', name: 'R', email: 'a@b.co', password: '        ' }).errors.password,
+    'eight spaces is not a password');
+  assert.ok(checkAuthFields({ mode: 'up', name: 'R', email: 'a@b.co', password: 'x'.repeat(129) }).errors.password);
+  assert.equal(checkAuthFields({ mode: 'up', name: 'R', email: 'a b@c.com', password: 'longenough' }).errors.email,
+    'That email doesn’t look right.');
+  assert.equal(AUTH_MIN_PASSWORD, 8);
+});
+
+t('signing in needs only the email and a password, of any length', () => {
+  const r = checkAuthFields({ mode: 'in', email: ' remi@example.com ', password: 'abc' });
+  assert.equal(r.ok, true, 'an old short password still signs in; the length rule is for new ones');
+  assert.equal(r.errors.name, undefined, 'no name asked when signing in');
+  assert.equal(checkAuthFields({ mode: 'in', email: 'remi@example.com', password: '' }).errors.password, 'Type your password.');
+  assert.equal(checkAuthFields({ mode: 'in', email: '', password: 'x' }).errors.email, 'Type your email.');
+  assert.equal(checkAuthFields().ok, false);
+});
+
+t('every sign-in failure says what happened in words a handler can act on', () => {
+  const cases = {
+    'auth/email-already-in-use': 'Sign in instead',
+    'auth/invalid-email': 'doesn’t look right',
+    'auth/weak-password': String(AUTH_MIN_PASSWORD),
+    'auth/invalid-credential': 'don’t match an account',
+    'auth/wrong-password': 'don’t match an account',
+    'auth/user-not-found': 'don’t match an account',
+    'auth/too-many-requests': 'reset your password',
+    'auth/network-request-failed': 'No signal',
+    'auth/api-key-not-valid': 'setup guide',
+    'auth/operation-not-allowed': 'switched on yet',
+  };
+  for (const [code, words] of Object.entries(cases)) {
+    const m = authMessage(code);
+    assert.ok(m.includes(words), `${code} → "${m}"`);
+    assert.ok(!/auth\/|firebase|code/i.test(m), `${code} does not show the developer's code`);
+    assert.ok(!m.includes('—'), 'no dash-spliced sentences');
+  }
+  assert.equal(authMessage('auth/popup-closed-by-user'), null, 'closing the window yourself is not an error');
+  assert.equal(authMessage('auth/something-new'), 'Sign-in did not work. Try again.');
+  assert.equal(authMessage(), 'Sign-in did not work. Try again.');
+  /* A wrong password and an unknown email read the same, so the form never
+     tells a stranger which emails have accounts. */
+  assert.equal(authMessage('auth/wrong-password'), authMessage('auth/user-not-found'));
 });
 
 console.log(`\n${pass} passed total\n`);

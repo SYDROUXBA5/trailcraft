@@ -102,7 +102,7 @@ html, body {
 .row-gap .btn { flex: 1; }
 
 /* ── Inputs ──────────────────────────────────────────────────────── */
-input[type="text"], input[type="number"], input[type="datetime-local"], input[type="date"], select {
+input[type="text"], input[type="email"], input[type="password"], input[type="number"], input[type="datetime-local"], input[type="date"], select {
   width: 100%; min-height: 56px; padding: 0 16px;
   background: var(--card); color: var(--ink);
   border: 1px solid var(--border); border-radius: 14px;
@@ -1145,6 +1145,27 @@ body:has(#scrWalk:not([hidden])) { --top-row: calc(var(--safe-t) + 104px); }
 .auth-btn[disabled] { opacity: 0.55; cursor: default; }
 .auth-btn:focus-visible { outline: 2px solid var(--ember); outline-offset: 3px; }
 .signin-error { margin: 2px 4px 0; color: #B3372B; text-align: center; }
+/* Email sign-up: labelled fields, the error under the field it is about. */
+.signin-or { display: flex; align-items: center; gap: 10px; margin: 4px 2px; color: var(--muted); font-size: 12.5px; }
+.signin-or::before, .signin-or::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+.signin-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 4px; border-radius: 14px; background: var(--paper); }
+.signin-tab { min-height: 44px; border-radius: 11px; border: 0; background: transparent; color: var(--muted);
+  font: 600 14.5px var(--body); cursor: pointer; }
+.signin-tab.on { background: var(--card); color: var(--ink); box-shadow: 0 1px 3px rgba(15, 31, 61, 0.14); }
+.signin-form { display: flex; flex-direction: column; gap: 12px; }
+.auth-field { display: flex; flex-direction: column; gap: 5px; }
+.auth-field > span:first-child { font: 600 13px var(--body); color: var(--ink); }
+.auth-field input { min-height: 48px; font-size: 16px; }
+.pw-wrap { position: relative; display: block; }
+.pw-wrap input { width: 100%; padding-right: 76px; }
+.pw-show { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); min-width: 64px; min-height: 40px;
+  border: 0; border-radius: 10px; background: transparent; color: var(--moss); font: 600 13.5px var(--body); cursor: pointer; }
+.auth-hint { font-style: normal; font-size: 12px; color: var(--muted); }
+.auth-err { font-style: normal; font-size: 12.5px; color: #B3372B; }
+.auth-field.bad input { border-color: #B3372B; }
+:root[data-theme="dark"] .auth-err { color: #F08A7E; }
+:root[data-theme="dark"] .auth-field.bad input { border-color: #F08A7E; }
+#authSubmit[disabled] { opacity: 0.6; cursor: default; }
 
 .signin-facts { list-style: none; margin: 20px 2px 0; padding: 0; display: grid; gap: 12px; }
 .signin-facts li { font-size: 14px; line-height: 1.5; color: var(--muted); padding-left: 22px; position: relative; }

@@ -23,6 +23,7 @@ import { GROUND_LAYERS, buildGround, surfaceAt, surfaceAlong, surfaceRows, withS
          CONDITIONS, blankSeen, cleanSeen, seenLine, surfaceById,
          FIX_AS, alongOf, idxAt, makeFix, applyFixes, fixSpan, stretchMetres } from './ground.js';
 import { sync, onSync, initSync, signInWithGoogle, signInWithApple, signOut,
+         signUpWithEmail, signInWithEmail, resetPassword,
          startLive, pushLive, endLive, watchLive } from './sync.js';
 import { trailModel, encodeShared, decodeShared, sharedUrl, toGpx, fileBase,
          detailSections, headline, notes, liveMeta, liveModel } from './share.js';
@@ -31,11 +32,12 @@ import { coachStep, initialCoach, coachPhrase, coachLine, TOL_OPTIONS, COACH_DEF
 import { DEBRIEF, FLAGS, NOTE_TAGS, blankDebrief, debriefDone, debriefLine, labelOf } from './debrief.js';
 import { CONFIDENCE, stampCall, confidenceOf, firstCall, calibration, calibrationLine } from './call.js';
 import { isNative, watchBackground, canHaptic, haptic, watchHeading } from './native.js';
+import { checkAuthFields, AUTH_MIN_PASSWORD } from './sync-core.js';
 import { createStore, migrateV1, TARGETS, ODOURS, targetById, targetText, verbs, uid,
          dogStats, ageBand, AGE_BANDS, LEVELS, levelById, dogAge } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-22a';
+const BUILD = '2026-09-22b';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true,
@@ -5220,9 +5222,102 @@ let signInFirstLaunch = false;
 function openSignIn({ firstLaunch = false } = {}) {
   signInFirstLaunch = firstLaunch;
   $('btnApple').hidden = !sync.apple;
+  /* Google refuses to sign anyone in from inside an app's built-in browser,
+     which is what the iPhone app is. Offering the button there would only
+     ever fail, so the iPhone app signs in by email. */
+  $('btnGoogle').hidden = isNative();
+  $('signInOr').hidden = $('btnGoogle').hidden && $('btnApple').hidden;
+  setAuthMode(authMode);
+  $('authPassword').value = '';
   $('btnSkipSignIn').textContent = firstLaunch ? 'Use without an account' : 'Not now';
   $('signInError').hidden = true;
   go('scrSignIn');
+}
+
+/* ── Email accounts ───────────────────────────────────────────────────
+   One form, two tabs. Checked on the phone first (sync-core.js) so a typo
+   is pointed out under the field it is in; the server's answer lands in the
+   one error line above the button. */
+let authMode = 'up';
+
+function setAuthMode(mode) {
+  authMode = mode === 'in' ? 'in' : 'up';
+  const up = authMode === 'up';
+  $('tabSignUp').classList.toggle('on', up);
+  $('tabSignIn').classList.toggle('on', !up);
+  $('tabSignUp').setAttribute('aria-selected', String(up));
+  $('tabSignIn').setAttribute('aria-selected', String(!up));
+  $('authNameRow').hidden = !up;
+  $('authHint').hidden = !up;
+  $('authHint').textContent = `At least ${AUTH_MIN_PASSWORD} characters.`;
+  $('authForgot').hidden = up;
+  $('authPassword').setAttribute('autocomplete', up ? 'new-password' : 'current-password');
+  $('authSubmit').textContent = up ? 'Create account' : 'Sign in';
+  showAuthErrors({});
+  $('signInError').hidden = true;
+}
+
+function showAuthErrors(errors) {
+  for (const [id, key] of [['authNameErr', 'name'], ['authEmailErr', 'email'], ['authPasswordErr', 'password']]) {
+    const el = $(id);
+    el.textContent = errors[key] || '';
+    el.hidden = !errors[key];
+    el.closest('.auth-field')?.classList.toggle('bad', !!errors[key]);
+  }
+}
+
+function authFields() {
+  return { mode: authMode, name: $('authName').value, email: $('authEmail').value, password: $('authPassword').value };
+}
+
+async function submitAuth(e) {
+  e?.preventDefault();
+  const fields = authFields();
+  const check = checkAuthFields(fields);
+  showAuthErrors(check.errors);
+  if (!check.ok) {
+    /* Take them to the first thing to fix. */
+    const first = ['name', 'email', 'password'].find(k => check.errors[k]);
+    $({ name: 'authName', email: 'authEmail', password: 'authPassword' }[first])?.focus();
+    return;
+  }
+  const btn = $('authSubmit');
+  btn.disabled = true;
+  btn.textContent = authMode === 'up' ? 'Creating your account…' : 'Signing in…';
+  try {
+    const user = authMode === 'up' ? await signUpWithEmail(fields) : await signInWithEmail(fields);
+    if (user) {
+      $('authPassword').value = '';
+      if (authMode === 'up') toast(`Account created. A link to confirm it is on its way to ${fields.email.trim()}.`);
+      return;                       // signed in: the sync watcher takes it from here
+    }
+    /* Already has an account: move them to signing in, email kept, and keep
+       the message that says why. */
+    if (/already an account/.test(sync.error || '')) {
+      const why = sync.error;
+      setAuthMode('in');
+      $('signInError').textContent = why;
+      $('signInError').hidden = false;
+    }
+  } finally {
+    btn.disabled = false;
+    btn.textContent = authMode === 'up' ? 'Create account' : 'Sign in';
+  }
+}
+
+async function forgotPassword() {
+  const email = $('authEmail').value;
+  const check = checkAuthFields({ mode: 'in', email, password: 'x' });
+  if (check.errors.email) {
+    showAuthErrors({ email: check.errors.email });
+    return $('authEmail').focus();
+  }
+  showAuthErrors({});
+  const btn = $('authForgot');
+  btn.disabled = true;
+  const sent = await resetPassword(email);
+  btn.disabled = false;
+  if (sent) toast(`If there’s an account for ${email.trim()}, a reset link is on its way.`);
 }
 
 function when(t) {
@@ -5827,6 +5922,24 @@ function wire() {
     applyTheme();
   });
   $('btnGoogle').addEventListener('click', () => signInWithGoogle());
+  $('tabSignUp').addEventListener('click', () => setAuthMode('up'));
+  $('tabSignIn').addEventListener('click', () => setAuthMode('in'));
+  $('authForm').addEventListener('submit', submitAuth);
+  $('authForgot').addEventListener('click', forgotPassword);
+  $('authShow').addEventListener('click', () => {
+    const pw = $('authPassword'), show = pw.type === 'password';
+    pw.type = show ? 'text' : 'password';
+    $('authShow').textContent = show ? 'Hide' : 'Show';
+    $('authShow').setAttribute('aria-pressed', String(show));
+    $('authShow').setAttribute('aria-label', show ? 'Hide password' : 'Show password');
+  });
+  /* A field's complaint goes as soon as they start fixing it. */
+  for (const id of ['authName', 'authEmail', 'authPassword']) {
+    $(id).addEventListener('input', () => {
+      const err = $(`${id}Err`);
+      if (!err.hidden) { err.hidden = true; err.closest('.auth-field')?.classList.remove('bad'); }
+    });
+  }
   $('btnApple').addEventListener('click', () => signInWithApple());
   $('btnSkipSignIn').addEventListener('click', () => {
     db.kv.set('signInAnswered', true);
