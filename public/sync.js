@@ -10,6 +10,7 @@
    it cannot load — offline, blocked, not set up — the app does not notice. */
 
 import { firebaseConfig, appleSignInEnabled } from './firebase-config.js';
+import { isNative } from './native.js';
 import { mergeRecords, mergeCalibration, toCloud, fromCloud, approxBytes, DOC_LIMIT, packPoints, unpackPoints,
          authMessage } from './sync-core.js';
 
@@ -54,12 +55,19 @@ export async function initSync(store) {
   ready = (async () => {
     const f = await loadFirebase();
     const app = f.initializeApp(firebaseConfig);
-    auth = f.getAuth(app);
+    /* Inside the iPhone app, getAuth() also loads Google's sign-in helper page
+       from firebaseapp.com. That page never answers an app that isn't a website,
+       so every sign-in would wait forever. The iPhone app only signs in by email,
+       which needs no helper page, so it starts sign-in without one and keeps the
+       account in the app's own storage. */
+    auth = isNative()
+      ? f.initializeAuth(app, { persistence: f.indexedDBLocalPersistence })
+      : f.getAuth(app);
     fs = f.initializeFirestore(app, {
       localCache: f.persistentLocalCache({ tabManager: f.persistentMultipleTabManager() }),
     });
     // A redirect sign-in comes back through a full page load and lands here.
-    await f.getRedirectResult(auth).catch((e) => { sync.error = plain(e); });
+    if (!isNative()) await f.getRedirectResult(auth).catch((e) => { sync.error = plain(e); });
     f.onAuthStateChanged(auth, onUser);
   })();
   try {

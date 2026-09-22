@@ -37,7 +37,7 @@ import { createStore, migrateV1, TARGETS, ODOURS, targetById, targetText, verbs,
          dogStats, ageBand, AGE_BANDS, LEVELS, levelById, dogAge } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-22c';
+const BUILD = '2026-09-22d';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true,
@@ -5332,8 +5332,11 @@ function renderAccount() {
     card.innerHTML = `<p class="body">Backup and sync</p>
       <p class="body small muted">Not switched on yet. Your trails are on this phone only.</p>`;
   } else if (!sync.user) {
-    card.innerHTML = `<p class="body small muted">Sign in to back up your dogs and trails, and have them on any phone.</p>
-      <button type="button" class="btn moss" data-account="signin">Sign in</button>`;
+    /* Say what is true: the button only works once the account service has answered. */
+    const busy = sync.status === 'loading';
+    const err = sync.status === 'error' && sync.error ? `<p class="body small signin-error">${esc(sync.error)}</p>` : '';
+    card.innerHTML = `<p class="body small muted">Sign in to back up your dogs and trails, and have them on any phone.</p>${err}
+      <button type="button" class="btn moss" data-account="signin"${busy ? ' disabled' : ''}>${busy ? 'Connecting…' : 'Sign in'}</button>`;
   } else {
     const u = sync.user;
     const dot = sync.status === 'synced' ? 'ok' : sync.status === 'error' ? 'bad' : 'busy';
@@ -5345,7 +5348,7 @@ function renderAccount() {
       : avaHtml({ name: u.name || u.email || '?' });
     card.innerHTML = `<div class="account-who">${face}<div><b>${esc(u.name || 'Signed in')}</b><i>${esc(u.email || '')}</i></div></div>
       <div class="sync-line"><span class="sync-dot ${dot}"></span><span>${line}</span></div>
-      <button type="button" class="btn ghost small" data-account="signout">Sign out</button>`;
+      <button type="button" class="btn ghost" data-account="signout">Sign out</button>`;
   }
   // The privacy line says what is actually true right now.
   const where = $('dataWhere');
