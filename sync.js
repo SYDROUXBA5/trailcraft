@@ -22,7 +22,7 @@ export const sync = {
   configured: !!firebaseConfig,
   apple: !!firebaseConfig && appleSignInEnabled,
   user: null,               // { uid, name, email, photo }
-  status: 'off',            // off | loading | signed-out | other | syncing | synced | error
+  status: 'off',            // off | loading | signed-out | other | ask | syncing | synced | partial | error
   lastSync: 0,
   error: null,
 };
@@ -199,6 +199,7 @@ export async function useThisAccount() {
   if (!u) return false;
   try {
     stopMirror?.(); stopMirror = null;
+    forgetSkipped();                 // those records are not this phone's any more
     db.wipeAll();                    // takes the old owner with it
     db.kv.set('ownerUid', u.uid);
     const f = await loadFirebase();
@@ -232,24 +233,25 @@ async function applyUser(u) {
   stopMirror?.(); stopMirror = null;
   sync.user = u ? { uid: u.uid, name: u.displayName, email: u.email, photo: u.photoURL,
     password: (u.providerData || []).some(p => p.providerId === 'password') } : null;
-  if (!u) { sync.status = 'signed-out'; emit(); return; }
+  if (!u) { forgetSkipped(); sync.status = 'signed-out'; emit(); return; }
 
   /* Records already belonging to another account are never merged into this
      one (sync-core.js syncPlan). Nothing is read or written until the handler
      says what to do with them — renderAccount asks. */
   const plan = syncPlan(db.kv.get('ownerUid', null), u.uid, hasRecords());
-  if (plan === 'other' || plan === 'ask') { sync.status = plan; sync.error = null; emit(); return; }
+  if (plan === 'other' || plan === 'ask') { forgetSkipped(); sync.status = plan; sync.error = null; emit(); return; }
 
   sync.status = 'syncing'; emit();
   try {
     /* Claimed before the first upload, not after it: the merge starts sending
        straight away, and half-sent records still belong to this account. */
     db.kv.set('ownerUid', u.uid);
-    await fullSync(u.uid);
+    forgetSkipped();
+    for (const id of await fullSync(u.uid)) tooBig.add(id);
     stopMirror = db.onChange((table, rec) => mirror(u.uid, table, rec));
-    sync.status = 'synced';
-    sync.lastSync = Date.now();
-    sync.error = null;
+    /* "Backed up" only when everything is. Anything left behind is named. */
+    settle();
+    return;
   } catch (e) {
     sync.status = 'error';
     sync.error = plain(e) || 'Could not sync — your trails are still safe on this phone';
@@ -336,6 +338,7 @@ const userDoc = (uid, name, id) => fb.doc(fs, 'users', uid, name, String(id));
 
 /** Bring the phone and the account into agreement, both directions. */
 async function fullSync(uid) {
+  const skipped = [];
   for (const name of TABLES) {
     const snap = await fb.getDocs(userCol(uid, name));
     const remote = snap.docs.map(d => fromCloud(d.data()));
@@ -345,7 +348,7 @@ async function fullSync(uid) {
     const stamped = local.map(r => (Number.isFinite(r.updatedAt) ? r : { ...r, updatedAt: 1 }));
     const { merged, toUpload } = mergeRecords(stamped, remote);
     if (name === 'sessions') db.replaceSessions(merged); else db[name].replaceAll(merged);
-    await uploadAll(uid, name, toUpload);
+    skipped.push(...await uploadAll(uid, name, toUpload));
   }
 
   const snap = await fb.getDocs(userCol(uid, 'calibration'));
@@ -357,33 +360,73 @@ async function fullSync(uid) {
     db.setCalibration(dogId, rows);
     if (rows.length !== (remote.get(dogId) || []).length) up.push({ id: dogId, rows, updatedAt: Date.now() });
   }
-  await uploadAll(uid, 'calibration', up);
+  skipped.push(...await uploadAll(uid, 'calibration', up));
+  return skipped;
 }
 
 /** Firestore takes at most 500 writes in one batch. */
 async function uploadAll(uid, name, rows) {
+  const skipped = [];
   for (let i = 0; i < rows.length; i += 400) {
     const batch = fb.writeBatch(fs);
     let n = 0;
     for (const rec of rows.slice(i, i + 400)) {
       const payload = toCloud(rec);
-      if (approxBytes(payload) > DOC_LIMIT) { sync.error = 'One very long track is too large to back up'; continue; }
+      /* Skipped, and SAID: a backup that quietly leaves a session behind and
+         then reports "backed up" is worse than one that fails. */
+      if (approxBytes(payload) > DOC_LIMIT) { skipped.push(rec.id); continue; }
       batch.set(userDoc(uid, name, rec.id), payload);
       n++;
     }
     if (n) await batch.commit();
   }
+  return skipped;
+}
+
+/* What is NOT in the cloud: records too long to fit, and records the cloud
+   refused. Both are kept by id until that same record goes up, so no other
+   save can report "backed up" over the top of one that never went. */
+const tooBig = new Set();
+const failed = new Map();      // id → what went wrong, in words
+
+/** Forget both, because the records they describe are no longer this
+    account's business: wiped, signed out, or handed to someone else. */
+export function forgetSkipped() {
+  tooBig.clear();
+  failed.clear();
+}
+
+function settle() {
+  const n = tooBig.size;
+  const line = n
+    ? `${n} very long session${n === 1 ? '' : 's'} could not be backed up — ${n === 1 ? 'it is' : 'they are'} still on this phone only`
+    : failed.size
+      ? `${failed.size} record${failed.size === 1 ? '' : 's'} did not reach your account: ${[...failed.values()][0]}`
+      : null;
+  sync.error = line;
+  sync.status = line ? 'partial' : 'synced';
+  sync.lastSync = Date.now();
+  emit();
 }
 
 /** Every save on the phone, copied up as it happens. Not awaited: Firestore
     queues it offline, and the handler is never kept waiting on a network. */
 function mirror(uid, table, rec) {
   if (!fs || !rec?.id) return;
+  /* Firestore holds a write until it can send it, which offline can be hours.
+     By then the phone may be signed out, or signed in as somebody else, and an
+     answer about the old account must not touch what the screen is saying. */
+  const theirs = () => sync.user?.uid === uid && ['syncing', 'synced', 'partial'].includes(sync.status);
+  if (!theirs()) return;
   const payload = toCloud(rec);
-  if (approxBytes(payload) > DOC_LIMIT) { sync.error = 'One very long track is too large to back up'; emit(); return; }
+  if (approxBytes(payload) > DOC_LIMIT) { tooBig.add(rec.id); settle(); return; }
   fb.setDoc(userDoc(uid, table, rec.id), payload)
-    .then(() => { sync.lastSync = Date.now(); sync.status = 'synced'; emit(); })
-    .catch((e) => { sync.error = plain(e); emit(); });
+    .then(() => { if (!theirs()) return; tooBig.delete(rec.id); failed.delete(rec.id); settle(); })
+    .catch((e) => {
+      if (!theirs()) return;
+      failed.set(rec.id, plain(e) || 'the cloud refused it');
+      settle();
+    });
 }
 
 /* ── Live: a run, followed from anywhere while it happens ─────────────
