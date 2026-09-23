@@ -56,6 +56,18 @@ export function pruneTombstones(rows, now = Date.now(), keepMs = 90 * 86400e3) {
 const POINT_KEYS = ['lat', 'lon', 't', 'acc', 'alt', 'dwellS', 'kind', 'call'];
 const isPoint = (p) => p && typeof p === 'object' && Number.isFinite(p.lat) && Number.isFinite(p.lon);
 
+/* Compact mode: for the phone's own scratch copy of a recording in progress
+   (draft.js), which is stored as text and rewritten every few seconds, so
+   every character counts. Firestore is not stored as text — a number costs
+   eight bytes there however short it is — so the backup writes points plainly
+   and exactly, and none of this touches it.
+
+   What a stored number is worth keeping to, when it is kept short: six decimal
+   places is about 11 cm, already finer than the fix behind it. */
+const ROUND = { lat: 1e6, lon: 1e6, alt: 10, acc: 10, dwellS: 10, t: 1 };
+const tidy = (k, v) => (ROUND[k] && typeof v === 'number' && Number.isFinite(v)
+  ? Math.round(v * ROUND[k]) / ROUND[k] : v);
+
 /* Working notes the app hangs on a point while it is being drawn or walked —
    `_seen` and anything else beginning with an underscore. They mean nothing
    tomorrow and nothing on another phone, so they are the one thing not kept. */
@@ -68,28 +80,70 @@ const working = (k) => k.startsWith('_');
     something to a point — the handler's call on an indication — quietly failed
     to survive the trip to another phone, and nothing said so: the mark came
     back, the answer did not. Whatever a point holds now goes with it. */
-export function packPoints(pts) {
+export function packPoints(pts, { compact = false } = {}) {
   const out = { __pts: pts.length };
   const keys = [...POINT_KEYS];
   for (const p of pts) {
     for (const k of Object.keys(p || {})) if (!working(k) && !keys.includes(k)) keys.push(k);
   }
   for (const k of keys) {
-    if (pts.some(p => p?.[k] != null)) out[k] = pts.map(p => (p?.[k] ?? null));
+    if (!pts.some(p => p?.[k] != null)) continue;
+    const col = pts.map(p => (p?.[k] == null ? null : (compact ? tidy(k, p[k]) : p[k])));
+    out[k] = compact ? squeeze(k, col) : col;
   }
   return out;
 }
 
 export function unpackPoints(packed) {
   const keys = Object.keys(packed).filter(k => k !== '__pts');
+  const cols = {};
+  for (const k of keys) cols[k] = spread(packed[k]);
   return Array.from({ length: packed.__pts }, (_, i) => {
     const p = {};
     for (const k of keys) {
-      const col = packed[k];
+      const col = cols[k];
       if (Array.isArray(col) && col[i] != null) p[k] = col[i];
     }
     return p;
   });
+}
+
+/* A column of numbers, written as the step from one to the next.
+
+   Along a walked line every value is close to the one before it: a step is two
+   or three digits where the position itself is nine, and a second of clock is
+   four where the clock is thirteen. It is the same numbers either way, and it
+   is what decides whether a long morning's session fits in one record at all.
+   Columns that are not plain numbers, or that have gaps, stay as they are —
+   they are short, and simple beats clever on the thing that holds the backup.
+
+   `{ d: [...] }` is a step-written column; a bare array is one written out in
+   full, which is what every record made before this was. Both are read. */
+const STEP = { lat: 1e6, lon: 1e6, t: 1, alt: 10, acc: 10 };
+
+function squeeze(k, col) {
+  const s = STEP[k];
+  if (!s || col.length < 8) return col;
+  if (!col.every(v => typeof v === 'number' && Number.isFinite(v))) return col;
+  const ints = col.map(v => Math.round(v * s));
+  const d = [ints[0]];
+  for (let i = 1; i < ints.length; i++) d.push(ints[i] - ints[i - 1]);
+  const out = { d, s };
+  /* Only if it is actually smaller: a column that jumps about is better left
+     alone, and the step form then costs more than it saves. */
+  return JSON.stringify(out).length < JSON.stringify(col).length ? out : col;
+}
+
+function spread(col) {
+  if (Array.isArray(col) || !col || typeof col !== 'object' || !Array.isArray(col.d)) return col;
+  const s = Number.isFinite(col.s) && col.s > 0 ? col.s : 1;
+  const out = [];
+  let n = 0;
+  for (let i = 0; i < col.d.length; i++) {
+    n = i === 0 ? col.d[0] : n + col.d[i];
+    out.push(s === 1 ? n : n / s);
+  }
+  return out;
 }
 
 /** Make any value storable in Firestore, reversibly.
@@ -125,8 +179,28 @@ export function fromCloud(value) {
 }
 
 /** Roughly how many bytes a document will be, to catch the megabyte ceiling
-    before Firestore refuses it rather than after. */
-export const approxBytes = (value) => new TextEncoder().encode(JSON.stringify(value)).length;
+    before Firestore refuses it rather than after.
+
+    Counted the way Firestore counts, NOT as JSON text. A number costs eight
+    bytes there whether it is 3 or 51.209412, so measuring the text says a
+    document has shrunk when nothing has moved — and a guard that reads low
+    waves through exactly the documents the server will refuse, which fails
+    the whole batch and stops the rest of the backup with it. */
+const utf8 = (s) => new TextEncoder().encode(String(s)).length;
+export function approxBytes(value) {
+  if (value === null || value === undefined || typeof value === 'boolean') return 1;
+  if (typeof value === 'number') return 8;
+  if (typeof value === 'string') return utf8(value) + 1;
+  if (Array.isArray(value)) return value.reduce((n, v) => n + approxBytes(v), 0);
+  if (typeof value === 'object') {
+    return Object.entries(value)
+      .reduce((n, [k, v]) => n + utf8(k) + 1 + approxBytes(v), 0);
+  }
+  return 8;
+}
+/* Firestore's hard ceiling is 1,048,576 bytes including the document's own
+   name and a little overhead. The margin is deliberate: the estimate is close,
+   not exact, and being refused costs the whole batch. */
 export const DOC_LIMIT = 1_000_000;
 
 /** Calibration is different from every other record: rows are APPENDED, run by

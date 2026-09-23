@@ -23,7 +23,7 @@ import { GROUND_LAYERS, buildGround, surfaceAt, surfaceAlong, surfaceRows, withS
          tilesCovering, isHard, GROUND_V, GROUND_RULES, readingSig, readingFits, readingVersion,
          CONDITIONS, blankSeen, cleanSeen, seenLine, surfaceById,
          FIX_AS, alongOf, idxAt, makeFix, applyFixes, fixSpan, stretchMetres } from './ground.js';
-import { sync, onSync, initSync, signInWithGoogle, signInWithApple, signOut, deleteAccount, useThisAccount,
+import { sync, onSync, initSync, signInWithGoogle, signInWithApple, signOut, deleteAccount, useThisAccount, forgetSkipped,
          adoptRecords, reclaim,
          signUpWithEmail, signInWithEmail, resetPassword,
          startLive, pushLive, endLive, watchLive, resumeLive } from './sync.js';
@@ -39,7 +39,7 @@ import { createStore, migrateV1, TARGETS, ODOURS, targetById, targetText, verbs,
          dogStats, ageBand, AGE_BANDS, LEVELS, levelById, dogAge } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-22m';
+const BUILD = '2026-09-22n';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true,
@@ -5520,9 +5520,10 @@ function renderAccount() {
       <button type="button" class="btn ghost small del-link" data-account="delete">Delete my account</button>`;
   } else {
     const u = sync.user;
-    const dot = sync.status === 'synced' ? 'ok' : sync.status === 'error' ? 'bad' : 'busy';
+    const dot = sync.status === 'synced' ? 'ok'
+      : sync.status === 'error' || sync.status === 'partial' ? 'bad' : 'busy';
     const line = sync.status === 'synced' ? `Backed up ${when(sync.lastSync)}`
-      : sync.status === 'error' ? esc(sync.error || 'Not backed up')
+      : sync.status === 'error' || sync.status === 'partial' ? esc(sync.error || 'Not backed up')
       : 'Backing up…';
     const face = u.photo
       ? `<img src="${esc(u.photo)}" alt="" referrerpolicy="no-referrer">`
@@ -5543,11 +5544,14 @@ function renderAccount() {
 onSync((st) => {
   renderAccount();
   const err = $('signInError');
-  if (err) { err.textContent = st.error || ''; err.hidden = !st.error || $('scrSignIn').hidden; }
+  /* Only what stopped them signing IN belongs on the sign-in form. A backup
+     that skipped a long session is the account card's business. */
+  const signInProblem = st.status === 'error' && !st.user ? st.error : '';
+  if (err) { err.textContent = signInProblem || ''; err.hidden = !signInProblem || $('scrSignIn').hidden; }
   /* Signed in from the sign-in screen and the account had records: they are
      on the phone now, so carry on as if they had always been there. */
   paintLiveBtn();                 // a live link is refused until the records are settled
-  if (st.user && ['synced', 'other', 'ask'].includes(st.status) && !$('scrSignIn').hidden) {
+  if (st.user && ['synced', 'partial', 'other', 'ask'].includes(st.status) && !$('scrSignIn').hidden) {
     db.kv.set('signInAnswered', true);
     snap();
     if (st.status === 'other' || st.status === 'ask') {
@@ -6236,6 +6240,7 @@ function wire() {
     if (!confirm(`Wipe everything? ${S.sessions.length} sessions, ${S.dogs.length} dogs and all profiles. Export first if you want to keep them.${backup}`)) return;
     db.wipeAll();
     reclaim();          // the owner mark lives in the same store and went with it
+    forgetSkipped();    // and the list of what could not be sent describes nothing now
     snap();
     boot();
   });

@@ -190,6 +190,25 @@ t('every screen in the markup is one the app can actually show', () => {
   for (const id of inList) assert.ok(inMarkup.includes(id), `SCREENS names ${id}, which no longer exists`);
 });
 
+t('"backed up" means backed up', () => {
+  /* The backup used to skip a session that was too long, set an error, and
+     then report success over the top of it. */
+  assert.match(syncJs, /const tooBig = new Set\(\);/);
+  assert.match(syncJs, /failed\.set\(rec\.id/, 'a refused write is remembered by record, not by a flag');
+  assert.match(syncJs, /sync\.status = line \? 'partial' : 'synced';/,
+    'anything left behind keeps the backup marked incomplete');
+  const settle = syncJs.slice(syncJs.indexOf('function settle()'), syncJs.indexOf('/* ── Deleting the account'));
+  assert.ok(!/status = 'synced';[\s\S]{0,40}error = null/.test(settle), 'success never clears a recorded failure');
+  /* A write can land hours later, after a sign-out or a different account. */
+  assert.match(syncJs, /const theirs = \(\) => sync\.user\?\.uid === uid/, 'a late answer speaks only for its own account');
+  for (const where of ['forgetSkipped();                 // those records', 'if (!u) { forgetSkipped();']) {
+    assert.ok(syncJs.includes(where), `the list is forgotten: ${where.slice(0, 30)}`);
+  }
+  assert.match(js, /\['synced', 'partial', 'other', 'ask'\]\.includes\(st\.status\)/,
+    'a partial backup still lets them off the sign-in screen');
+  assert.match(js, /forgetSkipped\(\);    \/\/ and the list/, 'wiping the phone forgets it too');
+});
+
 t('seeing the answer once counts for the rest of the run', () => {
   assert.match(js, /callSeen = !!run\.revealedAt;/, 'a call is judged on whether they have looked, not on what is on screen');
   assert.match(js, /if \(run\.revealed && !run\.revealedAt\) run\.revealedAt = Date\.now\(\);/,

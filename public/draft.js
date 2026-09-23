@@ -44,9 +44,11 @@ export function packDraft({
     /* Whether the answer had been shown before the app died: a recovered run
        must not turn a call made after looking into a blind one. */
     revealedAt: fin(revealedAt) && revealedAt > 0 ? revealedAt : null,
-    pts: pts?.length ? packPoints(pts) : null,
-    wps: wps?.length ? packPoints(wps) : null,
-    hides: hides?.length ? packPoints(hides) : null,
+    /* Short form: this is rewritten every few seconds while walking, and it
+       lives in the phone's own text store where every character is paid for. */
+    pts: pts?.length ? packPoints(pts, { compact: true }) : null,
+    wps: wps?.length ? packPoints(wps, { compact: true }) : null,
+    hides: hides?.length ? packPoints(hides, { compact: true }) : null,
   };
 }
 

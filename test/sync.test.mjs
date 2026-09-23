@@ -82,6 +82,18 @@ t('points: packed into columns and back, exactly', () => {
   }));
   const back = unpackPoints(packPoints(pts));
   assert.deepEqual(back, pts, 'every field, every point, nothing invented');
+
+  /* The phone's own scratch copy is kept short instead: rounded to about 11 cm
+     and written as steps. It is text, rewritten every few seconds; the backup
+     is not, and pays nothing for the longer numbers. */
+  const short = packPoints(pts, { compact: true });
+  assert.ok(JSON.stringify(short).length < JSON.stringify(packPoints(pts)).length / 2,
+    'the short form is less than half the size');
+  const fromShort = unpackPoints(short);
+  fromShort.forEach((p, i) => {
+    assert.ok(Math.abs(p.lat - pts[i].lat) <= 1e-6, `point ${i} is where it was`);
+    assert.equal(p.t, pts[i].t, `point ${i} time is exact`);
+  });
 });
 
 t('toCloud: a real session becomes storable, and comes back identical', () => {
@@ -253,6 +265,37 @@ t('whatever a point carries travels with it, except the app’s own working note
   assert.equal(back[0]._seen, undefined, 'working notes are the one thing dropped');
   assert.equal(back[1].dwellS, 9);
   assert.equal(back[1].note, undefined, 'and a point without a field does not gain one');
+});
+
+/* Firestore charges eight bytes for a number whatever it holds, so the
+   ceiling is about how MANY points there are, not how they are written. This
+   is the honest picture of where it bites. */
+t('the size guard counts the way Firestore counts', () => {
+  const walk = (n) => Array.from({ length: n }, (_, i) => ({
+    lat: 51.2094 + i * 0.000012, lon: -2.6449 + i * 0.000018,
+    t: 1758000000000 + i * 1000, acc: 5, alt: 42,
+  }));
+  const session = (mins) => ({ id: 's', updatedAt: 1,
+    data: { trail: walk(mins * 60), track: walk(mins * 60), trackWaypoints: walk(12) } });
+
+  assert.ok(approxBytes(toCloud(session(180))) < DOC_LIMIT,
+    'three hours laid and three hours run still fits in one record');
+  assert.ok(approxBytes(toCloud(session(240))) > DOC_LIMIT,
+    'four and four does not — and the handler is told so rather than being told it was backed up');
+
+  /* Shortening the numbers does NOT change what Firestore charges. Anything
+     claiming otherwise is measuring the text and not the record. */
+  const plain = approxBytes(packPoints(walk(2000)));
+  const short = approxBytes(packPoints(walk(2000), { compact: true }));
+  assert.ok(short >= plain * 0.9, `the short form buys nothing here (${short} vs ${plain})`);
+
+  /* Written before any of this: still a walk, not a crash. */
+  const older = { __pts: 3, lat: [51.2, 51.3, 51.4], lon: [-2.6, -2.7, -2.8], t: [1000, 2000, 3000], kind: [null, 'Indication', null] };
+  assert.deepEqual(unpackPoints(older), [
+    { lat: 51.2, lon: -2.6, t: 1000 },
+    { lat: 51.3, lon: -2.7, t: 2000, kind: 'Indication' },
+    { lat: 51.4, lon: -2.8, t: 3000 },
+  ]);
 });
 
 console.log(`\n${pass} passed total\n`);
