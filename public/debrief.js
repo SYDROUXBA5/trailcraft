@@ -148,10 +148,26 @@ export function debriefLine(d) {
    perfect record and has proved nothing. */
 
 /** Rates over a set of debriefed runs, split by how blind they were. */
+/** A run this handler actually made.
+
+    A whole run kept from someone else's link is theirs: their dog, their
+    track, their call. A trail that arrived as a Trail Card and was then run
+    on this phone is the opposite — the blindest run there is — and the record
+    of it belongs here. Both carry `imported`; what tells them apart is
+    whether the running happened after the import. */
+export function ownRun(session) {
+  const d = session?.data;
+  if (!d) return false;
+  const imp = d.imported;
+  if (!imp) return true;
+  const at = Number.isFinite(imp.at) ? imp.at : null;
+  return !!(at && Number.isFinite(d.trackStarted) && d.trackStarted >= at);
+}
+
 export function debriefRates(sessions) {
   /* A run kept from someone else's link is their dog and their judgement.
      Counting it here would quietly blend two handlers into one record. */
-  const rows = (sessions ?? []).filter(s => !s?.data?.imported)
+  const rows = (sessions ?? []).filter(ownRun)
     .map(s => s?.data?.debrief).filter(d => d && d.outcome);
   const count = (f) => rows.filter(f).length;
   const real = rows.filter(d => d.target === 'real');
@@ -174,7 +190,7 @@ export function debriefRates(sessions) {
 /** What this dog has never been asked to do. Stated as a gap, not a score —
     it is the most useful thing a training record can tell anyone. */
 export function varietyGaps(sessions) {
-  const rows = (sessions ?? []).filter(s => !s?.data?.imported && s?.data?.debrief?.outcome);
+  const rows = (sessions ?? []).filter(s => ownRun(s) && s?.data?.debrief?.outcome);
   const gaps = [];
   if (!rows.length) return gaps;
   const d = rows.map(s => s.data.debrief);

@@ -190,6 +190,24 @@ t('every screen in the markup is one the app can actually show', () => {
   for (const id of inList) assert.ok(inMarkup.includes(id), `SCREENS names ${id}, which no longer exists`);
 });
 
+t('seeing the answer once counts for the rest of the run', () => {
+  assert.match(js, /callSeen = !!run\.revealedAt;/, 'a call is judged on whether they have looked, not on what is on screen');
+  assert.match(js, /if \(run\.revealed && !run\.revealedAt\) run\.revealedAt = Date\.now\(\);/,
+    'the first reveal is stamped and never unstamped');
+  assert.match(js, /run\.revealedAt = s\.data\.revealedAt \|\| 0;/,
+    'a second run of the same trail knows the answer was already shown');
+  assert.match(js, /revealedAt: run\.revealedAt \|\| s\.data\.revealedAt \|\| null/,
+    'and saving a later run never erases when it was shown');
+  assert.match(js, /if \(!run\.revealedAt\) run\.revealedAt = Date\.now\(\);/,
+    'switching the coach on is being shown the answer');
+  assert.match(js, /stampCall\(v, callSeen \|\| !!run\.revealedAt \|\| coach\.on\)/,
+    'and the call is judged when it is answered, not when it was asked');
+  assert.match(js, /if \(isFirstInd && !run\.revealedAt && !coach\.on\) openCall\(wp\);/,
+    'and they are not asked once they have looked, or while the coach is talking');
+  assert.ok(/revealedAt: run\.revealedAt \|\| s\.data\.revealedAt \|\| null/.test(js),
+    'the run is saved with when the answer was shown');
+});
+
 t('an unfinished recording is written down, and nothing reloads over it', () => {
   assert.match(js, /function onFix[\s\S]{0,2000}keepDraft\(\);/, 'every fix keeps the draft up to date');
   assert.match(js, /const busy = unsavedWork\(\);/, 'an update waits for unsaved work, not just for the GPS');

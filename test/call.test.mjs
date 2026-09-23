@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { CONFIDENCE, CALL_V, MIN_PER_BAND, stampCall, confidenceOf, labelOf,
          callsIn, firstCall, scorable, calibration, calibrationLosses,
-         calibrationLine } from '../public/call.js';
+         calibrationLine, callVerdict } from '../public/call.js';
 
 let pass = 0;
 const t = (name, fn) => { fn(); pass++; console.log(`  ok  ${name}`); };
@@ -17,6 +17,23 @@ const sess = ({ conf = 'sure', seen = false, blind = 'handler',
     ],
     debrief: outcome === null ? undefined : { outcome, target: 'real', blind },
   },
+});
+
+/* Looking at the answer and then hiding it again does not make the next call
+   a blind one. The run screen stamps that on the call; this is the second
+   lock, on the record itself, for runs stamped before it learned to. */
+t('a call made after the answer was shown is never counted, however it was stamped', () => {
+  const shown = (revealedAt, at = 1000) => {
+    const s = sess({ t: at });
+    s.data.revealedAt = revealedAt;
+    return s;
+  };
+  assert.equal(scorable(shown(900)), null, 'the trail had been on screen before the call');
+  assert.equal(scorable(shown(1000)), null, 'shown the same moment: not blind either');
+  assert.deepEqual(scorable(shown(1500)), { conf: 'sure', right: true, at: 1000 },
+    'called first, looked afterwards: that is a blind call');
+  assert.ok(scorable(shown(null)), 'a run that was never revealed still counts');
+  assert.ok(scorable(shown(0)), 'and so does one whose reveal was never recorded');
 });
 
 /** n sessions in a band, `right` of them correct. */
@@ -139,7 +156,7 @@ t('discarded runs are counted, so a thin curve is explained not hidden', () => {
   assert.equal(l.seen, 1);
   assert.equal(l.notBlind, 1);
   assert.equal(l.noDebrief, 1);
-  assert.deepEqual(calibrationLosses([]), { total: 0, seen: 0, notBlind: 0, noDebrief: 0 });
+  assert.deepEqual(calibrationLosses([]), { total: 0, seen: 0, helped: 0, notBlind: 0, noDebrief: 0 });
 });
 
 t('a run kept from someone else’s link never counts as your call', () => {
@@ -155,6 +172,50 @@ t('a run kept from someone else’s link never counts as your call', () => {
 
   assert.equal(calibrationLosses([sess(), theirs(sess({ blind: 'open' }))]).total, 1,
     'and they are not counted as your losses either');
+});
+
+/* The coach reads out the distance to the real trail while the dog works.
+   With it on there is no such thing as a blind call, whatever the run screen
+   managed to stamp on it. */
+t('a call made with the coach running is never banked', () => {
+  const helped = (s) => ({ ...s, data: { ...s.data, coach: { assisted: true, tolM: 20 } } });
+  assert.equal(scorable(helped(sess())), null);
+  assert.equal(callVerdict(helped(sess())).why, 'helped');
+  assert.ok(scorable({ ...sess(), data: { ...sess().data, coach: { assisted: false } } }),
+    'the coach switched on and never used does not spoil the run');
+  const l = calibrationLosses([sess(), helped(sess())]);
+  assert.equal(l.helped, 1);
+  assert.equal(l.seen, 1, 'and it is counted among the calls that could not be blind');
+});
+
+/* A trail someone else laid, sent as a Trail Card and run here, is the
+   blindest run there is. It used to be thrown away with the runs kept from
+   other people's links, because both are marked "imported". */
+t('a trail that arrived as a card and was run here is your own blind call', () => {
+  const card = (s, { ranAfter = true } = {}) => ({
+    ...s,
+    data: { ...s.data, imported: { from: 'Sophie', at: 500 }, trackStarted: ranAfter ? 900 : 100 },
+  });
+  assert.deepEqual(scorable(card(sess())), { conf: 'sure', right: true, at: 1000 },
+    'you ran it after it arrived: your call');
+  assert.equal(scorable(card(sess(), { ranAfter: false })), null,
+    'a whole run kept from someone else carries their call, made before it got here');
+  assert.equal(callVerdict(card(sess(), { ranAfter: false })).why, 'someone-elses');
+  const cal = calibration([card(sess()), card(sess())]);
+  assert.equal(cal.calls, 2, 'card-run trails build your record like any other');
+});
+
+/* The question can sit open while the answer goes up on screen. What counts
+   is when the handler answered, not when they were asked. */
+t('the moment that matters is when the call was given', () => {
+  const late = sess({ t: 1000 });
+  late.data.trackWaypoints.at(-1).call.at = 2000;   // answered after the reveal
+  late.data.revealedAt = 1500;
+  assert.equal(scorable(late), null, 'marked at 1000, answered at 2000, revealed at 1500');
+  const early = sess({ t: 1000 });
+  early.data.trackWaypoints.at(-1).call.at = 1100;
+  early.data.revealedAt = 1500;
+  assert.ok(scorable(early), 'answered before the reveal: it counts');
 });
 
 console.log(`\n${pass} passed total\n`);
