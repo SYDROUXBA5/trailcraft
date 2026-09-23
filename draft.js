@@ -28,7 +28,7 @@ const str = (v) => (typeof v === 'string' && v ? v : null);
     backup uses, so a long track costs a few kilobytes rather than a hundred. */
 export function packDraft({
   kind, startedAt, sessionId = null, targetId = null, layerId = null, dogId = null,
-  odour = null, liveId = null, liveUrl = null, pts = [], wps = [], hides = [],
+  odour = null, liveId = null, liveUrl = null, revealedAt = 0, pts = [], wps = [], hides = [],
 } = {}, now = Date.now()) {
   if (!KINDS.has(kind)) return null;
   return {
@@ -41,6 +41,9 @@ export function packDraft({
     /* A run being watched: the link must be closed with its result, or whoever
        is following is left staring at a track that stopped. */
     liveId: str(liveId), liveUrl: str(liveUrl),
+    /* Whether the answer had been shown before the app died: a recovered run
+       must not turn a call made after looking into a blind one. */
+    revealedAt: fin(revealedAt) && revealedAt > 0 ? revealedAt : null,
     pts: pts?.length ? packPoints(pts) : null,
     wps: wps?.length ? packPoints(wps) : null,
     hides: hides?.length ? packPoints(hides) : null,
@@ -60,6 +63,7 @@ export function unpackDraft(o) {
     sessionId: str(o.sessionId), targetId: str(o.targetId), layerId: str(o.layerId),
     dogId: str(o.dogId), odour: str(o.odour),
     liveId: str(o.liveId), liveUrl: str(o.liveUrl),
+    revealedAt: fin(o.revealedAt) ? o.revealedAt : 0,
     pts, wps, hides,
   };
 }

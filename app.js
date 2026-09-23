@@ -32,14 +32,14 @@ import { trailModel, encodeShared, decodeShared, sharedUrl, toGpx, fileBase,
 import { buildPdf, jpegSize } from './pdf.js';
 import { coachStep, initialCoach, coachPhrase, coachLine, TOL_OPTIONS, COACH_DEFAULTS } from './coach.js';
 import { DEBRIEF, FLAGS, NOTE_TAGS, blankDebrief, debriefDone, debriefLine, labelOf } from './debrief.js';
-import { CONFIDENCE, stampCall, confidenceOf, firstCall, calibration, calibrationLine } from './call.js';
+import { CONFIDENCE, stampCall, confidenceOf, firstCall, calibration, calibrationLine, callVerdict } from './call.js';
 import { isNative, watchBackground, canHaptic, haptic, watchHeading } from './native.js';
 import { checkAuthFields, AUTH_MIN_PASSWORD } from './sync-core.js';
 import { createStore, migrateV1, TARGETS, ODOURS, targetById, targetText, verbs, uid,
          dogStats, ageBand, AGE_BANDS, LEVELS, levelById, dogAge } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-22l';
+const BUILD = '2026-09-22m';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true,
@@ -2404,11 +2404,14 @@ function removeFix(s, fixId) {
    debrief's outcome can honestly be scored against, and asking about marks
    that will never be scored is how a form stops being filled in. */
 let callWp = null;     // the indication waiting on an answer
-let callSeen = false;  // was the trail on screen when it was made
+let callSeen = false;  // had the handler already seen the answer when it was made
 
 function openCall(wp) {
   callWp = wp;
-  callSeen = run.revealed;
+  /* Not "is the trail on screen now" — "has this handler seen it at all".
+     Reveal, hide again, then indicate used to count as a blind call, and a
+     confidence record built from calls made after looking is worthless. */
+  callSeen = !!run.revealedAt;
   $('callOpts').innerHTML = CONFIDENCE.map(c =>
     `<button type="button" class="call-opt" data-conf="${c.v}"><b>${esc(c.label)}</b><i>${esc(c.why)}</i></button>`).join('');
   $('callSheet').hidden = false;
@@ -2423,7 +2426,9 @@ function pickCall(v) {
   /* Written onto the waypoint itself, so the call travels with the mark
      through save, share and replay without a second place to keep in step. */
   if (callWp) {
-    callWp.call = stampCall(v, callSeen);
+    /* Read again now, not when the sheet opened: the answer can be put on
+       screen, or the coach switched on, while the question sits there. */
+    callWp.call = stampCall(v, callSeen || !!run.revealedAt || coach.on);
     navigator.vibrate?.(18);
   }
   closeCall();
@@ -2444,9 +2449,13 @@ function paintCallBlock(s) {
   else if (d.outcome === 'found') tail = ', and you were right.';
   else if (d.outcome === 'false') tail = ', and you were wrong.';
   else tail = `. The debrief says: ${labelOf('outcome', d.outcome)}.`;
-  /* Say plainly when a call cannot count, rather than letting it look banked. */
-  if (d && d.blind === 'open') tail += ' This one doesn’t count towards your record, because you knew the answer.';
-  else if (c.call.seen) tail += ' This one doesn’t count, because the trail was already on screen.';
+  /* Say plainly when a call cannot count, rather than letting it look banked.
+     Straight from the same verdict the maths uses, so the two never differ. */
+  const why = callVerdict(s).why;
+  if (why === 'notblind') tail += ' This one doesn’t count towards your record, because you knew the answer.';
+  else if (why === 'helped') tail += ' This one doesn’t count, because the coach was on.';
+  else if (why === 'seen') tail += ' This one doesn’t count, because the answer was already on screen.';
+  else if (why === 'someone-elses') tail += ' This one doesn’t count towards your record: it is someone else’s run.';
   $('callSummary').textContent = `You called it “${band?.label ?? c.call.conf}”${tail}`;
   $('callCal').textContent = calibrationLine(calibration(db.sessions()));
 }
@@ -3011,6 +3020,7 @@ function keepDraft(force = false) {
     targetId: S.target?.id ?? null, layerId: S.layer?.id ?? null,
     dogId: S.dog?.id ?? null, odour: S.odour ?? null,
     liveId: liveState?.id ?? null, liveUrl: liveState?.url ?? null,
+    revealedAt: run.revealedAt || 0,
     pts: rec.pts, wps: rec.wps, hides: rec.hides,
   }, now);
   /* A full phone must not stop the walk: the recording carries on in memory,
@@ -3739,9 +3749,13 @@ const ageWord = (ms) => {
 const run = { session: null, revealed: false, startedAt: 0 };
 
 async function startRun(s) {
+  if (rec.on) return toast('A run is already going — stop that one first');
   const t = targetById(s.targetId);
   run.session = s;
   run.revealed = false;
+  /* Once the answer has been seen it stays seen — including on a second run
+     of the same trail, which is why this is read back off the session. */
+  run.revealedAt = s.data.revealedAt || 0;
   closeCall();
   run.startedAt = Date.now();
   rec.kind = 'run';
@@ -3790,6 +3804,9 @@ async function startRun(s) {
 function toggleReveal() {
   const s = run.session;
   run.revealed = !run.revealed;
+  /* Hiding it again does not unsee it. Kept with the run, so the record says
+     when the answer was shown and which calls came before it. */
+  if (run.revealed && !run.revealedAt) run.revealedAt = Date.now();
   const t = targetById(s.targetId);
   if (t.kind === 'person') {
     setTrail(run.revealed ? s.data.trail : null);
@@ -3823,7 +3840,7 @@ function addWaypoint(kind) {
      with the trail drawn on the map there is nothing to be sure about. */
   const isFirstInd = kind === 'Indication'
     && rec.wps.filter(w => w.kind === 'Indication').length === 1;
-  if (isFirstInd && !run.revealed) openCall(wp);
+  if (isFirstInd && !run.revealedAt && !coach.on) openCall(wp);   // asking after they have looked means nothing
 }
 
 async function stopRun() {
@@ -3847,7 +3864,8 @@ async function stopRun() {
   /* The walk is written to the session BEFORE it is graded. Grading asks the
      weather service for the wind during the run, and anything that goes to
      the network can hang or fail — the walk itself must not depend on it. */
-  const raw = { data: { ...s.data, track: rec.pts, trackStarted: run.startedAt, trackWaypoints: rec.wps } };
+  const raw = { data: { ...s.data, track: rec.pts, trackStarted: run.startedAt, trackWaypoints: rec.wps,
+    revealedAt: run.revealedAt || s.data.revealedAt || null } };
   guardSave({ ...s, ...raw }, () => saveSession(s, raw));
   /* A plan-graded run is provisional: the drawn line is a sketch, so it
      neither banks calibration nor gets the last word — the walked card does. */
@@ -3858,7 +3876,8 @@ async function stopRun() {
     dogId: S.dog?.id ?? null,
     handlerId: S.handler.id,
     summary: result.sentence,
-    data: { ...s.data, track: rec.pts, trackStarted: run.startedAt, trackWaypoints: rec.wps, result, coach: coachRecord },
+    data: { ...s.data, track: rec.pts, trackStarted: run.startedAt, trackWaypoints: rec.wps,
+      revealedAt: run.revealedAt || s.data.revealedAt || null, result, coach: coachRecord },
   };
   /* If the phone refuses the save, the run stays in memory and on screen:
      the result still shows, it can be sent as a link or a file, and the
@@ -4750,6 +4769,9 @@ function coachSync() {
   if (want && !coach.on) {
     coach.on = true;
     coach.everOn = true;
+    /* It reads out where the trail is. From here nothing the handler says is
+       a blind call, and the record must say so. */
+    if (!run.revealedAt) run.revealedAt = Date.now();
     coach.used = { tolM: Number(settings.coachTol) || 20, scent: !!settings.coachScent };
     coach.state ??= initialCoach();
     clearInterval(coach.tick);
@@ -6277,6 +6299,7 @@ async function recoverKeep() {
     if (!s) { dropDraft(); toast('That run’s trail is no longer on this phone'); return boot(); }
     run.session = s;
     run.startedAt = d.startedAt;
+    run.revealedAt = d.revealedAt || 0;
     /* Whoever was watching it live gets the end of the run and the result,
        rather than a track that simply stopped. */
     if (d.liveId && sync.user) {

@@ -22,6 +22,8 @@
    - A call on a run the handler knew the answer to proves nothing either.
    Both are excluded from the maths, not quietly folded in. */
 
+import { ownRun } from './debrief.js';
+
 export const CALL_V = 1;
 
 /** Three bands. More would be false precision from a wet field with a dog on
@@ -69,22 +71,40 @@ export function firstCall(session) {
   return callsIn(session)[0] ?? null;
 }
 
-/** Was this run's call one that can be scored at all?
+/** Can this run's call be scored, and if not, why not?
 
-    Three conditions, all of them about whether the handler could have known:
-    the trail was not on screen, nobody present knew the answer, and the run
-    ended in a way that says plainly whether the call was right or wrong. */
-export function scorable(session) {
-  /* A run kept from someone else's link carries THEIR call. Folding it into
-     your calibration would quietly measure a different person. */
-  if (session?.data?.imported) return null;
+    One answer, used by the maths, by the tally of what was thrown away and by
+    the run screen, so the three can never tell the handler different things.
+    Everything here is about whether the handler could have known: the answer
+    was not shown, nothing was telling them where the trail was, nobody
+    present knew, and the run ended in a way that says plainly whether the
+    call was right or wrong. */
+export function callVerdict(session) {
   const c = firstCall(session);
-  if (!c || c.call.seen) return null;
+  if (!c) return { ok: false, why: 'nocall' };
+  /* Someone else's run, kept from their link: their call, made before this
+     phone ever saw it. Folding it in would quietly measure a different person.
+     A trail that arrived as a card and was run here is not that. */
+  if (!ownRun(session)) return { ok: false, why: 'someone-elses' };
+  if (c.call.seen) return { ok: false, why: 'seen' };
+  /* The coach reads out the distance to the real trail as the dog works: with
+     it on, nothing the handler says afterwards is a blind call. */
+  if (session?.data?.coach?.assisted) return { ok: false, why: 'helped' };
+  /* Belt and braces against the run screen: the moment the answer was put on
+     screen, against the moment the call was actually given. */
+  const shown = session?.data?.revealedAt;
+  const when = Number.isFinite(c.call?.at) ? c.call.at : c.t;
+  if (Number.isFinite(shown) && shown > 0 && when >= shown) return { ok: false, why: 'seen' };
   const d = session?.data?.debrief;
-  if (!d) return null;
-  if (d.blind !== 'handler' && d.blind !== 'double') return null;
-  if (d.outcome !== 'found' && d.outcome !== 'false') return null;
-  return { conf: c.call.conf, right: d.outcome === 'found', at: c.t };
+  if (!d || (d.outcome !== 'found' && d.outcome !== 'false')) return { ok: false, why: 'nodebrief' };
+  if (d.blind !== 'handler' && d.blind !== 'double') return { ok: false, why: 'notblind' };
+  return { ok: true, conf: c.call.conf, right: d.outcome === 'found', at: c.t };
+}
+
+/** The call as the maths wants it, or nothing. */
+export function scorable(session) {
+  const v = callVerdict(session);
+  return v.ok ? { conf: v.conf, right: v.right, at: v.at } : null;
 }
 
 /** How the handler's confidence has actually performed, band by band.
@@ -132,15 +152,17 @@ export function calibration(sessions) {
     calibration reads as "you have not run blind much" rather than as a fault
     in the app. */
 export function calibrationLosses(sessions) {
-  const all = (sessions ?? []).filter(s => !s?.data?.imported && firstCall(s));
+  /* One reason each, the first that applies — the same order the maths
+     rejects them in, so the buckets add up to what was actually lost. */
+  const mine = (sessions ?? []).map(callVerdict)
+    .filter(v => v.why !== 'nocall' && v.why !== 'someone-elses');
+  const count = (...why) => mine.filter(v => why.includes(v.why)).length;
   return {
-    total: all.length,
-    seen: all.filter(s => firstCall(s).call.seen).length,
-    notBlind: all.filter(s => {
-      const d = s?.data?.debrief;
-      return !firstCall(s).call.seen && d && d.blind === 'open';
-    }).length,
-    noDebrief: all.filter(s => !s?.data?.debrief?.outcome).length,
+    total: mine.length,
+    seen: count('seen', 'helped'),
+    helped: count('helped'),
+    notBlind: count('notblind'),
+    noDebrief: count('nodebrief'),
   };
 }
 
