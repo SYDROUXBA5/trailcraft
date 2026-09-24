@@ -74,13 +74,14 @@ t('every module the app imports is cached for offline use', () => {
   const cached = new Set([...shell.matchAll(/'([\w./-]+\.js)'/g)].map(m => m[1]));
   /* All of it, or none of it: a half-cached update that activates anyway
      deletes the last working copy and leaves nothing to start from. */
-  assert.match(sw, /await c\.addAll\(SHELL\);/, 'the shell installs all-or-nothing');
+  assert.match(sw, /await c\.addAll\(SHELL\.map\(fresh\)\);/, 'the shell installs all-or-nothing');
   assert.ok(!/addAll\(SHELL\)\s*\.catch/.test(sw) && !/SHELL\.map\([^)]*catch/.test(sw),
     'and its failures are never swallowed');
   assert.ok(!cached.has('token.js'),
     'the Mapbox token is not deployed, so requiring it would fail every web install');
   assert.match(sw, /const whole = \(await Promise\.all\(SHELL\.map/, 'the old cache goes only once the new one is whole');
-  assert.match(sw, /e\.request\.mode === 'navigate' \? caches\.match\('index\.html'\)/,
+  // sw.test.mjs runs both of these for real; this keeps the shape from drifting.
+  assert.match(sw, /e\.request\.mode === 'navigate' \? openPage\(e\) : shellFile\(e\)/,
     'only a page falls back to the page: a missing script must not come back as HTML');
 
   const pub = new URL('../public/', import.meta.url);
@@ -229,8 +230,8 @@ t('seeing the answer once counts for the rest of the run', () => {
 
 t('an unfinished recording is written down, and nothing reloads over it', () => {
   assert.match(js, /function onFix[\s\S]{0,2000}keepDraft\(\);/, 'every fix keeps the draft up to date');
-  assert.match(js, /const busy = unsavedWork\(\);/, 'an update waits for unsaved work, not just for the GPS');
-  assert.match(js, /function unsavedWork\(\)[\s\S]{0,200}rec\.on[\s\S]{0,200}draftAlive/,
+  assert.match(js, /if \(!idleForUpdate\(\) \|\| tried === remote\) return toast/, 'an update waits for unsaved work, not just for the GPS');
+  assert.match(js, /function unsavedWork\(\)[\s\S]{0,200}rec\.on[\s\S]{0,800}draftAlive/,
     'unsaved means recording OR a walk still on the phone');
   /* The walk goes into the session before anything that can hang: grading
      asks the weather service, and the run must not depend on it. */
@@ -252,6 +253,85 @@ t('an unfinished recording is written down, and nothing reloads over it', () => 
   assert.match(js, /if \(S\.handler && offerRecovery\(\)\) return;/,
     'boot offers it back, once there is a handler to save it for');
   assert.ok(htmlIds.has('scrRecover') && htmlIds.has('btnRecoverKeep') && htmlIds.has('btnRecoverDrop'));
+});
+
+/** One top-level function of app.js as source, to be run against stand-ins. */
+function fnSource(name) {
+  const m = js.match(new RegExp(`\\n((?:async )?function ${name}\\([\\s\\S]*?\\n\\})`));
+  assert.ok(m, `${name}() is still where the test expects it`);
+  return m[1];
+}
+const ta = async (name, fn) => { await fn(); pass++; console.log(`  ok  ${name}`); };
+
+t('unsaved work is everything that lives only in memory, not just a recording', () => {
+  /* A self-update reloads the page. Corners tapped for a plan, a debrief half
+     answered or a form half filled were not counted, so coming back to the
+     app after a deploy threw them away without a word. */
+  const editing = js.match(/const EDITING = (new Set\(\[[^\]]*\]\));/);
+  assert.ok(editing, 'the screens that hold an edit are listed');
+  const unsaved = (over = {}) => new Function('s', `
+    const { rec, draw, contam, document, db, draftAlive, unpackDraft, currentScreen } = s;
+    const EDITING = ${editing[1]};
+    ${fnSource('unsavedWork')}
+    return unsavedWork();`)({
+    rec: { on: false }, draw: { pts: [] }, contam: { pts: [] },
+    document: { activeElement: null }, db: { draft: { read: () => null } },
+    draftAlive: () => false, unpackDraft: (x) => x, currentScreen: 'scrHome', ...over,
+  });
+  const corners = [{ lat: 51, lon: -2.6 }, { lat: 51.001, lon: -2.6 }];
+  assert.equal(unsaved(), false, 'idle on Home is nothing unsaved');
+  assert.equal(unsaved({ rec: { on: true } }), true, 'a recording');
+  assert.equal(unsaved({ draftAlive: () => true }), true, 'a walk still waiting on Confirm');
+  assert.equal(unsaved({ currentScreen: 'scrDraw', draw: { pts: corners } }), true, 'a plan being drawn');
+  assert.equal(unsaved({ currentScreen: 'scrDraw' }), false, 'an empty map is nothing to lose');
+  assert.equal(unsaved({ currentScreen: 'scrContam', contam: { pts: corners } }), true, 'a contamination trail being tapped');
+  for (const screen of ['scrDebrief', 'scrOnboardHandler', 'scrOnboardDog', 'scrSignIn', 'scrDelete', 'scrFix']) {
+    assert.equal(unsaved({ currentScreen: screen }), true, `${screen} holds an edit until it is saved`);
+  }
+  assert.equal(unsaved({ document: { activeElement: { matches: () => true } } }), true, 'someone typing');
+  assert.equal(unsaved({ draw: { pts: corners } }), false,
+    'a plan already saved and left behind does not hold every update back');
+});
+
+await ta('an update reloads only when idle on Home, and asks again after the slow re-fetch', async () => {
+  const check = (env) => new Function('env', `
+    const BUILD = 'old';
+    const unsavedWork = () => env.busy;
+    const toast = (m) => env.toasts.push(m);
+    const sessionStorage = { getItem: () => env.tried, setItem: (k, v) => { env.tried = v; }, removeItem: () => { env.tried = null; } };
+    const location = { reload: () => { env.reloaded = true; } };
+    const AbortSignal = { timeout: () => undefined };
+    const fetch = async (u) => {
+      if (u === 'build.txt') return { ok: true, text: async () => 'new' };
+      env.meanwhile?.();
+      return {};
+    };
+    ${fnSource('idleForUpdate').replaceAll('currentScreen', 'env.screen')}
+    ${fnSource('checkForUpdate')}
+    return checkForUpdate();`)(env);
+  const fresh = (over) => ({ screen: 'scrHome', busy: false, tried: null, toasts: [], reloaded: false, ...over });
+
+  const idle = fresh();
+  await check(idle);
+  assert.ok(idle.reloaded, 'idle on Home, the new build loads at once');
+
+  /* One bar at the trailhead: the re-fetch takes half a minute, and the
+     handler starts the dog in the meantime. */
+  const started = fresh({ meanwhile() { this.screen = 'scrRun'; this.busy = true; } });
+  started.meanwhile = started.meanwhile.bind(started);
+  await check(started);
+  assert.ok(!started.reloaded, 'a run that started during the re-fetch is not reloaded over');
+  assert.equal(started.toasts.length, 1, 'they are told the update is waiting');
+  assert.equal(started.tried, null, 'and the update is not spent: the next idle moment can still load it');
+
+  const drawing = fresh({ screen: 'scrDraw' });
+  await check(drawing);
+  assert.ok(!drawing.reloaded && drawing.toasts.length === 1, 'away from Home the update waits for the next open');
+
+  assert.match(fnSource('checkForUpdate'), /fetch\('build\.txt', \{[^}]*signal: AbortSignal\.timeout/,
+    'asking for the build gives up after a few seconds');
+  assert.match(js, /addEventListener\('controllerchange'[\s\S]{0,120}if \(idleForUpdate\(\)\) location\.reload\(\);/,
+    'the service worker’s own reload keeps the same rule');
 });
 
 t('a save sends only what it changes, so nothing written meanwhile is lost', () => {
