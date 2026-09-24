@@ -13,7 +13,9 @@
 
    Run: node scripts/build-single.mjs   (or: npm run build) */
 
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -33,12 +35,18 @@ const ns = (name) => '__' + name.replace(/-/g, '_');
 
 /** One module → an IIFE namespace. Imports become destructuring, exports are
     collected and returned. */
+/* `import { a, b as c }` becomes `const { a, b: c }`. Written out as it was,
+   `b as c` inside a destructuring is a syntax error — and one syntax error in
+   the single inline module means the whole Desktop copy never runs. */
+const destructure = (names) => names.replace(/\s+/g, ' ').trim()
+  .replace(/\b([\w$]+)\s+as\s+([\w$]+)\b/g, '$1: $2');
+
 function toNamespace(name) {
   let src = pub(`${name}.js`);
   const preludes = [];
 
   src = src.replace(/import\s*\{([\s\S]*?)\}\s*from\s*'\.\/([\w-]+)\.js';?/g, (_, names, dep) => {
-    preludes.push(`const {${names.replace(/\s+/g, ' ').trim()}} = ${ns(dep)};`);
+    preludes.push(`const {${destructure(names)}} = ${ns(dep)};`);
     return '';
   });
 
@@ -59,7 +67,7 @@ function appBody() {
   let src = pub('app.js');
   const preludes = [];
   src = src.replace(/import\s*\{([\s\S]*?)\}\s*from\s*'\.\/([\w-]+)\.js';?/g, (_, names, dep) => {
-    preludes.push(`const {${names.replace(/\s+/g, ' ').trim()}} = ${ns(dep)};`);
+    preludes.push(`const {${destructure(names)}} = ${ns(dep)};`);
     return '';
   });
   if (/from\s+'\.\//.test(src)) throw new Error('app.js: an import survived the transform');
@@ -95,6 +103,21 @@ html = html.replace(/<script src="app\.js" type="module"><\/script>/, () => `<sc
 
 for (const leftover of ['href="app.css"', 'src="app.js"', 'vendor/qrcode.js"', 'vendor/jsQR.js"']) {
   if (html.includes(leftover)) throw new Error(`assembly incomplete: ${leftover} still referenced`);
+}
+
+/* The build must prove the page will actually run, not just that it was
+   written. A bundle that does not parse is a page whose every button is dead,
+   and until this check existed that shipped for days looking like success. */
+{
+  const probe = join(tmpdir(), `trailcraft-bundle-${process.pid}.mjs`);
+  writeFileSync(probe, bundle);
+  try {
+    execFileSync(process.execPath, ['--check', probe], { stdio: 'pipe' });
+  } catch (e) {
+    throw new Error(`the single-file bundle does not parse:\n${String(e.stderr || e.message).slice(0, 600)}`);
+  } finally {
+    rmSync(probe, { force: true });
+  }
 }
 
 mkdirSync(join(root, 'dist'), { recursive: true });
