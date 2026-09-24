@@ -454,4 +454,31 @@ t('grading reads the approach, the trail ends, the rain and the handler the righ
   assert.match(bodyOf('openDebrief'), /const last = stickyDebrief\(db\.sessions\(\), s\);/);
 });
 
+t('a replay shows the air as it was, and a search can be replayed', () => {
+  /* The plume's first frame prunes, and it was drawn on the real clock
+     before the replay set its own: a run from yesterday lost every parcel.
+     A search has no trail, and reading its first point threw. */
+  const start = bodyOf('plumeStart');
+  assert.match(start, /function plumeStart\(trail, wx, T, contamination = null, \{ at = null, since = at \} = \{\}\)/);
+  assert.ok(start.indexOf('plume.clock = at;') > 0 && start.indexOf('plume.clock = at;') < start.indexOf('plumeFrame();'),
+    'the clock is set before the first frame prunes');
+  assert.ok(start.indexOf('plume.clock = at;') < start.indexOf('if (!settings.plume'), 'and on every start, so none leaks');
+  const frame = bodyOf('plumeFrame');
+  assert.match(frame, /plume\.sim\.prune\(now, plume\.wx, plume\.st, \{ max: 9000, since: plume\.since \}\)/);
+  assert.match(frame, /plume\.contam\.prune\(now, plume\.wx, plume\.st, \{ max: 5000, since: plume\.since \}\)/);
+  const open = bodyOf('openReplay');
+  assert.match(open, /plumeStart\(trailOf\(s\), s\.data\.weather, plume\.T, s\.data\.contamination,\s*\{ at: replay\.at, since: replay\.from \}\)/,
+    'on the replay’s clock, pruned by the start of the run');
+  assert.doesNotMatch(open, /plume\.clock =/, 'the clock is plumeStart’s to set');
+  const hide = open.indexOf("if (targetById(s.targetId).kind === 'hide') {");
+  assert.ok(hide > 0 && hide < open.indexOf('s.data.trail[0]'), 'a search never reads a trail it does not have');
+  assert.match(open.slice(hide), /^[^}]*setSrc\('hides', pointsOf\(s\.data\.hides \|\| \[\]\)\);/, 'it shows the hides');
+  assert.match(open, /fitTo\(s\.data\.trail \|\| s\.data\.hides \|\| \[\], track,/);
+  assert.ok(open.indexOf('replay.s = s;') > open.indexOf('plumeStart('), 'nothing is left half open');
+  assert.match(bodyOf('paintReplay'), /const laid = targetById\(s\.targetId\)\.kind === 'hide' \? 'Hides' : 'Trail';/);
+  assert.match(bodyOf('showOnMap'),
+    /plumeStart\(trailOf\(s\), wx, undefined, s\.data\.contamination, \{ at: s\.data\.trackStarted \?\? null \}\)/,
+    'a saved run’s map shows the air when the dog set off, not now');
+});
+
 console.log(`\n${pass} passed total\n`);

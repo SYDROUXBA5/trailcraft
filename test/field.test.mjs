@@ -522,6 +522,40 @@ t('ScentSim.prune: an hour of laying does not grow without bound', () => {
   assert.equal(fresh.parts.length, n, 'nothing old, nothing dropped');
 });
 
+t('ScentSim.prune: a replay dragged back to the start of the run still has its air', () => {
+  /* A replay opens at the end of the run and can be scrubbed back to its
+     start. On a hot dry day scent lives eight minutes, so an hour-long run
+     outlasts five lives: aged by the end, the parcels the dog was working at
+     the start were deleted, and a prune cannot be undone. */
+  const t0 = Date.parse('2026-08-24T07:00:00Z');
+  const trail = Array.from({ length: 20 }, (_, i) => ({
+    lat: WELLS.lat, lon: WELLS.lon + i * 1e-4, t: t0 + i * 30000,
+  }));
+  const wx = { wind_speed: 3, wind_direction: 270, temp: 30, soil_temp: 38, humidity: 20 };
+  const st = stability(38, 30);
+  assert.equal(scentLife(wx, st), 8, 'the shortest scent life there is');
+  const from = t0 + 30 * 60000, to = from + 60 * 60000;
+  const drawn = (sim, at) => {
+    sim.advance(FLAT, wx, st, at);
+    return sim.parts.filter(p => p.str >= 0.03).length;
+  };
+
+  const replayed = new ScentSim().seed(trail);
+  const n = replayed.parts.length;
+  replayed.prune(to, wx, st, { since: from });       // opened at the end
+  assert.equal(replayed.parts.length, n, 'nothing the start of the run still needs is dropped');
+  assert.ok(drawn(replayed, from) > 0, 'scrubbed back to the start, the air is there');
+
+  const aged = new ScentSim().seed(trail);
+  aged.prune(to, wx, st);                            // no replay, no floor
+  assert.equal(drawn(aged, from), 0, 'a live plume still ages by its own clock');
+
+  // A floor later than the clock never keeps anything the clock would drop.
+  const late = new ScentSim().seed(trail);
+  late.prune(to, wx, st, { since: to + 3600e3 });
+  assert.equal(late.parts.length, aged.parts.length);
+});
+
 t('ScentSim: parcels do not all stop at the same distance', () => {
   /* Every parcel sharing one airborne time drew a ruler-straight edge across
      the end of the plume — the one shape a plume never has. Turbulence takes

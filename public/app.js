@@ -1392,7 +1392,7 @@ function dropHideAtFeet() {
    where the model stops being sure, never a hard-edged corridor. And it is
    drawn only when there is real weather to drive it: no weather, no plume,
    because a guessed plume is worse than none. */
-const plume = { sim: null, tick: 0, T: FLAT, wx: null, st: null, trail: null, tAt: 0, tLen: 0, clock: null,
+const plume = { sim: null, tick: 0, T: FLAT, wx: null, st: null, trail: null, tAt: 0, tLen: 0, clock: null, since: null,
                 walls: null, wAt: 0, wLen: 0, bandWalls: 0, lastField: null };
 
 /* ── The ground under the trail ───────────────────────────────────────
@@ -1630,8 +1630,15 @@ const bandWallNote = () => (plume.bandWalls
   ? ` The band runs through ${plume.bandWalls} building${plume.bandWalls === 1 ? '' : 's'}: it’s drawn straight and can’t bend round them.`
   : '');
 
-function plumeStart(trail, wx, T, contamination = null) {
+function plumeStart(trail, wx, T, contamination = null, { at = null, since = at } = {}) {
   plumeStop();
+  /* A plume showing a past moment is on that clock from its very first
+     frame, which is drawn below. That frame prunes, and a prune cannot be
+     undone: set the clock any later and a run from yesterday has already
+     lost every parcel to today's clock. Every other caller gets the real
+     clock back, so a replay's clock can never leak into a live plume. */
+  plume.clock = at;
+  plume.since = since;
   if (!settings.plume || !wx) return;
   plume.sim = new ScentSim();
   plume.contam = contamSim(contamination);
@@ -2602,7 +2609,6 @@ const REPLAY_SPEEDS = [1, 4, 10, 30];
 function openReplay(s) {
   const track = s?.data?.track;
   if (!(track?.length > 1)) return toast('No run recorded on this one');
-  replay.s = s;
   replay.from = track[0].t;
   replay.to = track[track.length - 1].t;
   replay.at = replay.to;
@@ -2610,14 +2616,24 @@ function openReplay(s) {
   replayPause();
 
   clearMap();
-  setTrail(trailOf(s));
-  setSrc('start', pointsOf([s.data.trail[0]]));
-  if (s.data.planTrail?.length > 1) setSrc('plan', lineOf(s.data.planTrail));
-  if (s.data.weather) plumeStart(trailOf(s), s.data.weather, plume.T, s.data.contamination);
+  if (targetById(s.targetId).kind === 'hide') {
+    // A search has hides and no trail: no start, no plan, no plume to draw.
+    setSrc('hides', pointsOf(s.data.hides || []));
+  } else {
+    setTrail(trailOf(s));
+    setSrc('start', pointsOf([s.data.trail[0]]));
+    if (s.data.planTrail?.length > 1) setSrc('plan', lineOf(s.data.planTrail));
+    /* On the replay's clock from the first frame, and pruned by the start of
+       the run, because the slider can be dragged back there at any time. */
+    if (s.data.weather) plumeStart(trailOf(s), s.data.weather, plume.T, s.data.contamination,
+      { at: replay.at, since: replay.from });
+  }
+  // Only once the map is drawn, so a replay that fails to open is not left half open.
+  replay.s = s;
   $('repSpeed').textContent = `${replay.speed}×`;
 
   go('scrReplay');
-  fitTo(s.data.trail || [], track, s.data.planTrail || []);
+  fitTo(s.data.trail || s.data.hides || [], track, s.data.planTrail || []);
   paintReplay();
 }
 
@@ -2661,7 +2677,8 @@ function paintReplay() {
   const off = s.data.trail?.length > 1
     ? signedOffsets(s.data.trail, [here]).filter(Number.isFinite)[0] : null;
   $('repHudText').textContent = `${Math.floor(el / 60)}:${String(el % 60).padStart(2, '0')}`;
-  $('repCaption').textContent = `Trail ${ageMin} min old here`
+  const laid = targetById(s.targetId).kind === 'hide' ? 'Hides' : 'Trail';
+  $('repCaption').textContent = `${laid} ${ageMin} min old here`
     + (off == null ? '' : ` · dog ${fmtM(Math.abs(off))} ${off >= 0 ? 'right' : 'left'} of the line`)
     + (plume.bandWalls ? '.' + bandWallNote() : '');
   const f = replay.to > replay.from ? (at - replay.from) / (replay.to - replay.from) : 1;
@@ -2897,11 +2914,11 @@ const parcelsGeo = (sim) => ({ type: 'FeatureCollection', features: sim.drawable
 function plumeFrame() {
   if (!plume.sim) return;
   const now = plume.clock ?? Date.now();
-  plume.sim.prune(now, plume.wx, plume.st, { max: 9000 });
+  plume.sim.prune(now, plume.wx, plume.st, { max: 9000, since: plume.since });
   plume.sim.advance(plume.T, plume.wx, plume.st, now);
   setSrc('scent', parcelsGeo(plume.sim));
   if (plume.contam) {
-    plume.contam.prune(now, plume.wx, plume.st, { max: 5000 });
+    plume.contam.prune(now, plume.wx, plume.st, { max: 5000, since: plume.since });
     plume.contam.advance(plume.T, plume.wx, plume.st, now);
     setSrc('contamScent', parcelsGeo(plume.contam));
   }
@@ -4222,8 +4239,11 @@ function showOnMap(from = 'scrResult') {
          only learn to agree with it. */
       const field = scentField(trailOf(s), wx, s.data.trackStarted ?? undefined);
       if (field.length) setSrc('drift', plumePolygon(field));
-      // ...and the air itself, moving, as it was when the dog worked it.
-      plumeStart(trailOf(s), wx, undefined, s.data.contamination);
+      /* ...and the air itself, moving, over the scent as it stood when the
+         dog set off: the same moment the band is drawn for. On the real
+         clock, a run from yesterday had every parcel pruned before one was
+         drawn. A trail not yet run has no such moment and shows the air now. */
+      plumeStart(trailOf(s), wx, undefined, s.data.contamination, { at: s.data.trackStarted ?? null });
       showWeather(wx);
     }
   } else {
