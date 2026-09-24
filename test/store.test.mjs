@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { handlerStats, ODOURS, targetText } from '../public/store.js';
 import { createStore, migrateV1, TARGETS, targetById, verbs, uid,
-         dogStats, ageBand, AGE_BANDS, dogAge, SaveError, patchSession, runAgain } from '../public/store.js';
+         dogStats, ageBand, AGE_BANDS, dogAge, SaveError, patchSession, runAgain,
+         askDelete, dogsOf, storageWords } from '../public/store.js';
 
 let pass = 0;
 const t = (name, fn) => { fn(); pass++; console.log(`  ok  ${name}`); };
@@ -408,6 +409,90 @@ t('odours: narcotics and explosives name theirs, each target remembers its own, 
   assert.equal(db.snapshot().odour, '');
   db.kv.set('lastTargetId', 'other');
   assert.equal(db.snapshot().odour, 'Truffle');
+});
+
+/* ── Deleting ────────────────────────────────────────────────────────
+   There was no delete at all, so a full phone could only be wiped. Every
+   delete now asks first, and the question has to name exactly what goes. */
+
+t('deleting a session: the question names it and everything that goes with it', () => {
+  const run = { id: 's1', targetId: 'person', name: 'Church lane loop', dogId: 'bo',
+    data: { trail: [{ lat: 51, lon: -2 }], track: [{ lat: 51, lon: -2 }], debrief: { grade: 'good' } } };
+  const q = askDelete('session', { row: run, dog: { id: 'bo', name: 'Bo' }, when: 'Tue 3 Sep, 10:00' });
+  assert.match(q, /^Delete “Church lane loop”\?/, 'a named session is asked about by its name');
+  assert.match(q, /The laid trail, Bo’s run and the debrief go, and cannot be got back\./);
+  assert.doesNotMatch(q, /account backup/, 'nothing about a backup when there is none');
+
+  const laid = { id: 's2', targetId: 'person', data: { trail: [{ lat: 51, lon: -2 }] } };
+  assert.equal(askDelete('session', { row: laid, when: 'Tue 3 Sep, 10:00' }),
+    'Delete this trail from Tue 3 Sep, 10:00? The laid trail goes, and cannot be got back.',
+    'an unnamed one is asked about by its date, and a trail never run loses only the trail');
+
+  const hides = { id: 's3', targetId: 'narcotics', dogId: 'gone', data: { hides: [{ lat: 51, lon: -2 }], track: [{ lat: 51, lon: -2 }] } };
+  const hq = askDelete('session', { row: hides, dog: null, when: 'Wed 4 Sep, 09:00', backedUp: true });
+  assert.match(hq, /^Delete this search from Wed 4 Sep, 09:00\? The hides and the dog’s search go/,
+    'a hide set is a search, and a dog since deleted is still "the dog"');
+  assert.match(hq, /It goes from your account backup too\.$/, 'signed in, the question says the backup copy goes as well');
+});
+
+t('deleting a dog: its profile goes, its sessions stay, and the question says both', () => {
+  const bo = { id: 'bo', handlerId: 'h1', name: 'Bo' };
+  const sessions = [{ id: 'a', dogId: 'bo' }, { id: 'b', dogId: 'bo' }, { id: 'c', dogId: 'nell' }];
+  assert.equal(askDelete('dog', { row: bo, sessions }),
+    'Delete Bo? Bo’s profile goes, and cannot be got back. Bo’s 2 sessions stay in the session list.');
+  assert.equal(askDelete('dog', { row: bo, sessions: sessions.slice(0, 1), learned: true, backedUp: true }),
+    'Delete Bo? Bo’s profile and what the app has learned about Bo go, and cannot be got back. '
+    + 'It goes from your account backup too. Bo’s session stays in the session list.');
+  assert.equal(askDelete('dog', { row: bo, sessions: [] }), 'Delete Bo? Bo’s profile goes, and cannot be got back.');
+});
+
+t('deleting a handler takes their dogs, and the question names every dog that goes', () => {
+  const db = createStore(fakeBackend());
+  db.handlers.upsert({ id: 'h1', name: 'Rémi' });
+  db.handlers.upsert({ id: 'h2', name: 'Anna' });
+  db.dogs.upsert({ id: 'bo', handlerId: 'h1', name: 'Bo' });
+  db.dogs.upsert({ id: 'tess', handlerId: 'h1', name: 'Tess' });
+  db.dogs.upsert({ id: 'nell', handlerId: 'h2', name: 'Nell' });
+  db.addSession({ id: 's1', handlerId: 'h1', dogId: 'bo', startedAt: 1, data: {} });
+
+  const q = askDelete('handler', { row: db.handlers.byId('h1'), dogs: db.dogs.all(), sessions: db.sessions() });
+  assert.equal(q, 'Delete Rémi and their 2 dogs, Bo and Tess? All 3 profiles go, and cannot be got back. '
+    + 'Their session stays in the session list.');
+  const named = dogsOf(db.dogs.all(), 'h1').map(d => d.id);
+  db.deleteHandler('h1');
+  assert.deepEqual(db.dogs.all().map(d => d.id), ['nell'], 'exactly the dogs the question named are the ones that went');
+  assert.deepEqual(named.sort(), ['bo', 'tess']);
+  assert.deepEqual(db.sessions().map(s => s.id), ['s1'], 'the sessions stay, as the question said');
+
+  assert.equal(askDelete('handler', { row: { id: 'h2', name: 'Anna' }, dogs: [{ id: 'nell', handlerId: 'h2', name: 'Nell' }], backedUp: true }),
+    'Delete Anna and their dog Nell? Both profiles go, and cannot be got back. They go from your account backup too.');
+  assert.equal(askDelete('handler', { row: { id: 'h3', name: 'Sam' }, dogs: [], sessions: [] }),
+    'Delete Sam? Sam’s profile goes, and cannot be got back.');
+});
+
+t('the delete questions are plain: no em dashes, nothing left blank', () => {
+  const qs = [
+    askDelete('session', { row: { targetId: 'person', data: {} } }),
+    askDelete('dog', { row: { id: 'x' } }),
+    askDelete('handler', { row: { id: 'y' } }),
+  ];
+  for (const q of qs) {
+    assert.doesNotMatch(q, /—/, q);
+    assert.doesNotMatch(q, /undefined|null|\s\?|\s{2}/, q);
+  }
+  assert.equal(qs[0], 'Delete this trail? The laid trail goes, and cannot be got back.');
+  assert.equal(qs[1], 'Delete this dog? This dog’s profile goes, and cannot be got back.');
+});
+
+t('the storage line points at the session list when the phone is nearly full', () => {
+  const MB = 1048576;
+  assert.deepEqual(storageWords(0.02 * MB, 5), { nearly: false, text: 'Records use under 0.1 MB of the roughly 5 MB allowed here.' });
+  assert.deepEqual(storageWords(2 * MB, 5), { nearly: false, text: 'Records use 2.0 MB of the roughly 5 MB allowed here.' });
+  const full = storageWords(4.6 * MB, 5);
+  assert.equal(full.nearly, true);
+  assert.equal(full.text, 'Records use 4.6 MB of the roughly 5 MB allowed here. Nearly full: open the session list and delete old sessions.');
+  assert.doesNotMatch(full.text, /—/);
+  assert.equal(storageWords(4.6 * MB, 50).nearly, false, 'the iOS app has far more room');
 });
 
 console.log(`\n${pass} passed total\n`);

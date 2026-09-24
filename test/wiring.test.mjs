@@ -368,4 +368,66 @@ t('Settings and the sign-in screen link to the privacy page, opening outside the
   for (const l of links) assert.equal(l, 'https://sydrouxba5.github.io/trailcraft/privacy.html');
 });
 
+/* A function's body in app.js, from its name to the brace that closes it. */
+const bodyOf = (name) => {
+  const i = js.indexOf(`\nfunction ${name}(`);
+  assert.ok(i > 0, `app.js still has ${name}()`);
+  return js.slice(i, js.indexOf('\n}\n', i) + 2);
+};
+
+t('a session, a dog and a handler can each be deleted, and only after a question naming what goes', () => {
+  /* There was no delete anywhere: store.deleteSession and deleteHandler had
+     no caller, so a full phone could only be wiped. Each delete goes through
+     the store, whose tombstone is what reaches the backup and other phones. */
+  const flows = [
+    ['confirmDeleteSession', "askDelete('session'", 'db.deleteSession(id)'],
+    ['confirmDeleteDog', "askDelete('dog'", 'db.dogs.remove(id)'],
+    ['confirmDeleteHandler', "askDelete('handler'", 'db.deleteHandler(id)'],
+  ];
+  for (const [fn, ask, del] of flows) {
+    const body = bodyOf(fn);
+    assert.ok(body.includes(ask), `${fn} asks in askDelete's words`);
+    assert.ok(body.includes(del), `${fn} deletes through the store`);
+    assert.ok(body.indexOf('confirm(q)') > 0 && body.indexOf('confirm(q)') < body.indexOf(del),
+      `${fn} asks before it deletes`);
+  }
+  const controls = [
+    ['btnResDelete', "deleteShownSession(sessionById($('resGround').dataset.sid))"],
+    ['btnShareDelete', "deleteShownSession(sessionById($('shareGround').dataset.sid))"],
+    ['dogDelete', 'dogCardId && confirmDeleteDog(dogCardId)'],
+    ['hDelete', 'handlerCardId && confirmDeleteHandler(handlerCardId)'],
+  ];
+  for (const [id, call] of controls) {
+    assert.ok(htmlIds.has(id), `#${id} is on its screen`);
+    assert.ok(js.includes(`$('${id}').addEventListener('click', () => ${call}`), `#${id} is wired to ${call}`);
+  }
+  assert.ok(bodyOf('deleteShownSession').includes('confirmDeleteSession(s.id)'));
+});
+
+t('the session list deletes from a card without opening it, only once Delete sessions is on', () => {
+  assert.ok(htmlIds.has('btnSessDelete'), 'the list has its Delete sessions switch');
+  assert.match(bodyOf('sessionCard'), /\$\{del \? `<button[^`]*data-del-session="\$\{s\.id\}"[^`]*>Delete<\/button>` : ''\}/,
+    'a card carries its own Delete only in delete mode');
+  assert.match(js, /recent\.map\(s => sessionCard\(s\)\)/, 'home never shows one');
+  const i = js.indexOf("$('sessionList').addEventListener('click'");
+  const handler = js.slice(i, js.indexOf('\n  });', i));
+  assert.ok(handler.indexOf('[data-del-session]') > 0 && handler.indexOf('[data-del-session]') < handler.indexOf('[data-open-session]'),
+    'the Delete inside a card is looked for before the card itself');
+  assert.match(handler, /if \(confirmDeleteSession\(del\.dataset\.delSession\)\) renderSessions\(\);\s*return;/);
+});
+
+t('the full-phone banner and the storage line point at a delete that exists', () => {
+  /* They used to send the handler to "Settings → All sessions → delete old
+     ones", a flow that did not exist. */
+  for (const [name, src] of [['app.js', js], ['index.html', html]]) {
+    assert.doesNotMatch(src, /All sessions → delete old ones|delete old sessions soon|delete old sessions in Settings soon/,
+      `${name} still points at a delete that is not there`);
+  }
+  assert.ok(htmlIds.has('saveFree'), 'the banner has its own way to the list');
+  assert.match(js, /\$\('saveFree'\)\.addEventListener\('click', \(\) => openSessionList\(\{ deleting: true \}\)\);/,
+    'and it opens the session list with Delete sessions already on');
+  assert.match(bodyOf('showSaveTrouble'), /\$\('saveFree'\)\.hidden = !e\.full;/, 'shown whenever the phone is full');
+  assert.match(bodyOf('paintStorageLine'), /storageWords\(db\.usage\(\)\.bytes, STORAGE_MB\)/);
+});
+
 console.log(`\n${pass} passed total\n`);
