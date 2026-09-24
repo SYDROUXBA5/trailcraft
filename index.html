@@ -37,9 +37,10 @@
      failed. It stays until the handler has done something about it. -->
 <div id="saveTrouble" class="save-trouble" role="alert" hidden>
   <b id="saveTroubleTitle">Couldn’t save — the phone has no room left</b>
-  <p class="body small" id="saveTroubleText">The run is still here on screen. Send it as a link or a GPX now, then free some space (Settings → All sessions → delete old ones) and try again.</p>
+  <p class="body small" id="saveTroubleText">The run is still here on screen. Send it as a link or a GPX now, then delete old sessions to make room and try again.</p>
   <div class="save-trouble-row">
     <button class="btn small moss" id="saveRetry">Try again</button>
+    <button class="btn small" id="saveFree" hidden>Delete old sessions</button>
     <button class="btn small" id="saveLink">Send as a link</button>
     <button class="btn small" id="saveGpx">Save as GPX</button>
     <button class="btn small ghost" id="saveLater">Later</button>
@@ -376,6 +377,7 @@
       <button class="btn ember" id="btnOff" hidden>She&rsquo;s off, start the countdown</button>
       <button class="btn moss" id="btnRunHere">Run it on this phone</button>
       <button class="btn ghost" id="btnShareDone">Done</button>
+      <button class="btn ghost small del-link" id="btnShareDelete">Delete this trail</button>
     </div>
   </div>
 </section>
@@ -489,6 +491,7 @@
       <button class="btn moss" id="btnReplay" hidden>Replay this run</button>
       <button class="btn" id="btnShareOut">Share this run</button>
       <button class="btn ghost" id="btnResDone">Done</button>
+      <button class="btn ghost small del-link" id="btnResDelete">Delete this session</button>
     </div>
   </div>
 </section>
@@ -530,6 +533,7 @@
     <div class="page-bottom">
       <button class="btn moss" id="dogEdit">Edit this dog</button>
       <button class="btn ghost" id="dogBack">Done</button>
+      <button class="btn ghost small del-link" id="dogDelete">Delete this dog</button>
     </div>
   </div>
 </section>
@@ -557,6 +561,7 @@
     <div class="page-bottom">
       <button class="btn moss" id="hEdit">Edit this handler</button>
       <button class="btn ghost" id="hBack">Done</button>
+      <button class="btn ghost small del-link" id="hDelete">Delete this handler</button>
     </div>
   </div>
 </section>
@@ -616,7 +621,11 @@
 
 <section id="scrSessions" class="screen paper" hidden>
   <div class="page">
-    <h1 class="display">Sessions</h1>
+    <div class="home-head">
+      <h1 class="display">Sessions</h1>
+      <button class="btn ghost small" id="btnSessDelete">Delete sessions</button>
+    </div>
+    <p class="body small muted" id="sessDeleteNote" hidden>Tap Delete on any session you no longer need. Each one asks first.</p>
     <div id="sessionList" class="recent"></div>
     <div class="page-bottom"><button class="btn ghost" id="btnSessBack">Back</button></div>
   </div>

@@ -117,6 +117,69 @@ export function runAgain(s, { id, summary }) {
   return { ...rest, id, dogId: null, summary, data };
 }
 
+/* ── Deleting ─────────────────────────────────────────────────────────
+   Every delete is asked about first, in words that name what goes. The words
+   are worked out from the same rows the delete itself walks (deleteHandler
+   takes dogsOf too), so the question can never promise less than the delete
+   then does. Sessions are never taken along with a dog or a handler: they are
+   the record, and they stay in the session list until deleted there. */
+
+/** The dogs a handler owns, and so the dogs that go when the handler does. */
+export const dogsOf = (dogs, handlerId) => (dogs || []).filter(d => d?.handlerId === handlerId);
+
+const andList = (xs) => xs.length < 2 ? (xs[0] ?? '') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`;
+const firstUp = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+
+/** The question a delete asks, for kind 'session', 'dog' or 'handler'.
+    `row` is what would go; `dog` is the dog on a session; `dogs` and
+    `sessions` are everything on the phone; `when` is the session's date as
+    the screen writes it; `learned` says the app has learned something about
+    this dog; `backedUp` says the phone is signed in, so the account's copy
+    goes as well. */
+export function askDelete(kind, { row, dog = null, dogs = [], sessions = [], when = '', learned = false, backedUp = false } = {}) {
+  const backup = (many) => backedUp ? ` ${many ? 'They go' : 'It goes'} from your account backup too.` : '';
+  const stay = (n, whose) => n === 0 ? ''
+    : ` ${whose} ${n === 1 ? 'session stays' : `${n} sessions stay`} in the session list.`;
+  const name = String(row?.name ?? '').trim();
+
+  if (kind === 'session') {
+    const hide = targetById(row?.targetId).kind === 'hide';
+    const parts = [hide ? 'the hides' : 'the laid trail'];
+    if (row?.data?.track?.length) parts.push(`${dog?.name ?? 'the dog'}’s ${hide ? 'search' : 'run'}`);
+    if (row?.data?.debrief) parts.push('the debrief');
+    const which = name ? `“${name}”` : `this ${hide ? 'search' : 'trail'}${when ? ` from ${when}` : ''}`;
+    const goes = parts.length === 1 && !hide ? 'goes' : 'go';
+    return `Delete ${which}? ${firstUp(andList(parts))} ${goes}, and cannot be got back.${backup(false)}`;
+  }
+  if (kind === 'dog') {
+    const who = name || 'this dog';
+    const n = sessions.filter(s => s.dogId === row?.id).length;
+    const what = learned ? `${who}’s profile and what the app has learned about ${who} go` : `${who}’s profile goes`;
+    return `Delete ${who}? ${firstUp(what)}, and cannot be got back.${backup(false)}${stay(n, `${who}’s`)}`;
+  }
+  const who = name || 'this handler';
+  const team = dogsOf(dogs, row?.id).map(d => d.name);
+  const n = sessions.filter(s => s.handlerId === row?.id).length;
+  if (!team.length) {
+    return `Delete ${who}? ${firstUp(who)}’s profile goes, and cannot be got back.${backup(false)}${stay(n, 'Their')}`;
+  }
+  const withDogs = team.length === 1 ? `their dog ${team[0]}` : `their ${team.length} dogs, ${andList(team)}`;
+  const profiles = team.length === 1 ? 'Both profiles go' : `All ${team.length + 1} profiles go`;
+  return `Delete ${who} and ${withDogs}? ${profiles}, and cannot be got back.${backup(true)}${stay(n, 'Their')}`;
+}
+
+/** The storage line in Settings. Nearly full, it says where room is made: the
+    session list, whose button sits just above the line. */
+export function storageWords(bytes, capMB) {
+  const mb = bytes / 1048576;
+  const nearly = mb > capMB * 0.8;
+  const used = mb < 0.1 ? 'under 0.1' : mb.toFixed(1);
+  return {
+    nearly,
+    text: `Records use ${used} MB of the roughly ${capMB} MB allowed here.${nearly ? ' Nearly full: open the session list and delete old sessions.' : ''}`,
+  };
+}
+
 export function createStore(backend) {
   const read = (k, f) => {
     try { return JSON.parse(backend.getItem(k)) ?? f; } catch { return f; }
@@ -195,7 +258,7 @@ export function createStore(backend) {
        exactly as the native app does it. */
     deleteHandler(id) {
       handlers.remove(id);
-      for (const d of dogs.all().filter(d => d.handlerId === id)) dogs.remove(d.id);
+      for (const d of dogsOf(dogs.all(), id)) dogs.remove(d.id);
     },
 
     /* Sessions, newest first. {id, handlerId, dogId, layerId|null, targetId,

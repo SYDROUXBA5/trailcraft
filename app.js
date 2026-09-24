@@ -36,7 +36,8 @@ import { CONFIDENCE, stampCall, confidenceOf, firstCall, calibration, calibratio
 import { isNative, watchBackground, canHaptic, haptic, watchHeading } from './native.js';
 import { checkAuthFields, AUTH_MIN_PASSWORD } from './sync-core.js';
 import { createStore, migrateV1, TARGETS, ODOURS, targetById, targetText, verbs, uid,
-         dogStats, ageBand, AGE_BANDS, LEVELS, levelById, dogAge, patchSession, runAgain } from './store.js';
+         dogStats, ageBand, AGE_BANDS, LEVELS, levelById, dogAge, patchSession, runAgain,
+         askDelete, storageWords } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
 const BUILD = '2026-09-22n';
@@ -185,6 +186,9 @@ function go(id, { back = false } = {}) {
   for (const s of SCREENS) $(s).hidden = s !== id;
   if (id === 'scrHome') renderHome();
   if (id === 'scrHandler' && handlerCardId) paintHandlerCard(handlerCardId);   // fresh after an edit
+  /* And after a delete: going back to a list must not show what just went. */
+  if (id === 'scrDog' && dogCardId) paintDogCard(dogCardId);
+  if (id === 'scrSessions') renderSessions();
   // The map only needs to be right when something transparent sits over it.
   if (MAP_SCREENS.includes(id)) {
     map?.resize();
@@ -1296,16 +1300,19 @@ function renderHome() {
   $('btnScanHome').hidden = target.kind !== 'person';
 
   const recent = S.sessions.slice(0, 6);
-  $('recentList').innerHTML = recent.length ? recent.map(sessionCard).join('')
+  $('recentList').innerHTML = recent.length ? recent.map(s => sessionCard(s)).join('')
     : `<div class="card"><p class="body muted">Nothing yet. After each run, one line about what the dog did appears here.</p></div>`;
 }
 
-function sessionCard(s) {
+/* `del` is the session list with Delete sessions turned on: each card gains
+   its own Delete button. Home never has one; it is not where records are kept. */
+function sessionCard(s, { del = false } = {}) {
   const d = S.dogs.find(x => x.id === s.dogId);
   return `<div class="card" data-open-session="${s.id}">
     <div class="meta"><span>${fmtWhen(s.startedAt)}</span><span>${esc(d?.name ?? '')}${d ? ' · ' : ''}${esc(targetText(s))}</span></div>
     ${s.name ? `<div class="card-name">${esc(s.name)}</div>` : ''}
     <div class="story">${esc(s.summary)}</div>
+    ${del ? `<button type="button" class="btn ghost small del-link" data-del-session="${s.id}">Delete</button>` : ''}
   </div>`;
 }
 
@@ -3271,6 +3278,7 @@ function renderShare(s) {
   $('shareNameLabel').textContent = isHide ? 'Name this search' : 'Name this trail';
   $('shareName').value = s.name || '';
   $('btnRunHere').textContent = isHide ? 'Search it on this phone' : 'Run it on this phone';
+  $('btnShareDelete').textContent = isHide ? 'Delete this search' : 'Delete this trail';
   $('btnContam').hidden = isHide;
   /* A plan is a drawn sketch with no walked times behind it — modelling scent
      off it would dress a guess as a measurement. */
@@ -3789,7 +3797,7 @@ async function startRun(s) {
   paintLiveBtn();
   fillSurfaces(s);              // ready by the time Reveal wants the plume
   coachStart(s);
-  if (db.usage().bytes > STORAGE_MB * 0.8 * 1048576) toast('Storage nearly full — delete old sessions in Settings soon');
+  if (storageWords(db.usage().bytes, STORAGE_MB).nearly) toast('Storage nearly full. Delete old sessions from the session list in Settings.');
 
   if (t.kind === 'person') {
     // Only the start of the trail. The line itself stays hidden: run blind.
@@ -4289,12 +4297,15 @@ function showSaveTrouble(e) {
   $('saveTroubleTitle').textContent = e.full ? 'Couldn’t save — the phone has no room left' : 'Couldn’t save this';
   $('saveTroubleText').textContent = e.full
     ? (hasTrail
-      ? 'It is still here on screen. Send it as a link or a GPX now, then free some space (Settings → All sessions → delete old ones) and try again.'
-      : 'Free some space (Settings → All sessions → delete old ones) and try again.')
+      ? 'It is still here on screen. Send it as a link or a GPX now, then delete old sessions to make room and try again.'
+      : 'Delete old sessions to make room, then try again.')
     : `${e.message}.${hasTrail ? ' It is still here on screen — send it as a link or a GPX now, then try again.' : ' Try again in a moment.'}`;
   $('saveLink').hidden = !hasTrail;
   $('saveGpx').hidden = !hasTrail;
   $('saveRetry').hidden = !saveTrouble?.retry;
+  /* Room is made in one place, so the banner goes straight there. It stays
+     up meanwhile: Try again is still the way to save once there is room. */
+  $('saveFree').hidden = !e.full;
   $('saveTrouble').hidden = false;
 }
 function hideSaveTrouble() { saveTrouble = null; $('saveTrouble').hidden = true; }
@@ -4309,7 +4320,7 @@ function retrySave() {
   } catch (e) {
     if (e?.name !== 'SaveError') throw e;
     showSaveTrouble(e);
-    toast(e.full ? 'Still no room — delete an old session first' : 'Still could not save');
+    toast(e.full ? 'Still no room. Delete another old session first.' : 'Still could not save');
   }
 }
 
@@ -4319,9 +4330,8 @@ const STORAGE_MB = isNative() ? 50 : 5;
 function paintStorageLine() {
   const el = $('storageLine');
   if (!el) return;
-  const mb = db.usage().bytes / 1048576;
-  const nearly = mb > STORAGE_MB * 0.8;
-  el.textContent = `Records use ${mb < 0.1 ? 'under 0.1' : mb.toFixed(1)} MB of the roughly ${STORAGE_MB} MB allowed here${nearly ? ' — delete old sessions soon' : ''}.`;
+  const { text, nearly } = storageWords(db.usage().bytes, STORAGE_MB);
+  el.textContent = text;
   el.classList.toggle('warn', nearly);
 }
 
@@ -4960,11 +4970,112 @@ function openSession(id) {
   }
 }
 
+/* Delete sessions is a mode the handler turns on, not a button on every card
+   all the time: the list is for looking back, and a column of Delete buttons
+   is one careless tap from losing a record. Each delete still asks first. */
+let sessDeleting = false;
 function renderSessions() {
+  snap();
   const all = S.sessions;
+  if (!all.length) sessDeleting = false;
+  $('btnSessDelete').hidden = !all.length;
+  $('btnSessDelete').textContent = sessDeleting ? 'Done deleting' : 'Delete sessions';
+  $('sessDeleteNote').hidden = !sessDeleting;
   $('sessionList').innerHTML = all.length
-    ? all.map(sessionCard).join('')
+    ? all.map(s => sessionCard(s, { del: sessDeleting })).join('')
     : `<div class="card"><p class="body muted">No sessions yet.</p></div>`;
+}
+function openSessionList({ deleting = false } = {}) {
+  sessDeleting = deleting;
+  go('scrSessions');   // go() paints the list
+}
+
+/* ── Deleting ─────────────────────────────────────────────────────────
+   The way to make room on a full phone short of wiping it, and the way to
+   let go of a dog or a handler. Every delete asks first, in words that name
+   what goes (askDelete in store.js). The store leaves a tombstone, and the
+   tombstone is what takes the record off the account backup and the
+   handler's other phones as well: an absence would simply be put back by
+   the next sync. */
+
+/* A delete writes too (the tombstone), so a phone past full could in
+   principle refuse it. That is said, not thrown past the tap. */
+function tryDelete(fn) {
+  try { fn(); return true; } catch (e) {
+    if (e?.name !== 'SaveError') throw e;
+    toast('Couldn’t delete that. Try again.');
+    return false;
+  }
+}
+
+/** Delete one session, after asking. It can be one on screen that never
+    saved because the phone was full: then nothing is stored, and letting go
+    of it is all there is to do. True if it went. */
+function confirmDeleteSession(id) {
+  const s = sessionById(id);
+  if (!s) return false;
+  const stored = db.sessions().some(x => x.id === id);
+  const q = askDelete('session', { row: s, dog: S.dogs.find(d => d.id === s.dogId) ?? null,
+    when: fmtWhen(s.startedAt), backedUp: stored && !!sync.user });
+  if (!confirm(q)) return false;
+  if (stored && !tryDelete(() => db.deleteSession(id))) return false;
+  if (saveTrouble?.session?.id === id) hideSaveTrouble();   // what it was waiting to save has gone
+  if (run.session?.id === id) run.session = null;
+  if (pendingSession?.id === id) pendingSession = null;
+  if (shareOutSession?.id === id) shareOutSession = null;
+  snap();
+  toast('Session deleted');
+  return true;
+}
+
+/* From the session's own page there is nothing left to show once it has
+   gone. Back to the list it was opened from, repainted without it, or home;
+   the pages about that one session are skipped over on the way. */
+const SESSION_PAGES = new Set(['scrShare', 'scrResult', 'scrShareOut', 'scrShowMap', 'scrReplay', 'scrDebrief', 'scrFix']);
+const SESSION_LISTS = new Set(['scrSessions', 'scrDog', 'scrHandler']);
+function deleteShownSession(s) {
+  if (!s || !confirmDeleteSession(s.id)) return;
+  clearMap();
+  let prev = navStack.pop();
+  while (prev && (TRANSIENT.has(prev) || SESSION_PAGES.has(prev))) prev = navStack.pop();
+  go(SESSION_LISTS.has(prev) ? prev : 'scrHome', { back: true });
+}
+
+/* A profile gone can leave the phone as a new one starts, with no handler or
+   no dog at all, and boot() already knows that way. Otherwise back to the
+   handler card or Settings, repainted, or home. */
+function leaveDeletedProfile() {
+  snap();
+  if (!S.handler || (!S.dogs.length && !S.layerOnly)) return boot();
+  let prev = navStack.pop();
+  while (prev && TRANSIENT.has(prev)) prev = navStack.pop();
+  if (prev === 'scrSettings') renderSettings();
+  const back = prev === 'scrSettings' || (prev === 'scrHandler' && db.handlers.byId(handlerCardId));
+  go(back ? prev : 'scrHome', { back: true });
+}
+
+function confirmDeleteDog(id) {
+  const d = db.dogs.byId(id);
+  if (!d) return;
+  snap();
+  const q = askDelete('dog', { row: d, sessions: S.sessions, learned: db.calibration(id).length > 0, backedUp: !!sync.user });
+  if (!confirm(q) || !tryDelete(() => db.dogs.remove(id))) return;
+  if (dogCardId === id) dogCardId = null;
+  toast(`${d.name} deleted`);
+  leaveDeletedProfile();
+}
+
+/* The handler's dogs go with them (store.deleteHandler), and the question
+   names each one, so nobody loses a dog they did not know was attached. */
+function confirmDeleteHandler(id) {
+  const h = db.handlers.byId(id);
+  if (!h) return;
+  snap();
+  const q = askDelete('handler', { row: h, dogs: S.dogs, sessions: S.sessions, backedUp: !!sync.user });
+  if (!confirm(q) || !tryDelete(() => db.deleteHandler(id))) return;
+  if (handlerCardId === id) handlerCardId = null;
+  toast(`${h.name} deleted`);
+  leaveDeletedProfile();
 }
 
 /* ── Scan ─────────────────────────────────────────────────────────── */
@@ -5193,9 +5304,13 @@ function openHandlerCard(id) {
 }
 
 function openDogCard(id) {
+  if (!db.dogs.byId(id)) return;
+  dogCardId = id;
+  go('scrDog');   // go() paints the card
+}
+function paintDogCard(id) {
   const d = db.dogs.byId(id);
   if (!d) return;
-  dogCardId = id;
   snap();
   const st = dogStats(id, S.sessions, db.calibration(id));
 
@@ -5273,8 +5388,6 @@ function openDogCard(id) {
       <div class="story">${esc(x.summary || '')}</div>
     </div>`;
   }).join('') : `<div class="card"><p class="body muted">Nothing run yet.</p></div>`;
-
-  go('scrDog');
 }
 
 /* ── Settings ─────────────────────────────────────────────────────── */
@@ -5827,6 +5940,7 @@ function wire() {
     e.target.blur();
   });
   $('btnShareDone').addEventListener('click', () => { clearMap(); go('scrHome'); });
+  $('btnShareDelete').addEventListener('click', () => deleteShownSession(sessionById($('shareGround').dataset.sid)));
 
   // Contamination
   $('contamUndo').addEventListener('click', () => { contam.pts.pop(); paintContam(); });
@@ -5962,6 +6076,7 @@ function wire() {
     else if (MAP_SCREENS.includes(currentScreen)) headingStart();
   });
   $('saveLater').addEventListener('click', () => { $('saveTrouble').hidden = true; });
+  $('saveFree').addEventListener('click', () => openSessionList({ deleting: true }));
   $('saveLink').addEventListener('click', () => saveTrouble?.session && sendLink(modelOf(saveTrouble.session)));
   $('saveGpx').addEventListener('click', () => saveTrouble?.session && saveGpx(modelOf(saveTrouble.session)));
   // A save that fails somewhere unguarded (a weather update, a preference) still gets said.
@@ -6071,6 +6186,9 @@ function wire() {
   $('btnLiveDetails').addEventListener('click', () => liveView.model && openShared(liveView.model, 'scrLive'));
   $('btnLiveClose').addEventListener('click', closeLive);
   $('btnResDone').addEventListener('click', () => { clearMap(); go('scrHome'); });
+  /* The session the card is showing, by the id it was painted with: the same
+     one the ground controls on it act on. */
+  $('btnResDelete').addEventListener('click', () => deleteShownSession(sessionById($('resGround').dataset.sid)));
 
   // Sessions
   $('dogBack').addEventListener('click', () => go('scrHome'));
@@ -6082,20 +6200,30 @@ function wire() {
     const d = db.dogs.byId(dogCardId);
     if (d) openDogForm({ id: d.id, handlerId: d.handlerId, returnTo: 'scrHome' });
   });
+  $('dogDelete').addEventListener('click', () => dogCardId && confirmDeleteDog(dogCardId));
+  $('hDelete').addEventListener('click', () => handlerCardId && confirmDeleteHandler(handlerCardId));
   $('dogRuns').addEventListener('click', (e) => {
     const open = e.target.closest('[data-open-session]');
     if (open) openSession(open.dataset.openSession);
   });
 
   $('btnSessBack').addEventListener('click', () => { renderSettings(); go('scrSettings'); });
+  $('btnSessDelete').addEventListener('click', () => { sessDeleting = !sessDeleting; renderSessions(); });
   $('sessionList').addEventListener('click', (e) => {
+    /* The Delete button sits inside the card, so it is looked for first:
+       a tap on it deletes (after asking) and never also opens the session. */
+    const del = e.target.closest('[data-del-session]');
+    if (del) {
+      if (confirmDeleteSession(del.dataset.delSession)) renderSessions();
+      return;
+    }
     const open = e.target.closest('[data-open-session]');
     if (open) openSession(open.dataset.openSession);
   });
 
   // Settings
   $('btnSetDone').addEventListener('click', () => go('scrHome'));
-  $('btnAllSessions').addEventListener('click', () => { renderSessions(); go('scrSessions'); });
+  $('btnAllSessions').addEventListener('click', () => openSessionList());
   $('btnTutorial').addEventListener('click', () => openTutorial(true));
   $('btnMapTut').addEventListener('click', openMapTut);
 
