@@ -379,9 +379,15 @@ export class ScentSim {
       Laying a trail live runs for an hour and appends the whole way; without
       this the set only ever grows, and a phone in a pocket pays to carry
       every dead particle. Four lifetimes is well past anything drawable —
-      the cut is invisible on screen and the arithmetic stops climbing. */
-  prune(now, wx, st, { lives = 5, max = 6000 } = {}) {
-    const cutoff = now - scentLife(wx, st) * 60000 * lives;
+      the cut is invisible on screen and the arithmetic stops climbing.
+
+      `since` is the earliest moment these parcels will ever be drawn at. A
+      replay opens at the end of the run and can be dragged back to its
+      start, and a prune cannot be undone, so it ages the air by the start.
+      Aged by the moment on screen, a replay scrubbed back finds nothing. */
+  prune(now, wx, st, { lives = 5, max = 6000, since = null } = {}) {
+    const from = Number.isFinite(since) ? Math.min(now, since) : now;
+    const cutoff = from - scentLife(wx, st) * 60000 * lives;
     if (Number.isFinite(cutoff)) {
       const keptTrail = this.trail.filter(p => p.t > cutoff);
       // The pool's source is the trail's END, so never prune the last point
