@@ -4,7 +4,7 @@
 
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { encodeTrail, decodeTrail, maxDeviation , cardUrl, cardFromText, walkedPlanFor } from '../public/card.js';
+import { encodeTrail, decodeTrail, maxDeviation , cardUrl, cardFromText, walkedPlanFor, inflate } from '../public/card.js';
 import { simplify, dist, pathLen } from '../public/geo.js';
 
 let pass = 0;
@@ -110,6 +110,41 @@ await t('crafted cards cannot flood storage or leak raw errors', async () => {
     p: [[5120000, 100], [-260000, 100], [1756200000, 60]], w: [] });
   const back = await decodeTrail(named);
   assert.ok(back.from.length <= 40, `hostile sender name capped, got ${back.from.length}`);
+});
+
+await t('a crafted card that unfolds into megabytes is refused before it is read', async () => {
+  const { deflateRawSync } = await import('node:zlib');
+  const craft = (text) => 'TC1.' + Buffer.from(deflateRawSync(text))
+    .toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+
+  // A million zero steps per column: a short code, and megabytes once inflated.
+  const zeros = `[1${',0'.repeat(1e6)}]`;
+  const bomb = craft(`{"v":1,"f":"","d":0,"a":0,"p":[${zeros},${zeros},${zeros}],"w":[]}`);
+  assert.ok(bomb.length < 8000, `the bomb fits a link: ${bomb.length} chars`);
+  const t0 = Date.now();
+  await assert.rejects(() => decodeTrail(bomb), /damaged/);
+  assert.ok(Date.now() - t0 < 2000, 'refused without summing a million steps');
+
+  /* A card that is otherwise perfectly good but inflates past the limit is
+     refused too: the limit is on what the code unfolds into, not on what
+     it happens to say once it has. */
+  const padded = craft(`{"v":1,"f":"","d":0,"a":0,"p":[[5120000,100],[-260000,100],[1756200000,60]],"w":[]}${' '.repeat(300000)}`);
+  assert.ok(padded.length < 8000);
+  await assert.rejects(() => decodeTrail(padded), /damaged/);
+
+  // No QR holds a card this long, and a link is not let off because it has none.
+  await assert.rejects(() => decodeTrail('TC1.' + 'A'.repeat(9000)), /damaged/);
+
+  // A payload that is not an object reads as damage, not a TypeError.
+  await assert.rejects(() => decodeTrail(craft('null')), /Trail Card is damaged/);
+});
+
+await t('inflate stops at its limit and gives back exactly what fits under it', async () => {
+  const { deflateRawSync } = await import('node:zlib');
+  const raw = new TextEncoder().encode('scent '.repeat(5000));
+  const packed = new Uint8Array(deflateRawSync(raw));
+  assert.deepEqual(await inflate(packed, raw.length), raw);
+  assert.equal(await inflate(packed, raw.length - 1), null);
 });
 
 await t('simplify: collinear collapses, corners survive, bound holds', () => {

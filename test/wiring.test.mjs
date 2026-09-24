@@ -486,7 +486,7 @@ t('a session, a dog and a handler can each be deleted, and only after a question
 
 t('the session list deletes from a card without opening it, only once Delete sessions is on', () => {
   assert.ok(htmlIds.has('btnSessDelete'), 'the list has its Delete sessions switch');
-  assert.match(bodyOf('sessionCard'), /\$\{del \? `<button[^`]*data-del-session="\$\{s\.id\}"[^`]*>Delete<\/button>` : ''\}/,
+  assert.match(bodyOf('sessionCard'), /\$\{del \? `<button[^`]*data-del-session="\$\{esc\(s\.id\)\}"[^`]*>Delete<\/button>` : ''\}/,
     'a card carries its own Delete only in delete mode');
   assert.match(js, /recent\.map\(s => sessionCard\(s\)\)/, 'home never shows one');
   const i = js.indexOf("$('sessionList').addEventListener('click'");
@@ -652,6 +652,60 @@ t('the HUD says when the GPS is keeping nothing, and a mark says when it is a gu
   assert.equal((watch.match(/rec\.droppedAt = 0; rec\.blocked = false;/g) || []).length, 2, 'both ways of recording start clean');
   assert.match(fnSrc('function addWaypoint(kind)'), /const stale = !!gpsTrouble\(\{ last, droppedAt: rec\.droppedAt \}\);[\s\S]{0,200}\.\.\.\(stale \? \{ approx: true \} : \{\}\)/);
   assert.match(fnSrc('function searchResult('), /ind\.approx \? 'roughly ' : ''/, 'and the result does not claim a distance it never measured');
+});
+
+/* ── Hostile links, at the screen end ─────────────────────────────────
+   share.js cleans what a link carries, but runs kept before it did are
+   already saved and backed up. So the screens that show a kept run, and the
+   rows synced from the cloud, escape what they write into markup. */
+const escSrc = js.match(/^const esc = .*$/m)[0];
+
+t('the result grid escapes every value, whatever the saved result holds', () => {
+  const src = bodyOf('renderResult');
+  const cellSrc = src.match(/const cell = \(b, i, sub = ''\) =>\n?[^;]*;/)?.[0];
+  assert.ok(cellSrc, 'renderResult still builds its grid with cell()');
+  const cell = new Function(`${escSrc}\n${cellSrc}\nreturn cell;`)();
+  const xss = '<img src=x onerror=alert(document.domain)>';
+  const out = cell(xss, `of the time ${xss}`, `${xss} min`);
+  assert.doesNotMatch(out, /<img/, 'a crafted approach or side is text, not markup');
+  assert.match(out, /&lt;img src=x onerror=alert\(document\.domain\)&gt;/);
+  /* Every call in the grid goes through cell(): nothing is concatenated
+     around it where the escaping would not reach. */
+  for (const m of src.matchAll(/\$\('resGrid'\)\.innerHTML =([\s\S]*?);\n/g)) {
+    assert.doesNotMatch(m[1].replace(/cell\((?:[^()]|\((?:[^()]|\([^()]*\))*\))*\)/g, ''), /[`'"]/,
+      'the grid is cells and nothing else');
+  }
+  assert.doesNotMatch(src, /cell\(`\$\{r\.ageMin\} min`/, 'an age that is not a number reads as a dash');
+  assert.match(src, /Number\.isFinite\(r\.ageMin\) \? `\$\{r\.ageMin\} min` : '—'/);
+});
+
+t('a photo from a synced record cannot break out of the avatar markup', () => {
+  const avaSrc = js.slice(js.indexOf('const PHOTO_RE = '), js.indexOf('\n};\n', js.indexOf('const avaHtml = ')) + 3);
+  const avaHtml = new Function(`${escSrc}\n${avaSrc}\nreturn avaHtml;`)();
+  const hostile = avaHtml({ name: 'Bo', photo: 'x)" onmouseover="alert(1)' });
+  assert.doesNotMatch(hostile, /onmouseover|style=/);
+  assert.doesNotMatch(avaHtml({ name: 'Bo', photo: 'javascript:alert(1)' }), /style=/);
+  const real = avaHtml({ name: 'Bo', photo: 'data:image/jpeg;base64,/9j/4AAQSkZJRg==' });
+  assert.match(real, /style="background-image:url\(data:image\/jpeg;base64,\/9j\/4AAQSkZJRg==\)"/);
+  assert.match(real, /has-photo/);
+});
+
+t('record ids from the cloud are escaped wherever they go into markup', () => {
+  const attrs = ['data-handler', 'data-dog', 'data-layer', 'data-open-session', 'data-del-session', 'data-run-session',
+    'data-dog-card', 'data-edit-handler', 'data-edit-layer', 'data-add-dog-for', '<option value'];
+  let seen = 0;
+  for (const a of attrs) {
+    for (const m of js.matchAll(new RegExp(`${a}="\\$\\{([^}]*)\\}"`, 'g'))) {
+      seen++;
+      assert.match(m[1], /^esc\(/, `${a}="\${${m[1]}}" is written unescaped`);
+    }
+  }
+  assert.ok(seen >= 14, `found the id attributes (${seen})`);
+});
+
+t('Save GPX and Save PDF say when a file cannot be made, rather than doing nothing', () => {
+  assert.match(fnSrc('async function saveGpx('), /try \{[\s\S]*toGpx\(m\)[\s\S]*\} *\n? *catch \{ toast\('Could not make the file'\); \}/);
+  assert.match(fnSrc('async function savePdf('), /try \{[\s\S]*buildPdf\([\s\S]*\} catch \{\n\s*toast\('Could not make the report'\);/);
 });
 
 console.log(`\n${pass} passed total\n`);

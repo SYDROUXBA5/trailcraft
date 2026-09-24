@@ -253,7 +253,11 @@ export function buildPdf(doc) {
 /* ── The file ────────────────────────────────────────────────────── */
 
 const latin1 = (s) => Uint8Array.from(s, c => c.charCodeAt(0) & 0xFF);
-const pdfDate = (d = new Date()) => 'D:' + d.toISOString().replace(/[-:T]/g, '').slice(0, 14);
+/* A date the calendar cannot hold (a crafted link's, or one saved before
+   links were checked) would make toISOString throw and lose the whole file;
+   the report is stamped with today instead. */
+const pdfDate = (d = new Date()) => 'D:' + (Number.isFinite(d.getTime()) ? d : new Date())
+  .toISOString().replace(/[-:T]/g, '').slice(0, 14);
 
 function assemble(pages, doc, image) {
   /* Objects: 1 catalog, 2 pages, 3–5 fonts, 6 info, 7 image (if any), then a

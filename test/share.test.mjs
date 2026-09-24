@@ -414,4 +414,170 @@ await t('a trail’s name travels with it, and a blank or odd one does not', asy
   assert.equal(plain.name, null, 'an unnamed trail stays unnamed');
 });
 
+/* ── Hostile links ─────────────────────────────────────────────────
+   Every payload below is one a stranger could send. A link is opened by
+   tapping it, so whatever is in it has to be refused or made harmless
+   before any of it reaches the page. */
+const forgeLink = async (obj) => 'TS1.' + b64url(await through(
+  new TextEncoder().encode(JSON.stringify(obj)), new CompressionStream('deflate-raw')));
+const oneHide = { lat: [51200000], lon: [-2600000] };
+const twoPts = { lat: [51200000, 100], lon: [-2600000, 100] };
+
+await t('a link cannot put markup into the result a kept run shows', async () => {
+  const xss = '<img src=x onerror=alert(document.domain)>';
+  const m = await decodeShared(await forgeLink({
+    kind: 'search', hides: oneHide,
+    result: { kind: 'search', sentence: 'Found it', approach: xss, ageMin: '<b>9</b>', catchM: '<svg onload=x>',
+      toFirst: 90e3, catchApprox: 'yes', approachV: 2, extra: '<script>alert(1)</script>', __proto__: { kind: 'x' } },
+  }));
+  assert.equal(m.result.kind, 'search');
+  assert.equal(m.result.sentence, 'Found it');
+  assert.equal(m.result.approach, null, 'an approach the app never writes is dropped');
+  assert.equal(m.result.ageMin, null);
+  assert.equal(m.result.catchM, null);
+  assert.equal(m.result.toFirst, 90e3);
+  assert.equal(m.result.catchApprox, false);
+  assert.equal('extra' in m.result, false, 'a field the app never writes does not come');
+  assert.doesNotMatch(JSON.stringify(m.result), /</);
+
+  const trail = await decodeShared(await forgeLink({
+    kind: 'trail', trail: twoPts,
+    result: { kind: 'trail', sentence: 'Bo ran.', side: '<b>left</b>', mainSide: '__proto__', predSide: '1',
+      shares: { left: 0.2, on: 0.5, right: '<i>' }, wind: { speed: 3, from: 'north' }, medAbs: -4, mean: 2.5,
+      regimeKey: 'javascript:', mp: { '__proto__': 1, drift: 2, 'a b': 3, bad: 'x' } },
+  }));
+  const r = trail.result;
+  assert.equal(r.side, null);
+  assert.equal(r.mainSide, null);
+  assert.equal(r.predSide, null);
+  assert.equal(r.shares, null, 'shares only come whole and as fractions');
+  assert.deepEqual(r.wind, { speed: 3, from: null });
+  assert.equal(r.medAbs, null);
+  assert.equal(r.mean, 2.5);
+  assert.equal(r.regimeKey, null);
+  assert.deepEqual(Object.keys(r.mp), ['drift']);
+  assert.equal(({}).drift, undefined);
+
+  const odd = await decodeShared(await forgeLink({ kind: 'trail', trail: twoPts, result: { kind: '<b>', sentence: 'x' } }));
+  assert.equal(odd.result, null, 'a result of a kind the app never writes is no result');
+});
+
+await t('a genuine result still comes through whole', async () => {
+  const hides = [{ lat: 51.2, lon: -2.6 }];
+  const track = walk(50).map(p => ({ ...p, t: p.t + 60e3 }));
+  const result = { kind: 'search', sentence: 'Bo indicated in 1:40, 2 m from the hide, coming into the wind.',
+    toFirst: 100e3, catchM: 2, catchApprox: false, approach: 'into the wind', approachV: 2, ageMin: 1,
+    stability: 'neutral', stabilityPlain: 'Ground and air are close.', wind: { speed: 2.4, from: 200 } };
+  const back = await decodeShared(await encodeShared(trailModel({ startedAt: T0, targetId: 'cadaver', data: {
+    hides, track, trackStarted: T0 + 60e3, trackWaypoints: [], result } }, people)));
+  assert.deepEqual(back.result, result);
+});
+
+await t('a link cannot slip a word in where the weather keeps a number', async () => {
+  const m = await decodeShared(await forgeLink({
+    kind: 'trail', trail: twoPts,
+    wx: { wind_speed: '<img src=x>', temp: 12, time: '2026-09-16T13:00', evil: { a: 1 }, note: '<b>hi</b>',
+      series: Array.from({ length: 300 }, (_, i) => ({ t: T0 + i, wind_speed: i % 2 ? 'x' : 3 })) },
+  }));
+  assert.equal(m.wx.wind_speed, undefined);
+  assert.equal(m.wx.temp, 12);
+  assert.equal(m.wx.time, '2026-09-16T13:00');
+  assert.equal('evil' in m.wx, false);
+  assert.equal('note' in m.wx, false);
+  assert.ok(m.wx.series.length <= 96, `series capped, got ${m.wx.series.length}`);
+  assert.ok(m.wx.series.every(e => e.wind_speed === undefined || e.wind_speed === 3));
+});
+
+await t('a link too big to be real is refused in words, before it is built', async () => {
+  /* The finding's own payload: millions of zero steps deflate to a few
+     kilobytes and used to unfold into millions of points. */
+  const zeros = (n, first) => [first, ...new Array(n).fill(0)];
+  const bomb = await forgeLink({ kind: 'trail', trail: { lat: zeros(1e6, 51200000), lon: zeros(1e6, -2600000) } });
+  assert.ok(bomb.length < 64000, `the bomb is a short link: ${bomb.length} chars`);
+  const t0 = Date.now();
+  await assert.rejects(decodeShared(bomb), /too big to open/);
+  assert.ok(Date.now() - t0 < 3000, 'refused without building it');
+
+  // Under the inflate limit but over the point count.
+  const many = await forgeLink({ kind: 'trail', trail: { lat: zeros(30000, 51200000), lon: zeros(30000, -2600000) },
+    track: { lat: zeros(30000, 51200000), lon: zeros(30000, -2600000) } });
+  await assert.rejects(decodeShared(many), /too big to open/);
+
+  // A code longer than any link this app makes is not even inflated.
+  await assert.rejects(decodeShared('TS1.' + 'A'.repeat(70000)), /too big to open/);
+
+  // Crossing trails by the hundred.
+  await assert.rejects(decodeShared(await forgeLink({ kind: 'trail', trail: twoPts,
+    contam: Array.from({ length: 60 }, () => twoPts) })), /too big to open/);
+});
+
+await t('a run too long for a link is refused where the link is made, not where it is opened', async () => {
+  /* Hides are never thinned, so enough of them scattered at random cannot be
+     squeezed under the limit however hard the lines are thinned. */
+  const hides = Array.from({ length: 20000 }, () => ({ lat: 51.2 + rnd() * 0.02, lon: -2.6 + rnd() * 0.02 }));
+  const m = { kind: 'search', target: 'A hide', hides, contamination: [], wps: [], plan: false, walked: false };
+  await assert.rejects(encodeShared(m), /too long for a link\. Save it as a GPX file instead/);
+});
+
+await t('point indexes from a link cannot reach the prototype, or throw a raw error', async () => {
+  const m = await decodeShared(await forgeLink({ kind: 'trail', trail: { ...twoPts,
+    kd: [['__proto__', 'Indication'], ['length', 'x'], [1.5, 'x'], [-1, 'x'], [99, 'x'], 'junk', null, [0, 'Start'], [1, { toString: 1 }]],
+    dw: [['__proto__', 9], ['length', 5], [1, 30]],
+    cl: [['__proto__', 'sure', 1], ['constructor', 'sure', 1]] } }));
+  assert.equal([].kind, undefined, 'Array.prototype.kind');
+  assert.equal([].dwellS, undefined, 'Array.prototype.dwellS');
+  assert.equal([].call, undefined, 'Array.prototype.call');
+  assert.deepEqual(Object.keys(Object.getPrototypeOf([])).filter(k => ['kind', 'dwellS', 'call'].includes(k)), []);
+  const keys = [];
+  for (const k in [1]) keys.push(k);
+  assert.deepEqual(keys, ['0']);
+  assert.equal(m.trail[0].kind, 'Start');
+  assert.equal(m.trail[1].kind, undefined);
+  assert.equal(m.trail[1].dwellS, 30);
+  assert.equal(m.trail.length, 2);
+});
+
+await t('times from a link are kept to a real era, so Save GPX and Save PDF work', async () => {
+  const m = await decodeShared(await forgeLink({
+    kind: 'trail', laidAt: 9e15, runAt: -5,
+    trail: { ...twoPts, t: [1e14, 1] },
+    track: { ...twoPts, t: [Math.round(T0 / 1000), 2] },
+    dog: { name: 'Bo', dob: 9e15 },
+    debrief: { outcome: 'found', at: 9e15 },
+  }));
+  assert.equal(m.laidAt, null);
+  assert.equal(m.runAt, null);
+  assert.equal(m.trail[0].t, undefined, 'a time out of its era takes its column with it');
+  assert.equal(m.track[1].t, T0 + 2000, 'a real clock is kept');
+  assert.equal(m.dog.dob, undefined);
+  assert.equal(m.debrief.at, null);
+  assertWellFormed(toGpx(m));
+
+  /* A run kept before links were checked still holds its impossible times;
+     the file is made without them rather than not at all. */
+  const old = { ...m, laidAt: 9e15, trail: m.trail.map(p => ({ ...p, t: 1e17 })),
+    track: m.track.map(p => ({ ...p, t: -1e17 })) };
+  const gpx = toGpx(old);
+  assert.doesNotMatch(gpx, /<time>/);
+  assertWellFormed(gpx);
+});
+
+await t('a live run from someone else is held to the same checks as a link', () => {
+  const m = liveModel({
+    kind: 'search', target: 'A hide', laidAt: 9e15, startedAt: T0,
+    hides: [{ lat: 51.2, lon: -2.6 }],
+    dog: { name: { evil: 1 }, breed: '<b>Mal</b>' },
+    wx: { wind_speed: '<img>', temp: 9 },
+    result: { kind: 'search', sentence: 'Found', approach: '<img src=x onerror=alert(1)>', ageMin: 3 },
+  }, [[{ lat: 51.2, lon: -2.6, t: T0 }], [{ lat: 51.2001, lon: -2.6, t: T0 + 1000 }]]);
+  assert.equal(m.laidAt, null);
+  assert.equal(m.runAt, T0);
+  assert.equal(m.dog.name, undefined);
+  assert.equal(m.wx.wind_speed, undefined);
+  assert.equal(m.wx.temp, 9);
+  assert.equal(m.result.approach, null);
+  assert.equal(m.result.ageMin, 3);
+  assert.equal(m.track.length, 2);
+});
+
 console.log(`\n${pass} passed total`);

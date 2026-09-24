@@ -133,4 +133,13 @@ t('a JPEG’s size is read from its own header, and non-JPEGs are refused', () =
   assert.equal(jpegSize(null), null);
 });
 
+t('a date the calendar cannot hold still makes a report', () => {
+  /* What a crafted link used to carry: laidAt 9e15 is past the last date a
+     Date can hold, and toISOString threw on it, so Save PDF never delivered. */
+  for (const date of [9e15, -9e15, NaN]) {
+    const s = bin(buildPdf(doc({ date })));
+    assert.match(s, /\/CreationDate \(D:\d{14}\)/);
+  }
+});
+
 console.log(`\n${pass} passed total`);

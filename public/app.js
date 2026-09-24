@@ -129,10 +129,15 @@ function pickPhoto(cb) {
   inp.click();
 }
 
+/* A photo is always an image this phone drew as a data URL (pickPhoto). One
+   that arrives from a synced record as anything else is left out rather than
+   written into a style attribute, where a quote would end the attribute. */
+const PHOTO_RE = /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/;
 const avaHtml = (ent, cls = '') => {
   const init = esc((ent?.name || '?').trim().charAt(0).toUpperCase() || '?');
-  const style = ent?.photo ? ` style="background-image:url(${ent.photo})"` : '';
-  return `<span class="ava ${cls}${ent?.photo ? ' has-photo' : ''}"${style}>${init}</span>`;
+  const photo = typeof ent?.photo === 'string' && PHOTO_RE.test(ent.photo) ? ent.photo : null;
+  const style = photo ? ` style="background-image:url(${photo})"` : '';
+  return `<span class="ava ${cls}${photo ? ' has-photo' : ''}"${style}>${init}</span>`;
 };
 
 /* ── Screens ──────────────────────────────────────────────────────── */
@@ -1274,12 +1279,12 @@ function renderHome() {
   $('homeSettings').innerHTML = avaHtml(handler);
 
   $('rowHandlers').innerHTML = handlers.map(h =>
-    `<button class="chip${h.id === handler.id ? ' selected' : ''}" data-handler="${h.id}">${avaHtml(h)}${esc(h.name)}</button>`).join('')
+    `<button class="chip${h.id === handler.id ? ' selected' : ''}" data-handler="${esc(h.id)}">${avaHtml(h)}${esc(h.name)}</button>`).join('')
     + `<button class="chip ghost" data-add-handler>+ Add handler</button>`;
 
   $('lblDogs').textContent = `${handler.name}'s dogs`;
   $('rowDogs').innerHTML = team.map(d =>
-    `<button class="chip${d.id === dog?.id ? ' selected' : ''}" data-dog="${d.id}">${avaHtml(d)}<span class="who">${esc(d.name)}<i class="sub">${esc(d.level)}</i></span></button>`).join('')
+    `<button class="chip${d.id === dog?.id ? ' selected' : ''}" data-dog="${esc(d.id)}">${avaHtml(d)}<span class="who">${esc(d.name)}<i class="sub">${esc(d.level)}</i></span></button>`).join('')
     + `<button class="chip ghost" data-add-dog>+ Add dog</button>`;
 
   $('rowTargets').innerHTML = TARGETS.map(t =>
@@ -1306,7 +1311,7 @@ function renderHome() {
   $('rowLayers').innerHTML =
     (isPerson ? '' : `<button class="chip${!layer ? ' selected' : ''}" data-layer=""><span class="who"><b>Just me</b><i class="sub">single phone</i></span></button>`)
     + layers.map(l =>
-      `<button class="chip${l.id === layer?.id ? ' selected' : ''}" data-layer="${l.id}">${avaHtml(l)}<span class="who"><b>${esc(l.name)}</b></span></button>`).join('')
+      `<button class="chip${l.id === layer?.id ? ' selected' : ''}" data-layer="${esc(l.id)}">${avaHtml(l)}<span class="who"><b>${esc(l.name)}</b></span></button>`).join('')
     + `<button class="chip ghost" data-add-layer>+ Add person</button>`;
 
   const setter = layer ? layer.name : handler.name;
@@ -1343,11 +1348,11 @@ function renderHome() {
    its own Delete button. Home never has one; it is not where records are kept. */
 function sessionCard(s, { del = false } = {}) {
   const d = S.dogs.find(x => x.id === s.dogId);
-  return `<div class="card" data-open-session="${s.id}">
+  return `<div class="card" data-open-session="${esc(s.id)}">
     <div class="meta"><span>${fmtWhen(s.startedAt)}</span><span>${esc(d?.name ?? '')}${d ? ' · ' : ''}${esc(targetText(s))}</span></div>
     ${s.name ? `<div class="card-name">${esc(s.name)}</div>` : ''}
     <div class="story">${esc(s.summary)}</div>
-    ${del ? `<button type="button" class="btn ghost small del-link" data-del-session="${s.id}">Delete</button>` : ''}
+    ${del ? `<button type="button" class="btn ghost small del-link" data-del-session="${esc(s.id)}">Delete</button>` : ''}
   </div>`;
 }
 
@@ -3504,7 +3509,7 @@ function openContam(s) {
   fitTo(s.data.trail);
   // Who walked it: any known person. When is before or after the main trail.
   $('contamWho').innerHTML =
-    S.layers.map(l => `<option value="${l.id}">${esc(l.name)}</option>`).join('')
+    S.layers.map(l => `<option value="${esc(l.id)}">${esc(l.name)}</option>`).join('')
     + `<option value="">${esc(S.handler?.name ?? 'Me')}</option>`;
   contam.order = 'before';
   paintContamOrder();
@@ -3921,7 +3926,7 @@ function openPick() {
       ? `${s.data.hides?.length ?? 0} hides`
       : `${fmtKm(pathLen(s.data.trail || []))}`;
     const age = ageWord(Date.now() - s.startedAt);
-    return `<div class="card" data-run-session="${s.id}">
+    return `<div class="card" data-run-session="${esc(s.id)}">
       <div class="meta"><span>${fmtWhen(s.startedAt)}</span><span>${what}</span></div>
       <div class="story">${esc(targetText(s))} · ${age} old</div>
     </div>`;
@@ -4300,14 +4305,18 @@ function renderResult(s) {
   $('resSentence').textContent = r.kind === 'trail' && !Number.isFinite(r.medAbs)
     ? legacySentence(r, d?.name ?? 'The dog') : r.sentence;
 
+  /* Every value is escaped here, not just trusted to be a number: a run kept
+     from someone else's link, or saved before links were checked, carries
+     whatever the link held, and this grid is markup. */
   const cell = (b, i, sub = '') =>
-    `<div><b>${b}</b><i>${i}</i>${sub ? `<span class="sub-line">${sub}</span>` : ''}</div>`;
+    `<div><b>${esc(b)}</b><i>${esc(i)}</i>${sub ? `<span class="sub-line">${esc(sub)}</span>` : ''}</div>`;
+  const age = Number.isFinite(r.ageMin) ? `${r.ageMin} min` : '—';
 
   if (r.kind === 'search') {
     $('resGrid').innerHTML =
       cell(r.toFirst != null ? fmtDur(r.toFirst) : '—', 'to first indication') +
       cell(r.catchM != null ? `${r.catchApprox ? '~' : ''}${r.catchM} m` : '—', 'from the hide') +
-      cell(`${r.ageMin} min`, 'hide age at start') +
+      cell(age, 'hide age at start') +
       cell(r.approach ?? '—', 'approach vs wind');
   } else {
     /* Older results carry only a signed mean; they still read. */
@@ -4324,7 +4333,7 @@ function renderResult(s) {
       cell(typical != null ? fmtM(typical, 1) : '—', 'typical distance from the line',
         r.noisy && Number.isFinite(r.accMed) ? `GPS ±${fmtM(r.accMed)}` : '') +
       sideCell +
-      cell(`${r.ageMin} min`, 'trail age at start') +
+      cell(age, 'trail age at start') +
       cell(dur != null ? fmtDur(dur) : '—', 'run', tr.length > 1 ? fmtKm(pathLen(tr)) : '');
   }
   const modelled = r.modelled
@@ -4600,7 +4609,13 @@ async function deliverFile(bytes, name, type) {
   setTimeout(() => URL.revokeObjectURL(a.href), 60000);
   toast(`Saved ${name}`);
 }
-const saveGpx = (m) => deliverFile(toGpx(m), `${fileBase(m)}.gpx`, 'application/gpx+xml');
+/* A run kept from someone else's link, or saved before links were checked,
+   can hold a value no file can be made from. The tap then says so, rather
+   than doing nothing at all. */
+async function saveGpx(m) {
+  try { await deliverFile(toGpx(m), `${fileBase(m)}.gpx`, 'application/gpx+xml'); }
+  catch { toast('Could not make the file'); }
+}
 
 /* The report's map: the same static square as the share card, larger, with
    the lines drawn in vector over it — so the picture is only a picture. */
@@ -4648,20 +4663,24 @@ async function staticJpeg(view) {
 
 async function savePdf(m) {
   toast('Making the report…');
-  const search = m.kind === 'search';
-  const map = await reportMap(m);
-  const bytes = buildPdf({
-    title: `${search ? 'Search' : 'Trail'} report${m.dog?.name ? ` — ${m.dog.name}` : ''}`,
-    eyebrow: `Trailcraft · ${search ? 'search' : 'trail'} report`,
-    headline: headline(m),
-    meta: metaLine(m),
-    map,
-    sections: detailSections(m, unitsForText()),
-    notes: notes(m),
-    footer: 'Trailcraft · sydrouxba5.github.io/trailcraft',
-    date: m.runAt ?? m.laidAt ?? Date.now(),
-  });
-  return deliverFile(bytes, `${fileBase(m)}.pdf`, 'application/pdf');
+  try {
+    const search = m.kind === 'search';
+    const map = await reportMap(m);
+    const bytes = buildPdf({
+      title: `${search ? 'Search' : 'Trail'} report${m.dog?.name ? ` — ${m.dog.name}` : ''}`,
+      eyebrow: `Trailcraft · ${search ? 'search' : 'trail'} report`,
+      headline: headline(m),
+      meta: metaLine(m),
+      map,
+      sections: detailSections(m, unitsForText()),
+      notes: notes(m),
+      footer: 'Trailcraft · sydrouxba5.github.io/trailcraft',
+      date: m.runAt ?? m.laidAt ?? Date.now(),
+    });
+    await deliverFile(bytes, `${fileBase(m)}.pdf`, 'application/pdf');
+  } catch {
+    toast('Could not make the report');
+  }
 }
 
 /* ── A trail someone sent ─────────────────────────────────────────── */
@@ -5467,14 +5486,14 @@ function paintHandlerCard(id) {
   $('hDogsLabel').textContent = dogs.length ? `Dogs \u00b7 ${dogs.length}` : 'Dogs';
   $('hDogs').innerHTML = dogs.length ? dogs.map(d => {
     const n = st.dogs[d.id] || 0;
-    return `<div class="card person-row" data-dog-card="${d.id}">${avaHtml(d)}<span class="who"><b>${esc(d.name)}</b><i class="sub">${n} run${n === 1 ? '' : 's'} \u00b7 ${esc(d.level)}</i></span></div>`;
+    return `<div class="card person-row" data-dog-card="${esc(d.id)}">${avaHtml(d)}<span class="who"><b>${esc(d.name)}</b><i class="sub">${n} run${n === 1 ? '' : 's'} \u00b7 ${esc(d.level)}</i></span></div>`;
   }).join('') : `<div class="card"><p class="body muted">No dog on this handler yet. Add one from the home screen.</p></div>`;
   const runs = S.sessions.filter(x => x.handlerId === id && x.data?.track);
   $('hRunsLabel').textContent = runs.length ? `Every trail \u00b7 ${runs.length}` : 'Every trail';
   $('hRuns').innerHTML = runs.length ? runs.map(x => {
     const d = S.dogs.find(z => z.id === x.dogId);
     const band = ageBand(x.data.result?.ageMin);
-    return `<div class="card" data-open-session="${x.id}">
+    return `<div class="card" data-open-session="${esc(x.id)}">
       <div class="meta"><span>${fmtWhen(x.data.trackStarted ?? x.startedAt)}</span><span>${esc(d?.name ?? '')}${d ? ' \u00b7 ' : ''}${fmtKm(pathLen(x.data.track || []))}${band ? ' \u00b7 ' + esc(band.label) : ''}</span></div>
       <p class="body small">${esc(x.data.result?.sentence ?? x.summary ?? '')}</p>
     </div>`;
@@ -5565,7 +5584,7 @@ function paintDogCard(id) {
   $('dogRuns').innerHTML = runs.length ? runs.map(x => {
     const band = ageBand(x.data.result?.ageMin);
     const len = fmtKm(pathLen(x.data.track || []));
-    return `<div class="card" data-open-session="${x.id}">
+    return `<div class="card" data-open-session="${esc(x.id)}">
       <div class="meta"><span>${fmtWhen(x.data.trackStarted ?? x.startedAt)}</span>
         <span>${band ? `${band.label} · ` : ''}${len}</span></div>
       <div class="story">${esc(x.summary || '')}</div>
@@ -5579,14 +5598,14 @@ function renderSettings() {
   $('setPeople').innerHTML = S.handlers.map(h => {
     const team = S.dogs.filter(d => d.handlerId === h.id);
     return `<div class="card set-card">
-      <button class="set-row" data-edit-handler="${h.id}">${avaHtml(h)}<span class="who"><b>${esc(h.name)}</b></span></button>
-      ${team.map(d => `<button class="set-row" data-dog-card="${d.id}">${avaHtml(d)}<span class="who"><b>${esc(d.name)}</b><i>${esc(d.level)} · ${fmtM(d.lineM)} line</i></span></button>`).join('')}
-      <button class="btn ghost small" data-add-dog-for="${h.id}">Add a dog for ${esc(h.name)}</button>
+      <button class="set-row" data-edit-handler="${esc(h.id)}">${avaHtml(h)}<span class="who"><b>${esc(h.name)}</b></span></button>
+      ${team.map(d => `<button class="set-row" data-dog-card="${esc(d.id)}">${avaHtml(d)}<span class="who"><b>${esc(d.name)}</b><i>${esc(d.level)} · ${fmtM(d.lineM)} line</i></span></button>`).join('')}
+      <button class="btn ghost small" data-add-dog-for="${esc(h.id)}">Add a dog for ${esc(h.name)}</button>
     </div>`;
   }).join('') + `<button class="btn ghost small" id="setAddHandler">Add handler</button>`;
 
   $('setLayers').innerHTML = (S.layers.length
-    ? S.layers.map(l => `<div class="card set-card"><button class="set-row" data-edit-layer="${l.id}">${avaHtml(l)}<span class="who"><b>${esc(l.name)}</b></span></button></div>`).join('')
+    ? S.layers.map(l => `<div class="card set-card"><button class="set-row" data-edit-layer="${esc(l.id)}">${avaHtml(l)}<span class="who"><b>${esc(l.name)}</b></span></button></div>`).join('')
     : `<p class="body small muted">None yet.</p>`)
     + `<button class="btn ghost small" id="setAddLayer">Add person</button>`;
 

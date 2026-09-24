@@ -8,7 +8,7 @@
    link is made — it is long, and once sent it cannot be called back. */
 
 import { simplify, pathLen, cardinal, fmtDist, fmtShort, fmtSpeed, fmtTemp, fmtWeight, fmtCoord } from './geo.js';
-import { through, b64url, unb64url, needStreams } from './card.js';
+import { through, inflate, b64url, unb64url, needStreams } from './card.js';
 import { targetById, ageBand, dogAge, healApproach } from './store.js';
 import { DEBRIEF, FLAGS, NOTE_TAGS, toldField, toldOf } from './debrief.js';
 import { CONFIDENCE, labelOf as callLabel } from './call.js';
@@ -18,6 +18,29 @@ import { rainRate } from './field.js';
 const MAGIC = 'TS1.';
 const fin = Number.isFinite;
 const str = (v) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, 80) : null);
+
+/* A stranger's link is read inside limits no genuine one comes near: how long
+   the code is, what it inflates to, and how many points it holds. Deflate
+   squeezes a run of zeros about a thousand to one, so without them a link of
+   a few kilobytes unfolds into millions of points and takes the phone down
+   with it. The encoder keeps to the same limits, so a link this app makes
+   always opens. */
+const MAX_CODE = 64000;
+const MAX_JSON = 4 * 1024 * 1024;
+const MAX_POINTS = 50000;
+const MAX_LINES = 50;
+const TOO_BIG = 'This shared trail is too big to open';
+const DAMAGED = 'This shared trail is damaged — ask for the link again';
+/* The errors written here are meant to be read; anything else that goes
+   wrong while reading a link is said as damage, never as a JS message. */
+const refuse = (msg) => Object.assign(new Error(msg), { plain: true });
+
+/* Times must fall in a plausible era, as they must on a Trail Card: the GPX
+   file and the report turn them into dates, and Date.toISOString throws
+   outright past the year 275760. */
+const T_MIN = Date.UTC(2000, 0, 1), T_MAX = Date.UTC(2100, 0, 1);
+const inEra = (ms) => fin(ms) && ms >= T_MIN && ms <= T_MAX;
+const era = (ms) => (inEra(ms) ? ms : null);
 const pick = (o, keys) => Object.fromEntries(keys.filter(k => o?.[k] != null).map(k => [k, o[k]]));
 const cap = (w) => (w ? w.charAt(0).toUpperCase() + w.slice(1) : w);
 const DOG_KEYS = ['name', 'breed', 'sex', 'dob', 'weightKg', 'lineM'];
@@ -81,23 +104,33 @@ function packPts(pts) {
   return o;
 }
 
+/* Each [index, value] pair names a point by its place in the line, and only
+   a whole number that is a real place is used. An index of '__proto__' or
+   'length' would otherwise write onto every array in the page, or throw. */
+const pairs = (col, n) => (Array.isArray(col) ? col : [])
+  .filter(e => Array.isArray(e) && Number.isInteger(e[0]) && e[0] >= 0 && e[0] < n);
+
 function unpackPts(o) {
   if (!o || !Array.isArray(o.lat) || !Array.isArray(o.lon) || o.lat.length !== o.lon.length || !o.lat.length) return null;
   const lat = sums(o.lat), lon = sums(o.lon);
-  const t = Array.isArray(o.t) && o.t.length === lat.length ? sums(o.t) : null;
-  const alt = Array.isArray(o.alt) && o.alt.length === lat.length ? sums(o.alt) : null;
+  let t = Array.isArray(o.t) && o.t.length === lat.length ? sums(o.t).map(s => s * 1000) : null;
+  /* One time out of its era and the whole column goes: a line with no clock
+     still draws and grades, and one with an impossible clock breaks Save GPX. */
+  if (t && !t.every(inEra)) t = null;
+  let alt = Array.isArray(o.alt) && o.alt.length === lat.length ? sums(o.alt).map(a => a / 10) : null;
+  if (alt && !alt.every(fin)) alt = null;
   const pts = lat.map((v, i) => {
     const p = { lat: v / 1e6, lon: lon[i] / 1e6 };
-    if (t) p.t = t[i] * 1000;
-    if (alt) p.alt = alt[i] / 10;
+    if (t) p.t = t[i];
+    if (alt) p.alt = alt[i];
     return p;
   });
-  for (const [i, s] of Array.isArray(o.dw) ? o.dw : []) if (pts[i] && fin(s)) pts[i].dwellS = s;
-  for (const [i, k] of Array.isArray(o.kd) ? o.kd : []) if (pts[i]) pts[i].kind = String(k).slice(0, 40);
+  for (const [i, s] of pairs(o.dw, pts.length)) if (fin(s)) pts[i].dwellS = s;
+  for (const [i, k] of pairs(o.kd, pts.length)) if (typeof k === 'string') pts[i].kind = k.slice(0, 40);
   /* Only a confidence the app itself offers gets through; anything else in a
      crafted link is dropped rather than shown. */
-  for (const [i, c, seen] of Array.isArray(o.cl) ? o.cl : []) {
-    if (pts[i] && CALL_VS.has(c)) pts[i].call = { conf: c, seen: seen === 1 };
+  for (const [i, c, seen] of pairs(o.cl, pts.length)) {
+    if (CALL_VS.has(c)) pts[i].call = { conf: c, seen: seen === 1 };
   }
   const sane = pts.every(p => fin(p.lat) && fin(p.lon) && Math.abs(p.lat) <= 90 && Math.abs(p.lon) <= 180);
   return sane ? pts : null;
@@ -112,6 +145,24 @@ function packWx(wx) {
     .map(([k, v]) => [k, fin(v) && k !== 't' ? round(v, 1) : v]));
   const out = flat(wx);
   if (Array.isArray(wx.series)) out.series = wx.series.map(flat);
+  return out;
+}
+
+/* And read back the same way: numbers stay numbers, the forecast's own time
+   is the one word kept, and the series is no longer than a day of
+   fifteen-minute steps. A word where a number belongs would reach the
+   weather panel as a string and break the arithmetic done on it there. */
+const WX_SERIES_MAX = 96;
+function cleanWx(wx) {
+  const flat = (e) => (e && typeof e === 'object' && !Array.isArray(e)
+    ? Object.fromEntries(Object.entries(e)
+      .filter(([k, v]) => k !== 'series' && k.length <= 32
+        && (fin(v) || (k === 'time' && typeof v === 'string' && v.length < 40)))
+      .slice(0, 40))
+    : null);
+  const out = flat(wx);
+  if (!out) return null;
+  if (Array.isArray(wx.series)) out.series = wx.series.slice(0, WX_SERIES_MAX).map(flat).filter(Boolean);
   return out;
 }
 
@@ -151,8 +202,57 @@ function unpackDebrief(o) {
   d.note = typeof o.note === 'string' ? o.note.slice(0, 140) : '';
   d.noteTag = TAG_VS.has(o.noteTag) ? o.noteTag : null;
   d.by = str(o.by);
-  d.at = fin(o.at) ? o.at : null;
+  d.at = era(o.at);
   return d;
+}
+
+/* The verdict that came with the run, rebuilt field by field from what the
+   app itself writes. A kept run shows it on this phone's own result screen,
+   so a word from outside the app's short lists is dropped, a number has to
+   be a number in range, free text is cut short, and nothing else comes. */
+const RESULT_KINDS = new Set(['trail', 'search']);
+const SIDES = new Set(['left', 'right']);
+const APPROACHES = new Set(['into the wind', 'with the wind', 'across the wind']);
+const REGIME_KEYS = new Set(['wind', 'drain']);
+const PRED_SIDES = new Set([-1, 0, 1]);
+const text = (n) => (v) => (typeof v === 'string' ? v.trim().slice(0, n) : null);
+const within = (lo, hi) => (v) => (fin(v) && v >= lo && v <= hi ? v : null);
+const oneOf = (set) => (v) => (set.has(v) ? v : null);
+const fraction = within(0, 1);
+const RESULT_FIELDS = {
+  sentence: text(300), modelled: text(300), stability: text(40), stabilityPlain: text(300),
+  regimeWord: text(20), regimeKey: oneOf(REGIME_KEYS), mv: text(40),
+  side: oneOf(SIDES), mainSide: oneOf(SIDES), approach: oneOf(APPROACHES), predSide: oneOf(PRED_SIDES),
+  mean: within(-1e5, 1e5), medAbs: within(0, 1e5), accMed: within(0, 1e5), catchM: within(0, 1e5),
+  toFirst: within(0, 7 * 864e5), ageMin: within(0, 10 * 525600),
+  agree: fraction, sideAgreement: fraction, approachV: within(0, 100),
+  noisy: (v) => v === true, catchApprox: (v) => v === true,
+  shares: (v) => (v && typeof v === 'object' && [v.left, v.on, v.right].every(x => fraction(x) != null)
+    ? { left: v.left, on: v.on, right: v.right } : null),
+  wind: (v) => (v && typeof v === 'object' && within(0, 100)(v.speed) != null
+    ? { speed: v.speed, from: within(0, 360)(v.from) } : null),
+  /* The bench dials that were moved when it was graded: names and numbers. */
+  mp: (v) => (v && typeof v === 'object' && !Array.isArray(v)
+    ? Object.fromEntries(Object.entries(v).filter(([k, x]) => /^[A-Za-z]\w{0,39}$/.test(k) && fin(x)).slice(0, 64))
+    : null),
+};
+
+function cleanResult(r) {
+  if (!r || typeof r !== 'object' || !RESULT_KINDS.has(r.kind)) return null;
+  const out = { kind: r.kind };
+  for (const [k, clean] of Object.entries(RESULT_FIELDS)) if (k in r) out[k] = clean(r[k]);
+  return out;
+}
+
+/** A dog as a link or a live run describes it: names as short words, numbers
+    as numbers, and a date of birth in the same era as every other time. */
+function cleanDog(d) {
+  if (!d || typeof d !== 'object') return null;
+  return {
+    ...pick({ name: str(d.name), breed: str(d.breed), sex: str(d.sex) }, ['name', 'breed', 'sex']),
+    ...pick({ dob: era(d.dob), weightKg: fin(d.weightKg) ? d.weightKg : null,
+      lineM: fin(d.lineM) ? d.lineM : null }, ['dob', 'weightKg', 'lineM']),
+  };
 }
 
 function pack(m) {
@@ -176,22 +276,23 @@ function pack(m) {
 /* Everything read back from a link is a stranger's input: every field is
    checked for its type here, and every string is escaped where it is shown. */
 function unpack(o) {
-  if (!o || typeof o !== 'object') throw new Error('This shared trail is damaged');
+  if (!o || typeof o !== 'object' || Array.isArray(o)) throw refuse(DAMAGED);
+  /* Counted before a single point is built, so an oversized link costs
+     nothing but the refusal. */
+  const contam = Array.isArray(o.contam) ? o.contam : [];
+  const count = [o.trail, o.hides, o.track, o.wps, ...contam]
+    .reduce((n, l) => n + (Array.isArray(l?.lat) ? l.lat.length : 0), 0);
+  if (count > MAX_POINTS || contam.length > MAX_LINES) throw refuse(TOO_BIG);
   const trail = unpackPts(o.trail), hides = unpackPts(o.hides), track = unpackPts(o.track);
-  if (!trail && !hides) throw new Error('This shared trail is damaged — ask for the link again');
+  if (!trail && !hides) throw refuse(DAMAGED);
   const kind = o.kind === 'search' ? 'search' : 'trail';
-  const dog = o.dog && typeof o.dog === 'object' ? {
-    ...pick({ name: str(o.dog.name), breed: str(o.dog.breed), sex: str(o.dog.sex) }, ['name', 'breed', 'sex']),
-    ...pick({ dob: fin(o.dog.dob) ? o.dog.dob : null, weightKg: fin(o.dog.weightKg) ? o.dog.weightKg : null,
-      lineM: fin(o.dog.lineM) ? o.dog.lineM : null }, ['dob', 'weightKg', 'lineM']),
-  } : null;
   return {
     kind,
     name: str(o.name),
     target: str(o.target) ?? (kind === 'search' ? 'A hide' : 'A person'),
-    laidAt: fin(o.laidAt) ? o.laidAt : null,
-    runAt: fin(o.runAt) ? o.runAt : null,
-    dog,
+    laidAt: era(o.laidAt),
+    runAt: era(o.runAt),
+    dog: cleanDog(o.dog),
     handler: str(o.handler),
     layer: str(o.layer),
     plan: !!o.plan,
@@ -199,10 +300,10 @@ function unpack(o) {
     trail, hides,
     track: track?.length > 1 ? track : null,
     wps: unpackPts(o.wps) ?? [],
-    contamination: (Array.isArray(o.contam) ? o.contam : []).map(unpackPts).filter(p => p?.length > 1).map(points => ({ points })),
-    wx: o.wx && typeof o.wx === 'object' ? o.wx : null,
+    contamination: contam.map(unpackPts).filter(p => p?.length > 1).map(points => ({ points })),
+    wx: cleanWx(o.wx),
     /* A link sent before the approach was put right still says it back to front. */
-    result: o.result && typeof o.result === 'object' ? healApproach(o.result) : null,
+    result: healApproach(cleanResult(o.result)),
     coach: o.coach && typeof o.coach === 'object' ? {
       assisted: !!o.coach.assisted, tolM: fin(o.coach.tolM) ? o.coach.tolM : null, scent: !!o.coach.scent,
       calls: fin(o.coach.calls) ? o.coach.calls : null,
@@ -260,6 +361,8 @@ export async function encodeShared(model, info = {}) {
     };
     code = await squeeze(m);
   }
+  /* Past the limit a link is refused on opening, so it is not made at all. */
+  if (code.length > MAX_CODE) throw refuse('This run is too long for a link. Save it as a GPX file instead');
   info.thinnedM = m.thinnedM || 0;
   info.chars = code.length;
   return code;
@@ -272,14 +375,20 @@ export async function decodeShared(code) {
     throw new Error('This link does not hold a shared trail');
   }
   needStreams();
-  let json;
+  if (s.length > MAX_CODE) throw refuse(TOO_BIG);
+  let bytes, json;
   try {
-    const bytes = await through(unb64url(s.slice(MAGIC.length)), new DecompressionStream('deflate-raw'));
-    json = JSON.parse(new TextDecoder().decode(bytes));
+    bytes = await inflate(unb64url(s.slice(MAGIC.length)), MAX_JSON);
+    if (bytes) json = JSON.parse(new TextDecoder().decode(bytes));
   } catch {
     throw new Error('This shared trail is damaged — the link may have been cut short when it was copied');
   }
-  return unpack(json);
+  if (!bytes) throw refuse(TOO_BIG);
+  try {
+    return unpack(json);
+  } catch (e) {
+    throw e?.plain ? e : refuse(DAMAGED);
+  }
 }
 
 export const sharedUrl = (code, base) => `${String(base).replace(/#.*$/, '')}#t=${code}`;
@@ -303,7 +412,7 @@ const deg = (x) => x.toFixed(7);
 function gpxPoint(tag, p, { name, sym, type } = {}) {
   return `<${tag} lat="${deg(p.lat)}" lon="${deg(p.lon)}">`
     + (fin(p.alt) ? `<ele>${p.alt.toFixed(1)}</ele>` : '')
-    + (fin(p.t) ? `<time>${isoTime(p.t)}</time>` : '')
+    + (inEra(p.t) ? `<time>${isoTime(p.t)}</time>` : '')
     + (name ? `<name>${xml(name)}</name>` : '')
     + (sym ? `<sym>${xml(sym)}</sym>` : '')
     + (type ? `<type>${xml(type)}</type>` : '')
@@ -363,7 +472,7 @@ export function toGpx(m) {
     '  <metadata>',
     `    <name>${xml(title)}</name>`,
     m.result?.sentence ? `    <desc>${xml(m.result.sentence)}</desc>` : null,
-    fin(m.laidAt) ? `    <time>${isoTime(m.laidAt)}</time>` : null,
+    inEra(m.laidAt) ? `    <time>${isoTime(m.laidAt)}</time>` : null,
     all.length ? `    <bounds minlat="${deg(Math.min(...lats))}" minlon="${deg(Math.min(...lons))}" `
       + `maxlat="${deg(Math.max(...lats))}" maxlon="${deg(Math.max(...lons))}"/>` : null,
     '  </metadata>',
@@ -582,23 +691,26 @@ export function liveMeta(m, startedAt = Date.now()) {
 /** A model again, from the live document and its minute-by-minute chunks
     of track — in time order whatever order they arrived in. */
 export function liveModel(meta, chunks = []) {
-  const pts = chunks.flat().filter(p => fin(p?.lat) && fin(p?.lon)).sort((a, b) => (a.t ?? 0) - (b.t ?? 0));
-  const okPts = (a) => (Array.isArray(a) && a.length ? a.filter(p => fin(p?.lat) && fin(p?.lon)) : null);
+  /* Someone else's run, read from the cloud: held to the same limits and the
+     same checks as a link, and the newest fixes kept if it ran past them. */
+  const pts = (Array.isArray(chunks) ? chunks : []).flat().filter(p => fin(p?.lat) && fin(p?.lon))
+    .sort((a, b) => (a.t ?? 0) - (b.t ?? 0)).slice(-MAX_POINTS);
+  const okPts = (a) => (Array.isArray(a) && a.length ? a.slice(0, MAX_POINTS).filter(p => fin(p?.lat) && fin(p?.lon)) : null);
   return {
     kind: meta?.kind === 'search' ? 'search' : 'trail',
     target: str(meta?.target) ?? 'A person',
-    laidAt: fin(meta?.laidAt) ? meta.laidAt : null,
-    runAt: fin(meta?.startedAt) ? meta.startedAt : null,
-    dog: meta?.dog && typeof meta.dog === 'object' ? pick(meta.dog, DOG_KEYS) : null,
+    laidAt: era(meta?.laidAt),
+    runAt: era(meta?.startedAt),
+    dog: cleanDog(meta?.dog),
     handler: str(meta?.handler), layer: str(meta?.layer),
     plan: !!meta?.plan, walked: !!meta?.walked,
     trail: okPts(meta?.trail), hides: okPts(meta?.hides),
-    contamination: (Array.isArray(meta?.contamination) ? meta.contamination : [])
+    contamination: (Array.isArray(meta?.contamination) ? meta.contamination.slice(0, MAX_LINES) : [])
       .map(c => ({ points: okPts(c?.points) })).filter(c => c.points?.length > 1),
     track: pts.length > 1 ? pts : null,
     wps: okPts(meta?.wps) ?? [],
-    wx: meta?.wx && typeof meta.wx === 'object' ? meta.wx : null,
-    result: meta?.result && typeof meta.result === 'object' ? healApproach(meta.result) : null,
+    wx: cleanWx(meta?.wx),
+    result: healApproach(cleanResult(meta?.result)),
     k: fin(meta?.k) ? meta.k : null,
     ended: !!meta?.ended,
     thinnedM: 0,
