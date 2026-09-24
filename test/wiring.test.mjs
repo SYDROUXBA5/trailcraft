@@ -496,6 +496,19 @@ t('the session list deletes from a card without opening it, only once Delete ses
   assert.match(handler, /if \(confirmDeleteSession\(del\.dataset\.delSession\)\) renderSessions\(\);\s*return;/);
 });
 
+t('batch 1 follow-ups the checkers asked for', () => {
+  /* A session the phone refused to keep still has its crash copy: deleting the
+     session must take that copy too, or it is offered back at the next launch. */
+  assert.match(bodyOf('confirmDeleteSession'), /if \(!stored \|\| draftFor\(id\)\) dropDraft\(\);/);
+  /* A fix arriving proves location is allowed again; the warning must go. */
+  assert.match(bodyOf('onFix'), /rec\.blocked = false;/);
+  /* A walk the phone lost part-way is not sent as a finished one unasked. */
+  assert.match(js, /if \(short > 60 && !confirm\(`The recording stopped \$\{fmtM\(short\)\} before the drawn end/);
+  /* The lettering is render-blocking, so it gets a time limit on one bar. */
+  const sw = readFileSync(new URL('../public/sw.js', import.meta.url), 'utf8');
+  assert.match(sw, /fonts\s*\? await Promise\.race\(\[fetch\(e\.request\), wait\(PATIENCE \* 2, null\)\]\) \?\? Response\.error\(\)/);
+});
+
 t('the full-phone banner and the storage line point at a delete that exists', () => {
   /* They used to send the handler to "Settings → All sessions → delete old
      ones", a flow that did not exist. */
@@ -504,9 +517,13 @@ t('the full-phone banner and the storage line point at a delete that exists', ()
       `${name} still points at a delete that is not there`);
   }
   assert.ok(htmlIds.has('saveFree'), 'the banner has its own way to the list');
-  assert.match(js, /\$\('saveFree'\)\.addEventListener\('click', \(\) => openSessionList\(\{ deleting: true \}\)\);/,
+  assert.match(js, /\$\('saveFree'\)\.addEventListener\('click', \(\) => \{[\s\S]{0,160}openSessionList\(\{ deleting: true \}\);/,
     'and it opens the session list with Delete sessions already on');
-  assert.match(bodyOf('showSaveTrouble'), /\$\('saveFree'\)\.hidden = !e\.full;/, 'shown whenever the phone is full');
+  /* But never from a recording screen: leaving one with the GPS running
+     strands the walk with no way back to Stop. */
+  assert.match(bodyOf('showSaveTrouble'), /\$\('saveFree'\)\.hidden = !e\.full \|\| !!liveScreen\(\);/,
+    'shown when the phone is full, and never over a recording');
+  assert.match(js, /if \(liveScreen\(\)\) return toast\('Stop the recording first/, 'and refuses if one starts meanwhile');
   assert.match(bodyOf('paintStorageLine'), /storageWords\(db\.usage\(\)\.bytes, STORAGE_MB\)/);
 });
 
@@ -601,8 +618,8 @@ t('the layer’s guided walk is written down, and comes back after a crash', () 
   assert.match(keep, /if \(guardSave\(own, \(\) => db\.addSession\(own\)\)\) dropDraft\(\);/,
     'the draft goes once her record is really kept, not before');
   assert.match(fnSrc('async function recoverKeep()'),
-    /if \(d\.kind === 'walk'\) \{[\s\S]{0,400}walk\.card = d\.plan;\s*\n\s*walk\.offAt = d\.offAt \|\| 0;[\s\S]{0,120}return keepWalk\(\);/,
-    'a recovered walk is finished the way the button finishes one');
+    /if \(d\.kind === 'walk'\) \{[\s\S]{0,400}walk\.card = d\.plan;\s*\n\s*walk\.offAt = d\.offAt \|\| 0;[\s\S]{0,900}return keepWalk\(\);/,
+    'a recovered walk is finished the way the button finishes one, asking the same question if it stopped short');
   const cancel = js.slice(js.indexOf("$('walkCancel').addEventListener"), js.indexOf("$('walkCancel').addEventListener") + 400);
   assert.match(cancel, /dropDraft\(\);/, 'a walk cancelled on purpose is never offered back');
 });

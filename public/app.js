@@ -3066,6 +3066,9 @@ function onFix(pos) {
   const { latitude: lat, longitude: lon, accuracy: acc, altitude: alt } = pos.coords;
   lastFix = { lat, lon, t: Date.now() };
   if (!rec.on) return;
+  /* A fix is proof location is allowed again (the iPhone resumes the watch the
+     moment it is switched back on in Settings), so the warning goes. */
+  rec.blocked = false;
   const pt = { lat, lon, t: pos.timestamp || Date.now(), acc, alt: alt ?? null };
   const last = rec.pts[rec.pts.length - 1];
   /* Stillness is not noise — it is the strongest source on the trail. A
@@ -3125,6 +3128,11 @@ function keepDraft(force = false) {
   /* A full phone must not stop the walk: the recording carries on in memory,
      exactly as it did before there was a draft at all. */
   if (d) try { db.draft.save(d); } catch { /* no room */ }
+}
+
+/** Is the unfinished recording on this phone the one for this session? */
+function draftFor(id) {
+  try { return unpackDraft(db.draft.read())?.sessionId === id; } catch { return false; }
 }
 
 function dropDraft() {
@@ -4506,7 +4514,10 @@ function showSaveTrouble(e) {
   $('saveRetry').hidden = !saveTrouble?.retry;
   /* Room is made in one place, so the banner goes straight there. It stays
      up meanwhile: Try again is still the way to save once there is room. */
-  $('saveFree').hidden = !e.full;
+  /* Never while something is being recorded: the list is somewhere else, and
+     leaving a recording screen with the GPS still running strands the walk
+     with no way back to Stop. */
+  $('saveFree').hidden = !e.full || !!liveScreen();
   $('saveTrouble').hidden = false;
 }
 function hideSaveTrouble() { saveTrouble = null; $('saveTrouble').hidden = true; }
@@ -5230,6 +5241,9 @@ function confirmDeleteSession(id) {
     when: fmtWhen(s.startedAt), backedUp: stored && !!sync.user });
   if (!confirm(q)) return false;
   if (stored && !tryDelete(() => db.deleteSession(id))) return false;
+  /* A session the phone refused to keep still has its crash copy, and that
+     would be offered back at the next launch. It was deleted: it goes too. */
+  if (!stored || draftFor(id)) dropDraft();
   if (saveTrouble?.session?.id === id) hideSaveTrouble();   // what it was waiting to save has gone
   if (run.session?.id === id) run.session = null;
   if (pendingSession?.id === id) pendingSession = null;
@@ -6295,7 +6309,10 @@ function wire() {
     else if (MAP_SCREENS.includes(currentScreen)) headingStart();
   });
   $('saveLater').addEventListener('click', () => { $('saveTrouble').hidden = true; });
-  $('saveFree').addEventListener('click', () => openSessionList({ deleting: true }));
+  $('saveFree').addEventListener('click', () => {
+    if (liveScreen()) return toast('Stop the recording first, then delete old sessions');
+    openSessionList({ deleting: true });
+  });
   $('saveLink').addEventListener('click', () => saveTrouble?.session && sendLink(modelOf(saveTrouble.session)));
   $('saveGpx').addEventListener('click', () => saveTrouble?.session && saveGpx(modelOf(saveTrouble.session)));
   // A save that fails somewhere unguarded (a weather update, a preference) still gets said.
@@ -6752,6 +6769,16 @@ async function recoverKeep() {
     walk.card = d.plan;
     walk.offAt = d.offAt || 0;
     walk.atStart = !!walk.offAt;
+    /* The question the Finish button asks, asked here too: a walk the phone
+       lost part-way is not a finished one, and the handler's run will be
+       graded against whatever is sent. Saying no loses nothing — the draft
+       stays, and the offer comes straight back. */
+    const end = walk.card?.points?.[walk.card.points.length - 1];
+    const lastPt = rec.pts[rec.pts.length - 1];
+    const short = end && lastPt ? dist(lastPt, end) : 0;
+    if (short > 60 && !confirm(`The recording stopped ${fmtM(short)} before the drawn end. Send what was walked anyway?`)) {
+      return boot();
+    }
     return keepWalk();
   }
   if (d.kind === 'hide') {

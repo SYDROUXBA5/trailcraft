@@ -365,6 +365,31 @@ t('lineCorrect: the start borrows the way the handler set off; too short a walk 
     'never a line-length from anywhere: no heading to project along');
 });
 
+/* The dog is where the handler got to a line-length later, so round a bend
+   it is on the path, not flung to the outside of it. A heading read from a
+   line-length back put every dog on the outside of every turn. */
+t('lineCorrect: round a corner and back from an overshoot, the dog stays on the path', () => {
+  const corner = project(WELLS, 0, 50);
+  const walkL = [];
+  for (let m = 0; m <= 50; m += 2.5) walkL.push({ ...project(WELLS, 0, m), t: m });
+  for (let m = 2.5; m <= 50; m += 2.5) walkL.push({ ...project(corner, 90, m), t: 50 + m });
+  const trailL = [WELLS, corner, project(corner, 90, 50)];
+  const before = walkL.findIndex(p => dist(p, corner) < 5.1 && p.lat < corner.lat);   // 5 m short of the corner
+  const out = lineCorrect(walkL, 10);
+  const off = signedOffsets(trailL, [out[before]], { withinEnds: true })[0];
+  assert.ok(Math.abs(off) < 0.3, `5 m before the corner the dog is 5 m round it, on the path (${off.toFixed(2)} m off)`);
+  near(dist(out[before], corner), 5, 0.5, 'five metres past the corner, along the new leg');
+
+  /* Out 30 m, back 30 m: just before the turn the dog is already coming back. */
+  const top = project(WELLS, 0, 30);
+  const uturn = [];
+  for (let m = 0; m <= 30; m += 2.5) uturn.push({ ...project(WELLS, 0, m), t: m });
+  for (let m = 2.5; m <= 30; m += 2.5) uturn.push({ ...project(top, 180, m), t: 30 + m });
+  const u = lineCorrect(uturn, 10);
+  const i25 = uturn.findIndex(p => Math.abs(dist(p, WELLS) - 25) < 0.1);
+  near(dist(u[i25], top), 5, 0.5, '25 m out, the dog is 5 m back down from the top');
+});
+
 t('grading: standing at the find is not time spent left or right of the line', () => {
   /* The reward at the runner folded into the last fix's dwell, and the line
      put that fix 10 m past the end, on a side picked by noise. A 90 s reward

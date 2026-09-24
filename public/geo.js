@@ -417,25 +417,41 @@ export function sideAgreement(offs, predictedSide, deadM = 1.5) {
    reason. */
 export function lineCorrect(track, lineM) {
   if (!track?.length || !(lineM > 0)) return track ? track.slice() : [];
-  /* How far back along the walk to look for that stretch. Circling on the
-     spot never produces one, and then the last heading stands. */
-  const reach = lineM * 4;
-  const heading = track.map((p, i) => {
-    let walked = 0;
-    for (let j = i - 1; j >= 0 && walked <= reach; j--) {
-      walked += dist(track[j + 1], track[j]);
-      if (dist(track[j], p) >= lineM) return bearing(track[j], p);
-    }
-    return null;
-  });
-  /* Until the handler has gone a line-length there is nothing behind them to
-     read, so the start borrows the first heading the walk does give: the way
-     they set off. Standing still, or circling, keeps the last one. */
-  let hdg = heading.find(h => h != null) ?? null;
+  /* Where the dog was is where the handler got to a line-length later. The
+     handler walks the dog's path a lead behind, so the handler's OWN walk,
+     read a line-length ahead, follows every bend and every overshoot exactly.
+     Grading happens after the run, so that later walk is already known.
+
+     Two earlier readings both went wrong. A heading from one kept fix to the
+     next (2.5 m apart) carried ten metres ahead turned a metre of GPS wobble
+     into four. A heading from a line-length back fixed that, but lagged round
+     every turn and put the dog on the outside of each bend, which on a trail
+     that mostly turns one way reads as the dog working that side. */
+  const along = [0];
+  for (let i = 1; i < track.length; i++) along.push(along[i - 1] + dist(track[i - 1], track[i]));
+  const total = along[along.length - 1];
+  /* Never a line-length from anywhere: nothing to read ahead, nothing to
+     project along. */
+  if (total < lineM) return track.map(p => ({ ...p }));
+
+  /* The last line-length has no later walk to read, so the dog carries on
+     the way the walk was going over that final stretch. */
+  let k = track.length - 1;
+  while (k > 0 && total - along[k] < lineM) k--;
+  const endHdg = bearing(track[k], track[track.length - 1]);
+  const last = track[track.length - 1];
+
+  let j = 0;
   return track.map((p, i) => {
-    if (heading[i] != null) hdg = heading[i];
-    if (hdg == null) return { ...p };                     // never went a line-length: nothing to project along
-    const q = project(p, hdg, lineM);
+    const want = along[i] + lineM;
+    if (want <= total) {
+      while (j < track.length - 2 && along[j + 1] < want) j++;
+      const a = track[j], b = track[j + 1];
+      const seg = along[j + 1] - along[j];
+      const f = seg > 0 ? (want - along[j]) / seg : 0;
+      return { ...p, lat: a.lat + (b.lat - a.lat) * f, lon: a.lon + (b.lon - a.lon) * f };
+    }
+    const q = project(last, endHdg, want - total);
     return { ...p, lat: q.lat, lon: q.lon };
   });
 }
