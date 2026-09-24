@@ -19,20 +19,86 @@
 const stamp = (r) => (Number.isFinite(r?.updatedAt) ? r.updatedAt : 0);
 
 /** Merge the phone's copy of a table with the cloud's.
-    Returns what the phone should now hold, and what should go up. */
-export function mergeRecords(local = [], remote = []) {
+    Returns what the phone should now hold, and what should go up.
+
+    `partial`: the cloud side is only what changed there lately (a pull on
+    coming back to the app), so a record missing from it is not missing from
+    the cloud, and is not sent again. `union`: see mergeOne. */
+export function mergeRecords(local = [], remote = [], { partial = false, union = false } = {}) {
   const L = new Map((local || []).filter(r => r?.id).map(r => [r.id, r]));
   const R = new Map((remote || []).filter(r => r?.id).map(r => [r.id, r]));
   const merged = [], toUpload = [];
 
   for (const id of new Set([...L.keys(), ...R.keys()])) {
     const l = L.get(id), r = R.get(id);
-    if (l && !r) { merged.push(l); toUpload.push(l); continue; }
-    if (r && !l) { merged.push(r); continue; }
-    if (stamp(l) > stamp(r)) { merged.push(l); toUpload.push(l); }
-    else merged.push(r);                         // remote newer, or a tie: nothing to send
+    if (partial && !r) { merged.push(l); continue; }
+    const { keep, up } = mergeOne(l, r, { union });
+    merged.push(keep);
+    if (up) toUpload.push(keep);
   }
   return { merged, toUpload };
+}
+
+/* Fields the cloud cannot hold (toCloud leaves them out). A copy with one
+   and a copy without are the same record, not two to be merged. */
+const cloudless = (k) => !k || /^__.*__$/.test(k);
+/* The cloud's own bookkeeping on a record (fromCloudRecord). A phone on an
+   older build kept them when it pulled; carried over as "only the older copy
+   has it", they would make every merge look new and send it up again. */
+const CLOUD_ONLY = new Set(['baseAt', 'syncedAt']);
+const plainObject = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
+
+/* The newer copy, plus any field only the older one has, or null when the
+   older one has nothing the newer lacks. A session is only ever changed by
+   laying new fields over it (patchSession): nothing takes a field away, and
+   clearing one sets it to null, which counts as having it. So a field the
+   newer copy lacks was never there, not removed. */
+function withMissing(win, lose) {
+  if (!plainObject(win) || !plainObject(lose) || win.deleted || lose.deleted) return null;
+  const out = { ...win };
+  let added = 0;
+  for (const [k, v] of Object.entries(lose)) {
+    if (cloudless(k) || CLOUD_ONLY.has(k) || k === 'updatedAt' || k === 'data' || k in win || v === undefined) continue;
+    out[k] = v; added++;
+  }
+  if (plainObject(lose.data)) {
+    if (!('data' in win)) { out.data = lose.data; added++; }
+    else if (plainObject(win.data)) {
+      const data = { ...win.data };
+      for (const [k, v] of Object.entries(lose.data)) {
+        if (cloudless(k) || k in win.data || v === undefined) continue;
+        data[k] = v; added++;
+      }
+      out.data = data;
+    }
+  }
+  return added ? out : null;
+}
+
+/** One record, two copies: `keep` is what both should hold, and `up` says
+    the cloud does not have it yet. The newer copy wins.
+
+    `union` is for sessions, which two phones can each add to: a run on one,
+    a new name on the other. Newest-wins alone threw the run away whenever
+    the other phone's edit was later, on both phones and in the backup. With
+    it, the newer copy wins every field both have, and a field only the older
+    one has is kept. What comes out differs from both copies, so it is
+    stamped newer than both: every phone then takes it, and a save made from
+    either old copy is refused by the rules as out of date. */
+export function mergeOne(l, r, { union = false } = {}) {
+  if (!l || !r) return { keep: l || r || null, up: !!l };
+  const mine = stamp(l) > stamp(r);
+  const extra = union ? withMissing(mine ? l : r, mine ? r : l) : null;
+  if (extra) return { keep: { ...extra, updatedAt: Math.max(stamp(l), stamp(r)) + 1 }, up: true };
+  return mine ? { keep: l, up: true } : { keep: r, up: false };   // a tie goes to the cloud: nothing to send
+}
+
+/** A record as the cloud holds it, without the two fields that are only the
+    cloud's business: which copy a save was made from (baseAt), and when the
+    server stored it (syncedAt). Neither belongs on the phone. */
+export function fromCloudRecord(data) {
+  const { baseAt, syncedAt, ...rest } = data || {};
+  return fromCloud(rest);
 }
 
 /** What the app should actually see: tombstones are bookkeeping, not rows. */
@@ -226,6 +292,16 @@ export function mergeCalibration(localRows = [], remoteRows = [], cap = 50) {
   return [...seen.values()].sort((a, b) => a.t - b.t).slice(-cap);
 }
 
+/** Whether the cloud's rows are not the merged ones, by content. Counting
+    them was not enough: at the fifty-row cap a merge that took in a new run
+    and let the oldest go has fifty rows, the same as the cloud, and was
+    never sent. */
+export function calibrationDiffers(rows = [], remoteRows = []) {
+  const key = (r) => `${r?.t}|${r?.k}`;
+  const theirs = new Set((remoteRows || []).map(key));
+  return (rows || []).length !== (remoteRows || []).length || (rows || []).some(r => !theirs.has(key(r)));
+}
+
 /* ── Accounts by email ────────────────────────────────────────────────
    Checked on the phone before anything is sent, so a typo is caught next to
    the field it is in rather than after a round trip. The server still has
@@ -286,5 +362,22 @@ export function authMessage(code = '') {
   if (c.includes('permission-denied')) return 'The cloud refused the save. Check the security rules.';
   if (c.includes('quota')) return 'The free cloud allowance is used up for today.';
   return 'Sign-in did not work. Try again.';
+}
+
+/** What a failed backup, pull or live link means. Not authMessage: that one
+    ends in "Sign-in did not work", which is wrong for all of these and was
+    what every one of them said, even to someone following a live link who
+    never signed in. null for anything unrecognised, so the caller's own
+    words show instead. */
+export function syncMessage(e) {
+  if (e?.name === 'SaveError') {
+    return e.full ? 'This phone is full. Delete an old session to make room.' : 'This phone could not save what came from your account.';
+  }
+  const c = String(e?.code || '');
+  if (c.includes('permission-denied')) return 'Your account turned it down. It tries again when you next open the app.';
+  if (c.includes('resource-exhausted') || c.includes('quota')) return 'The free cloud allowance is used up for today.';
+  if (c.includes('unavailable') || c.includes('deadline-exceeded') || c.includes('network')) return 'No signal. It will try again when you have some.';
+  if (c.includes('unauthenticated')) return 'You are signed out. Sign in again to back up.';
+  return null;
 }
 

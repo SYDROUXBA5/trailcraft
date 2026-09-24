@@ -24,7 +24,7 @@ import { GROUND_LAYERS, buildGround, surfaceAt, surfaceAlong, surfaceRows, withS
          CONDITIONS, blankSeen, cleanSeen, seenLine, surfaceById,
          FIX_AS, alongOf, idxAt, makeFix, applyFixes, fixSpan, stretchMetres } from './ground.js';
 import { sync, onSync, initSync, signInWithGoogle, signInWithApple, signOut, deleteAccount, useThisAccount, forgetSkipped,
-         adoptRecords, reclaim,
+         adoptRecords, wipeAndSignOut, resync,
          signUpWithEmail, signInWithEmail, resetPassword,
          startLive, pushLive, endLive, watchLive, resumeLive } from './sync.js';
 import { trailModel, encodeShared, decodeShared, sharedUrl, toGpx, fileBase,
@@ -6708,11 +6708,28 @@ function wire() {
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   });
-  $('btnWipe').addEventListener('click', () => {
-    const backup = sync.user ? ' Your account backup is not touched: signing in again brings it back.' : '';
+  $('btnWipe').addEventListener('click', async () => {
+    /* Signed in, a wipe also signs out (sync.js wipeAndSignOut). Staying signed
+       in sent whatever the next person saved into this account, and the next
+       launch pulled the whole backup back onto the phone they were holding. */
+    /* Until the account service has answered, whether the phone is signed in
+       is not known, and a wipe then would be undone by the sync it is about
+       to start. */
+    if (sync.configured && !sync.user && sync.status === 'loading') return toast('Still connecting to your account. Try again in a moment.');
+    const signedIn = !!sync.user;
+    const behind = ['syncing', 'partial', 'error', 'ask'].includes(sync.status) ? ' Not everything here has reached your account yet.' : '';
+    const backup = signedIn
+      ? ` This also signs you out. Your account backup is kept: signing in again brings it back. To delete the backup too, use Delete my account first.${behind}`
+      : '';
     if (!confirm(`Wipe everything? ${S.sessions.length} sessions, ${S.dogs.length} dogs and all profiles. Export first if you want to keep them.${backup}`)) return;
+    if (signedIn) {
+      const ok = await wipeAndSignOut().catch(() => false);
+      if (!ok) return toast('That did not work. Nothing was changed.');
+      /* The account's copy in the database's own cache went too, which shut
+         the database down: the app starts again from clean. */
+      return location.reload();
+    }
     db.wipeAll();
-    reclaim();          // the owner mark lives in the same store and went with it
     forgetSkipped();    // and the list of what could not be sent describes nothing now
     snap();
     boot();
@@ -6919,6 +6936,10 @@ for (const id of BACKABLE) {
 buildMap();
 wire();
 initSync(db);            // does nothing until a Firebase config exists; before boot so a live link can wait on it
+/* Back in the app, or back in signal: take what another phone changed since,
+   before anything here is edited over it (sync.js resync). */
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') resync(); });
+addEventListener('online', () => resync());
 boot();
 checkForUpdate();
 if (migrated) toast('Your team and trails came along to the new Trailcraft');

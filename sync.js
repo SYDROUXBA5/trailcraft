@@ -12,8 +12,9 @@
 import { firebaseConfig, appleSignInEnabled } from './firebase-config.js';
 import { isNative } from './native.js';
 import { syncPlan,
-         mergeRecords, mergeCalibration, toCloud, fromCloud, approxBytes, DOC_LIMIT, packPoints, unpackPoints,
-         authMessage } from './sync-core.js';
+         mergeRecords, mergeOne, mergeCalibration, calibrationDiffers, toCloud, fromCloud, fromCloudRecord,
+         approxBytes, DOC_LIMIT, packPoints, unpackPoints,
+         authMessage, syncMessage } from './sync-core.js';
 
 const SDK = 'https://www.gstatic.com/firebasejs/12.3.0';
 const TABLES = ['handlers', 'dogs', 'layers', 'sessions'];
@@ -33,7 +34,9 @@ export function onSync(fn) { watchers.add(fn); fn(sync); return () => watchers.d
 const emit = () => { for (const fn of watchers) { try { fn(sync); } catch { /* never break sync */ } } };
 
 /* Firebase's error codes are for developers. A handler in a field needs to
-   know what happened and whether to do anything about it (sync-core.js). */
+   know what happened and whether to do anything about it (sync-core.js).
+   `plain` is for signing in; a backup, a pull or a live link that fails says
+   so in its own words (syncMessage), never "Sign-in did not work". */
 const plain = (e) => authMessage(e?.code || '');
 
 async function loadFirebase() {
@@ -210,12 +213,38 @@ export async function useThisAccount() {
   }
 }
 
-/** Wiping the phone takes the owner mark with it (it lives in the same
-    store), so the account that is signed in says again that these are its
-    records — or the next account to sign in would be offered them. */
-export function reclaim() {
-  const u = auth?.currentUser;
-  if (u && db) db.kv.set('ownerUid', u.uid);
+/** "Wipe this phone" while signed in: the phone is cleared AND signed out.
+    It used to stay signed in, so the mirror went on uploading whatever the
+    next person saved into this account, and the next launch pulled the whole
+    backup back onto the phone they were holding. Now the phone is nobody's:
+    no owner mark, no account, nothing listening. The account's backup is
+    kept, and signing in again brings it back. The database's own cache of
+    that account goes too, which shuts the database down, so the caller
+    reloads the app afterwards. False, with nothing changed, if signing out
+    did not work. */
+let wiping = false;
+export async function wipeAndSignOut() {
+  const f = await loadFirebase();
+  wiping = true;                          // no pull on coming back may start meanwhile (resync)
+  stopMirror?.(); stopMirror = null;
+  try {
+    await f.signOut(auth);
+  } catch {
+    wiping = false;
+    onUser(auth?.currentUser ?? null);   // still signed in: back to backing up
+    return false;
+  }
+  try { await f.terminate(fs); } catch { /* already shut */ }
+  /* A sync still running stops with its database. Waited for (not for ever:
+     a write held for signal never answers once the database is shut), so
+     nothing it merges can land on the phone after it is cleared. */
+  let timer;
+  await Promise.race([userRun, new Promise(r => { timer = setTimeout(r, 3000); })]);
+  clearTimeout(timer);
+  forgetSkipped();
+  db.wipeAll();                           // the owner mark goes with it, and is not put back
+  try { await f.clearIndexedDbPersistence(fs); } catch { /* the cache stays; the phone is clear */ }
+  return true;
 }
 
 export async function signOut() {
@@ -227,9 +256,30 @@ export async function signOut() {
 /* One account change at a time: a deletion waits for a backup still running,
    so nothing it uploads can land after the removal. */
 let userRun = Promise.resolve();
-const onUser = (u) => (userRun = userRun.then(() => applyUser(u)).catch(() => {}));
+const onUser = (u, how) => (userRun = userRun.then(() => applyUser(u, how)).catch(() => {}));
 
-async function applyUser(u) {
+/* Coming back to the app, or back into signal. The only pull used to be at
+   launch, and an iPhone keeps the app alive for days: a phone that had not
+   pulled since the morning edited its old copy of a trail and sent it over
+   the run another phone had recorded on it since. Now it fetches what other
+   phones changed before anything here is edited over it. Only what changed
+   is read (syncedAt), so it is cheap, and it runs at most once a minute. */
+const RESYNC_EVERY = 60e3;
+let lastPull = 0;
+let pulling = false;
+export function resync() {
+  const u = auth?.currentUser;
+  /* Not while the account is being deleted or the phone wiped: a pull would
+     put the mirror back, and send saves into what is being taken away. */
+  if (!u || !db || pulling || deleting || wiping || sync.user?.uid !== u.uid) return false;
+  if (!['syncing', 'synced', 'partial', 'error'].includes(sync.status)) return false;
+  if (Date.now() - lastPull < RESYNC_EVERY) return false;
+  lastPull = Date.now();
+  onUser(u, { resume: true });
+  return true;
+}
+
+async function applyUser(u, { resume = false } = {}) {
   stopMirror?.(); stopMirror = null;
   sync.user = u ? { uid: u.uid, name: u.displayName, email: u.email, photo: u.photoURL,
     password: (u.providerData || []).some(p => p.providerId === 'password') } : null;
@@ -241,22 +291,44 @@ async function applyUser(u) {
   const plan = syncPlan(db.kv.get('ownerUid', null), u.uid, hasRecords());
   if (plan === 'other' || plan === 'ask') { forgetSkipped(); sync.status = plan; sync.error = null; emit(); return; }
 
-  sync.status = 'syncing'; emit();
+  /* A pull on coming back reads only what changed since the last one. After
+     a failure, or with records the cloud refused, it reads everything, so
+     those are sent again. */
+  const partial = resume && pulled.size > 0 && failed.size === 0;
+  sync.status = 'syncing'; pulling = true; emit();
+  /* The mirror only listens once the merge is done, and the merge reads each
+     table once. A save made in between used to go nowhere while the card
+     said "Backed up": it is noted here and sent at the end. */
+  const meanwhile = new Map();
+  const stopNoting = db.onChange((table, rec) => { if (rec?.id) meanwhile.set(`${table}/${rec.id}`, [table, rec.id]); });
   try {
     /* Claimed before the first upload, not after it: the merge starts sending
        straight away, and half-sent records still belong to this account. */
     db.kv.set('ownerUid', u.uid);
-    forgetSkipped();
+    if (!partial) forgetSkipped();
     refused.clear();
-    for (const id of await fullSync(u.uid)) tooBig.add(id);
+    for (const id of await fullSync(u.uid, { partial })) tooBig.add(id);
     for (const [id, why] of refused) failed.set(id, why);
+    lastPull = Date.now();
+    stopNoting();
     stopMirror = db.onChange((table, rec) => mirror(u.uid, table, rec));
+    /* Sent as they stand now, not as they were noted: the merge may have
+       replaced one with a newer copy from the cloud since. */
+    for (const [table, id] of meanwhile.values()) {
+      const rec = current(table, id);
+      if (rec) mirror(u.uid, table, rec);
+    }
+    pulling = false;
     /* "Backed up" only when everything is. Anything left behind is named. */
     settle();
     return;
   } catch (e) {
+    pulled.clear();                      // the next pull reads everything again
     sync.status = 'error';
-    sync.error = plain(e) || 'Could not sync — your trails are still safe on this phone';
+    sync.error = syncMessage(e) || 'Could not sync. Your trails are still safe on this phone.';
+  } finally {
+    stopNoting();
+    pulling = false;
   }
   emit();
 }
@@ -338,31 +410,101 @@ async function removeLive(uid) {
 const userCol = (uid, name) => fb.collection(fs, 'users', uid, name);
 const userDoc = (uid, name, id) => fb.doc(fs, 'users', uid, name, String(id));
 
-/** Bring the phone and the account into agreement, both directions. */
-async function fullSync(uid) {
+/* ── Two phones, one account ───────────────────────────────────────────
+   What this phone last knew of each record in the cloud: `table/id` → that
+   copy's updatedAt. Every save names it as the copy it was made from
+   (baseAt), and the rules refuse a save when the cloud holds a different
+   copy: another phone changed the record since this one last read it. The
+   phone then merges the two (put). It compares copies, not times, so two
+   phones whose clocks differ by a few seconds cannot fool it. */
+const known = new Map();
+/* Up to when each table has been read, by the server's clock: every save
+   carries syncedAt, which the server stamps as it stores it. A pull on
+   coming back reads only what was stored after that. */
+const pulled = new Map();
+
+const stampOf = (rec) => (Number.isFinite(rec?.updatedAt) ? rec.updatedAt : null);
+const setKnown = (k, at) => { if (at == null) known.delete(k); else known.set(k, at); };
+const baseOf = (table, id) => known.get(`${table}/${id}`) ?? null;
+/* What goes up: the record, the copy it was made from, and a slot for the
+   server to write when it stored it. */
+const forCloud = (table, rec, body = toCloud(rec)) =>
+  ({ ...body, baseAt: baseOf(table, rec.id), syncedAt: fb.serverTimestamp() });
+const refusedByRules = (e) => String(e?.code || '').includes('permission-denied');
+
+/* A record as the phone holds it now, tombstone and all. */
+function current(table, id) {
+  if (table === 'calibration') return { id, rows: db.calibration(id), updatedAt: Date.now() };
+  const rows = table === 'sessions' ? db.rawSessions() : db[table].raw();
+  return rows.find(r => r.id === id) ?? null;
+}
+
+/* Put one record on the phone as the cloud and the phone agreed it. Not a
+   save: nothing is announced, so the mirror does not send it back. */
+function keepHere(table, rec) {
+  if (table === 'calibration') return db.setCalibration(rec.id, rec.rows);
+  const rows = table === 'sessions' ? db.rawSessions() : db[table].raw();
+  const i = rows.findIndex(r => r.id === rec.id);
+  if (i >= 0) rows[i] = rec; else rows.push(rec);
+  if (table === 'sessions') db.replaceSessions(rows); else db[table].replaceAll(rows);
+}
+
+/** Read one table, or only what changed in it since the last pull. */
+async function readTable(uid, name, partial) {
+  const since = partial ? pulled.get(name) : undefined;
+  const snap = await fb.getDocs(since === undefined ? userCol(uid, name)
+    : fb.query(userCol(uid, name), fb.where('syncedAt', '>', fb.Timestamp.fromMillis(since))));
+  let mark = since ?? 0;
+  const rows = snap.docs.map((d) => {
+    const raw = d.data();
+    mark = Math.max(mark, raw.syncedAt?.toMillis?.() ?? 0);
+    const rec = fromCloudRecord(raw);
+    if (rec.id == null) rec.id = d.id;
+    setKnown(`${name}/${d.id}`, stampOf(rec));
+    return rec;
+  });
+  /* With no signal the answer comes from the phone's own copy of the cloud,
+     which holds this phone's saves but not what other phones sent meanwhile.
+     Marking the table read up to the newest save in it would skip theirs for
+     good, so the mark stays where the last real read left it. */
+  if (snap.metadata?.fromCache) mark = since;
+  return { rows, mark, whole: since === undefined };
+}
+
+/** Bring the phone and the account into agreement, both directions.
+    `partial`: only what other phones changed since the last pull. */
+async function fullSync(uid, { partial = false } = {}) {
   const skipped = [];
+  const marks = new Map();
   for (const name of TABLES) {
-    const snap = await fb.getDocs(userCol(uid, name));
-    const remote = snap.docs.map(d => fromCloud(d.data()));
+    const { rows: remote, mark, whole } = await readTable(uid, name, partial);
+    marks.set(name, mark);
+    /* Nothing changed there: the phone's copy is not rewritten for nothing,
+       which for sessions is the whole history, every time the app comes back. */
+    if (!whole && !remote.length) continue;
     const local = name === 'sessions' ? db.rawSessions() : db[name].raw();
     // Rows from before sync existed have no stamp. Give them the oldest real
     // one on both sides at once, so the two copies agree from here on.
     const stamped = local.map(r => (Number.isFinite(r.updatedAt) ? r : { ...r, updatedAt: 1 }));
-    const { merged, toUpload } = mergeRecords(stamped, remote);
+    const { merged, toUpload } = mergeRecords(stamped, remote, { partial: !whole, union: name === 'sessions' });
     if (name === 'sessions') db.replaceSessions(merged); else db[name].replaceAll(merged);
     skipped.push(...await uploadAll(uid, name, toUpload));
   }
 
-  const snap = await fb.getDocs(userCol(uid, 'calibration'));
-  const remote = new Map(snap.docs.map(d => [d.id, fromCloud(d.data()).rows || []]));
+  const { rows: cal, mark, whole } = await readTable(uid, 'calibration', partial);
+  marks.set('calibration', mark);
+  const remote = new Map(cal.map(c => [c.id, c.rows || []]));
   const local = new Map(db.allCalibration().map(c => [c.id, c.rows]));
   const up = [];
-  for (const dogId of new Set([...remote.keys(), ...local.keys()])) {
+  for (const dogId of new Set([...remote.keys(), ...(whole ? local.keys() : [])])) {
     const rows = mergeCalibration(local.get(dogId), remote.get(dogId));
     db.setCalibration(dogId, rows);
-    if (rows.length !== (remote.get(dogId) || []).length) up.push({ id: dogId, rows, updatedAt: Date.now() });
+    if (calibrationDiffers(rows, remote.get(dogId))) up.push({ id: dogId, rows, updatedAt: Date.now() });
   }
   skipped.push(...await uploadAll(uid, 'calibration', up));
+  /* Only once everything was read and merged: a pull that failed half-way
+     leaves the next one reading all of it again. */
+  for (const [name, at] of marks) if (at !== undefined) pulled.set(name, at);
   return skipped;
 }
 
@@ -381,23 +523,93 @@ const refused = new Map();
 
 async function uploadAll(uid, name, rows) {
   const skipped = [];
-  let batch = null, n = 0, bytes = 0;
-  const send = async () => { if (n) await batch.commit(); batch = null; n = 0; bytes = 0; };
+  let batch = null, n = 0, bytes = 0, inBatch = [];
+  const send = async () => {
+    if (n) {
+      try {
+        await batch.commit();
+        for (const rec of inBatch) setKnown(`${name}/${rec.id}`, stampOf(rec));
+      } catch (e) {
+        if (!refusedByRules(e)) throw e;
+        /* One record another phone changed a moment ago, since it was read,
+           refuses the whole batch. Each goes on its own instead, merged
+           first where it has to be. */
+        for (const rec of inBatch) {
+          try { await put(uid, name, rec); } catch (err) { refused.set(rec.id, syncMessage(err) || 'the cloud refused it'); }
+        }
+      }
+    }
+    batch = null; n = 0; bytes = 0; inBatch = [];
+  };
   for (const rec of rows) {
-    const payload = toCloud(rec);
-    const size = approxBytes(payload);
+    const body = toCloud(rec);
+    const size = approxBytes(body);
     /* Skipped, and SAID: a backup that quietly leaves a session behind and
        then reports "backed up" is worse than one that fails. */
     if (size > DOC_LIMIT) { skipped.push(rec.id); continue; }
     if (n && (n >= BATCH_WRITES || bytes + size > BATCH_BYTES)) await send();
     batch ??= fb.writeBatch(fs);
+    const payload = forCloud(name, rec, body);
     /* A record the SDK refuses outright is left behind by itself, not with
        every record that happened to share its batch. */
-    try { batch.set(userDoc(uid, name, rec.id), payload); } catch (e) { refused.set(rec.id, plain(e) || 'the cloud refused it'); continue; }
-    n++; bytes += size;
+    try { batch.set(userDoc(uid, name, rec.id), payload); } catch (e) { refused.set(rec.id, syncMessage(e) || 'the cloud refused it'); continue; }
+    n++; bytes += size; inBatch.push(rec);
   }
   await send();
   return skipped;
+}
+
+/** One record to the cloud, made from the copy this phone last knew. When
+    the rules refuse it, another phone has changed that record since: the
+    two are merged (sync-core.js mergeOne, or the calibration union), the
+    phone keeps the merge, and the merge goes up in its place. Once: a
+    second refusal is reported, not chased. */
+async function put(uid, table, rec) {
+  const k = `${table}/${rec.id}`;
+  const base = known.get(k) ?? null;
+  const payload = forCloud(table, rec);
+  /* This phone's writes reach the cloud in the order they were made, so
+     its next save of this record is made from this one. */
+  setKnown(k, stampOf(rec));
+  try {
+    await fb.setDoc(userDoc(uid, table, rec.id), payload);
+  } catch (e) {
+    if (!refusedByRules(e)) { if (known.get(k) === stampOf(rec)) setKnown(k, base); throw e; }
+    await mend(uid, table, rec.id);
+  }
+}
+
+/* One merge at a time for any one record: two refused saves of it would
+   otherwise each merge with a cloud copy the other is about to replace. */
+const mending = new Map();
+function mend(uid, table, id) {
+  const k = `${table}/${id}`;
+  const run = (mending.get(k) || Promise.resolve()).catch(() => {}).then(() => mendNow(uid, table, id));
+  mending.set(k, run);
+  run.catch(() => {}).then(() => { if (mending.get(k) === run) mending.delete(k); });
+  return run;
+}
+
+async function mendNow(uid, table, id) {
+  const k = `${table}/${id}`;
+  const snap = await fb.getDoc(userDoc(uid, table, id));
+  const cloud = snap.exists() ? { ...fromCloudRecord(snap.data()), id } : null;
+  const at = stampOf(cloud);
+  setKnown(k, at);
+  const mine = current(table, id);
+  let keep, up;
+  if (table === 'calibration') {
+    const rows = mergeCalibration(mine?.rows, cloud?.rows);
+    keep = { id, rows, updatedAt: Date.now() };
+    up = calibrationDiffers(rows, cloud?.rows || []);
+  } else {
+    ({ keep, up } = mergeOne(mine, cloud, { union: table === 'sessions' }));
+  }
+  if (!keep) return;
+  keepHere(table, keep);
+  if (!up) return;                                  // the cloud's copy was the one to keep
+  await fb.setDoc(userDoc(uid, table, id), forCloud(table, keep));
+  setKnown(k, stampOf(keep));
 }
 
 /* What is NOT in the cloud: records too long to fit, and records the cloud
@@ -405,12 +617,18 @@ async function uploadAll(uid, name, rows) {
    save can report "backed up" over the top of one that never went. */
 const tooBig = new Set();
 const failed = new Map();      // id → what went wrong, in words
+/* Saves on their way, each marked with its account. Offline that can be
+   hours, and until one lands the card says "Backing up", not "Backed up". */
+const sending = new Set();
 
 /** Forget both, because the records they describe are no longer this
-    account's business: wiped, signed out, or handed to someone else. */
+    account's business: wiped, signed out, or handed to someone else. What
+    this phone knew of the cloud goes too, so the next sync reads it all. */
 export function forgetSkipped() {
   tooBig.clear();
   failed.clear();
+  known.clear();
+  pulled.clear();
 }
 
 function settle() {
@@ -420,9 +638,10 @@ function settle() {
     : failed.size
       ? `${failed.size} record${failed.size === 1 ? '' : 's'} did not reach your account: ${[...failed.values()][0]}`
       : null;
+  const busy = pulling || [...sending].some(s => s.uid === sync.user?.uid);
   sync.error = line;
-  sync.status = line ? 'partial' : 'synced';
-  sync.lastSync = Date.now();
+  sync.status = line ? 'partial' : busy ? 'syncing' : 'synced';
+  if (!busy) sync.lastSync = Date.now();
   emit();
 }
 
@@ -435,15 +654,17 @@ function mirror(uid, table, rec) {
      answer about the old account must not touch what the screen is saying. */
   const theirs = () => sync.user?.uid === uid && ['syncing', 'synced', 'partial'].includes(sync.status);
   if (!theirs()) return;
-  const payload = toCloud(rec);
-  if (approxBytes(payload) > DOC_LIMIT) { tooBig.add(rec.id); settle(); return; }
-  fb.setDoc(userDoc(uid, table, rec.id), payload)
-    .then(() => { if (!theirs()) return; tooBig.delete(rec.id); failed.delete(rec.id); settle(); })
+  if (approxBytes(toCloud(rec)) > DOC_LIMIT) { tooBig.add(rec.id); settle(); return; }
+  const going = { uid };
+  sending.add(going);
+  settle();
+  put(uid, table, rec)
+    .then(() => { if (!theirs()) return; tooBig.delete(rec.id); failed.delete(rec.id); })
     .catch((e) => {
       if (!theirs()) return;
-      failed.set(rec.id, plain(e) || 'the cloud refused it');
-      settle();
-    });
+      failed.set(rec.id, syncMessage(e) || 'the cloud refused it');
+    })
+    .finally(() => { sending.delete(going); if (theirs()) settle(); });
 }
 
 /* ── Live: a run, followed from anywhere while it happens ─────────────
@@ -548,7 +769,7 @@ export async function watchLive(id, cb) {
     if (!snap.exists()) { cb({ error: 'This live link has expired, or never existed' }); return; }
     meta = fromCloud(snap.data());
     push();
-  }, (e) => cb({ error: e?.code?.includes('permission') ? 'This live link has expired' : (plain(e) || 'Could not follow this run') }));
+  }, (e) => cb({ error: e?.code?.includes('permission') ? 'This live link has expired' : (syncMessage(e) || 'Could not follow this run') }));
   const offChunks = f.onSnapshot(f.collection(fs, 'live', id, 'chunks'), (qs) => {
     qs.docChanges().forEach(ch => {
       if (ch.type === 'removed') chunks.delete(ch.doc.id);
