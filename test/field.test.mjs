@@ -8,7 +8,7 @@
 import assert from 'node:assert/strict';
 import {
   FLAT, buildTerrain, normOf, sample, stability, synoptic, flowAt,
-  scentLife, solarPosition, insolation, regime, lerpDir, wxAt,
+  scentLife, solarPosition, insolation, regime, lerpDir, wxAt, rainRate,
 } from '../public/field.js';
 import { driftFrom, predictedOffsets, ScentSim, NOSE, AIRBORNE, RESIDENCE,
          stepByFlow, flowBearing } from '../public/sim.js';
@@ -216,13 +216,30 @@ t('scentLife: responds to each condition in the right direction', () => {
   assert.ok(L({}, CONVECT) < L({}, NEUTRAL), 'convection strips scent');
 });
 
+/* `precipitation` is Open-Meteo's 15-minute total in mm, so 0.075 is
+   0.3 mm/h and 1.5 is 6 mm/h. */
 t('scentLife: light rain helps, heavy rain destroys', () => {
   const base = { humidity: 70, wind_speed: 3, soil_temp: 12 };
   const dry = scentLife({ ...base, precipitation: 0 }, NEUTRAL);
-  const light = scentLife({ ...base, precipitation: 0.3 }, NEUTRAL);
-  const heavy = scentLife({ ...base, precipitation: 6 }, NEUTRAL);
+  const light = scentLife({ ...base, precipitation: 0.075 }, NEUTRAL);
+  const heavy = scentLife({ ...base, precipitation: 1.5 }, NEUTRAL);
   assert.ok(light > dry, 'light rain re-wets the surface and refreshes scent');
   assert.ok(heavy < dry, 'heavy rain washes it away');
+});
+
+t('rain: a 15-minute total is read as a rate per hour', () => {
+  /* It was read as mm/h as it stood. Steady 2 mm/h rain arrives as 0.5 mm in
+     15 minutes, under the 0.6 mm/h drizzle line, and counted as the light
+     rain that refreshes scent: a scent life nearly four times too long. */
+  assert.equal(rainRate({ precipitation: 0.5 }), 2);
+  assert.equal(rainRate({ precipitation: 0 }), 0);
+  assert.equal(rainRate({}), 0);
+  assert.equal(rainRate(null), 0);
+  assert.equal(rainRate({ precipitation: -1 }), 0, 'never a negative rate');
+  const base = { humidity: 70, wind_speed: 3, soil_temp: 12 };
+  const dry = scentLife({ ...base, precipitation: 0 }, NEUTRAL);
+  const steady = scentLife({ ...base, precipitation: 0.5 }, NEUTRAL);
+  assert.ok(steady < dry, `2 mm/h is past drizzle and shortens scent life (${steady.toFixed(0)} vs ${dry.toFixed(0)} min)`);
 });
 
 t('scentLife: never returns zero or a negative, whatever it is handed', () => {

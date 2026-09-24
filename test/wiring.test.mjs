@@ -430,4 +430,28 @@ t('the full-phone banner and the storage line point at a delete that exists', ()
   assert.match(bodyOf('paintStorageLine'), /storageWords\(db\.usage\(\)\.bytes, STORAGE_MB\)/);
 });
 
+t('grading reads the approach, the trail ends, the rain and the handler the right way', () => {
+  const block = (start) => {
+    const i = js.indexOf(start);
+    assert.ok(i >= 0, `app.js still has ${start}`);
+    return js.slice(i, js.indexOf('\n}', i) + 2);
+  };
+  /* The approach was worked out inline and named back to front. */
+  const search = bodyOf('searchResult');
+  assert.match(search, /approach = approachToWind\(bearing\(path\[back\], path\[path\.length - 1\]\), wx\.wind_direction\);/);
+  assert.match(search, /approachV: APPROACH_V/, 'a new result is marked, so the store never swaps it back');
+  assert.doesNotMatch(js, /off > 135 \? 'into the wind'/);
+  /* Past the ends of the trail a fix has no side. */
+  assert.match(block('async function computeResult('),
+    /const offs = signedOffsets\(trail, corrected, \{ withinEnds: true \}\);/);
+  /* Rain is held as Open-Meteo's 15-minute total and read as a rate. */
+  assert.match(bodyOf('benchWx'), /precipitation: PV\.rain \/ RAIN_SUMS_PER_HOUR/);
+  assert.match(block('const scentLifeOf = '), /rain = rainRate\(wx\)/);
+  assert.doesNotMatch(js, /rain = wx\?\.precipitation/);
+  /* One handler's calls, and one handler's sticky answers. */
+  assert.match(bodyOf('paintCallBlock'), /calibration\(runsOf\(db\.sessions\(\), s\.handlerId \?\? S\.handler\?\.id\)\)/);
+  assert.doesNotMatch(js, /calibration\(db\.sessions\(\)\)/);
+  assert.match(bodyOf('openDebrief'), /const last = stickyDebrief\(db\.sessions\(\), s\);/);
+});
+
 console.log(`\n${pass} passed total\n`);

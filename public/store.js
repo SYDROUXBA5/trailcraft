@@ -117,6 +117,36 @@ export function runAgain(s, { id, summary }) {
   return { ...rest, id, dogId: null, summary, data };
 }
 
+/* ── Search results written back to front ─────────────────────────────
+   A search result used to name the approach the wrong way round: a dog that
+   came in nose to the wind was written up as "coming with the wind", and a
+   dog with the wind behind it as "coming into the wind". Across the wind was
+   always right. Those results are already saved, sent and backed up, so the
+   two words are swapped back as a result is read, wherever it came from.
+   A result graded since carries approachV, and so does one swapped here, so
+   a copy that is read, changed and saved again is never swapped twice. */
+export const APPROACH_V = 2;
+const SWAPPED = { 'into the wind': 'with the wind', 'with the wind': 'into the wind' };
+const swapComing = (text) => (typeof text === 'string'
+  ? text.replace(/coming (into|with) the wind/, (_, w) => `coming ${w === 'into' ? 'with' : 'into'} the wind`)
+  : text);
+
+/** A search result with its approach the right way round. Anything else,
+    or a result already right, comes back as the very same object. */
+export function healApproach(r) {
+  if (!r || r.kind !== 'search' || r.approachV >= APPROACH_V || !SWAPPED[r.approach]) return r;
+  return { ...r, approach: SWAPPED[r.approach], sentence: swapComing(r.sentence), approachV: APPROACH_V };
+}
+
+/** The same for a whole session: its summary is the result's sentence, so it
+    was written the wrong way round too. */
+export function healSession(s) {
+  const r = s?.data?.result;
+  const fixed = healApproach(r);
+  if (fixed === r) return s;
+  return { ...s, summary: swapComing(s.summary), data: { ...s.data, result: fixed } };
+}
+
 /* ── Deleting ─────────────────────────────────────────────────────────
    Every delete is asked about first, in words that name what goes. The words
    are worked out from the same rows the delete itself walks (deleteHandler
@@ -263,8 +293,10 @@ export function createStore(backend) {
 
     /* Sessions, newest first. {id, handlerId, dogId, layerId|null, targetId,
        startedAt, summary, data} — `data` carries the trail, track, waypoints,
-       weather, hides and verdict, opaque to the store. */
-    sessions: () => visible(read(K.sessions, [])),
+       weather, hides and verdict, opaque to the store. The one exception is
+       an old search result's approach, which is put right as it is read
+       (healSession) so every screen, link and backup gets the same words. */
+    sessions: () => visible(read(K.sessions, [])).map(healSession),
     rawSessions: () => read(K.sessions, []),
     addSession(s) {
       const all = read(K.sessions, []);

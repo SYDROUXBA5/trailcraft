@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { CONFIDENCE, CALL_V, MIN_PER_BAND, stampCall, confidenceOf, labelOf,
          callsIn, firstCall, scorable, calibration, calibrationLosses,
-         calibrationLine, callVerdict } from '../public/call.js';
+         calibrationLine, callVerdict, runsOf } from '../public/call.js';
 
 let pass = 0;
 const t = (name, fn) => { fn(); pass++; console.log(`  ok  ${name}`); };
@@ -216,6 +216,21 @@ t('the moment that matters is when the call was given', () => {
   early.data.trackWaypoints.at(-1).call.at = 1100;
   early.data.revealedAt = 1500;
   assert.ok(scorable(early), 'answered before the reveal: it counts');
+});
+
+t('calibration is one handler’s, never the whole phone’s', () => {
+  /* A trainer's phone running a class: A calls "Certain" five times and is
+     right three, B five times and right five. Over every session on the
+     phone, each was told "right 8 times in 10", which is neither of them. */
+  const as = (who, rows) => rows.map(s => ({ ...s, handlerId: who }));
+  const all = [...as('A', band('sure', 5, 3)), ...as('B', band('sure', 5, 5))];
+  const a = calibration(runsOf(all, 'A')).bands.find(b => b.v === 'sure');
+  const b = calibration(runsOf(all, 'B')).bands.find(b => b.v === 'sure');
+  assert.deepEqual([a.n, a.right], [5, 3]);
+  assert.deepEqual([b.n, b.right], [5, 5]);
+  assert.match(calibrationLine(calibration(runsOf(all, 'A'))), /right 3 times in 5/);
+  assert.deepEqual(runsOf(all, null), [], 'no handler, no record');
+  assert.deepEqual(runsOf(null, 'A'), []);
 });
 
 console.log(`\n${pass} passed total\n`);

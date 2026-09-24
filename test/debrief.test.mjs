@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { DEBRIEF, FLAGS, NOTE_TAGS, DEBRIEF_V, blankDebrief, debriefDone, debriefLine,
-         labelOf, fieldById, debriefRates, varietyGaps, toldField, toldOf } from '../public/debrief.js';
+         labelOf, fieldById, debriefRates, varietyGaps, toldField, toldOf, stickyDebrief } from '../public/debrief.js';
 
 let pass = 0;
 const t = (name, fn) => { fn(); pass++; console.log(`  ok  ${name}`); };
@@ -145,6 +145,22 @@ t('what someone else reads never says I or you', () => {
   assert.equal(labelOf('blind', 'handler'), 'I did not', 'the handler’s own form is unchanged');
   assert.equal(toldOf('blind', 'nonsense'), null);
   assert.equal(toldField('nonsense'), null);
+});
+
+t('the sticky answers come from this handler’s own last debrief', () => {
+  /* They came from the newest debrief on the phone, whoever's it was, so one
+     handler's "Nobody there knew" was already picked on the next handler's
+     run, and a run kept from someone else's link did the same. */
+  const mine = { id: 'm', handlerId: 'A', data: { debrief: full({ blind: 'handler' }) } };
+  const theirs = { id: 'o', handlerId: 'B', data: { debrief: full({ blind: 'double' }) } };
+  const kept = { id: 'k', handlerId: 'A', data: { imported: { at: 5 }, debrief: full({ blind: 'double' }) } };
+  const now = { id: 'n', handlerId: 'A', data: {} };
+  const sessions = [kept, theirs, now, mine];     // newest first
+  assert.equal(stickyDebrief(sessions, now)?.blind, 'handler', 'skips B, and the kept run');
+  assert.equal(blankDebrief(stickyDebrief(sessions, now)).blind, 'handler');
+  assert.equal(stickyDebrief([theirs, now], now), null, 'nothing of their own yet: nothing filled in');
+  assert.equal(stickyDebrief(sessions, { id: 'x', data: {} }), null, 'a run with no handler borrows nothing');
+  assert.equal(stickyDebrief([now], now), null, 'never its own');
 });
 
 console.log(`\n${pass} passed total\n`);

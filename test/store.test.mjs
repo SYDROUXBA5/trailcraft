@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { handlerStats, ODOURS, targetText } from '../public/store.js';
 import { createStore, migrateV1, TARGETS, targetById, verbs, uid,
          dogStats, ageBand, AGE_BANDS, dogAge, SaveError, patchSession, runAgain,
-         askDelete, dogsOf, storageWords } from '../public/store.js';
+         askDelete, dogsOf, storageWords, healApproach, healSession, APPROACH_V } from '../public/store.js';
 
 let pass = 0;
 const t = (name, fn) => { fn(); pass++; console.log(`  ok  ${name}`); };
@@ -493,6 +493,37 @@ t('the storage line points at the session list when the phone is nearly full', (
   assert.equal(full.text, 'Records use 4.6 MB of the roughly 5 MB allowed here. Nearly full: open the session list and delete old sessions.');
   assert.doesNotMatch(full.text, /—/);
   assert.equal(storageWords(4.6 * MB, 50).nearly, false, 'the iOS app has far more room');
+});
+
+t('an old search result is read with its approach the right way round, once', () => {
+  /* The words were back to front until this was fixed: a dog that came in
+     nose to the wind was written up as "coming with the wind". */
+  const old = { kind: 'search', sentence: 'Bo indicated in 1:40, 2 m from the hide, coming with the wind.',
+    toFirst: 100e3, catchM: 2, approach: 'with the wind', ageMin: 1 };
+  const fixed = healApproach(old);
+  assert.equal(fixed.approach, 'into the wind');
+  assert.equal(fixed.sentence, 'Bo indicated in 1:40, 2 m from the hide, coming into the wind.');
+  assert.equal(fixed.approachV, APPROACH_V);
+  assert.equal(healApproach(fixed), fixed, 'a healed result is never swapped back');
+  assert.equal(healApproach({ ...old, approach: 'into the wind' }).approach, 'with the wind');
+  const across = { ...old, approach: 'across the wind' };
+  assert.equal(healApproach(across), across, 'across the wind was always right');
+  const now = { ...old, approach: 'with the wind', approachV: APPROACH_V };
+  assert.equal(healApproach(now), now, 'a result graded since is left as it is');
+  const trail = { kind: 'trail', sentence: 'x' };
+  assert.equal(healApproach(trail), trail);
+  assert.equal(healApproach(null), null);
+
+  const db = createStore(fakeBackend());
+  db.addSession({ id: 's1', handlerId: 'h', startedAt: 1, summary: old.sentence, data: { result: old } });
+  const read = db.sessions()[0];
+  assert.equal(read.summary, 'Bo indicated in 1:40, 2 m from the hide, coming into the wind.', 'the list reads right');
+  assert.equal(read.data.result.approach, 'into the wind');
+  // Changed and saved back whole, then read again: still right, not swapped twice.
+  db.addSession({ ...read, id: 's2' });
+  assert.equal(db.sessions().find(x => x.id === 's2').data.result.approach, 'into the wind');
+  const plain = { id: 'p', data: { result: trail } };
+  assert.equal(healSession(plain), plain, 'anything else is the same object');
 });
 
 console.log(`\n${pass} passed total\n`);

@@ -128,7 +128,7 @@ console.log(`\n${pass} passed\n`);
 
 /* ── Scent field ──────────────────────────────────────────────── */
 import {
-  bearing, windRegime, scentOffset, plumeWidth, scentField, plumePolygon, legSummary,
+  bearing, windRegime, scentOffset, plumeWidth, scentField, plumePolygon, legSummary, approachToWind,
 } from '../public/geo.js';
 
 t('bearing: cardinal directions', () => {
@@ -143,6 +143,17 @@ t('windRegime: classifies against direction of travel', () => {
   assert.equal(windRegime(0, 90).side, 'left');
   assert.equal(windRegime(0, 180).label, 'tailwind');   // from behind, pushes forward
   assert.equal(windRegime(0, 0).label, 'headwind');     // in the face, pushes back
+});
+
+t('approachToWind: heading toward where the wind comes from is into the wind', () => {
+  /* It was back to front: a dog heading west into a westerly was written up
+     as "coming with the wind". */
+  assert.equal(approachToWind(270, 270), 'into the wind', 'nose to a westerly');
+  assert.equal(approachToWind(90, 270), 'with the wind', 'the westerly behind it');
+  assert.equal(approachToWind(0, 270), 'across the wind');
+  assert.equal(approachToWind(350, 20), 'into the wind', 'wraps across north');
+  assert.equal(approachToWind(10, null), null, 'no wind recorded, no word');
+  assert.equal(approachToWind(null, 270), null);
 });
 
 t('windRegime: along/cross components are unit-consistent', () => {
@@ -317,6 +328,69 @@ t('lineCorrect: fixes move one line-length along the heading of travel', () => {
   near(dist(still[4], out2[4]), 10, 0.3, 'stationary fix still projects');
   assert.equal(lineCorrect(track, 0).length, 4, 'zero line is a no-op copy');
   near(dist(lineCorrect(track, 0)[1], track[1]), 0, 0.01, 'and does not move fixes');
+});
+
+/* A handler walking exactly down a 200 m trail, fixes kept 2.5 m apart, each
+   off by up to a metre either side, the way GPS wanders. */
+const wobble = [0.8, -0.6, 1.0, -0.2, -0.9, 0.4, 0.7, -1.0, 0.1, -0.5, 0.9, -0.8, 0.3, 0.6, -0.7, -0.1, 1.0, -0.4, 0.2, -0.9];
+const onLine = (lengthM = 200, stepM = 2.5) => {
+  const pts = [];
+  for (let m = 0, i = 0; m <= lengthM + 1e-9; m += stepM, i++) {
+    pts.push({ ...project(project(WELLS, 0, m), 90, wobble[i % wobble.length]), t: 1e12 + i * 2000, dwellS: 0 });
+  }
+  return pts;
+};
+const straightTrail = (lengthM = 200) => [WELLS, project(WELLS, 0, lengthM / 2), project(WELLS, 0, lengthM)];
+
+t('lineCorrect: a metre of GPS wobble stays about a metre, not four', () => {
+  /* The heading used to come from one kept fix to the next, 2.5 m apart, and
+     be carried 10 m ahead: any sideways wobble came out four times bigger. */
+  const track = onLine(), trail = straightTrail();
+  const raw = signedOffsets(trail, track, { withinEnds: true });
+  const offs = signedOffsets(trail, lineCorrect(track, 10), { withinEnds: true });
+  assert.ok(medianAbs(raw) <= 1, 'the walk itself is within a metre');
+  assert.ok(medianAbs(offs) < 1.5, `typical offset after the line: ${medianAbs(offs).toFixed(2)} m`);
+  assert.ok(Math.max(...offs.filter(Number.isFinite).map(Math.abs)) < 3, 'no fix is pushed 3 m off');
+  const sh = sideShares(lineCorrect(track, 10), offs);
+  assert.ok(sh.on > 0.95, `on the line ${sh.on.toFixed(2)} of the time`);
+});
+
+t('lineCorrect: the start borrows the way the handler set off; too short a walk is left alone', () => {
+  const track = [0, 2.5, 5, 7.5, 10, 12.5].map((m, i) => ({ ...project(WELLS, 90, m), t: i }));
+  const out = lineCorrect(track, 10);
+  near(bearing(track[0], out[0]), 90, 0.5, 'the first fix points east, as the walk does');
+  near(dist(track[0], out[0]), 10, 0.3, 'by a line-length');
+  const short = track.slice(0, 3);
+  assert.deepEqual(lineCorrect(short, 10).map(p => [p.lat, p.lon]), short.map(p => [p.lat, p.lon]),
+    'never a line-length from anywhere: no heading to project along');
+});
+
+t('grading: standing at the find is not time spent left or right of the line', () => {
+  /* The reward at the runner folded into the last fix's dwell, and the line
+     put that fix 10 m past the end, on a side picked by noise. A 90 s reward
+     took a run from mostly on the line to "mostly worked one side". */
+  const track = onLine(), trail = straightTrail();
+  track[track.length - 1].dwellS = 90;
+  const corrected = lineCorrect(track, 10);
+  const offs = signedOffsets(trail, corrected, { withinEnds: true });
+  const sh = sideShares(corrected, offs, { deadM: 3 });
+  assert.ok(sh.on > 0.95, `on the line ${sh.on.toFixed(2)} of the time`);
+  assert.ok(Math.max(sh.left, sh.right) < 0.05, 'and no side to speak of');
+});
+
+t('signedOffsets withinEnds: behind the start and past the end have no side', () => {
+  const a = WELLS, b = project(a, 0, 100), c = project(b, 90, 100);
+  const trail = [a, b, c];
+  const beside = project(project(a, 0, 50), 90, 6);
+  const behind = project(project(a, 180, 8), 90, 0.3);
+  const past = project(project(c, 90, 10), 0, 0.3);
+  const [x, y, z] = signedOffsets(trail, [beside, behind, past], { withinEnds: true });
+  near(x, 6, 0.2, 'beside the first leg reads as usual');
+  assert.ok(Number.isNaN(y), 'behind the start');
+  assert.ok(Number.isNaN(z), 'past the end');
+  const plain = signedOffsets(trail, [behind, past]);
+  assert.ok(plain.every(Number.isFinite), 'without the option nothing changes');
+  near(Math.abs(plain[1]), 10, 0.2, 'the clamped distance, mostly how far past the end');
 });
 
 
@@ -566,6 +640,22 @@ t('sideShares: time-weighted, dead zone counts as on the line, a long gap is cap
   assert.ok(Math.abs(sh.left - 11 / 22) < 1e-9);
   assert.equal(sideShares(track, [1, 2]), null, 'lengths must match');
   assert.equal(sideShares([], []), null);
+});
+
+t('sideShares: a fix with no offset weighs nothing, and the last fix’s dwell is not work', () => {
+  const t0 = 1e12;
+  const track = [
+    { t: t0, dwellS: 0 }, { t: t0 + 2000, dwellS: 0 }, { t: t0 + 4000, dwellS: 0 }, { t: t0 + 6000, dwellS: 90 },
+  ];
+  // 2 s right, 2 s on, then 2 s and a 90 s stand past the end of the trail.
+  const sh = sideShares(track, [5, 1, NaN, NaN]);
+  assert.ok(Math.abs(sh.right - 0.5) < 1e-9 && Math.abs(sh.on - 0.5) < 1e-9, JSON.stringify(sh));
+  // Beside the line, the last fix still counts, but for its second, not its 90 s.
+  const end = sideShares(track, [5, 1, 1, -5]);
+  assert.ok(Math.abs(end.left - 1 / 7) < 1e-9, `the stand is left out: ${end.left}`);
+  assert.equal(sideShares(track, [NaN, NaN, NaN, NaN]), null, 'nothing beside the trail, nothing to share');
+  near(meanSigned([4, NaN, -2]), 1, 1e-9, 'the mean skips them too');
+  assert.equal(meanSigned([NaN]), null);
 });
 
 t('stepPoints: a print every stride along the track, the bearing of travel on each', () => {

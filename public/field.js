@@ -253,6 +253,19 @@ const _tmp = { u: 0, v: 0 };
 
 /* ── Scent life ───────────────────────────────────────────────────── */
 
+/** How hard it is raining, in mm per hour. Every weather record holds
+    `precipitation` exactly as Open-Meteo's 15-minute series gives it: the
+    rain that fell in the 15 minutes before, in mm, not a rate. The rain
+    dials are in mm/h, and reading the one as the other made steady 2 mm/h
+    rain arrive as 0.5, under the 0.6 drizzle line, so rain four times too
+    heavy still counted as the light rain that refreshes scent. Scaled here,
+    once, so every record already saved reads right as it is. */
+export const RAIN_SUMS_PER_HOUR = 4;
+export function rainRate(wx) {
+  const p = wx?.precipitation;
+  return Number.isFinite(p) && p > 0 ? p * RAIN_SUMS_PER_HOUR : 0;
+}
+
 /* How long a scent pool stays workable, in minutes. Humid, cool, still and
    stable holds it for hours; hot, dry, windy and convective strips it in tens
    of minutes.
@@ -263,7 +276,7 @@ const _tmp = { u: 0, v: 0 };
 export function scentLife(wx, st) {
   const hum = wx?.humidity ?? 70;
   const wind = wx?.wind_speed ?? 0;
-  const rain = wx?.precipitation ?? 0;
+  const rain = rainRate(wx);
   const soil = wx?.soil_temp;
 
   const fHum  = PV.humA + hum / PV.humB;

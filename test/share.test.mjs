@@ -242,6 +242,31 @@ await t('a search lists its hides and how the dog found them', () => {
   assert.doesNotMatch(text, /Laid by/);
 });
 
+await t('a search link sent before the fix reads with the approach the right way round', async () => {
+  /* The approach used to be written back to front. A link made then still
+     carries it that way; one made since carries approachV and is left alone. */
+  const hides = [{ lat: 51.2, lon: -2.6 }];
+  const track = walk(50).map(p => ({ ...p, t: p.t + 60e3 }));
+  const search = (result) => trailModel({ startedAt: T0, targetId: 'cadaver', data: {
+    hides, track, trackStarted: T0 + 60e3, trackWaypoints: [], result } }, people);
+  const old = { kind: 'search', sentence: 'Bo indicated in 1:40, 2 m from the hide, coming with the wind.',
+    toFirst: 100e3, catchM: 2, approach: 'with the wind', ageMin: 1 };
+  const back = await decodeShared(await encodeShared(search(old)));
+  assert.equal(back.result.approach, 'into the wind');
+  assert.equal(headline(back), 'Bo indicated in 1:40, 2 m from the hide, coming into the wind.');
+  const rows = detailSections(back, { when: () => 'x' }).flatMap(sec => sec.rows.map(r => r.join(': '))).join('\n');
+  assert.match(rows, /Came in: into the wind/);
+  const now = await decodeShared(await encodeShared(search({ ...old, approachV: 2 })));
+  assert.equal(now.result.approach, 'with the wind', 'graded since: already right');
+});
+
+await t('rain is shown as a rate, not a bare 15-minute total', () => {
+  const s = session();
+  s.data.weather = { ...s.data.weather, precipitation: 0.5 };
+  const rows = detailSections(trailModel(s, people), { when: () => 'x' }).flatMap(sec => sec.rows.map(r => r.join(': '))).join('\n');
+  assert.match(rows, /Rain: 2\.0 mm\/h/);
+});
+
 await t('live: the meta holds the trail but not the run, and chunks rebuild the run in order', () => {
   const m = trailModel(session(), people);
   const meta = liveMeta(m, T0 + 25 * 60e3);

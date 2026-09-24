@@ -164,6 +164,19 @@ export function ownRun(session) {
   return !!(at && Number.isFinite(d.trackStarted) && d.trackStarted >= at);
 }
 
+/** The debrief a new one borrows its sticky fields from: the newest one the
+    same handler wrote on a run of their own. It used to be the newest on the
+    phone, whoever's it was, so one handler's "Nobody there knew" was already
+    filled in on the next handler's run, and a run kept from someone else's
+    link did the same. Left unnoticed, a run where the handler knew the answer
+    was then scored as a blind call. */
+export function stickyDebrief(sessions, session) {
+  const who = session?.handlerId;
+  if (!who) return null;
+  return (sessions ?? []).find(x => x && x.id !== session.id && x.handlerId === who
+    && x.data?.debrief && ownRun(x))?.data?.debrief ?? null;
+}
+
 export function debriefRates(sessions) {
   /* A run kept from someone else's link is their dog and their judgement.
      Counting it here would quietly blend two handlers into one record. */
