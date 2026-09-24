@@ -3127,9 +3127,21 @@ function dropDraft() {
   try { db.draft.clear(); } catch { /* nothing to clear */ }
 }
 
-/** Is there work on this phone that has not been saved yet? */
+/* Screens that exist to make one change, kept only when their button is
+   pressed. Until then what is on them lives in memory and nowhere else. */
+const EDITING = new Set(['scrOnboardHandler', 'scrOnboardDog', 'scrSignIn', 'scrDelete', 'scrFix', 'scrDebrief']);
+
+/** Is there work on this phone that has not been saved yet? Not only a
+    recording: corners tapped for a plan or a contamination trail, a debrief
+    half answered and a form half filled all live in memory until their Save,
+    and a reload would take them without a word. */
 function unsavedWork() {
   if (rec.on) return true;
+  if (EDITING.has(currentScreen)) return true;
+  if (currentScreen === 'scrDraw' && draw.pts.length) return true;
+  if (currentScreen === 'scrContam' && contam.pts.length) return true;
+  // Someone typing, on any screen: a reload would take the keyboard away mid-word.
+  if (document.activeElement?.matches?.('textarea, input:not([type=range]):not([type=checkbox]):not([type=radio])')) return true;
   try { return draftAlive(unpackDraft(db.draft.read())); } catch { return false; }
 }
 
@@ -5930,20 +5942,36 @@ onSync((st) => {
 });
 
 /* ── Self-update ──────────────────────────────────────────────────── */
+/* The page is only ever reloaded for the handler when nothing is lost by it:
+   idle on Home with nothing unsaved. Anywhere else they are told, and the
+   next open has it. The same rule whichever way an update arrives. */
+function idleForUpdate() {
+  return currentScreen === 'scrHome' && !unsavedWork();
+}
+
 async function checkForUpdate() {
   try {
-    const r = await fetch('build.txt', { cache: 'no-store' });
+    // A few seconds, or on one bar the answer can land long after it was asked.
+    const r = await fetch('build.txt', { cache: 'no-store', signal: AbortSignal.timeout?.(5000) });
     if (!r.ok) return;
     const remote = (await r.text()).trim();
     if (!remote || remote === BUILD) return;
+    const later = `Update ${remote} ready — close and reopen the app`;
     /* Not just "recording": a trail waiting on Confirm, or a run between
        Stop and its result, is unsaved work and a reload would take it. */
-    const busy = unsavedWork();
     const tried = sessionStorage.getItem('tc.updateTried');
-    if (busy || tried === remote) return toast(`Update ${remote} ready — close and reopen the app`);
+    if (!idleForUpdate() || tried === remote) return toast(later);
     sessionStorage.setItem('tc.updateTried', remote);
     await Promise.all(['./', 'app.js', 'app.css', 'sw.js']
       .map(u => fetch(u, { cache: 'reload' }).catch(() => {})));
+    /* Asked again at the last moment. On one bar the fetches above can take
+       half a minute, and in that time a run may have started or a plan been
+       begun. Then the update waits, and is not marked as tried: the next
+       quiet moment on Home can still load it. */
+    if (!idleForUpdate()) {
+      sessionStorage.removeItem('tc.updateTried');
+      return toast(later);
+    }
     location.reload();
   } catch { /* offline */ }
 }
@@ -6824,7 +6852,7 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
   const hadSw = !!navigator.serviceWorker.controller;
   navigator.serviceWorker.addEventListener('controllerchange', () => {
     if (!hadSw) return;
-    if (currentScreen === 'scrHome' && !unsavedWork()) location.reload();
+    if (idleForUpdate()) location.reload();
     else toast('A new version is ready \u2014 it loads next time you open the app');
   });
 }
