@@ -31,12 +31,12 @@ import { trailModel, encodeShared, decodeShared, sharedUrl, toGpx, fileBase,
          detailSections, headline, notes, liveMeta, liveModel } from './share.js';
 import { buildPdf, jpegSize } from './pdf.js';
 import { coachStep, initialCoach, coachPhrase, coachLine, TOL_OPTIONS, COACH_DEFAULTS } from './coach.js';
-import { DEBRIEF, FLAGS, NOTE_TAGS, blankDebrief, debriefDone, debriefLine, labelOf } from './debrief.js';
+import { DEBRIEF, FLAGS, NOTE_TAGS, blankDebrief, debriefDone, debriefLine, labelOf, ownRun } from './debrief.js';
 import { CONFIDENCE, stampCall, confidenceOf, firstCall, calibration, calibrationLine, callVerdict } from './call.js';
 import { isNative, watchBackground, canHaptic, haptic, watchHeading } from './native.js';
 import { checkAuthFields, AUTH_MIN_PASSWORD } from './sync-core.js';
 import { createStore, migrateV1, TARGETS, ODOURS, targetById, targetText, verbs, uid,
-         dogStats, ageBand, AGE_BANDS, LEVELS, levelById, dogAge } from './store.js';
+         dogStats, ageBand, AGE_BANDS, LEVELS, levelById, dogAge, patchSession, runAgain } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
 const BUILD = '2026-09-22n';
@@ -891,12 +891,24 @@ const MAP_VARS = {
 };
 const SERIES_SPAN = 6 * 3600e3;
 
-async function fetchWeather(lat, lon, when) {
+/* How long an ask that someone is waiting on gets. One bar of signal can hold
+   a request open for a minute or more with nothing on screen to say so, and
+   grading a run must never hang on it: past this, the laid-time weather is
+   used instead. The laid-time asks themselves have no limit. They wait in the
+   background, and a late answer is written as the one field it is. */
+const WX_WAIT = 10000;
+
+async function fetchWeather(lat, lon, when, { within = 0 } = {}) {
   const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat.toFixed(4)}&longitude=${lon.toFixed(4)}`
     + `&minutely_15=${WX_VARS}&past_days=2&forecast_days=3&timezone=auto&wind_speed_unit=ms`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`weather ${res.status}`);
-  const j = await res.json();
+  const ctl = new AbortController();
+  const timer = within > 0 ? setTimeout(() => ctl.abort(), within) : 0;
+  let j;
+  try {
+    const res = await fetch(url, { signal: ctl.signal });
+    if (!res.ok) throw new Error(`weather ${res.status}`);
+    j = await res.json();              // the body can stall too, so the clock runs until it is read
+  } finally { clearTimeout(timer); }
   const block = j.minutely_15 || j.hourly;
   if (!block?.time?.length) throw new Error('weather: empty response');
   const times = block.time.map(t => new Date(t).getTime());
@@ -1447,7 +1459,7 @@ function fillSurfaces(s, { reread = false } = {}) {
       Object.assign(s.data, reading);   // whoever holds this session sees it
       const kept = db.sessions().find(x => x.id === s.id);
       if (kept && kept.data.trail?.length === pts.length) {
-        db.updateSession(s.id, { data: { ...kept.data, ...reading } });
+        db.updateSession(s.id, { data: reading });
         snap();
       }
       return s;
@@ -1905,7 +1917,7 @@ async function weatherHere(hint = null) {
         : rej(new Error('no gps')));
       at = { lat: pos.coords.latitude, lon: pos.coords.longitude };
     }
-    const wx = await fetchWeather(at.lat, at.lon, Date.now());
+    const wx = await fetchWeather(at.lat, at.lon, Date.now(), { within: WX_WAIT });
     wxNow.wx = wx; wxNow.at = Date.now();
     return wx;
   } catch { return wxNow.wx; }          // offline or blocked: the panel stays away
@@ -2371,7 +2383,7 @@ function saveFix() {
   const [a, b] = fixRange();
   const f = makeFix(s.data.trail, a, b, fixer.as, { note: $('fixNote').value.trim(), by: S.handler?.name ?? null });
   if (!f) return toast('Pick a stretch and what it really was.');
-  const saved = guardSave(s, () => saveSession(s, { data: { ...s.data, surfFix: [...(s.data.surfFix ?? []), f] } }));
+  const saved = guardSave(s, () => saveSession(s, { data: { surfFix: [...(s.data.surfFix ?? []), f] } }));
   if (!saved) return;
   snap();
   const s2 = db.sessions().find(x => x.id === s.id) ?? s;
@@ -2384,7 +2396,7 @@ function saveFix() {
 
 function removeFix(s, fixId) {
   const fixes = (s.data.surfFix ?? []).filter(f => f.id !== fixId);
-  const saved = guardSave(s, () => saveSession(s, { data: { ...s.data, surfFix: fixes } }));
+  const saved = guardSave(s, () => saveSession(s, { data: { surfFix: fixes } }));
   if (!saved) return;
   snap();
   const s2 = db.sessions().find(x => x.id === s.id) ?? s;
@@ -2530,7 +2542,7 @@ function saveDebrief() {
   d.by = S.handler?.name ?? null;
   d.at = Date.now();
   const seen = cleanSeen(dbSeen);
-  const saved = guardSave(s, () => saveSession(s, { data: { ...s.data, debrief: d,
+  const saved = guardSave(s, () => saveSession(s, { data: { debrief: d,
     ...(seen ? { seen: { ...seen, at: Date.now() } } : {}) } }));
   snap();
   const s2 = saved ?? db.sessions().find(x => x.id === s.id) ?? s;
@@ -3152,11 +3164,7 @@ async function confirmLay() {
 
   // Weather and soil temperature, fetched silently on confirm.
   try {
-    const wx = await fetchWeather(origin.lat, origin.lon, startedAt);
-    db.updateSession(s.id, { data: { ...s.data, weather: wx } });
-    pendingSession = db.sessions().find(x => x.id === s.id);
-    snap();
-    if (!$('scrShare').hidden) renderShare(pendingSession);
+    keepWeather(s.id, await fetchWeather(origin.lat, origin.lon, startedAt));
   } catch { /* offline — weather joins when it can */ }
 }
 
@@ -3409,7 +3417,7 @@ function saveContam() {
   const points = contamTimed(s.data.trail, contam.pts, order);
   const laidAt = points[0]?.t ?? Date.now();
   const list = [...(s.data.contamination || []), { who, order, laidAt, points }];
-  db.updateSession(s.id, { data: { ...s.data, contamination: list } });
+  db.updateSession(s.id, { data: { contamination: list } });
   snap();
   closeContam();
   pendingSession = db.sessions().find(x => x.id === s.id);
@@ -3527,12 +3535,7 @@ function saveDrawPlan() {
   go('scrShare');
   renderShare(sess);
   fetchWeather(planPts[0].lat, planPts[0].lon, Date.now())
-    .then(wx => {
-      db.updateSession(sess.id, { data: { ...sess.data, weather: wx } });
-      pendingSession = db.sessions().find(x => x.id === sess.id);
-      snap();
-      if (!$('scrShare').hidden) renderShare(pendingSession);
-    })
+    .then(wx => keepWeather(sess.id, wx))
     .catch(() => { /* offline — joins later */ });
 }
 
@@ -3700,15 +3703,18 @@ async function applyWalked(sessionId, card) {
 
   const walkedPatch = {
     startedAt: card.started,
-    data: { ...s.data, planTrail: plan, trail: card.points, walked: true, walkedFrom: card.from },
+    data: { planTrail: plan, trail: card.points, walked: true, walkedFrom: card.from },
   };
-  const savedWalk = guardSave(s, () => saveSession(s, walkedPatch));
+  const savedWalk = guardSave(patchSession(s, walkedPatch), () => saveSession(s, walkedPatch));
   snap();
-  let s2 = savedWalk ?? { ...s, ...walkedPatch };
+  let s2 = savedWalk ?? patchSession(s, walkedPatch);
   toast(`The real walked line from ${card.from || 'the layer'} — re-grading`);
   if (s2.data.track) {
+    /* Graded for the dog that ran it (s2.dogId), not whichever dog is picked
+       on Home today, and banked to that dog. */
     const result = await computeResult(s2, s2.data.track, s2.data.trackWaypoints || [], s2.data.trackStarted, { bank: true });
-    guardSave(s2, () => saveSession(s2, { summary: result.sentence, data: { ...s2.data, result } }));
+    const graded = { summary: result.sentence, data: { result } };
+    guardSave(patchSession(s2, graded), () => saveSession(s2, graded));
     snap();
     s2 = db.sessions().find(x => x.id === s.id);
   }
@@ -3746,11 +3752,23 @@ const ageWord = (ms) => {
 };
 
 /* ── Run / Search ─────────────────────────────────────────────────── */
-const run = { session: null, revealed: false, startedAt: 0 };
+const run = { session: null, revealed: false, startedAt: 0, copy: false, stopping: false };
 
 async function startRun(s) {
   if (rec.on) return toast('A run is already going — stop that one first');
   const t = targetById(s.targetId);
+  /* One session holds one run. Running a trail or hide set that has a run
+     already (again from the share screen, or with the next dog) records into
+     a copy of it, and the run that is there is left exactly as it was. The
+     copy is saved now, so a recording cut short by the app dying still has a
+     session to come back to. */
+  const had = db.sessions().find(x => x.id === s.id) ?? s;
+  run.copy = !!had.data?.track;
+  if (run.copy) {
+    s = runAgain(had, { id: uid(), summary: t.kind === 'hide' ? 'Searched again, not graded yet.' : 'Run again, not graded yet.' });
+    guardSave(s, () => db.addSession(s));
+    snap();
+  }
   run.session = s;
   run.revealed = false;
   /* Once the answer has been seen it stays seen — including on a second run
@@ -3790,7 +3808,7 @@ async function startRun(s) {
   };
   $('btnReveal').textContent = t.kind === 'person' ? 'Reveal trail' : 'Reveal hides';
   go('scrRun');
-  if (!(await startWatch('runHudText'))) return go('scrHome');
+  if (!(await startWatch('runHudText'))) { dropRunCopy(); return go('scrHome'); }
   startFollowing(null);
   /* Wind, even on a blind run: it says nothing about where the trail is, and
      it is the first thing you want before deciding where to cast. */
@@ -3843,7 +3861,30 @@ function addWaypoint(kind) {
   if (isFirstInd && !run.revealedAt && !coach.on) openCall(wp);   // asking after they have looked means nothing
 }
 
+/* A copy made for a run that never got going is not a session: nothing was
+   recorded, and the trail it copied is still there to run. */
+function dropRunCopy() {
+  if (!run.copy) return;
+  run.copy = false;
+  const s = run.session;
+  if (!s || db.sessions().find(x => x.id === s.id)?.data.track) return;
+  try { db.deleteSession(s.id); } catch { /* a phone too full to write even that keeps it, unrun */ }
+  snap();
+}
+
+/* One Stop per run. Grading can take several seconds on a poor signal with
+   the run screen still up, and a second tap used to grade the run again: a
+   second calibration row for the same run, and a save made after the coach's
+   record had already been cleared. */
 async function stopRun() {
+  if (run.stopping) return;
+  run.stopping = true;
+  $('btnRunStop').disabled = true;
+  try { await finishRun(); }
+  finally { run.stopping = false; $('btnRunStop').disabled = false; }
+}
+
+async function finishRun() {
   closeCall();
   await stopWatch();
   const coachRecord = coachSummary();
@@ -3856,35 +3897,41 @@ async function stopRun() {
   if (rec.pts.length < 2) {
     liveEnd(null);
     dropDraft();
+    dropRunCopy();
     toast('Too short to grade — nothing saved');
     return go('scrHome');
   }
+  $('runHudText').textContent = 'Working out the result…';
   rec.pts.forEach(p => delete p._seen);
   keepDraft(true);
   /* The walk is written to the session BEFORE it is graded. Grading asks the
      weather service for the wind during the run, and anything that goes to
-     the network can hang or fail — the walk itself must not depend on it. */
-  const raw = { data: { ...s.data, track: rec.pts, trackStarted: run.startedAt, trackWaypoints: rec.wps,
+     the network can hang or fail — the walk itself must not depend on it.
+     Both saves carry only what the run adds: `s` was taken when the run
+     began, and anything written since (the laid-time weather, most often)
+     stays as it is. */
+  const raw = { data: { track: rec.pts, trackStarted: run.startedAt, trackWaypoints: rec.wps,
     revealedAt: run.revealedAt || s.data.revealedAt || null } };
-  guardSave({ ...s, ...raw }, () => saveSession(s, raw));
+  guardSave(patchSession(s, raw), () => saveSession(s, raw));
   /* A plan-graded run is provisional: the drawn line is a sketch, so it
      neither banks calibration nor gets the last word — the walked card does. */
   const provisional = !!s.data.plan && !s.data.walked;
-  const result = await computeResult(s, rec.pts, rec.wps, run.startedAt, { bank: !provisional });
+  const dogId = S.dog?.id ?? null;          // the run being recorded now is the picked dog's
+  const result = await computeResult({ ...s, dogId }, rec.pts, rec.wps, run.startedAt, { bank: !provisional });
   liveEnd(result);
   const patch = {
-    dogId: S.dog?.id ?? null,
+    dogId,
     handlerId: S.handler.id,
     summary: result.sentence,
-    data: { ...s.data, track: rec.pts, trackStarted: run.startedAt, trackWaypoints: rec.wps,
+    data: { track: rec.pts, trackStarted: run.startedAt, trackWaypoints: rec.wps,
       revealedAt: run.revealedAt || s.data.revealedAt || null, result, coach: coachRecord },
   };
   /* If the phone refuses the save, the run stays in memory and on screen:
      the result still shows, it can be sent as a link or a file, and the
      save can be retried once there is room. */
-  const saved = guardSave({ ...s, ...patch }, () => saveSession(s, patch));
+  const saved = guardSave(patchSession(s, patch), () => saveSession(s, patch));
   snap();
-  run.session = saved ?? { ...s, ...patch };
+  run.session = saved ?? patchSession(s, patch);
   if (saved) dropDraft();   // graded and kept; a refused save keeps its draft
   renderResult(run.session);
   go('scrResult');
@@ -3900,13 +3947,16 @@ function travelBrg(trail, i) {
 
 async function computeResult(s, track, wps, startedAt, { bank = true } = {}) {
   const t = targetById(s.targetId);
-  const dogRow = S.dog;
+  /* The dog the run belongs to, never simply the one picked on Home: a walked
+     card can re-grade an old run long after the chip has moved to another
+     dog, and its name, line length and calibration are that run's dog's. */
+  const dogRow = S.dogs.find(d => d.id === s.dogId) ?? null;
   const dogName = dogRow?.name ?? 'The dog';
   const ageMin = Math.max(0, Math.round((startedAt - s.startedAt) / 60000));
 
   // The wind that moved scent during THIS run.
   let wx = s.data.weather;
-  try { wx = await fetchWeather(track[0].lat, track[0].lon, startedAt); } catch { /* keep laid-time weather */ }
+  try { wx = await fetchWeather(track[0].lat, track[0].lon, startedAt, { within: WX_WAIT }); } catch { /* keep laid-time weather */ }
   const st = stability(wx?.soil_temp, wx?.temp);
 
   if (t.kind === 'hide') return searchResult(s, track, wps, startedAt, wx, dogName, ageMin);
@@ -4101,7 +4151,7 @@ function renderResult(s) {
   note.hidden = !s.data.plan;
   if (s.data.plan) {
     if (provisional) {
-      note.textContent = `Graded against the line you drew, not the walk itself. Nothing is banked to ${S.dog?.name ?? 'this dog'}’s calibration until you scan the layer’s walked card.`;
+      note.textContent = `Graded against the line you drew, not the walk itself. Nothing is banked to ${d?.name ?? 'this dog'}’s calibration until you scan the layer’s walked card.`;
     } else {
       /* The walk is the record now. Say how far it drifted from the sketch,
          because a dog that looks wrong against the plan may have been exactly
@@ -4188,12 +4238,37 @@ function showOnMap(from = 'scrResult') {
    message, so it is a banner that stays until dismissed. */
 let saveTrouble = null;   // { session, retry, err }
 
-/** Save a session whether or not it exists yet; returns what is now stored. */
+/** Save a session whether or not it exists yet; returns what is now stored.
+    The patch carries only what it changes: the stored copy keeps the rest. */
 function saveSession(s, patch) {
-  const merged = { ...s, ...patch, data: { ...(s.data || {}), ...(patch.data || {}) } };
+  const merged = patchSession(s, patch);
   if (db.sessions().some(x => x.id === s.id)) db.updateSession(s.id, patch);
   else db.addSession(merged);
   return db.sessions().find(x => x.id === s.id) ?? merged;
+}
+
+/* The laid-time weather is asked for in the background and lands whenever
+   the signal allows, often after the handler has moved on: a contamination
+   trail drawn, the layer marked off, the run begun. It is written as the one
+   field it is, and a run already going is given it too, so the wind shows,
+   Reveal can draw the plume, and the run is graded against it. */
+function keepWeather(id, wx) {
+  const live = run.session?.id === id ? run.session : null;
+  if (live) live.data.weather = wx;
+  const kept = db.updateSession(id, { data: { weather: wx } });
+  snap();
+  if (live && rec.on && rec.kind === 'run') {
+    airStart(wx);
+    showWeather(wx);
+    if (run.revealed && targetById(live.targetId).kind === 'person') {
+      plumeStart(trailOf(live), wx, undefined, live.data.contamination);
+    }
+  }
+  if (kept && pendingSession?.id === id) {
+    pendingSession = kept;
+    if (!$('scrShare').hidden) renderShare(kept);
+  }
+  return kept;
 }
 
 function guardSave(session, fn) {
@@ -4991,9 +5066,11 @@ async function handleCard(data) {
      all. Find the plan it belongs to rather than quietly filing it as a new
      trail — a walk with nothing to compare it against is not a session. */
   if (card.kind === 2) {
+    /* Only this phone's own runs. One kept from someone else's link is
+       their dog on their plan, so a walk laid here never belongs to it. */
     const waiting = scanWalkedFor
-      ?? db.sessions().find(x => x.data.plan && !x.data.walked && x.data.track)?.id
-      ?? db.sessions().find(x => x.data.plan && !x.data.walked)?.id
+      ?? db.sessions().find(x => x.data.plan && !x.data.walked && x.data.track && ownRun(x))?.id
+      ?? db.sessions().find(x => x.data.plan && !x.data.walked && ownRun(x))?.id
       ?? null;
     scanWalkedFor = null;
     stopScan();
@@ -5026,7 +5103,7 @@ async function handleCard(data) {
   toast(`Trail from ${s.data.imported.from} — ${fmtKm(pathLen(card.points))}`);
   // The card carries the REAL laid time; that moment's weather makes ageing true.
   fetchWeather(card.points[0].lat, card.points[0].lon, card.started)
-    .then(wx => { db.updateSession(s.id, { data: { ...s.data, weather: wx } }); snap(); })
+    .then(wx => keepWeather(s.id, wx))
     .catch(() => { /* offline — joins later */ });
   startRun(s);
   return true;
@@ -5805,7 +5882,7 @@ function wire() {
   $('btnOff').addEventListener('click', () => {
     if (!pendingSession) return;
     if (!pendingSession.data.offAt) {
-      db.updateSession(pendingSession.id, { data: { ...pendingSession.data, offAt: Date.now() } });
+      db.updateSession(pendingSession.id, { data: { offAt: Date.now() } });
       snap();
       pendingSession = db.sessions().find(x => x.id === pendingSession.id);
     }

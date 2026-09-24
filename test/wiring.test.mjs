@@ -254,6 +254,65 @@ t('an unfinished recording is written down, and nothing reloads over it', () => 
   assert.ok(htmlIds.has('scrRecover') && htmlIds.has('btnRecoverKeep') && htmlIds.has('btnRecoverDrop'));
 });
 
+t('a save sends only what it changes, so nothing written meanwhile is lost', () => {
+  /* The store merges data (store.test), but only if nobody hands it the whole
+     of data rebuilt from a copy taken earlier. */
+  const stale = [...js.matchAll(/(?:updateSession|saveSession)\([^;]*?data: \{ \.\.\.[\w.]+\.data\b/g)].map(m => m[0].slice(0, 70));
+  assert.deepEqual(stale, [], 'no save rebuilds data from a copy it was holding');
+  const body = (name) => js.slice(js.indexOf(name), js.indexOf(name) + 2400);
+  for (const where of ['async function confirmLay', 'function saveDrawPlan', 'async function handleCard']) {
+    assert.match(body(where), /keepWeather\((s|sess)\.id, /, `${where}: the late weather goes through keepWeather`);
+  }
+  assert.match(js, /function keepWeather\(id, wx\) \{[\s\S]{0,200}if \(live\) live\.data\.weather = wx;[\s\S]{0,80}db\.updateSession\(id, \{ data: \{ weather: wx \} \}\)/,
+    'a run already going is given the weather, and only the weather is written');
+  assert.match(js, /if \(kept && pendingSession\?\.id === id\) \{/, 'the share screen is only moved on if it still shows that session');
+  const stop = js.slice(js.indexOf('async function finishRun'), js.indexOf('/* ── The result'));
+  assert.match(stop, /guardSave\(patchSession\(s, raw\)/, 'a refused save keeps the whole session on screen, trail and all');
+  assert.match(stop, /run\.session = saved \?\? patchSession\(s, patch\);/);
+  assert.match(js, /function saveSession\(s, patch\) \{\s*\n\s*const merged = patchSession\(s, patch\);/);
+});
+
+t('running a trail or hide set again records a new session', () => {
+  const start = js.slice(js.indexOf('async function startRun'), js.indexOf('function toggleReveal'));
+  const fork = start.indexOf('runAgain(had');
+  assert.ok(fork > 0 && fork < start.indexOf('run.session = s;'), 'the copy is made before the run takes a session');
+  assert.match(start, /const had = db\.sessions\(\)\.find\(x => x\.id === s\.id\) \?\? s;\s*\n\s*run\.copy = !!had\.data\?\.track;/,
+    'decided on what is stored, not on the copy the button was holding');
+  assert.match(start, /guardSave\(s, \(\) => db\.addSession\(s\)\)/, 'saved at once, so a recording cut short can come back to it');
+  assert.match(start, /if \(!\(await startWatch\('runHudText'\)\)\) \{ dropRunCopy\(\); return go\('scrHome'\); \}/,
+    'a copy for a run that never started is not left behind');
+  const stop = js.slice(js.indexOf('async function finishRun'), js.indexOf('/* ── The result'));
+  assert.ok(stop.indexOf('dropRunCopy();') > 0 && stop.indexOf('dropRunCopy();') < stop.indexOf("toast('Too short to grade"),
+    'nor one for a run too short to keep');
+  assert.match(js, /function dropRunCopy\(\) \{[\s\S]{0,160}\?\.data\.track\) return;/, 'and never one that has a run in it');
+});
+
+t('a re-grade is for the dog that ran, not the one picked on Home', () => {
+  const grade = js.slice(js.indexOf('async function computeResult'), js.indexOf('async function computeResult') + 900);
+  assert.ok(!/S\.dog\b/.test(grade), 'grading never reads the Home selection');
+  assert.match(grade, /const dogRow = S\.dogs\.find\(d => d\.id === s\.dogId\) \?\? null;/);
+  const stop = js.slice(js.indexOf('async function finishRun'), js.indexOf('/* ── The result'));
+  assert.match(stop, /const dogId = S\.dog\?\.id \?\? null;[\s\S]{0,160}computeResult\(\{ \.\.\.s, dogId \}/,
+    'a run being recorded now is the picked dog’s, and is graded as that dog');
+  assert.match(stop, /const patch = \{\s*\n\s*dogId,/, 'and saved under the same dog it was graded for');
+  assert.match(js, /Nothing is banked to \$\{d\?\.name \?\? 'this dog'\}/, 'the provisional note names the run’s dog');
+  assert.match(js, /x\.data\.plan && !x\.data\.walked && x\.data\.track && ownRun\(x\)/,
+    'a walked card from the camera never re-grades a run kept from someone else');
+});
+
+t('Stop works once, and grading cannot wait for ever on the weather', () => {
+  assert.match(js, /async function stopRun\(\) \{\s*\n\s*if \(run\.stopping\) return;\s*\n\s*run\.stopping = true;\s*\n\s*\$\('btnRunStop'\)\.disabled = true;/,
+    'a second tap does nothing while the first is still grading');
+  assert.match(js, /finally \{ run\.stopping = false; \$\('btnRunStop'\)\.disabled = false; \}/, 'and the next run can be stopped');
+  assert.match(js, /\$\('btnRunStop'\)\.addEventListener\('click', stopRun\);/);
+  const wx = js.slice(js.indexOf('async function fetchWeather'), js.indexOf('async function fetchWeather') + 700);
+  assert.match(wx, /fetch\(url, \{ signal: ctl\.signal \}\)/, 'the weather ask can be called off');
+  assert.match(wx, /setTimeout\(\(\) => ctl\.abort\(\), within\)/);
+  assert.ok(wx.indexOf('clearTimeout(timer)') > wx.indexOf('res.json()'), 'the clock runs until the body has been read');
+  assert.match(js, /fetchWeather\(track\[0\]\.lat, track\[0\]\.lon, startedAt, \{ within: WX_WAIT \}\)/, 'grading gives up on it');
+  assert.match(js, /const WX_WAIT = \d{4,5};/);
+});
+
 t('a phone carrying another account’s records uploads nothing until it is answered', () => {
   const body = syncJs.slice(syncJs.indexOf('async function applyUser'), syncJs.indexOf('export async function deleteAccount'));
   const plan = body.indexOf('syncPlan('), claim = body.indexOf("kv.set('ownerUid'"), full = body.indexOf('fullSync(');

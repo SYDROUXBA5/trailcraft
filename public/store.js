@@ -89,6 +89,34 @@ export class SaveError extends Error {
 }
 const isQuota = (e) => !!e && (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED' || e.code === 22 || e.code === 1014);
 
+/** A session with a change laid over it. `data` is merged one level deep, so
+    a change carries only the fields it means to change. Answers that arrive
+    late (the weather, a reading of the ground) and saves built from a copy
+    held since the run began used to hand back the whole of `data`, and
+    whatever had been written in between was lost: the laid-time weather, a
+    contamination trail, the moment the layer went off. To clear a field, set
+    it to null. */
+export function patchSession(s, patch) {
+  return { ...s, ...patch, data: { ...(s?.data || {}), ...(patch?.data || {}) } };
+}
+
+/* What belongs to one run rather than to the trail or hides it ran on. When
+   was the answer shown is not here: a handler who has seen the line once
+   knows it on every later run. */
+const RUN_FIELDS = ['track', 'trackStarted', 'trackWaypoints', 'result', 'coach', 'debrief', 'seen'];
+
+/** A fresh session for running a trail or hide set again. One session holds
+    one run, so a second run gets its own copy, the way each scanned Trail
+    Card does, and the first dog's track, result and debrief stay exactly as
+    they were. The trail, its laid time, weather, ground and contamination
+    come along; the dog is whoever runs it this time. */
+export function runAgain(s, { id, summary }) {
+  const data = { ...(s?.data || {}) };
+  for (const k of RUN_FIELDS) delete data[k];
+  const { updatedAt, deleted, ...rest } = s || {};
+  return { ...rest, id, dogId: null, summary, data };
+}
+
 export function createStore(backend) {
   const read = (k, f) => {
     try { return JSON.parse(backend.getItem(k)) ?? f; } catch { return f; }
@@ -183,11 +211,13 @@ export function createStore(backend) {
       notify('sessions', stamped);
       return stamped;
     },
+    /** Change one session. `data` is merged, never replaced (patchSession):
+        a caller sends only the fields it changes. */
     updateSession(id, patch) {
       const all = read(K.sessions, []);
       const i = all.findIndex(s => s.id === id && !s.deleted);
       if (i < 0) return null;
-      all[i] = { ...all[i], ...patch, updatedAt: Date.now() };
+      all[i] = { ...patchSession(all[i], patch), updatedAt: Date.now() };
       write(K.sessions, all);
       notify('sessions', all[i]);
       return all[i];

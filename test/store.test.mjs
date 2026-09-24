@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { handlerStats, ODOURS, targetText } from '../public/store.js';
 import { createStore, migrateV1, TARGETS, targetById, verbs, uid,
-         dogStats, ageBand, AGE_BANDS, dogAge, SaveError } from '../public/store.js';
+         dogStats, ageBand, AGE_BANDS, dogAge, SaveError, patchSession, runAgain } from '../public/store.js';
 
 let pass = 0;
 const t = (name, fn) => { fn(); pass++; console.log(`  ok  ${name}`); };
@@ -73,6 +73,71 @@ t('sessions: newest first, update patches in place, delete removes', () => {
   assert.equal(db.updateSession('ghost', {}), null, 'patching a ghost is a null, not a crash');
   db.deleteSession('b');
   assert.deepEqual(db.sessions().map(s => s.id), ['a']);
+});
+
+t('a change to a session keeps whatever it did not mention', () => {
+  /* A scanned Trail Card: saved with no weather, the run begins at once, the
+     weather lands mid-run, then the run is saved from the copy taken at the
+     start. The run's save used to hand back the whole of data and put the
+     weather back to null. */
+  const db = createStore(fakeBackend());
+  const trail = [{ lat: 51, lon: -2.6, t: 1 }, { lat: 51.001, lon: -2.6, t: 2 }];
+  db.addSession({ id: 'card', startedAt: 1, summary: 'laid', data: { trail, weather: null, contamination: [] } });
+  db.updateSession('card', { data: { weather: { wind_speed: 3 } } });
+  db.updateSession('card', { data: { contamination: [{ who: 'Sam' }] } });
+  db.updateSession('card', { data: { offAt: 5 } });
+  const after = db.updateSession('card', { summary: 'ran', data: { track: trail, result: { sentence: 'ok' } } });
+  assert.deepEqual(after.data.weather, { wind_speed: 3 }, 'the weather that landed mid-run is still there');
+  assert.deepEqual(after.data.contamination, [{ who: 'Sam' }], 'and the contamination trail');
+  assert.equal(after.data.offAt, 5, 'and when the layer went off');
+  assert.deepEqual(after.data.trail, trail, 'and the trail itself');
+  assert.equal(after.summary, 'ran');
+  assert.equal(after.data.result.sentence, 'ok');
+  const named = db.updateSession('card', { name: 'Hill' });
+  assert.deepEqual(named.data, after.data, 'a change with no data leaves data alone');
+  assert.equal(db.updateSession('card', { data: { weather: null } }).data.weather, null, 'null is how a field is cleared');
+
+  const held = { id: 'x', summary: 'a', data: { trail, weather: { wind_speed: 1 } } };
+  const laid = patchSession(held, { summary: 'b', data: { track: trail } });
+  assert.deepEqual(laid.data, { trail, weather: { wind_speed: 1 }, track: trail }, 'the pure merge is the same one');
+  assert.equal(held.data.track, undefined, 'and it changes nothing it was handed');
+  assert.deepEqual(patchSession({ id: 'y' }, {}).data, {}, 'no data on either side is empty data');
+});
+
+t('running a trail again makes a new session and leaves the first run alone', () => {
+  const trail = [{ lat: 51, lon: -2.6, t: 1 }, { lat: 51.001, lon: -2.6, t: 2 }];
+  const first = {
+    id: 'one', handlerId: 'h', dogId: 'bella', layerId: 'sam', targetId: 'person', odour: null,
+    startedAt: 100, name: 'Hill', summary: 'Bella’s track stayed on the line.', updatedAt: 9,
+    data: {
+      trail, weather: { wind_speed: 3 }, contamination: [{ who: 'Sam' }], surf: 'gg', surfFix: [{ id: 'f' }],
+      plan: true, walked: true, planTrail: trail, offAt: 50, imported: { from: 'Jo', at: 20 }, revealedAt: 400,
+      track: trail, trackStarted: 300, trackWaypoints: [{ kind: 'Indication', call: 'sure' }],
+      result: { sentence: 'Bella ran' }, coach: { tol: 5 }, debrief: { outcome: 'found' }, seen: { at: 1 },
+    },
+  };
+  const before = JSON.stringify(first);
+  const again = runAgain(first, { id: 'two', summary: 'Run again, not graded yet.' });
+  assert.equal(JSON.stringify(first), before, 'the first run is not touched');
+  assert.equal(again.id, 'two');
+  assert.equal(again.dogId, null, 'the dog is whoever runs it this time');
+  assert.equal(again.summary, 'Run again, not graded yet.');
+  assert.equal(again.updatedAt, undefined, 'stamped when it is saved, not copied');
+  for (const k of ['handlerId', 'layerId', 'targetId', 'startedAt', 'name']) assert.equal(again[k], first[k], `${k} comes along`);
+  for (const k of ['trail', 'weather', 'contamination', 'surf', 'surfFix', 'plan', 'walked', 'planTrail', 'offAt', 'imported', 'revealedAt']) {
+    assert.deepEqual(again.data[k], first.data[k], `the trail's ${k} comes along`);
+  }
+  for (const k of ['track', 'trackStarted', 'trackWaypoints', 'result', 'coach', 'debrief', 'seen']) {
+    assert.ok(!(k in again.data), `the first run's ${k} does not`);
+  }
+
+  const db = createStore(fakeBackend());
+  db.addSession(first);
+  db.addSession(again);
+  db.updateSession('two', { dogId: 'rex', data: { track: trail, result: { sentence: 'Rex ran' } } });
+  assert.equal(db.sessions().find(s => s.id === 'one').data.result.sentence, 'Bella ran', 'Bella’s run is still Bella’s');
+  assert.equal(db.sessions().find(s => s.id === 'one').dogId, 'bella');
+  assert.equal(db.sessions().find(s => s.id === 'two').data.result.sentence, 'Rex ran');
 });
 
 t('export and wipe: everything out, then everything gone', () => {
