@@ -23,12 +23,41 @@ import { simplify, pathLen, dist } from './geo.js';
 
 const MAGIC = 'TC1.';
 const MAX_PTS = 120;
+/* One QR holds under 3,000 characters, so a card several times that long, or
+   one that inflates past a quarter of a megabyte, was never made by this app.
+   A card can also arrive as a link, and a link has no QR to limit it. */
+const MAX_CARD = 8000;
+const MAX_CARD_JSON = 256 * 1024;
 
 /* ── byte plumbing ────────────────────────────────────────────────── */
 
 export async function through(bytes, stream) {
   const out = new Blob([bytes]).stream().pipeThrough(stream);
   return new Uint8Array(await new Response(out).arrayBuffer());
+}
+
+/** Inflate, but stop once the output passes `max` bytes and give back null.
+    Deflate squeezes a run of zeros about a thousand to one, so a code of a
+    few kilobytes can otherwise unfold into hundreds of megabytes before
+    anything has looked at it. */
+export async function inflate(bytes, max) {
+  const reader = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw')).getReader();
+  const parts = [];
+  let n = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    n += value.length;
+    if (n > max) {
+      reader.cancel().catch(() => {});
+      return null;
+    }
+    parts.push(value);
+  }
+  const out = new Uint8Array(n);
+  let at = 0;
+  for (const part of parts) { out.set(part, at); at += part.length; }
+  return out;
 }
 
 export const b64url = (bytes) => {
@@ -122,18 +151,22 @@ export async function decodeTrail(str) {
   const s = String(str || '').trim();
   if (!s.startsWith('TC')) throw new Error('Not a Trail Card');
   if (!s.startsWith(MAGIC)) throw new Error('This card is from a newer Trailcraft than this app');
+  if (s.length > MAX_CARD) throw new Error('Trail Card is damaged — try scanning again');
 
   let payload;
   try {
     const packed = unb64url(s.slice(MAGIC.length));
-    const bytes = await through(packed, new DecompressionStream('deflate-raw'));
+    const bytes = await inflate(packed, MAX_CARD_JSON);
+    if (!bytes) throw new Error('too big');
     payload = JSON.parse(new TextDecoder().decode(bytes));
   } catch {
     throw new Error('Trail Card is damaged — try scanning again');
   }
 
-  if (payload.v !== 1 || !Array.isArray(payload.p) || payload.p.length !== 3
-      || !payload.p.every(Array.isArray)) {
+  /* The lengths are checked before any column is summed: a crafted card
+     can carry arrays far longer than any encoder writes. */
+  if (!payload || typeof payload !== 'object' || payload.v !== 1 || !Array.isArray(payload.p)
+      || payload.p.length !== 3 || !payload.p.every(a => Array.isArray(a) && a.length <= 2 * MAX_PTS)) {
     throw new Error('Trail Card is damaged — try scanning again');
   }
   const [la, lo, ts] = payload.p.map(absolutes);
