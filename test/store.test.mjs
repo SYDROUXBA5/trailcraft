@@ -131,6 +131,10 @@ t('running a trail again makes a new session and leaves the first run alone', ()
   for (const k of ['track', 'trackStarted', 'trackWaypoints', 'result', 'coach', 'debrief', 'seen']) {
     assert.ok(!(k in again.data), `the first run's ${k} does not`);
   }
+  assert.equal(again.data.planOf, 'one', 'a second run of a plan remembers the plan, so its walked card finds it');
+  assert.equal(runAgain(again, { id: 'three', summary: '' }).data.planOf, 'one', 'and a third names the same plan');
+  assert.equal(runAgain({ ...first, data: { ...first.data, plan: undefined } }, { id: 'x', summary: '' }).data.planOf,
+    undefined, 'a trail that was never a plan has no plan to name');
 
   const db = createStore(fakeBackend());
   db.addSession(first);

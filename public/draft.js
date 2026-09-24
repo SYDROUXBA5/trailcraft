@@ -20,7 +20,9 @@ export const DRAFT_V = 1;
     ever offered last week. */
 export const DRAFT_MAX_AGE = 18 * 3600e3;
 
-const KINDS = new Set(['lay', 'hide', 'run']);
+/* A walk is the layer following a drawn plan with the phone recording: the
+   real trail, and the line the handler's run is finally graded on. */
+const KINDS = new Set(['lay', 'hide', 'run', 'walk']);
 const fin = (n) => typeof n === 'number' && Number.isFinite(n);
 const str = (v) => (typeof v === 'string' && v ? v : null);
 
@@ -29,8 +31,13 @@ const str = (v) => (typeof v === 'string' && v ? v : null);
 export function packDraft({
   kind, startedAt, sessionId = null, targetId = null, layerId = null, dogId = null,
   odour = null, liveId = null, liveUrl = null, revealedAt = 0, pts = [], wps = [], hides = [],
+  plan = null, offAt = 0,
 } = {}, now = Date.now()) {
   if (!KINDS.has(kind)) return null;
+  /* A walk is finished against the plan it followed: the plan's end, its
+     countdown, whose it was and which plan it answers. Without the plan there
+     is no walked card to send back, so there is nothing worth writing. */
+  if (kind === 'walk' && !(plan?.points?.length >= 2)) return null;
   return {
     v: DRAFT_V,
     kind,
@@ -49,6 +56,15 @@ export function packDraft({
     pts: pts?.length ? packPoints(pts, { compact: true }) : null,
     wps: wps?.length ? packPoints(wps, { compact: true }) : null,
     hides: hides?.length ? packPoints(hides, { compact: true }) : null,
+    ...(kind === 'walk' ? {
+      plan: {
+        pts: packPoints(plan.points, { compact: true }),
+        from: str(plan.from), planId: str(plan.planId),
+        ageMin: fin(plan.ageMin) ? plan.ageMin : null,
+      },
+      /* When she left the start: the countdown on both phones runs from it. */
+      offAt: fin(offAt) && offAt > 0 ? offAt : null,
+    } : {}),
   };
 }
 
@@ -60,6 +76,13 @@ export function unpackDraft(o) {
   const wps = o.wps ? unpackPoints(o.wps) ?? [] : [];
   const hides = o.hides ? unpackPoints(o.hides) ?? [] : [];
   if (!fin(o.at)) return null;
+  let plan = null;
+  if (o.kind === 'walk') {
+    const points = o.plan?.pts ? unpackPoints(o.plan.pts) ?? [] : [];
+    if (points.length < 2) return null;
+    plan = { points, from: str(o.plan.from) ?? '', planId: str(o.plan.planId),
+      ageMin: fin(o.plan.ageMin) ? o.plan.ageMin : null };
+  }
   return {
     kind: o.kind, at: o.at, startedAt: fin(o.startedAt) ? o.startedAt : o.at,
     sessionId: str(o.sessionId), targetId: str(o.targetId), layerId: str(o.layerId),
@@ -67,6 +90,7 @@ export function unpackDraft(o) {
     liveId: str(o.liveId), liveUrl: str(o.liveUrl),
     revealedAt: fin(o.revealedAt) ? o.revealedAt : 0,
     pts, wps, hides,
+    plan, offAt: fin(o.offAt) ? o.offAt : 0,
   };
 }
 

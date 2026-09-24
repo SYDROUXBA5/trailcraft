@@ -19,7 +19,7 @@
    of mis-reading it. CompressionStream is used for deflate — present in every
    browser this app supports and in Node ≥18, so the tests run the same code. */
 
-import { simplify, pathLen } from './geo.js';
+import { simplify, pathLen, dist } from './geo.js';
 
 const MAGIC = 'TC1.';
 const MAX_PTS = 120;
@@ -96,6 +96,10 @@ export async function encodeTrail(session, info = {}) {
        g = the chosen ageing countdown, minutes. */
     ...(session.kind ? { k: session.kind } : {}),
     ...(Number.isFinite(session.ageMin) ? { g: Math.max(0, Math.min(1440, Math.round(session.ageMin))) } : {}),
+    /* i = which plan: the handler's session id on a plan card, echoed back on
+       the walked card, so the walk goes back to the plan it was drawn as and
+       not to whichever plan happens to be newest. */
+    ...(session.planId ? { i: String(session.planId).slice(0, 32) } : {}),
     a: tolUsed,               // 0 = untouched; otherwise the metric bound itself
     p: [
       deltas(pts.map(p => q(p.lat))),
@@ -170,17 +174,45 @@ export async function decodeTrail(str) {
   const kind = payload.k === 1 || payload.k === 2 ? payload.k : 0;
   const ageMin = Number.isFinite(payload.g) && payload.g >= 0 && payload.g <= 1440
     ? Math.round(payload.g) : null;
+  const planId = typeof payload.i === 'string' && /^[\w-]{1,32}$/.test(payload.i) ? payload.i : null;
 
   return {
     from: typeof payload.f === 'string' ? payload.f.slice(0, 40) : '',
     drawn: !!payload.d,
     approx: !!payload.a,
     tol,
-    kind, ageMin,
+    kind, ageMin, planId,
     points, waypoints,
     started: points[0].t,
     ended: points[points.length - 1].t,
   };
+}
+
+/** Which plan on this phone a walked card (kind 2) belongs to.
+
+    `plans` is this phone's own plans still waiting for their walk, newest
+    first, each { id, planOf, run, start }: planOf is the plan a second run's
+    copy was made from, run whether a dog has run it, start its first point.
+    `asked` is the plan the handler scanned it for, if they did.
+
+    A card that names its plan goes to that plan or to nothing. One from an
+    older app names none, and then a guess is only made when there is nothing
+    to choose between: with several plans waiting, the wrong one would have
+    its dog graded against someone else's walk and banked into its
+    calibration. So { ask } lists the ones to ask about, likeliest first. */
+export function walkedPlanFor(card, plans = [], asked = null) {
+  if (card?.planId) {
+    const its = plans.filter(p => p.id === card.planId || p.planOf === card.planId);
+    const hit = its.find(p => p.id === asked) ?? its.find(p => p.run) ?? its[0];
+    return hit ? { id: hit.id } : { id: null, why: 'other' };
+  }
+  if (asked) return { id: asked };
+  const ran = plans.filter(p => p.run);
+  const pool = ran.length ? ran : plans;
+  if (pool.length <= 1) return { id: pool[0]?.id ?? null };
+  const from = card?.points?.[0];
+  const away = (p) => (from && p.start ? dist(from, p.start) : Infinity);
+  return { id: null, ask: [...pool].sort((a, b) => away(a) - away(b)).map(p => p.id) };
 }
 
 /** Worst-case distance from any original point to the decoded POLYLINE — used

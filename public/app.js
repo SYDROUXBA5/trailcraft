@@ -9,14 +9,14 @@
 import {
   pathLen, cardinal, dist, dwellFold, bearing, project, fmtDist, fmtShort, fmtSpeed, fmtTemp, unitShort, fmtWeight, kgToShown, shownToKg, fmtCoord, scentField, plumePolygon, densify, timestamps, signedOffsets, meanSigned, sideOfDrift, sideAgreement, lineCorrect, departure, timestampsEndingAt, progressAlong, splitLine, smoothBearing, medianAbs, sideShares, approachToWind,
 } from './geo.js';
-import { stepPoints, contamTimed } from './geo.js';
+import { stepPoints, contamTimed, trailFrom, walkedOfTrail, gpsTrouble } from './geo.js';
 import { packDraft, unpackDraft, draftAlive, draftStats } from './draft.js';
 import { handlerStats } from './store.js';
 import { plumePalette, stepPalette, windPalette, trackPalette, COLOUR_PRESETS, isHex, mix } from './colours.js';
 import { FLAT, buildTerrain, stability, regime, flowAt, normOf, rainRate, RAIN_SUMS_PER_HOUR } from './field.js';
 import { predictedOffsets, ScentSim, driftFrom, stepByFlow } from './sim.js';
 import { PARAMS, DIALS, PV, setParam, resetParams, changed, isDefault, tally, dialById, PRESETS, applyPreset } from './params.js';
-import { encodeTrail, decodeTrail, cardUrl, cardFromText } from './card.js';
+import { encodeTrail, decodeTrail, cardUrl, cardFromText, walkedPlanFor } from './card.js';
 import { decodeTile, tileOf, tileBox } from './mvt.js';
 import { wallIndex, bandInWalls } from './walls.js';
 import { GROUND_LAYERS, buildGround, surfaceAt, surfaceAlong, surfaceRows, withSurface,
@@ -159,9 +159,31 @@ const BACKABLE = ['scrShare', 'scrPick', 'scrScan', 'scrResult', 'scrSessions', 
 let currentScreen = null;
 const navStack = [];
 
+/* What a screen's own close button tidies up, done too when it is left by
+   the phone's back gesture instead: the bench's dials, a replay's clock, a
+   plume still drawing, a map tap still listening for corners or hides. */
+const LEAVE = {
+  scrBench: () => closeBench(),
+  scrReplay: () => closeReplay(),
+  scrFix: () => closeFix(),
+  scrShowMap: () => plumeStop(),
+  scrContam: () => { closeContam(); setSrc('contam', EMPTY); },
+  scrDraw: () => closeDraw(),
+  scrCountdown: () => stopCountdownUi(),
+  scrLay: () => { map.off('click', onHideTap); map.getCanvas().style.cursor = ''; },
+};
+
+/** The screen something is being recorded on right now, or null. A hide
+    set counts from its first hide: those taps are the recording. */
+function liveScreen() {
+  if (rec.on) return { run: 'scrRun', walk: 'scrWalk', lay: 'scrLay' }[rec.kind] ?? null;
+  return rec.kind === 'hide' && rec.hides.length ? 'scrLay' : null;
+}
+
 function goBackNow() {
   const special = { scrShared: closeShared, scrLive: closeLive }[currentScreen];
   if (special) return special();
+  LEAVE[currentScreen]?.();
   let prev = navStack.pop();
   while (prev && TRANSIENT.has(prev)) prev = navStack.pop();
   go(prev ?? 'scrHome', { back: true });
@@ -172,7 +194,20 @@ function goBack() {
   if (history.state?.tc === currentScreen) history.back();
   else goBackNow();
 }
-window.addEventListener('popstate', () => { if (currentScreen && currentScreen !== 'scrHome') goBackNow(); });
+/* A back gesture never leaves a recording. It is easy to make by accident
+   with a line in one hand, and a run left behind it kept recording with no
+   screen that could stop it. So the history entry is put back, and the
+   screen says how to leave. */
+window.addEventListener('popstate', () => {
+  if (currentScreen && currentScreen === liveScreen()) {
+    try { history.pushState({ tc: currentScreen }, ''); } catch { /* file:// and the like */ }
+    toast(rec.kind === 'walk' ? 'Still recording the walk. Tap I’m in place or Cancel to leave.'
+      : rec.kind === 'hide' ? 'Tap Done to keep these hides, or Cancel to throw them away.'
+        : 'Still recording. Tap Stop to finish.');
+    return;
+  }
+  if (currentScreen && currentScreen !== 'scrHome') goBackNow();
+});
 
 function go(id, { back = false } = {}) {
   stopScan();
@@ -1317,11 +1352,13 @@ function sessionCard(s, { del = false } = {}) {
 }
 
 /* ── Lay a trail / Set a hide ─────────────────────────────────────── */
-const rec = { on: false, kind: null, pts: [], wps: [], hides: [], started: 0, dropped: 0, wx: null, watch: null, lock: null, tick: 0 };
+const rec = { on: false, kind: null, pts: [], wps: [], hides: [], started: 0, dropped: 0, droppedAt: 0, blocked: false, wx: null, watch: null, lock: null, tick: 0 };
 let pendingSession = null;   // built at Confirm, shared/run afterwards
 
 function gpsHudText() {
-  if (!rec.pts.length && rec.dropped) return accWarning();
+  const trouble = gpsTrouble({ last: rec.pts[rec.pts.length - 1], startedAt: rec.started,
+    droppedAt: rec.droppedAt, blocked: rec.blocked });
+  if (trouble) return gpsTroubleText(trouble);
   const m = pathLen(rec.pts);
   return `Recording · ${fmtDur(Date.now() - rec.started)} · ${fmtKm(m)}`;
 }
@@ -1336,7 +1373,22 @@ function accWarning() {
     + `so nothing is being kept. Turn on Precise Location for this app, or raise the cap in Settings.`;
 }
 
+/** The HUD's words for gpsTrouble (geo.js): said for as long as it lasts,
+    not in a toast that has gone before anyone looks at the phone. */
+function gpsTroubleText(tr) {
+  if (!tr) return '';
+  if (tr.why === 'blocked') return isNative()
+    ? 'Location is off for Trailcraft, so nothing is being recorded. Allow it in Settings.'
+    : 'Location is blocked, so nothing is being recorded. Allow it for this site, then reload.';
+  if (tr.why === 'poor') return accWarning();
+  /* Not "nothing is being recorded": a phone standing still can go quiet,
+     and its dwell is still counted when the next fix comes. */
+  return `No GPS fix for ${fmtDur(tr.ms)}. Open sky helps.`;
+}
+
 function startLay() {
+  // Emptying the points here while a run is recording would lose the run.
+  if (rec.on) return toast('A recording is already going. Stop that one first.');
   const t = S.target;
   clearMap();
   pendingSession = null;
@@ -3015,7 +3067,7 @@ function onFix(pos) {
      stationary fix folds its seconds into the last kept point's dwell, and
      the engine emits more from it. Only device-poor fixes are dropped. */
   const verdict = dwellFold(last, pt, Number(settings.accCap), Number(settings.stillCap));
-  if (verdict === 'drop') { rec.dropped++; rec.lastAcc = acc; return; }
+  if (verdict === 'drop') { rec.dropped++; rec.lastAcc = acc; rec.droppedAt = pt.t; return; }
   if (verdict === 'dwell') {
     last.dwellS = (last.dwellS ?? 0) + Math.max(0, (pt.t - (last._seen ?? last.t)) / 1000);
     last._seen = pt.t;
@@ -3063,6 +3115,7 @@ function keepDraft(force = false) {
     liveId: liveState?.id ?? null, liveUrl: liveState?.url ?? null,
     revealedAt: run.revealedAt || 0,
     pts: rec.pts, wps: rec.wps, hides: rec.hides,
+    plan: rec.kind === 'walk' ? walk.card : null, offAt: rec.kind === 'walk' ? walk.offAt : 0,
   }, now);
   /* A full phone must not stop the walk: the recording carries on in memory,
      exactly as it did before there was a draft at all. */
@@ -3086,10 +3139,14 @@ async function startWatch(hudId) {
      go in a pocket with the screen dark and every fix still arrives. */
   if (isNative()) {
     locateStop();
-    rec.on = true; rec.pts = []; rec.dropped = 0; rec.started = Date.now();
+    rec.on = true; rec.pts = []; rec.dropped = 0; rec.droppedAt = 0; rec.blocked = false; rec.started = Date.now();
     try {
       rec.bg = await watchBackground(onFix,
-        (e) => toast(e?.code === 'NOT_AUTHORIZED' ? 'Location is off for Trailcraft — allow it in Settings' : 'GPS error'),
+        (e) => {
+          // The toast goes in a few seconds; the HUD says it until Stop.
+          if (e?.code === 'NOT_AUTHORIZED') rec.blocked = true;
+          toast(e?.code === 'NOT_AUTHORIZED' ? 'Location is off for Trailcraft — allow it in Settings' : 'GPS error');
+        },
         { message: 'Recording — the phone can go in your pocket' });
     } catch { rec.bg = null; }
     if (!rec.bg) { rec.on = false; toast('Could not start GPS'); return false; }
@@ -3107,16 +3164,39 @@ async function startWatch(hudId) {
     }
   } catch { /* Permissions API optional */ }
   locateStop();
-  rec.on = true; rec.pts = []; rec.dropped = 0; rec.started = Date.now();
-  try { rec.lock = await navigator.wakeLock?.request('screen'); } catch { /* not fatal */ }
+  rec.on = true; rec.pts = []; rec.dropped = 0; rec.droppedAt = 0; rec.blocked = false; rec.started = Date.now();
+  await holdScreen();
   rec.watch = navigator.geolocation.watchPosition(onFix,
-    (e) => toast(e.code === 1 ? 'Location blocked — nothing recorded'
-      : e.code === 3 ? 'No fix yet — open sky helps' : 'GPS error'),
+    (e) => {
+      // The toast goes in a few seconds; the HUD says it until Stop.
+      if (e.code === 1) rec.blocked = true;
+      toast(e.code === 1 ? 'Location blocked — nothing recorded'
+        : e.code === 3 ? 'No fix yet — open sky helps' : 'GPS error');
+    },
     { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 });
   clearInterval(rec.tick);
   rec.tick = setInterval(() => { const el = $(hudId); const txt = hudText(); if (el) el.textContent = txt; }, 1000);
   return true;
 }
+
+/* The screen stays on while a web recording runs, because a locked phone's
+   browser stops getting fixes. The browser lets go of that hold whenever the
+   page is hidden (the camera, a call, another app) and never takes it back by
+   itself, so it is asked for again each time the page comes back. Inside the
+   iOS app the shell records with the screen dark, so it is not needed there. */
+async function holdScreen() {
+  if (isNative() || !rec.on || rec.lock || document.visibilityState !== 'visible') return;
+  try {
+    const lock = await navigator.wakeLock?.request('screen');
+    if (!lock) return;
+    if (!rec.on) { lock.release().catch(() => {}); return; }   // stopped while it was being asked for
+    rec.lock = lock;
+    lock.addEventListener?.('release', () => { if (rec.lock === lock) rec.lock = null; });
+  } catch { /* not fatal */ }
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') holdScreen();
+});
 
 let hudText = gpsHudText;
 
@@ -3370,7 +3450,10 @@ async function renderShareQr(s) {
     const card = await encodeTrail({
       points: s.data.trail, waypoints: s.data.waypoints || [],
       drawn: !!s.data.drawn || !!s.data.plan, from,
-      ...(s.data.plan ? { kind: 1, ageMin: s.data.ageMin ?? 10 } : {}),
+      ...(s.data.plan ? { kind: 1, ageMin: s.data.ageMin ?? 10, planId: s.data.planOf ?? s.id } : {}),
+      /* The layer's own record of a walk is the walked card, so it can be
+         shown again after the wait screen has gone. */
+      ...(s.data.walkOf ? { kind: 2, planId: s.data.planId ?? null } : {}),
     }, {});
     const qr = window.qrcode?.(0, 'M');
     if (!qr) throw new Error('QR library missing — hard refresh once online');
@@ -3380,7 +3463,9 @@ async function renderShareQr(s) {
     const who = S.layers.find(l => l.id !== s.layerId)?.name;
     $('shareQrCaption').textContent = s.data.plan
       ? `Point the other phone's camera at this — it opens Trailcraft and walks them along the line`
-      : `Point the other phone's camera at this — the trail travels inside the code, no signal needed`;
+      : s.data.walkOf
+        ? 'Point the handler’s camera at this. It takes the walk back to their plan.'
+        : `Point the other phone's camera at this — the trail travels inside the code, no signal needed`;
   } catch (err) {
     $('shareQr').innerHTML = '';
     $('shareQrCaption').textContent = err.message;
@@ -3500,6 +3585,7 @@ function drawStep(step) {
 }
 
 function openDraw() {
+  if (rec.on) return toast('A recording is already going. Stop that one first.');
   clearMap();
   /* Corners are tapped by finger, so the map has to be on the handler before
      the first tap — drawing from wherever the map happened to be sitting puts
@@ -3605,6 +3691,9 @@ function stopCountdownUi() { clearInterval(CD.tick); CD.tick = 0; CD.buzzed = fa
 const walk = { card: null, atStart: false, offAt: 0, done: false, tick: 0 };
 
 function startWalk(card) {
+  /* One phone records one thing. A plan opened from the camera mid-run would
+     otherwise take over the run's GPS and write its fixes as the walk. */
+  if (rec.on) return toast('A recording is already going. Stop that one first.');
   walk.card = card;
   walk.atStart = false;
   walk.offAt = 0;
@@ -3628,18 +3717,24 @@ function startWalk(card) {
 function walkHud() {
   const A = walk.card.points[0], B = walk.card.points[walk.card.points.length - 1];
   const last = rec.pts[rec.pts.length - 1];
-  if (!last) { navSay('—', '', accWarning(), ''); return ''; }
+  const trouble = gpsTrouble({ last, startedAt: rec.started, droppedAt: rec.droppedAt, blocked: rec.blocked });
+  if (!last) { navSay('—', '', trouble ? gpsTroubleText(trouble) : accWarning(), ''); return ''; }
   const dA = dist(last, A), dB = dist(last, B);
 
   /* The countdown arms at the departure point and fires on LEAVING it —
      which is the moment the trail starts existing, and ageing. The decision
-     itself lives in geo.js, where it can be tested without a phone. */
-  const st = departure(walk, { d: dA, t: last.t, walked: pathLen(rec.pts), firstT: rec.pts[0].t });
-  walk.atStart = st.atStart;
-  if (st.offAt && !walk.offAt) {
-    walk.offAt = st.offAt;
-    navigator.vibrate?.(60);
-    toast('Off you go — the countdown is running on both phones');
+     itself lives in geo.js, where it can be tested without a phone. What it
+     is told she has walked is the trail itself, never the walk from the car
+     to the start, or the clock would start while she is still on her way. */
+  if (!walk.offAt) {
+    const st = departure(walk, { d: dA, t: last.t, ...walkedOfTrail(rec.pts, walk.card.points) });
+    walk.atStart = st.atStart;
+    if (st.offAt) {
+      walk.offAt = st.offAt;
+      keepDraft(true);        // a walk brought back after a crash keeps the same clock
+      navigator.vibrate?.(60);
+      toast('Off you go — the countdown is running on both phones');
+    }
   }
 
   /* Before departure the destination is the START; after it, the END. The
@@ -3651,15 +3746,17 @@ function walkHud() {
 
   if (!walk.offAt) {
     navSay(n, u, dA < 40 ? 'At the start — walk on' : 'To the start of the trail',
-      dA < 40 ? 'The clock starts when you leave' : '');
+      trouble ? gpsTroubleText(trouble) : dA < 40 ? 'The clock starts when you leave' : '');
     return '';
   }
   const off = pr ? pr.off : null;
   const left = (walk.offAt + (walk.card.ageMin ?? 10) * 60000) - Date.now();
   const clock = left > 0 ? `Dog starts in ${fmtDur(left)}` : 'The dog is on its way';
+  /* The walk IS the trail. A stretch with no fixes is a straight line on the
+     handler's map, so she is told while she can still stop and wait for it. */
   navSay(n, u,
     off == null || off < 8 ? 'On the line' : `${fmtM(off)} off the line`,
-    clock);
+    trouble ? gpsTroubleText(trouble) : clock);
   return '';
 }
 
@@ -3680,25 +3777,39 @@ async function finishWalk() {
       !confirm(`You are ${fmtM(dist(last, B))} from the drawn end. Finish here anyway?`)) return;
   await stopWatch();
   stopFollowing();
+  return keepWalk();
+}
+
+/* A finished walk kept: her own record, and the walked card for the handler.
+   A walk brought back after a crash comes through here as well, so there is
+   one way of keeping a walk, not two. */
+async function keepWalk() {
   rec.pts.forEach(pt => delete pt._seen);
   walk.done = true;
 
-  const walked = rec.pts.length >= 2 ? rec.pts : walk.card.points;
-  if (rec.pts.length < 2) toast('No GPS track of the walk — the card will carry the drawn line');
+  /* The recording began when the plan was scanned, often a car park away.
+     The trail begins where she left the start, so the walk there is cut off
+     before anything is saved or sent: on the handler's phone it would be a
+     leg no dog ran, and it would make the trail older than it is. */
+  const trail = rec.pts.slice(trailFrom(rec.pts, walk.card.points[0], walk.offAt));
+  const walked = trail.length >= 2 ? trail : walk.card.points;
+  if (trail.length < 2) toast('No GPS track of the walk — the card will carry the drawn line');
 
   // Her own record of the walk stays on her phone.
   const own = {
     id: uid(), handlerId: S.handler.id, dogId: null, layerId: null,
     targetId: 'person', startedAt: walked[0].t,
     summary: `Walked ${walk.card.from ? walk.card.from + '’s' : 'a'} plan — ${fmtKm(pathLen(walked))}.`,
-    data: { trail: walked, waypoints: [], weather: null, contamination: [], walkOf: true },
+    data: { trail: walked, waypoints: [], weather: null, contamination: [], walkOf: true,
+      planId: walk.card.planId ?? null },
   };
-  guardSave(own, () => db.addSession(own));
+  if (guardSave(own, () => db.addSession(own))) dropDraft();   // a refused save keeps the draft: it is the only copy
   snap();
 
   // The card the handler scans after the find: the trail as it was REALLY walked.
   try {
-    const cardStr = await encodeTrail({ points: walked, waypoints: [], from: S.handler?.name ?? '', kind: 2 }, {});
+    const cardStr = await encodeTrail({ points: walked, waypoints: [], from: S.handler?.name ?? '', kind: 2,
+      planId: walk.card.planId ?? null }, {});
     const qr = window.qrcode?.(0, 'M');
     qr.addData(cardUrl(cardStr, SHARE_BASE), 'Byte');
     qr.make();
@@ -3723,6 +3834,36 @@ function paintWait() {
 
 /* ── The walked card, back on the handler’s phone ── */
 let scanWalkedFor = null;    // session id waiting for its walked card
+
+/** A walked card, to the plan it belongs to (walkedPlanFor, card.js). */
+function takeWalked(card, asked) {
+  /* Only this phone's own runs. One kept from someone else's link is
+     their dog on their plan, so a walk laid here never belongs to it. */
+  const plans = db.sessions().filter(x => x.data.plan && !x.data.walked && ownRun(x))
+    .map(x => ({ id: x.id, planOf: x.data.planOf ?? null, run: !!x.data.track, start: x.data.trail?.[0] ?? null }));
+  const pick = walkedPlanFor(card, plans, asked);
+  const waiting = pick.ask ? askWhichPlan(pick.ask) : pick.id;
+  if (!waiting) {
+    toast(pick.ask ? 'No plan picked, so the walk was not used'
+      : pick.why === 'other' ? 'That walk is for a plan that is not waiting on this phone'
+        : 'That is a walked trail, but no plan on this phone is waiting for one');
+    return false;
+  }
+  return applyWalked(waiting, card);
+}
+
+/* A walked card from an older app does not say which plan it walked. With
+   more than one waiting, a guess would grade one dog against another dog's
+   trail and bank it, so the handler is asked, the likeliest plan first. */
+function askWhichPlan(ids) {
+  for (const id of ids) {
+    const s = sessionById(id);
+    if (!s) continue;
+    const dog = S.dogs.find(d => d.id === s.dogId)?.name;
+    if (confirm(`Is this the walk for the plan drawn ${fmtWhen(s.startedAt)}${dog ? `, run by ${dog}` : ''}?`)) return id;
+  }
+  return null;
+}
 
 async function applyWalked(sessionId, card) {
   const s = db.sessions().find(x => x.id === sessionId);
@@ -3786,6 +3927,9 @@ const run = { session: null, revealed: false, startedAt: 0, copy: false, stoppin
 
 async function startRun(s) {
   if (rec.on) return toast('A run is already going — stop that one first');
+  /* A plume left drawing by a screen that was swiped away rather than closed
+     would paint the answer onto a blind run. */
+  plumeStop();
   const t = targetById(s.targetId);
   /* One session holds one run. Running a trail or hide set that has a run
      already (again from the share screen, or with the next dog) records into
@@ -3831,6 +3975,11 @@ async function startRun(s) {
   }
 
   hudText = () => {
+    /* A run where no fix is being kept looks, on a bare clock, exactly like a
+       run being recorded, and ends at Stop as "too short to grade". */
+    const trouble = gpsTrouble({ last: rec.pts[rec.pts.length - 1], startedAt: rec.started,
+      droppedAt: rec.droppedAt, blocked: rec.blocked });
+    if (trouble) return gpsTroubleText(trouble);
     const dogName = S.dog?.name ?? 'Dog';
     const age = ageWord(Date.now() - s.startedAt);
     const base = `${dogName} · ${fmtDur(Date.now() - rec.started)} · ${t.kind === 'person' ? 'trail' : 'hide'} ${age} old`;
@@ -3878,12 +4027,16 @@ function addWaypoint(kind) {
   const last = rec.pts[rec.pts.length - 1];
   if (!last) return toast('No fix yet');
   /* Stamped before anything else happens. Whatever is asked next, the mark is
-     already at the place and the moment the handler committed. */
-  const wp = { kind, lat: last.lat, lon: last.lon, t: Date.now() };
+     already at the place and the moment the handler committed. It can only go
+     where the last usable fix was; when that is old the dog may be well past
+     it, so the mark says so and the result does not claim a distance it never
+     measured. */
+  const stale = !!gpsTrouble({ last, droppedAt: rec.droppedAt });
+  const wp = { kind, lat: last.lat, lon: last.lon, t: Date.now(), ...(stale ? { approx: true } : {}) };
   rec.wps.push(wp);
   setSrc('wps', pointsOf(rec.wps, 'kind'));
   navigator.vibrate?.(35);
-  toast(kind);
+  toast(stale ? `${kind}, marked where the GPS last was, so it may be off` : kind);
   /* Only the first indication, and only while the answer is still hidden:
      with the trail drawn on the map there is nothing to be sure about. */
   const isFirstInd = kind === 'Indication'
@@ -4103,13 +4256,14 @@ function searchResult(s, track, wps, startedAt, wx, dogName, ageMin) {
       approach = approachToWind(bearing(path[back], path[path.length - 1]), wx.wind_direction);
     }
     sentence = `${dogName} indicated in ${fmtDur(toFirst)}`
-      + (catchM != null ? `, ${catchM} m from the hide` : '')
+      + (catchM != null ? `, ${ind.approx ? 'roughly ' : ''}${catchM} m from the hide` : '')
+      + (catchM != null && ind.approx ? ' (the GPS had dropped out)' : '')
       + (approach ? `, coming ${approach}.` : '.');
   }
   return {
     /* approachV marks a result whose approach is the right way round, so the
        store never swaps it back (healApproach). */
-    kind: 'search', sentence, toFirst, catchM, approach, approachV: APPROACH_V, ageMin,
+    kind: 'search', sentence, toFirst, catchM, catchApprox: !!ind?.approx, approach, approachV: APPROACH_V, ageMin,
     stability: st?.label ?? null, stabilityPlain: st?.plain ?? null,
     wind: wx ? { speed: wx.wind_speed, from: wx.wind_direction } : null,
   };
@@ -4140,7 +4294,7 @@ function renderResult(s) {
   if (r.kind === 'search') {
     $('resGrid').innerHTML =
       cell(r.toFirst != null ? fmtDur(r.toFirst) : '—', 'to first indication') +
-      cell(r.catchM != null ? `${r.catchM} m` : '—', 'from the hide') +
+      cell(r.catchM != null ? `${r.catchApprox ? '~' : ''}${r.catchM} m` : '—', 'from the hide') +
       cell(`${r.ageMin} min`, 'hide age at start') +
       cell(r.approach ?? '—', 'approach vs wind');
   } else {
@@ -5203,19 +5357,10 @@ async function handleCard(data) {
      all. Find the plan it belongs to rather than quietly filing it as a new
      trail — a walk with nothing to compare it against is not a session. */
   if (card.kind === 2) {
-    /* Only this phone's own runs. One kept from someone else's link is
-       their dog on their plan, so a walk laid here never belongs to it. */
-    const waiting = scanWalkedFor
-      ?? db.sessions().find(x => x.data.plan && !x.data.walked && x.data.track && ownRun(x))?.id
-      ?? db.sessions().find(x => x.data.plan && !x.data.walked && ownRun(x))?.id
-      ?? null;
+    const asked = scanWalkedFor;
     scanWalkedFor = null;
     stopScan();
-    if (!waiting) {
-      toast('That is a walked trail, but no plan on this phone is waiting for one');
-      return false;
-    }
-    return applyWalked(waiting, card);
+    return takeWalked(card, asked);
   }
   if (scanWalkedFor) {
     $('scanState').textContent = 'That is a plan, not a walked trail. Still scanning…';
@@ -6047,6 +6192,7 @@ function wire() {
   $('walkCancel').addEventListener('click', async () => {
     if (rec.pts.length > 1 && !confirm('Cancel this walk? The handler gets no walked card.')) return;
     await stopWatch();
+    dropDraft();            // thrown away on purpose: never offered back
     stopFollowing();
     walk.card = null;
     clearMap();
@@ -6500,7 +6646,7 @@ function offerRecovery() {
   const st = draftStats(d);
   $('recoverWhat').textContent = d.kind === 'hide'
     ? `${st.hides} hide${st.hides === 1 ? '' : 's'} set, not saved.`
-    : `${fmtKm(st.metres)} ${d.kind === 'run' ? 'run' : 'trail'}, ${fmtDur(st.lastedMs)}, not saved.`;
+    : `${fmtKm(st.metres)} ${d.kind === 'run' ? 'run' : d.kind === 'walk' ? 'walk of a plan' : 'trail'}, ${fmtDur(st.lastedMs)}, not saved.`;
   $('recoverWhen').textContent = `Recorded ${fmtWhen(st.startedAt)}.`;
   go('scrRecover');
   return true;
@@ -6551,6 +6697,15 @@ async function recoverKeep() {
       toast('The run is saved, but grading it did not work');
       return boot();
     }
+  }
+  if (d.kind === 'walk') {
+    /* The plan came with the draft, so the walk is finished exactly as the
+       button would have: her record kept and the walked card shown for the
+       handler, with the countdown still running from when she left. */
+    walk.card = d.plan;
+    walk.offAt = d.offAt || 0;
+    walk.atStart = !!walk.offAt;
+    return keepWalk();
   }
   if (d.kind === 'hide') {
     paintHides();

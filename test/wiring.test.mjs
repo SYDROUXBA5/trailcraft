@@ -296,7 +296,7 @@ t('a re-grade is for the dog that ran, not the one picked on Home', () => {
     'a run being recorded now is the picked dog’s, and is graded as that dog');
   assert.match(stop, /const patch = \{\s*\n\s*dogId,/, 'and saved under the same dog it was graded for');
   assert.match(js, /Nothing is banked to \$\{d\?\.name \?\? 'this dog'\}/, 'the provisional note names the run’s dog');
-  assert.match(js, /x\.data\.plan && !x\.data\.walked && x\.data\.track && ownRun\(x\)/,
+  assert.match(js, /function takeWalked[\s\S]{0,300}x\.data\.plan && !x\.data\.walked && ownRun\(x\)/,
     'a walked card from the camera never re-grades a run kept from someone else');
 });
 
@@ -479,6 +479,99 @@ t('a replay shows the air as it was, and a search can be replayed', () => {
   assert.match(bodyOf('showOnMap'),
     /plumeStart\(trailOf\(s\), wx, undefined, s\.data\.contamination, \{ at: s\.data\.trackStarted \?\? null \}\)/,
     'a saved run’s map shows the air when the dog set off, not now');
+});
+
+/** The source of one function, from its opening line to the next top-level one. */
+const fnSrc = (head) => {
+  const at = js.indexOf(head);
+  assert.ok(at >= 0, `${head} exists`);
+  const next = js.slice(at + head.length).search(/\n(?:async )?function |\n(?:const|let) \w+ = /);
+  return js.slice(at, next < 0 ? undefined : at + head.length + next);
+};
+
+t('a back gesture never leaves a recording, and a screen swiped away is tidied up', () => {
+  const pop = js.slice(js.indexOf("window.addEventListener('popstate'"), js.indexOf("window.addEventListener('popstate'") + 800);
+  assert.match(pop, /if \(currentScreen && currentScreen === liveScreen\(\)\) \{\s*\n\s*try \{ history\.pushState\(\{ tc: currentScreen \}, ''\); \}/,
+    'while something is recording, the history entry is put back');
+  assert.ok(pop.indexOf('liveScreen()') < pop.indexOf('goBackNow()'), 'before anything can leave the screen');
+  assert.match(fnSrc('function liveScreen()'),
+    /if \(rec\.on\) return \{ run: 'scrRun', walk: 'scrWalk', lay: 'scrLay' \}\[rec\.kind\] \?\? null;\s*\n\s*return rec\.kind === 'hide' && rec\.hides\.length \? 'scrLay' : null;/,
+    'a run, a walk, a GPS lay and a hide set with hides in it are all recordings');
+  assert.match(fnSrc('function goBackNow()'), /LEAVE\[currentScreen\]\?\.\(\);/, 'going back runs the screen’s own tidy-up');
+  const screens = [...js.match(/const SCREENS = \[([\s\S]*?)\];/)[1].matchAll(/'(\w+)'/g)].map(m => m[1]);
+  for (const [scr, what] of [['scrBench', 'closeBench()'], ['scrReplay', 'closeReplay()'], ['scrFix', 'closeFix()'],
+    ['scrShowMap', 'plumeStop()'], ['scrContam', 'closeContam()'], ['scrDraw', 'closeDraw()'],
+    ['scrCountdown', 'stopCountdownUi()'], ['scrLay', "map.off('click', onHideTap)"]]) {
+    assert.ok(screens.includes(scr), `${scr} is a screen`);
+    assert.ok(new RegExp(`\\n  ${scr}: \\(\\) => [^\\n]*${what.replace(/[()?.]/g, '\\$&')}`).test(js), `${scr} runs ${what} when swiped away`);
+  }
+  for (const fn of ['function startLay() {', 'function openDraw() {', 'function startWalk(card) {']) {
+    assert.match(fnSrc(fn), /\n\s*if \(rec\.on\) return toast\(/, `${fn} refuses while something else is recording`);
+  }
+  assert.match(fnSrc('async function startRun(s) {'), /plumeStop\(\);/, 'a plume left drawing never paints onto a blind run');
+});
+
+t('the layer’s guided walk is written down, and comes back after a crash', () => {
+  assert.match(fnSrc('function keepDraft('),
+    /plan: rec\.kind === 'walk' \? walk\.card : null, offAt: rec\.kind === 'walk' \? walk\.offAt : 0,/,
+    'the draft carries the plan it is walking and when she left');
+  assert.match(fnSrc('function walkHud()'), /keepDraft\(true\);/, 'the departure is written down the moment it happens');
+  assert.match(fnSrc('async function finishWalk()'), /await stopWatch\(\);[\s\S]*return keepWalk\(\);/);
+  const keep = fnSrc('async function keepWalk()');
+  assert.match(keep, /if \(guardSave\(own, \(\) => db\.addSession\(own\)\)\) dropDraft\(\);/,
+    'the draft goes once her record is really kept, not before');
+  assert.match(fnSrc('async function recoverKeep()'),
+    /if \(d\.kind === 'walk'\) \{[\s\S]{0,400}walk\.card = d\.plan;\s*\n\s*walk\.offAt = d\.offAt \|\| 0;[\s\S]{0,120}return keepWalk\(\);/,
+    'a recovered walk is finished the way the button finishes one');
+  const cancel = js.slice(js.indexOf("$('walkCancel').addEventListener"), js.indexOf("$('walkCancel').addEventListener") + 400);
+  assert.match(cancel, /dropDraft\(\);/, 'a walk cancelled on purpose is never offered back');
+});
+
+t('the walk to the start neither starts the clock nor goes on the trail', () => {
+  const hud = fnSrc('function walkHud()');
+  assert.match(hud, /departure\(walk, \{ d: dA, t: last\.t, \.\.\.walkedOfTrail\(rec\.pts, walk\.card\.points\) \}\)/,
+    'the fallback is fed the trail walked, not every metre since the scan');
+  assert.ok(!/walked: pathLen\(rec\.pts\)/.test(js), 'the old measure is gone');
+  assert.match(fnSrc('async function keepWalk()'),
+    /const trail = rec\.pts\.slice\(trailFrom\(rec\.pts, walk\.card\.points\[0\], walk\.offAt\)\);/,
+    'the walked card and her record start where she left the start');
+});
+
+t('a walked card names its plan, and one that does not is asked about', () => {
+  assert.match(fnSrc('async function renderShareQr(s)'), /kind: 1, ageMin: s\.data\.ageMin \?\? 10, planId: s\.data\.planOf \?\? s\.id/,
+    'the plan card says which plan it is');
+  assert.match(fnSrc('async function keepWalk()'), /kind: 2,\s*\n\s*planId: walk\.card\.planId \?\? null/, 'the walked card says it back');
+  const take = fnSrc('function takeWalked(card, asked)');
+  assert.match(take, /walkedPlanFor\(card, plans, asked\)/);
+  assert.match(take, /pick\.ask \? askWhichPlan\(pick\.ask\) : pick\.id/, 'with several plans and no name, the handler picks');
+  assert.match(fnSrc('async function handleCard(data)'), /return takeWalked\(card, asked\);/);
+});
+
+t('a web recording keeps the screen awake after the page has been hidden', () => {
+  const hold = fnSrc('async function holdScreen()');
+  assert.match(hold, /if \(isNative\(\) \|\| !rec\.on \|\| rec\.lock \|\| document\.visibilityState !== 'visible'\) return;/);
+  assert.match(hold, /lock\.addEventListener\?\.\('release', \(\) => \{ if \(rec\.lock === lock\) rec\.lock = null; \}\);/,
+    'a lock the browser let go of is known to be gone');
+  assert.match(js, /document\.addEventListener\('visibilitychange', \(\) => \{\s*\n\s*if \(document\.visibilityState === 'visible'\) holdScreen\(\);/,
+    'and asked for again when the page comes back');
+  const watch = fnSrc('async function startWatch(hudId)');
+  assert.match(watch, /await holdScreen\(\);/);
+  assert.ok(!/wakeLock/.test(watch), 'one place asks for the lock');
+});
+
+t('the HUD says when the GPS is keeping nothing, and a mark says when it is a guess', () => {
+  const start = fnSrc('async function startRun(s) {');
+  assert.match(start, /hudText = \(\) => \{[\s\S]{0,300}const trouble = gpsTrouble\(\{ last: rec\.pts\[rec\.pts\.length - 1\], startedAt: rec\.started,\s*\n\s*droppedAt: rec\.droppedAt, blocked: rec\.blocked \}\);\s*\n\s*if \(trouble\) return gpsTroubleText\(trouble\);/,
+    'the run HUD, before its clock');
+  assert.match(fnSrc('function gpsHudText()'), /if \(trouble\) return gpsTroubleText\(trouble\);/, 'and the lay HUD');
+  assert.match(fnSrc('function walkHud()'), /trouble \? gpsTroubleText\(trouble\) : clock/, 'and the walk');
+  assert.match(fnSrc('function onFix(pos)'), /if \(verdict === 'drop'\) \{ rec\.dropped\+\+; rec\.lastAcc = acc; rec\.droppedAt = pt\.t; return; \}/);
+  const watch = fnSrc('async function startWatch(hudId)');
+  assert.match(watch, /if \(e\.code === 1\) rec\.blocked = true;/, 'a refusal stays on the HUD, not just in a toast');
+  assert.match(watch, /if \(e\?\.code === 'NOT_AUTHORIZED'\) rec\.blocked = true;/);
+  assert.equal((watch.match(/rec\.droppedAt = 0; rec\.blocked = false;/g) || []).length, 2, 'both ways of recording start clean');
+  assert.match(fnSrc('function addWaypoint(kind)'), /const stale = !!gpsTrouble\(\{ last, droppedAt: rec\.droppedAt \}\);[\s\S]{0,200}\.\.\.\(stale \? \{ approx: true \} : \{\}\)/);
+  assert.match(fnSrc('function searchResult('), /ind\.approx \? 'roughly ' : ''/, 'and the result does not claim a distance it never measured');
 });
 
 console.log(`\n${pass} passed total\n`);

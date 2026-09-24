@@ -102,4 +102,33 @@ t('a crash does not lose what the handler called', () => {
   assert.equal(d.wps[0].kind, 'Indication');
 });
 
+t('the layer’s walk of a plan is written down too, with the plan it follows', () => {
+  // Walks are the trails the handler's run is finally graded on, and they were
+  // the one recording a crash still lost outright.
+  const plan = { points: walk(12, NOW - 600e3), from: 'Rémi', ageMin: 20, planId: 'plan1abc', kind: 1, drawn: true };
+  const packed = packDraft({ kind: 'walk', startedAt: NOW, pts: walk(400), plan, offAt: NOW + 95e3 }, NOW + 400e3);
+  assert.ok(packed, 'a walk is written down');
+  const d = unpackDraft(JSON.parse(JSON.stringify(packed)));
+  assert.equal(d.kind, 'walk');
+  assert.equal(d.pts.length, 400);
+  assert.equal(d.offAt, NOW + 95e3, 'the countdown keeps running from when she left');
+  assert.equal(d.plan.points.length, 12, 'the plan comes back with it');
+  assert.equal(d.plan.points[11].t, plan.points[11].t);
+  assert.equal(d.plan.from, 'Rémi');
+  assert.equal(d.plan.ageMin, 20);
+  assert.equal(d.plan.planId, 'plan1abc', 'and which plan it answers');
+  assert.ok(draftAlive(d, NOW + 500e3), 'so it is offered back');
+  assert.equal(draftStats(d).kind, 'walk');
+
+  assert.equal(packDraft({ kind: 'walk', startedAt: NOW, pts: walk(40) }, NOW), null,
+    'a walk with no plan cannot be finished, so it is not written');
+  const noPlan = { ...packed };
+  delete noPlan.plan;
+  assert.equal(unpackDraft(noPlan), null, 'and one that lost its plan is nothing');
+  const fresh = unpackDraft(packDraft({ kind: 'walk', startedAt: NOW, pts: walk(40), plan: { points: walk(3) } }, NOW));
+  assert.equal(fresh.offAt, 0, 'a walk still on its way to the start has no departure yet');
+  assert.equal(fresh.plan.from, '');
+  assert.equal(fresh.plan.planId, null, 'a plan from an older app names no plan');
+});
+
 console.log(`\n${pass} passed total\n`);

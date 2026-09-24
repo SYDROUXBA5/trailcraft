@@ -484,7 +484,8 @@ export function foldFixes(fixes, accCap, stillCap) {
 
 /** Fold one fix into the departure state. `prev` is the state so far,
     `fix` is { d, t, walked, firstT } — metres from the drawn start, the fix
-    clock, metres of track walked so far, and the first fix's clock.
+    clock, metres of the trail walked so far, and the clock at which she left
+    the point nearest the start (walkedOfTrail gives both).
 
     Hysteresis on purpose: armed only INSIDE `nearM`, fired only OUTSIDE
     `awayM`, with a dead band between, so a GPS wobble while she is standing
@@ -494,7 +495,7 @@ export function foldFixes(fixes, accCap, stillCap) {
     ever lands inside `nearM` — trees, a wall, or a drawn A that was simply a
     few metres out — the clock would otherwise never start and the session
     would be silently ruined. So a layer who has plainly walked `runM` of line
-    is taken to have departed at their first fix. */
+    is taken to have departed from the point nearest the start. */
 export function departure(prev, fix, opts = {}) {
   const { nearM = 25, awayM = 40, runM = 60 } = opts;
   const st = { atStart: !!(prev && prev.atStart), offAt: (prev && prev.offAt) || 0 };
@@ -503,6 +504,59 @@ export function departure(prev, fix, opts = {}) {
   if (st.atStart && fix.d > awayM) { st.offAt = fix.t; return st; }
   if (!st.atStart && fix.walked >= runM) { st.atStart = true; st.offAt = fix.firstT ?? fix.t; }
   return st;
+}
+
+/** The point where the walked trail really begins: the one she came nearest
+    the drawn start at, up to the moment she left (`offAt`, when known).
+
+    The recording starts when the plan is scanned, which is usually in a car
+    park some way off. That walk to the start is not part of the trail: kept,
+    it would put a leg on the handler's line that no dog ever ran, and start
+    the trail's clock minutes early. Only points up to the departure are
+    looked at, so a loop that finishes back by the start cannot be mistaken
+    for where it began. */
+export function trailFrom(pts, A, offAt = 0) {
+  let at = 0, best = Infinity;
+  for (let i = 0; i < (pts?.length ?? 0); i++) {
+    if (offAt && pts[i].t > offAt) break;
+    const d = dist(pts[i], A);
+    if (d < best) { best = d; at = i; }
+  }
+  return at;
+}
+
+/** What the departure fallback reads: metres of the TRAIL walked, and when
+    she left the point nearest its start. `walked` is the smaller of the track
+    since that point and the progress along the plan, so neither the walk to
+    the start (every fix is the nearest yet, so nothing counts) nor wandering
+    about behind the start (no progress along the line) can start the clock. */
+export function walkedOfTrail(pts, line) {
+  if (!pts?.length || !line?.length) return { walked: 0, firstT: null };
+  const i = trailFrom(pts, line[0]);
+  const since = pathLen(pts.slice(i));
+  const pr = progressAlong(line, pts[pts.length - 1]);
+  return { walked: Math.min(since, pr ? pr.along : since), firstT: pts[i]._seen ?? pts[i].t };
+}
+
+/* ── A recording that has stopped recording ───────────────────────────
+   A clock ticking on the screen looks exactly like a run being recorded,
+   whether or not a single fix is being kept. Without being told, a handler
+   finds out at Stop, when the whole run is "too short to grade". */
+
+/** What is wrong with the GPS right now, or null when fixes are being kept.
+    `last` is the newest kept point (its `_seen` moves on while she stands
+    still), `droppedAt` the clock of the newest fix thrown out for accuracy,
+    `blocked` whether the phone refused location outright.
+    { why: 'blocked' | 'poor' | 'none', ms } — `ms` is how long since the
+    last usable fix. */
+export function gpsTrouble({ last = null, startedAt = 0, now = Date.now(), droppedAt = 0, blocked = false, after = 15000 } = {}) {
+  if (blocked) return { why: 'blocked', ms: 0 };
+  const seen = last ? (last._seen ?? last.t) : startedAt;
+  const ms = Math.max(0, now - seen);
+  // Every fix so far refused: that is known at once, no need to wait.
+  if (!last && droppedAt) return { why: 'poor', ms };
+  if (ms < after) return null;
+  return { why: droppedAt > seen ? 'poor' : 'none', ms };
 }
 
 /* ── Following a route ────────────────────────────────────────────────

@@ -113,6 +113,9 @@ const RUN_FIELDS = ['track', 'trackStarted', 'trackWaypoints', 'result', 'coach'
 export function runAgain(s, { id, summary }) {
   const data = { ...(s?.data || {}) };
   for (const k of RUN_FIELDS) delete data[k];
+  /* A second run of a plan is still that plan: the walked card that comes
+     back names the plan it was drawn as, and this is how the copy answers. */
+  if (data.plan && !data.planOf && s?.id) data.planOf = s.id;
   const { updatedAt, deleted, ...rest } = s || {};
   return { ...rest, id, dogId: null, summary, data };
 }

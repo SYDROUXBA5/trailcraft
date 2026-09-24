@@ -4,7 +4,7 @@
 
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { encodeTrail, decodeTrail, maxDeviation , cardUrl, cardFromText } from '../public/card.js';
+import { encodeTrail, decodeTrail, maxDeviation , cardUrl, cardFromText, walkedPlanFor } from '../public/card.js';
 import { simplify, dist, pathLen } from '../public/geo.js';
 
 let pass = 0;
@@ -190,6 +190,38 @@ await t('relay cards: a plan carries its countdown, a walked card comes back, ol
   // Absurd values collapse safely instead of propagating.
   const silly = await encodeTrail({ points: pts, waypoints: [], kind: 1, ageMin: 99999 });
   assert.equal((await decodeTrail(silly)).ageMin, 1440, 'countdown is clamped to a day');
+});
+
+await t('a walked card goes back to the plan it walked, not the newest one waiting', async () => {
+  const t0 = Date.UTC(2026, 8, 13, 9, 0, 0);
+  const pts = [];
+  for (let i = 0; i < 20; i++) pts.push({ lat: 51.2094 + i * 1e-4, lon: -2.6449, t: t0 + i * 45000 });
+
+  // The plan names itself, the walker's phone echoes it back.
+  const plan = await decodeTrail(await encodeTrail({ points: pts, waypoints: [], kind: 1, ageMin: 10, planId: 'k3j9x2mdlw8a1b' }));
+  assert.equal(plan.planId, 'k3j9x2mdlw8a1b', 'a plan card carries its plan');
+  const card = await decodeTrail(await encodeTrail({ points: pts, waypoints: [], from: 'Sophie', kind: 2, planId: plan.planId }));
+  assert.equal(card.planId, 'k3j9x2mdlw8a1b', 'and the walked card carries it back');
+  assert.equal((await decodeTrail(await encodeTrail({ points: pts, waypoints: [], kind: 2 }))).planId, null,
+    'an older app’s card names no plan');
+  assert.equal((await decodeTrail(await encodeTrail({ points: pts, waypoints: [], kind: 2, planId: 'x"}<b>' }))).planId, null,
+    'a crafted id is no id');
+
+  // Two plans waiting on the same field, B the newer. The walk is A's.
+  const A = { id: 'k3j9x2mdlw8a1b', planOf: null, run: true, start: pts[0] };
+  const B = { id: 'zz9', planOf: null, run: true, start: { lat: 51.2096, lon: -2.6449 } };
+  assert.deepEqual(walkedPlanFor(card, [B, A]), { id: A.id }, 'opened from the camera, it still finds its own plan');
+  assert.deepEqual(walkedPlanFor(card, [B, A], B.id), { id: A.id }, 'even scanned from the other plan’s result');
+  const copy = { id: 'c2', planOf: A.id, run: true, start: pts[0] };
+  assert.deepEqual(walkedPlanFor(card, [B, copy]), { id: 'c2' }, 'a second run of the plan answers to it too');
+  assert.deepEqual(walkedPlanFor(card, [B]), { id: null, why: 'other' }, 'and a plan not waiting here takes nobody else’s');
+
+  // An older card, with two waiting: ask, rather than grade the wrong dog.
+  const old = { ...card, planId: null };
+  assert.deepEqual(walkedPlanFor(old, [B, A]), { id: null, ask: [A.id, B.id] }, 'asked, the nearest start first');
+  assert.deepEqual(walkedPlanFor(old, [B, A], B.id), { id: B.id }, 'unless the handler said which plan it was for');
+  assert.deepEqual(walkedPlanFor(old, [{ ...B, run: false }, A]), { id: A.id }, 'one run waiting: that one');
+  assert.deepEqual(walkedPlanFor(old, []), { id: null }, 'nothing waiting: nothing');
 });
 
 await t('a card in a QR is a link, so the phone camera opens the app not Google', async () => {

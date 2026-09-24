@@ -3,7 +3,7 @@ import {
   dist, project, pathLen, cardinal, driftMetres, driftPolygon, meanOffset, filterFixes, densify, timestamps, crossTrackSigned, signedOffsets, meanSigned, sideOfDrift, sideAgreement, lineCorrect, dwellFold, foldFixes, departure, progressAlong, splitLine, smoothBearing, fmtDist, fmtShort, fmtSpeed, fmtTemp, timestampsEndingAt, fmtWeight, kgToShown, shownToKg, fmtCoord, medianAbs, sideShares,
 } from '../public/geo.js';
 
-import { stepPoints, dist as distM, contamTimed, CONTAM_GAP } from '../public/geo.js';
+import { stepPoints, dist as distM, contamTimed, CONTAM_GAP, trailFrom, walkedOfTrail, gpsTrouble } from '../public/geo.js';
 
 let pass = 0;
 const t = (name, fn) => { fn(); pass++; console.log(`  ok  ${name}`); };
@@ -452,6 +452,81 @@ t('departure: the countdown reads from the moment she left', () => {
   const ageMin = 20;
   assert.equal(st.offAt + ageMin * 60000 - 60000, 20 * 60000, 'zero is 20 min after she left');
   assert.ok(st.offAt + ageMin * 60000 > 60000, 'and it is in the future the moment it starts');
+});
+
+/* The layer's walk, in metres east (x) and north (y) of the drawn start. */
+const KX = 111320 * Math.cos(WELLS.lat * Math.PI / 180);
+const walkAt = (x, y, t) => ({ lat: WELLS.lat + y / 111320, lon: WELLS.lon + x / KX, t });
+const T0 = Date.UTC(2026, 8, 20, 9);
+const PLAN = [walkAt(0, 0, T0), walkAt(150, 0, T0), walkAt(300, 0, T0)];
+
+/** Every fix at 1 Hz along `path(s)`, fed to departure as walkHud feeds it. */
+function walkDeparture(path, secs) {
+  const pts = [];
+  let st = { atStart: false, offAt: 0 }, firedAt = null;
+  for (let s = 0; s <= secs; s++) {
+    const [x, y] = path(s);
+    const p = walkAt(x, y, T0 + s * 1000);
+    pts.push(p);
+    if (st.offAt) continue;
+    st = departure(st, { d: dist(p, PLAN[0]), t: p.t, ...walkedOfTrail(pts, PLAN) });
+    if (st.offAt) firedAt = { s, x, y };
+  }
+  return { st, firedAt, pts };
+}
+
+t('departure: the walk from the car park to the start does not start the clock', () => {
+  // Parked 150 m short of a start drawn behind a wall: she never gets within
+  // 25 m of it (the nearest she comes is 30 m), so only the fallback can fire.
+  // Before, it counted the walk to the start as trail and fired 89 m short.
+  const { st, firedAt } = walkDeparture(s => [-150 + 1.3 * s, -30], 300);
+  assert.ok(firedAt, 'it does fire once she is walking the trail');
+  assert.ok(firedAt.x >= 55, `not before she has walked the trail itself (fired at x=${firedAt.x.toFixed(0)} m)`);
+  near(st.offAt, T0 + 115000, 1000, 'and the trail is timed from when she was by the start');
+});
+
+t('departure: walking straight through the start still fires on leaving it', () => {
+  const { st, firedAt } = walkDeparture(s => [-150 + 1.3 * s, 0], 300);
+  assert.ok(firedAt.x > 40 && firedAt.x < 43, `the fix that clears 40 m (x=${firedAt.x.toFixed(1)})`);
+  assert.equal(st.offAt, T0 + firedAt.s * 1000);
+});
+
+t('departure: wandering about behind the start is not a departure', () => {
+  // 80 m of pacing up and down 30 m behind A, never along the line.
+  const { st } = walkDeparture(s => [-30 - 20 * Math.abs(Math.sin(s / 10)), -30 + (s % 20)], 80);
+  assert.equal(st.offAt, 0, 'no progress along the plan, no clock');
+});
+
+t('trailFrom: the walked trail starts at the start, not at the car', () => {
+  const { st, pts } = walkDeparture(s => [-150 + 1.3 * s, -30], 346);
+  const i = trailFrom(pts, PLAN[0], st.offAt);
+  const trail = pts.slice(i);
+  assert.ok(dist(trail[0], PLAN[0]) < 31, 'its first point is the one nearest the drawn start');
+  near(pathLen(trail), 300, 3, 'the trail is the 300 m walked from there, without the 150 m before it');
+  assert.equal(trail[0].t, st.offAt, 'and it begins when the countdown did');
+
+  // A loop that finishes back by the start: the start is where she began it.
+  const loop = [...Array(120).keys()].map(s => walkAt(-100 + 1.3 * s, 3, T0 + s * 1000))
+    .concat([walkAt(60, 30, T0 + 200e3), walkAt(0, 30, T0 + 250e3), walkAt(0, 1, T0 + 280e3)]);
+  const armed = departure(departure(null, { d: 3, t: T0 + 77e3, walked: 0 }), { d: 45, t: T0 + 111e3, walked: 45 });
+  const j = trailFrom(loop, PLAN[0], armed.offAt);
+  assert.ok(j < 120 && loop[j].t <= armed.offAt, 'not the end of the loop, which is nearer the start');
+});
+
+t('gpsTrouble: a recording that is keeping nothing says so', () => {
+  const now = T0 + 600e3;
+  const fix = (ago, extra = {}) => ({ lat: 51, lon: -2, t: now - ago, ...extra });
+  assert.equal(gpsTrouble({ last: fix(2000), now }), null, 'fixes arriving: nothing to say');
+  assert.equal(gpsTrouble({ startedAt: now - 5000, now }), null, 'the first few seconds are not a fault');
+  assert.deepEqual(gpsTrouble({ startedAt: now - 20000, now }), { why: 'none', ms: 20000 }, 'no fix at all for 20 s');
+  assert.equal(gpsTrouble({ startedAt: now - 3000, droppedAt: now - 1000, now }).why, 'poor',
+    'every fix so far refused for accuracy: said at once');
+  assert.deepEqual(gpsTrouble({ last: fix(30000), droppedAt: now - 1000, now }), { why: 'poor', ms: 30000 },
+    'fixes still arriving, all of them too poor to keep');
+  assert.equal(gpsTrouble({ last: fix(30000), droppedAt: now - 40000, now }).why, 'none', 'no fixes arriving at all');
+  assert.equal(gpsTrouble({ last: fix(300000, { _seen: now - 2000 }), now }), null,
+    'standing still is being recorded, however long ago the point was first kept');
+  assert.equal(gpsTrouble({ last: fix(1000), blocked: true, now }).why, 'blocked', 'location refused outright');
 });
 
 t('progressAlong: how far in, how far left, and how far off', () => {
