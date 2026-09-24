@@ -9,10 +9,11 @@
 
 import { simplify, pathLen, cardinal, fmtDist, fmtShort, fmtSpeed, fmtTemp, fmtWeight, fmtCoord } from './geo.js';
 import { through, b64url, unb64url, needStreams } from './card.js';
-import { targetById, ageBand, dogAge } from './store.js';
+import { targetById, ageBand, dogAge, healApproach } from './store.js';
 import { DEBRIEF, FLAGS, NOTE_TAGS, toldField, toldOf } from './debrief.js';
 import { CONFIDENCE, labelOf as callLabel } from './call.js';
 import { cleanSeen, seenLine } from './ground.js';
+import { rainRate } from './field.js';
 
 const MAGIC = 'TS1.';
 const fin = Number.isFinite;
@@ -200,7 +201,8 @@ function unpack(o) {
     wps: unpackPts(o.wps) ?? [],
     contamination: (Array.isArray(o.contam) ? o.contam : []).map(unpackPts).filter(p => p?.length > 1).map(points => ({ points })),
     wx: o.wx && typeof o.wx === 'object' ? o.wx : null,
-    result: o.result && typeof o.result === 'object' ? o.result : null,
+    /* A link sent before the approach was put right still says it back to front. */
+    result: o.result && typeof o.result === 'object' ? healApproach(o.result) : null,
     coach: o.coach && typeof o.coach === 'object' ? {
       assisted: !!o.coach.assisted, tolM: fin(o.coach.tolM) ? o.coach.tolM : null, scent: !!o.coach.scent,
       calls: fin(o.coach.calls) ? o.coach.calls : null,
@@ -521,7 +523,9 @@ export function detailSections(m, u = {}) {
     `${fmtSpeed(wind.speed, imp)}${fin(wind.from) ? ` from ${cardinal(wind.from)}` : ''}`]);
   if (fin(wx?.wind_gusts)) weather.push(['Gusts', fmtSpeed(wx.wind_gusts, imp)]);
   if (fin(wx?.humidity)) weather.push(['Humidity', `${Math.round(wx.humidity)} %`]);
-  if (fin(wx?.precipitation) && wx.precipitation > 0) weather.push(['Rain', `${wx.precipitation.toFixed(1)} mm`]);
+  /* As a rate: the record holds a 15-minute total, and "0.5 mm" with no
+     time attached reads as a drizzle when it is 2 mm an hour. */
+  if (rainRate(wx) > 0) weather.push(['Rain', `${rainRate(wx).toFixed(1)} mm/h`]);
   if (weather.length) out.push({ title: 'Weather', rows: weather, note: 'Forecast for open ground, wind at 10 m (Open-Meteo)' });
 
   if (m.wps?.length && fin(m.track?.[0]?.t)) {
@@ -594,7 +598,7 @@ export function liveModel(meta, chunks = []) {
     track: pts.length > 1 ? pts : null,
     wps: okPts(meta?.wps) ?? [],
     wx: meta?.wx && typeof meta.wx === 'object' ? meta.wx : null,
-    result: meta?.result && typeof meta.result === 'object' ? meta.result : null,
+    result: meta?.result && typeof meta.result === 'object' ? healApproach(meta.result) : null,
     k: fin(meta?.k) ? meta.k : null,
     ended: !!meta?.ended,
     thinnedM: 0,

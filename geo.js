@@ -202,6 +202,18 @@ export function windRegime(heading, windFromDeg) {
   };
 }
 
+/** How a dog came in to a find, against the wind, in the words a search
+    result uses. `windFromDeg` is where the wind blows FROM, as Open-Meteo
+    gives it, so heading toward it is walking into the wind. The search result
+    used to work this out on its own and named it back to front, calling a dog
+    that came in nose to the wind "with the wind". Reading it off windRegime
+    means it cannot disagree with the rest of the app about which way is which. */
+export function approachToWind(heading, windFromDeg) {
+  if (!Number.isFinite(heading) || !Number.isFinite(windFromDeg)) return null;
+  const { label } = windRegime(heading, windFromDeg);
+  return label === 'headwind' ? 'into the wind' : label === 'tailwind' ? 'with the wind' : 'across the wind';
+}
+
 /** How far the workable line sits from the true line. Saturates: the ground
     keeps emitting, so the offset settles rather than growing without bound. */
 export function scentOffset(windMs, ageS, k = PV.driftPerMs) {
@@ -281,29 +293,43 @@ function enu(o, p) {
 }
 
 /** Signed cross-track distance of p from segment a→b, clamped to the segment.
-    + right of travel a→b, − left, 0 on the line (or a degenerate segment). */
+    + right of travel a→b, − left, 0 on the line (or a degenerate segment).
+    `along` is where p falls along the segment before clamping: below 0 is
+    behind a, above 1 is beyond b. */
 export function crossTrackSigned(a, b, p) {
   const ab = enu(a, b), ap = enu(a, p);
   const L2 = ab.x * ab.x + ab.y * ab.y;
-  if (L2 < 1e-9) return { off: dist(a, p), signed: 0 };   // no direction, no side
-  const t = Math.max(0, Math.min(1, (ap.x * ab.x + ap.y * ab.y) / L2));
+  if (L2 < 1e-9) return { off: dist(a, p), signed: 0, along: null };   // no direction, no side
+  const along = (ap.x * ab.x + ap.y * ab.y) / L2;
+  const t = Math.max(0, Math.min(1, along));
   const dx = ap.x - t * ab.x, dy = ap.y - t * ab.y;
   const d = Math.hypot(dx, dy);
   // z of ab×ap: > 0 means p sits LEFT of travel (x east, y north, right-handed).
   const cross = ab.x * ap.y - ab.y * ap.x;
-  return { off: d, signed: cross < 0 ? d : cross > 0 ? -d : 0 };
+  return { off: d, signed: cross < 0 ? d : cross > 0 ? -d : 0, along };
 }
 
 /** Signed offset of every track point from its nearest trail segment.
-    Needs a trail of at least two points; returns [] otherwise. */
-export function signedOffsets(trail, track) {
+    Needs a trail of at least two points; returns [] otherwise.
+
+    With `withinEnds`, a point whose nearest place on the trail is behind the
+    start or beyond the end gets NaN instead of a number. Past the end there
+    is no line to be left or right of: the clamped distance is mostly how far
+    past the end the point is, and its side comes from a cross product that is
+    close to zero, so it is decided by GPS noise. A handler standing at the
+    runner with a 10 m line put the dog 10 m past the end, and a long reward
+    there read as minutes spent on one side, picked at random. */
+export function signedOffsets(trail, track, { withinEnds = false } = {}) {
   if (!trail || trail.length < 2 || !track?.length) return [];
+  const last = trail.length - 1;
   return track.map((p) => {
-    let best = null;
+    let best = null, at = 0;
     for (let i = 1; i < trail.length; i++) {
       const c = crossTrackSigned(trail[i - 1], trail[i], p);
-      if (!best || c.off < best.off) best = c;
+      if (!best || c.off < best.off) { best = c; at = i; }
     }
+    if (withinEnds && best.along != null
+      && ((at === 1 && best.along < 0) || (at === last && best.along > 1))) return NaN;
     return best.signed;
   });
 }
@@ -321,16 +347,24 @@ export function medianAbs(offs) {
 /** Share of the run's time spent left of, on, and right of the line. Each
     fix weighs what it stood for — its dwell plus the gap to the next fix,
     capped so one dropped stretch cannot own the answer. Within `deadM` of
-    the line a fix says nothing about side and counts as "on". */
+    the line a fix says nothing about side and counts as "on".
+
+    A fix with no offset (NaN: before the start or past the end of the
+    trail) has no line to be on or off, so it carries no weight at all. It
+    used to count as "on". The last fix's dwell is left out too: after the
+    last step comes the reward at the find, or the wait before Finish is
+    pressed, and that is not the dog working the trail. A 90 second reward
+    used to outweigh most of a short run. */
 export function sideShares(track, offs, { deadM = 3, capS = 10 } = {}) {
   if (!track?.length || !offs?.length || track.length !== offs.length) return null;
   let left = 0, on = 0, right = 0;
   track.forEach((p, i) => {
+    const o = offs[i];
+    if (!Number.isFinite(o)) return;
     const next = track[i + 1];
     const gap = next && Number.isFinite(next.t) && Number.isFinite(p.t) ? Math.min(capS, Math.max(0, (next.t - p.t) / 1000)) : 1;
-    const w = gap + (p.dwellS > 0 ? p.dwellS : 0);
-    const o = offs[i];
-    if (!Number.isFinite(o) || Math.abs(o) < deadM) on += w;
+    const w = gap + (next && p.dwellS > 0 ? p.dwellS : 0);
+    if (Math.abs(o) < deadM) on += w;
     else if (o > 0) right += w;
     else left += w;
   });
@@ -339,10 +373,13 @@ export function sideShares(track, offs, { deadM = 3, capS = 10 } = {}) {
   return { left: left / total, on: on / total, right: right / total };
 }
 
-/** Mean of signed offsets — kept for the side, never for the distance. */
+/** Mean of signed offsets — kept for the side, never for the distance.
+    A fix with no offset (NaN, off either end of the trail) is left out:
+    one of them would otherwise turn the whole mean into NaN. */
 export function meanSigned(offs) {
-  if (!offs?.length) return null;
-  return offs.reduce((a, b) => a + b, 0) / offs.length;
+  const xs = (offs ?? []).filter(Number.isFinite);
+  if (!xs.length) return null;
+  return xs.reduce((a, b) => a + b, 0) / xs.length;
 }
 
 /** Which side of the travel direction the drift bearing points to:
@@ -368,15 +405,36 @@ export function sideAgreement(offs, predictedSide, deadM = 1.5) {
    The phone is in the handler's hand; the dog is a line-length ahead. Grading
    the phone's track against the trail penalises the handler for their own
    line. Project each fix forward along the handler's heading before offsets
-   are computed. */
+   are computed.
+
+   The heading is taken over a stretch of the walk at least a line-length
+   long, never from one kept fix to the next. Kept fixes can be only 2.5 m
+   apart, and a heading read off 2.5 m and then carried 10 m ahead multiplies
+   any sideways wobble between two fixes about four times over: a handler
+   walking exactly on the line read as 3 m off it half the time, on a side
+   chosen by the noise. Over a line-length the wobble comes through about one
+   to one, whatever the line. The coach smooths its heading for the same
+   reason. */
 export function lineCorrect(track, lineM) {
   if (!track?.length || !(lineM > 0)) return track ? track.slice() : [];
-  let hdg = null;
+  /* How far back along the walk to look for that stretch. Circling on the
+     spot never produces one, and then the last heading stands. */
+  const reach = lineM * 4;
+  const heading = track.map((p, i) => {
+    let walked = 0;
+    for (let j = i - 1; j >= 0 && walked <= reach; j--) {
+      walked += dist(track[j + 1], track[j]);
+      if (dist(track[j], p) >= lineM) return bearing(track[j], p);
+    }
+    return null;
+  });
+  /* Until the handler has gone a line-length there is nothing behind them to
+     read, so the start borrows the first heading the walk does give: the way
+     they set off. Standing still, or circling, keeps the last one. */
+  let hdg = heading.find(h => h != null) ?? null;
   return track.map((p, i) => {
-    const from = i > 0 ? track[i - 1] : p;
-    const to = i > 0 ? p : (track[1] ?? p);
-    if (dist(from, to) > 0.5) hdg = bearing(from, to);   // standing still keeps the last heading
-    if (hdg == null) return { ...p };                     // never moved: nothing to project along
+    if (heading[i] != null) hdg = heading[i];
+    if (hdg == null) return { ...p };                     // never went a line-length: nothing to project along
     const q = project(p, hdg, lineM);
     return { ...p, lat: q.lat, lon: q.lon };
   });

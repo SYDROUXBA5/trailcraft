@@ -7,13 +7,13 @@
    without. Weather: Open-Meteo, the one public API with soil temperature. */
 
 import {
-  pathLen, cardinal, dist, dwellFold, bearing, project, fmtDist, fmtShort, fmtSpeed, fmtTemp, unitShort, fmtWeight, kgToShown, shownToKg, fmtCoord, scentField, plumePolygon, densify, timestamps, signedOffsets, meanSigned, sideOfDrift, sideAgreement, lineCorrect, departure, timestampsEndingAt, progressAlong, splitLine, smoothBearing, medianAbs, sideShares,
+  pathLen, cardinal, dist, dwellFold, bearing, project, fmtDist, fmtShort, fmtSpeed, fmtTemp, unitShort, fmtWeight, kgToShown, shownToKg, fmtCoord, scentField, plumePolygon, densify, timestamps, signedOffsets, meanSigned, sideOfDrift, sideAgreement, lineCorrect, departure, timestampsEndingAt, progressAlong, splitLine, smoothBearing, medianAbs, sideShares, approachToWind,
 } from './geo.js';
 import { stepPoints, contamTimed } from './geo.js';
 import { packDraft, unpackDraft, draftAlive, draftStats } from './draft.js';
 import { handlerStats } from './store.js';
 import { plumePalette, stepPalette, windPalette, trackPalette, COLOUR_PRESETS, isHex, mix } from './colours.js';
-import { FLAT, buildTerrain, stability, regime, flowAt, normOf } from './field.js';
+import { FLAT, buildTerrain, stability, regime, flowAt, normOf, rainRate, RAIN_SUMS_PER_HOUR } from './field.js';
 import { predictedOffsets, ScentSim, driftFrom, stepByFlow } from './sim.js';
 import { PARAMS, DIALS, PV, setParam, resetParams, changed, isDefault, tally, dialById, PRESETS, applyPreset } from './params.js';
 import { encodeTrail, decodeTrail, cardUrl, cardFromText } from './card.js';
@@ -31,13 +31,13 @@ import { trailModel, encodeShared, decodeShared, sharedUrl, toGpx, fileBase,
          detailSections, headline, notes, liveMeta, liveModel } from './share.js';
 import { buildPdf, jpegSize } from './pdf.js';
 import { coachStep, initialCoach, coachPhrase, coachLine, TOL_OPTIONS, COACH_DEFAULTS } from './coach.js';
-import { DEBRIEF, FLAGS, NOTE_TAGS, blankDebrief, debriefDone, debriefLine, labelOf, ownRun } from './debrief.js';
-import { CONFIDENCE, stampCall, confidenceOf, firstCall, calibration, calibrationLine, callVerdict } from './call.js';
+import { DEBRIEF, FLAGS, NOTE_TAGS, blankDebrief, debriefDone, debriefLine, labelOf, ownRun, stickyDebrief } from './debrief.js';
+import { CONFIDENCE, stampCall, confidenceOf, firstCall, calibration, calibrationLine, callVerdict, runsOf } from './call.js';
 import { isNative, watchBackground, canHaptic, haptic, watchHeading } from './native.js';
 import { checkAuthFields, AUTH_MIN_PASSWORD } from './sync-core.js';
 import { createStore, migrateV1, TARGETS, ODOURS, targetById, targetText, verbs, uid,
          dogStats, ageBand, AGE_BANDS, LEVELS, levelById, dogAge, patchSession, runAgain,
-         askDelete, storageWords } from './store.js';
+         askDelete, storageWords, APPROACH_V } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
 const BUILD = '2026-09-22n';
@@ -2075,7 +2075,9 @@ function benchTrail(centre) {
 function benchWx() {
   return {
     wind_speed: PV.wind, wind_direction: PV.dir, wind_gusts: Math.max(PV.wind, PV.gust),
-    temp: PV.air, soil_temp: PV.soil, humidity: PV.hum, precipitation: PV.rain,
+    /* The rain dial is a rate in mm/h; a weather record holds the 15-minute
+       total Open-Meteo gives, so the dial is written the way a forecast is. */
+    temp: PV.air, soil_temp: PV.soil, humidity: PV.hum, precipitation: PV.rain / RAIN_SUMS_PER_HOUR,
     dew_point: PV.air - 2, time: null,
   };
 }
@@ -2140,7 +2142,7 @@ function benchReadout(st, field, trail, life) {
 /* scentLife is not exported under that name here; field.js owns it and the
    plume already uses it, so ask it the same way the plume does. */
 const scentLifeOf = (wx, st) => {
-  const hum = wx?.humidity ?? 70, wind = wx?.wind_speed ?? 0, rain = wx?.precipitation ?? 0, soil = wx?.soil_temp;
+  const hum = wx?.humidity ?? 70, wind = wx?.wind_speed ?? 0, rain = rainRate(wx), soil = wx?.soil_temp;
   const fHum = PV.humA + hum / PV.humB;
   const fWind = 1 / (1 + wind / PV.windHalf);
   const fHot = soil == null ? 1 : 1 / (1 + Math.max(0, soil - PV.hotKnee) / PV.hotScale);
@@ -2476,7 +2478,10 @@ function paintCallBlock(s) {
   else if (why === 'seen') tail += ' This one doesn’t count, because the answer was already on screen.';
   else if (why === 'someone-elses') tail += ' This one doesn’t count towards your record: it is someone else’s run.';
   $('callSummary').textContent = `You called it “${band?.label ?? c.call.conf}”${tail}`;
-  $('callCal').textContent = calibrationLine(calibration(db.sessions()));
+  /* The run's own handler's record only. A run kept from someone else's
+     link has no handler here, and its summary already speaks of "your
+     record", so it shows the handler on this phone. */
+  $('callCal').textContent = calibrationLine(calibration(runsOf(db.sessions(), s.handlerId ?? S.handler?.id)));
 }
 
 /* ── The debrief ──────────────────────────────────────────────────────
@@ -2496,9 +2501,9 @@ let dbSeen = null;      // what they saw: kept apart from what they judged
 function openDebrief(s) {
   if (!s) return;
   dbFor = s;
-  /* Sticky fields carry over: a class runs handler-blind all morning and
-     nobody wants to say so eleven times. */
-  const last = db.sessions().find(x => x.id !== s.id && x.data?.debrief)?.data?.debrief ?? null;
+  /* Sticky fields carry over from this handler's own last debrief: they run
+     handler-blind all morning and nobody wants to say so eleven times. */
+  const last = stickyDebrief(db.sessions(), s);
   dbDraft = s.data.debrief ? { ...s.data.debrief } : blankDebrief(last);
   dbSeen = s.data.seen ? { ...s.data.seen } : blankSeen();
   const d = S.dogs.find(x => x.id === s.dogId);
@@ -3973,7 +3978,9 @@ async function computeResult(s, track, wps, startedAt, { bank = true } = {}) {
   /* The phone's track, projected a line-length ahead: an ESTIMATE of where
      the dog was, never a measurement. It is called the track throughout. */
   const corrected = lineCorrect(track, dogRow?.lineM ?? 0);
-  const offs = signedOffsets(trail, corrected);
+  /* Only where there is a line beside the dog: before the start or past the
+     end a fix has no side (signedOffsets). */
+  const offs = signedOffsets(trail, corrected, { withinEnds: true });
   const mean = meanSigned(offs);
   const medAbs = medianAbs(offs);
   const shares = sideShares(corrected, offs, { deadM: 3 });
@@ -4076,17 +4083,16 @@ function searchResult(s, track, wps, startedAt, wx, dogName, ageMin) {
     let back = path.length - 1;
     while (back > 0 && dist(path[back], path[path.length - 1]) < 20) back--;
     if (path.length > 1 && wx?.wind_direction != null) {
-      const ab = bearing(path[back], path[path.length - 1]);
-      const into = (wx.wind_direction) % 360;              // walking toward where wind comes FROM
-      const off = Math.abs(((ab - into + 540) % 360) - 180);
-      approach = off > 135 ? 'into the wind' : off < 45 ? 'with the wind' : 'across the wind';
+      approach = approachToWind(bearing(path[back], path[path.length - 1]), wx.wind_direction);
     }
     sentence = `${dogName} indicated in ${fmtDur(toFirst)}`
       + (catchM != null ? `, ${catchM} m from the hide` : '')
       + (approach ? `, coming ${approach}.` : '.');
   }
   return {
-    kind: 'search', sentence, toFirst, catchM, approach, ageMin,
+    /* approachV marks a result whose approach is the right way round, so the
+       store never swaps it back (healApproach). */
+    kind: 'search', sentence, toFirst, catchM, approach, approachV: APPROACH_V, ageMin,
     stability: st?.label ?? null, stabilityPlain: st?.plain ?? null,
     wind: wx ? { speed: wx.wind_speed, from: wx.wind_direction } : null,
   };

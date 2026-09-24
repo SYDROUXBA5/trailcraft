@@ -107,6 +107,16 @@ export function scorable(session) {
   return v.ok ? { conf: v.conf, right: v.right, at: v.at } : null;
 }
 
+/** One handler's sessions, and nobody else's. A phone carries several
+    handlers, a trainer's phone a whole class, and calibration measures one
+    person. Run over every session on the phone, one handler's hits were
+    credited to another: "When you say “Certain”, you’re right 8 times in 10"
+    was the class average, printed to each of them as their own. */
+export function runsOf(sessions, handlerId) {
+  if (!handlerId) return [];
+  return (sessions ?? []).filter(s => s?.handlerId === handlerId);
+}
+
 /** How the handler's confidence has actually performed, band by band.
 
     Returns a row per band whether or not it has enough runs behind it, so the
