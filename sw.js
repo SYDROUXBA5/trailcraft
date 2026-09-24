@@ -212,7 +212,15 @@ self.addEventListener('fetch', (e) => {
     const key = tileKey(e.request);
     const hit = await tiles.match(key, { ignoreVary: true });
     if (hit) return hit;
-    const res = await fetch(e.request);
+    /* The lettering is the one outside file the page waits on before it draws
+       anything, so on one bar it gets a few seconds and then the phone's own
+       letters are used. A map tile that is slow only leaves a gap in the map,
+       and the map software is large enough that a slow link genuinely needs
+       longer, so those wait as long as the network does. */
+    const fonts = /^fonts\.(googleapis|gstatic)\.com$/.test(url.hostname);
+    const res = fonts
+      ? await Promise.race([fetch(e.request), wait(PATIENCE * 2, null)]) ?? Response.error()
+      : await fetch(e.request);
     if (res.ok) e.waitUntil(keepTile(tiles, key, res.clone()));
     return res;
   })());
