@@ -510,7 +510,15 @@ t('batch 1 follow-ups the checkers asked for', () => {
      request may not exceed 10 MiB, and a refused record is left behind alone. */
   const sync = readFileSync(new URL('../public/sync.js', import.meta.url), 'utf8');
   assert.match(sync, /bytes \+ size > BATCH_BYTES/);
-  assert.match(sync, /try \{ batch\.set\(userDoc\(uid, name, rec\.id\), payload\); \} catch \{ skipped\.push\(rec\.id\); continue; \}/);
+  assert.match(sync, /try \{ batch\.set\(userDoc\(uid, name, rec\.id\), payload\); \} catch \(e\) \{ refused\.set\(rec\.id/,
+    'a record the cloud refuses is left behind by itself, and reported as refused rather than as too long');
+  assert.match(sync, /const BATCH_BYTES = 5_000_000;/, 'with room for the request to be bigger than the stored size');
+  /* One unfinished recording at a time: a waiting one is dealt with before a
+     new recording could overwrite it. */
+  for (const start of ['function startLay() {', 'function startWalk(card) {', 'async function startRun(s) {']) {
+    const at = js.indexOf(start);
+    assert.ok(at > 0 && js.slice(at, at + 400).includes('if (recordingWaits()) return;'), `${start} checks for a waiting recording`);
+  }
   /* Runs kept before links were checked are read through the same cleaning. */
   assert.match(bodyOf('renderResult'), /s\.data\.imported \? \(cleanResult\(s\.data\.result\) \?\? \{\}\)/);
   assert.match(html, /<link rel="stylesheet" crossorigin="anonymous" href="https:\/\/fonts\.googleapis\.com/,

@@ -247,7 +247,9 @@ async function applyUser(u) {
        straight away, and half-sent records still belong to this account. */
     db.kv.set('ownerUid', u.uid);
     forgetSkipped();
+    refused.clear();
     for (const id of await fullSync(u.uid)) tooBig.add(id);
+    for (const [id, why] of refused) failed.set(id, why);
     stopMirror = db.onChange((table, rec) => mirror(u.uid, table, rec));
     /* "Backed up" only when everything is. Anything left behind is named. */
     settle();
@@ -368,8 +370,14 @@ async function fullSync(uid) {
 /* One request to Firestore may carry at most 10 MiB, and at most 500 writes.
    A first backup of a long history used to go up as batches of 400 whole
    sessions, far over the size limit, so it failed at every launch. */
-const BATCH_BYTES = 8_000_000;
+/* Counted in stored bytes (approxBytes), which runs about a third smaller
+   than the request that carries them, so the budget leaves that room. */
+const BATCH_BYTES = 5_000_000;
 const BATCH_WRITES = 400;
+
+/* Records the cloud would not take for a reason other than size. Kept apart
+   from the too-long ones, so the handler is told the right thing. */
+const refused = new Map();
 
 async function uploadAll(uid, name, rows) {
   const skipped = [];
@@ -385,7 +393,7 @@ async function uploadAll(uid, name, rows) {
     batch ??= fb.writeBatch(fs);
     /* A record the SDK refuses outright is left behind by itself, not with
        every record that happened to share its batch. */
-    try { batch.set(userDoc(uid, name, rec.id), payload); } catch { skipped.push(rec.id); continue; }
+    try { batch.set(userDoc(uid, name, rec.id), payload); } catch (e) { refused.set(rec.id, plain(e) || 'the cloud refused it'); continue; }
     n++; bytes += size;
   }
   await send();

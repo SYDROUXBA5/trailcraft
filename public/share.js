@@ -158,9 +158,9 @@ const WX_SERIES_MAX = 96;
    a field name the cloud refuses (an empty one, or one shaped like __x__),
    and one such kept run used to stop the whole backup at every launch. */
 const WX_RANGE = {
-  temp: [-60, 60], dew_point: [-60, 60], soil_temp: [-60, 60], humidity: [0, 100],
+  temp: [-60, 60], dew_point: [-60, 60], soil_temp: [-60, 85], humidity: [0, 100],
   wind_speed: [0, 80], wind_gusts: [0, 120], wind_direction: [0, 360],
-  precipitation: [0, 300], pressure: [800, 1100], gap: [0, 1e10],
+  precipitation: [0, 300], pressure: [300, 1100], gap: [0, 1e10],
 };
 function cleanWx(wx) {
   const flat = (e) => {

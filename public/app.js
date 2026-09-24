@@ -1391,9 +1391,24 @@ function gpsTroubleText(tr) {
   return `No GPS fix for ${fmtDur(tr.ms)}. Open sky helps.`;
 }
 
+/* The phone keeps one unfinished recording at a time. One that is waiting to
+   be sent or thrown away ("not now" on a recovered walk) would be overwritten
+   by the first fix of a new one, so it is dealt with first. */
+function recordingWaits() {
+  if (rec.on) return false;
+  let d;
+  try { d = unpackDraft(db.draft.read()); } catch { return false; }
+  if (!draftAlive(d)) return false;
+  toast('An unfinished recording is still on this phone. Send it or throw it away first.');
+  recoveryLater = false;
+  offerRecovery();
+  return true;
+}
+
 function startLay() {
   // Emptying the points here while a run is recording would lose the run.
   if (rec.on) return toast('A recording is already going. Stop that one first.');
+  if (recordingWaits()) return;
   const t = S.target;
   clearMap();
   pendingSession = null;
@@ -3731,6 +3746,7 @@ function startWalk(card) {
   /* One phone records one thing. A plan opened from the camera mid-run would
      otherwise take over the run's GPS and write its fixes as the walk. */
   if (rec.on) return toast('A recording is already going. Stop that one first.');
+  if (recordingWaits()) return;
   walk.card = card;
   walk.atStart = false;
   walk.offAt = 0;
@@ -3964,6 +3980,7 @@ const run = { session: null, revealed: false, startedAt: 0, copy: false, stoppin
 
 async function startRun(s) {
   if (rec.on) return toast('A run is already going — stop that one first');
+  if (recordingWaits()) return;
   /* A plume left drawing by a screen that was swiped away rather than closed
      would paint the answer onto a blind run. */
   plumeStop();
