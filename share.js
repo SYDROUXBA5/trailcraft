@@ -153,13 +153,26 @@ function packWx(wx) {
    fifteen-minute steps. A word where a number belongs would reach the
    weather panel as a string and break the arithmetic done on it there. */
 const WX_SERIES_MAX = 96;
+/* Only the fields the app itself writes into a weather record, each within
+   what the air can actually do. Any other key is dropped: a link could carry
+   a field name the cloud refuses (an empty one, or one shaped like __x__),
+   and one such kept run used to stop the whole backup at every launch. */
+const WX_RANGE = {
+  temp: [-60, 60], dew_point: [-60, 60], soil_temp: [-60, 60], humidity: [0, 100],
+  wind_speed: [0, 80], wind_gusts: [0, 120], wind_direction: [0, 360],
+  precipitation: [0, 300], pressure: [800, 1100], gap: [0, 1e10],
+};
 function cleanWx(wx) {
-  const flat = (e) => (e && typeof e === 'object' && !Array.isArray(e)
-    ? Object.fromEntries(Object.entries(e)
-      .filter(([k, v]) => k !== 'series' && k.length <= 32
-        && (fin(v) || (k === 'time' && typeof v === 'string' && v.length < 40)))
-      .slice(0, 40))
-    : null);
+  const flat = (e) => {
+    if (!e || typeof e !== 'object' || Array.isArray(e)) return null;
+    const out = {};
+    for (const [k, [lo, hi]] of Object.entries(WX_RANGE)) {
+      if (fin(e[k]) && e[k] >= lo && e[k] <= hi) out[k] = e[k];
+    }
+    if (typeof e.time === 'string' && e.time.length < 40) out.time = e.time;
+    if (inEra(e.t)) out.t = e.t;
+    return out;
+  };
   const out = flat(wx);
   if (!out) return null;
   if (Array.isArray(wx.series)) out.series = wx.series.slice(0, WX_SERIES_MAX).map(flat).filter(Boolean);
@@ -237,7 +250,7 @@ const RESULT_FIELDS = {
     : null),
 };
 
-function cleanResult(r) {
+export function cleanResult(r) {
   if (!r || typeof r !== 'object' || !RESULT_KINDS.has(r.kind)) return null;
   const out = { kind: r.kind };
   for (const [k, clean] of Object.entries(RESULT_FIELDS)) if (k in r) out[k] = clean(r[k]);
@@ -285,7 +298,12 @@ function unpack(o) {
   if (count > MAX_POINTS || contam.length > MAX_LINES) throw refuse(TOO_BIG);
   const trail = unpackPts(o.trail), hides = unpackPts(o.hides), track = unpackPts(o.track);
   if (!trail && !hides) throw refuse(DAMAGED);
-  const kind = o.kind === 'search' ? 'search' : 'trail';
+  /* A search needs hides and a trail needs a line. A link whose label says
+     one and whose contents are the other opened, could be kept, and then
+     crashed every screen that expected the geometry its label promised. */
+  const kind = o.kind === 'search' ? (hides ? 'search' : 'trail') : (trail?.length > 1 ? 'trail' : 'search');
+  if (kind === 'trail' && !(trail?.length > 1)) throw refuse(DAMAGED);
+  if (kind === 'search' && !hides?.length) throw refuse(DAMAGED);
   return {
     kind,
     name: str(o.name),
@@ -361,8 +379,13 @@ export async function encodeShared(model, info = {}) {
     };
     code = await squeeze(m);
   }
-  /* Past the limit a link is refused on opening, so it is not made at all. */
-  if (code.length > MAX_CODE) throw refuse('This run is too long for a link. Save it as a GPX file instead');
+  /* Past either limit a link is refused on opening, so it is not made at all:
+     the length of the code, and the number of points inside it. */
+  const points = [m.trail, m.hides, m.track, m.wps, ...(m.contamination ?? []).map(c => c.points)]
+    .reduce((n, l) => n + (Array.isArray(l) ? l.length : 0), 0);
+  if (code.length > MAX_CODE || points > MAX_POINTS || (m.contamination?.length ?? 0) > MAX_LINES) {
+    throw refuse('This run is too long for a link. Save it as a GPX file instead');
+  }
   info.thinnedM = m.thinnedM || 0;
   info.chars = code.length;
   return code;

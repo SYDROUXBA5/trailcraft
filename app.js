@@ -28,7 +28,7 @@ import { sync, onSync, initSync, signInWithGoogle, signInWithApple, signOut, del
          signUpWithEmail, signInWithEmail, resetPassword,
          startLive, pushLive, endLive, watchLive, resumeLive } from './sync.js';
 import { trailModel, encodeShared, decodeShared, sharedUrl, toGpx, fileBase,
-         detailSections, headline, notes, liveMeta, liveModel } from './share.js';
+         detailSections, headline, notes, liveMeta, liveModel, cleanResult } from './share.js';
 import { buildPdf, jpegSize } from './pdf.js';
 import { coachStep, initialCoach, coachPhrase, coachLine, TOL_OPTIONS, COACH_DEFAULTS } from './coach.js';
 import { DEBRIEF, FLAGS, NOTE_TAGS, blankDebrief, debriefDone, debriefLine, labelOf, ownRun, stickyDebrief } from './debrief.js';
@@ -3130,9 +3130,21 @@ function keepDraft(force = false) {
   if (d) try { db.draft.save(d); } catch { /* no room */ }
 }
 
-/** Is the unfinished recording on this phone the one for this session? */
-function draftFor(id) {
-  try { return unpackDraft(db.draft.read())?.sessionId === id; } catch { return false; }
+/** Is the unfinished recording on this phone the one for this session?
+    A run's copy names its session. A trail, hide set or walk is copied before
+    any session exists, so it is matched on the recording itself: the moment of
+    its last fix (or last hide), which the saved session keeps exactly. Anything
+    less certain than that leaves the copy alone, because it may be the only
+    record of a different walk. */
+function draftFor(s) {
+  let d;
+  try { d = unpackDraft(db.draft.read()); } catch { return false; }
+  if (!d || !s) return false;
+  if (d.sessionId) return d.sessionId === s.id;
+  const lastT = (pts) => (pts?.length ? pts[pts.length - 1].t : null);
+  const kept = d.kind === 'hide' ? lastT(s.data?.hides) : lastT(s.data?.trail);
+  const drafted = d.kind === 'hide' ? lastT(d.hides) : lastT(d.pts);
+  return Number.isFinite(kept) && kept === drafted;
 }
 
 function dropDraft() {
@@ -4307,7 +4319,10 @@ function legacySentence(r, dogName) {
 
 function renderResult(s) {
   paintGround('resGround', s);
-  const r = s.data.result;
+  /* A run kept from someone else's link before links were checked still holds
+     whatever the link carried. It is read through the same cleaning a link
+     gets now, so a field of the wrong type cannot stop the screen drawing. */
+  const r = s.data.imported ? (cleanResult(s.data.result) ?? {}) : s.data.result;
   const d = S.dogs.find(x => x.id === s.dogId);
   $('resWho').textContent = `${d?.name ?? ''} · ${fmtWhen(s.startedAt)}`;
   $('resSentence').textContent = r.kind === 'trail' && !Number.isFinite(r.medAbs)
@@ -4395,7 +4410,7 @@ function walkVsPlan(s) {
   return { med: medianAbs(offs), worst: Math.abs(worst), side: worst >= 0 ? 'right' : 'left' };
 }
 
-const cap = (w) => w ? w.charAt(0).toUpperCase() + w.slice(1) : w;
+const cap = (w) => (typeof w === 'string' && w ? w.charAt(0).toUpperCase() + w.slice(1) : w);
 
 /* ── Show on map: the ONLY place the plume band appears ───────────── */
 let mapCameFrom = 'scrResult';
@@ -5243,7 +5258,7 @@ function confirmDeleteSession(id) {
   if (stored && !tryDelete(() => db.deleteSession(id))) return false;
   /* A session the phone refused to keep still has its crash copy, and that
      would be offered back at the next launch. It was deleted: it goes too. */
-  if (!stored || draftFor(id)) dropDraft();
+  if (draftFor(s)) dropDraft();
   if (saveTrouble?.session?.id === id) hideSaveTrouble();   // what it was waiting to save has gone
   if (run.session?.id === id) run.session = null;
   if (pendingSession?.id === id) pendingSession = null;
@@ -6702,6 +6717,7 @@ async function importFromLink() {
 /* ── Boot ─────────────────────────────────────────────────────────── */
 /* ── Offering an unfinished recording back ──────────────────────────── */
 let recovering = null;
+let recoveryLater = false;   // "not now" to a recovered walk: ask again at the next launch, not straight away
 
 function offerRecovery() {
   const d = (() => { try { return unpackDraft(db.draft.read()); } catch { return null; } })();
@@ -6777,6 +6793,10 @@ async function recoverKeep() {
     const lastPt = rec.pts[rec.pts.length - 1];
     const short = end && lastPt ? dist(lastPt, end) : 0;
     if (short > 60 && !confirm(`The recording stopped ${fmtM(short)} before the drawn end. Send what was walked anyway?`)) {
+      /* Not now is an answer too. The copy stays on the phone and is offered
+         again next time the app opens; until then the app is hers to use. */
+      recoveryLater = true;
+      toast('Kept on this phone. It is offered again next time you open Trailcraft');
       return boot();
     }
     return keepWalk();
@@ -6821,7 +6841,7 @@ function boot() {
   if (openFromHash()) return;   // a trail someone sent: that first, the app's own business after
   /* Only once there is a handler to own it: recovery goes through the same
      save paths, and those need to know whose walk this is. */
-  if (S.handler && offerRecovery()) return;
+  if (S.handler && !recoveryLater && offerRecovery()) return;
   /* A brand-new phone is offered sign-in before anything else, because if
      there is an account, everything the handler set up on their last phone
      comes back and onboarding is not needed at all. Offered once: "use

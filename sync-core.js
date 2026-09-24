@@ -94,11 +94,17 @@ export function packPoints(pts, { compact = false } = {}) {
   return out;
 }
 
+/* However many points a record claims, never more than its columns hold.
+   A live document is written by whoever started the run, and a hundred bytes
+   claiming twenty million points used to make every viewer build them. */
+const MAX_UNPACK = 200000;
 export function unpackPoints(packed) {
   const keys = Object.keys(packed).filter(k => k !== '__pts');
   const cols = {};
   for (const k of keys) cols[k] = spread(packed[k]);
-  return Array.from({ length: packed.__pts }, (_, i) => {
+  const longest = Math.max(0, ...Object.values(cols).map(c => (Array.isArray(c) ? c.length : 0)));
+  const claimed = Number.isInteger(packed.__pts) && packed.__pts > 0 ? packed.__pts : 0;
+  return Array.from({ length: Math.min(claimed, longest, MAX_UNPACK) }, (_, i) => {
     const p = {};
     for (const k of keys) {
       const col = cols[k];
@@ -159,6 +165,10 @@ export function toCloud(value) {
     const out = {};
     for (const [k, v] of Object.entries(value)) {
       if (v === undefined) continue;
+      /* Firestore refuses an empty field name and any shaped like __x__, and
+         one refused field stops the batch it is in. Nothing the app writes
+         looks like either, so anything that does came from somewhere else. */
+      if (!k || /^__.*__$/.test(k)) continue;
       out[k] = toCloud(v);
     }
     return out;
