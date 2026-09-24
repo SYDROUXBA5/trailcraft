@@ -365,21 +365,30 @@ async function fullSync(uid) {
 }
 
 /** Firestore takes at most 500 writes in one batch. */
+/* One request to Firestore may carry at most 10 MiB, and at most 500 writes.
+   A first backup of a long history used to go up as batches of 400 whole
+   sessions, far over the size limit, so it failed at every launch. */
+const BATCH_BYTES = 8_000_000;
+const BATCH_WRITES = 400;
+
 async function uploadAll(uid, name, rows) {
   const skipped = [];
-  for (let i = 0; i < rows.length; i += 400) {
-    const batch = fb.writeBatch(fs);
-    let n = 0;
-    for (const rec of rows.slice(i, i + 400)) {
-      const payload = toCloud(rec);
-      /* Skipped, and SAID: a backup that quietly leaves a session behind and
-         then reports "backed up" is worse than one that fails. */
-      if (approxBytes(payload) > DOC_LIMIT) { skipped.push(rec.id); continue; }
-      batch.set(userDoc(uid, name, rec.id), payload);
-      n++;
-    }
-    if (n) await batch.commit();
+  let batch = null, n = 0, bytes = 0;
+  const send = async () => { if (n) await batch.commit(); batch = null; n = 0; bytes = 0; };
+  for (const rec of rows) {
+    const payload = toCloud(rec);
+    const size = approxBytes(payload);
+    /* Skipped, and SAID: a backup that quietly leaves a session behind and
+       then reports "backed up" is worse than one that fails. */
+    if (size > DOC_LIMIT) { skipped.push(rec.id); continue; }
+    if (n && (n >= BATCH_WRITES || bytes + size > BATCH_BYTES)) await send();
+    batch ??= fb.writeBatch(fs);
+    /* A record the SDK refuses outright is left behind by itself, not with
+       every record that happened to share its batch. */
+    try { batch.set(userDoc(uid, name, rec.id), payload); } catch { skipped.push(rec.id); continue; }
+    n++; bytes += size;
   }
+  await send();
   return skipped;
 }
 

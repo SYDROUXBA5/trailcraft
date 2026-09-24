@@ -250,8 +250,8 @@ t('an unfinished recording is written down, and nothing reloads over it', () => 
     const body = js.slice(js.indexOf(where), js.indexOf(where) + 1200);
     assert.ok(body.includes(what), `${where} clears the draft`);
   }
-  assert.match(js, /if \(S\.handler && offerRecovery\(\)\) return;/,
-    'boot offers it back, once there is a handler to save it for');
+  assert.match(js, /if \(S\.handler && !recoveryLater && offerRecovery\(\)\) return;/,
+    'boot offers it back, once there is a handler to save it for, unless she said not now');
   assert.ok(htmlIds.has('scrRecover') && htmlIds.has('btnRecoverKeep') && htmlIds.has('btnRecoverDrop'));
 });
 
@@ -499,11 +499,22 @@ t('the session list deletes from a card without opening it, only once Delete ses
 t('batch 1 follow-ups the checkers asked for', () => {
   /* A session the phone refused to keep still has its crash copy: deleting the
      session must take that copy too, or it is offered back at the next launch. */
-  assert.match(bodyOf('confirmDeleteSession'), /if \(!stored \|\| draftFor\(id\)\) dropDraft\(\);/);
+  assert.match(bodyOf('confirmDeleteSession'), /if \(draftFor\(s\)\) dropDraft\(\);/,
+    'only the crash copy that is provably this session’s — another walk’s copy may be its only record');
+  assert.match(bodyOf('draftFor'), /return Number\.isFinite\(kept\) && kept === drafted;/);
   /* A fix arriving proves location is allowed again; the warning must go. */
   assert.match(bodyOf('onFix'), /rec\.blocked = false;/);
   /* A walk the phone lost part-way is not sent as a finished one unasked. */
   assert.match(js, /if \(short > 60 && !confirm\(`The recording stopped \$\{fmtM\(short\)\} before the drawn end/);
+  /* A first backup goes up in batches bounded by size as well as count: one
+     request may not exceed 10 MiB, and a refused record is left behind alone. */
+  const sync = readFileSync(new URL('../public/sync.js', import.meta.url), 'utf8');
+  assert.match(sync, /bytes \+ size > BATCH_BYTES/);
+  assert.match(sync, /try \{ batch\.set\(userDoc\(uid, name, rec\.id\), payload\); \} catch \{ skipped\.push\(rec\.id\); continue; \}/);
+  /* Runs kept before links were checked are read through the same cleaning. */
+  assert.match(bodyOf('renderResult'), /s\.data\.imported \? \(cleanResult\(s\.data\.result\) \?\? \{\}\)/);
+  assert.match(html, /<link rel="stylesheet" crossorigin="anonymous" href="https:\/\/fonts\.googleapis\.com/,
+    'the lettering is fetched so the offline cache can keep it');
   /* The lettering is render-blocking, so it gets a time limit on one bar. */
   const sw = readFileSync(new URL('../public/sw.js', import.meta.url), 'utf8');
   assert.match(sw, /fonts\s*\? await Promise\.race\(\[fetch\(e\.request\), wait\(PATIENCE \* 2, null\)\]\) \?\? Response\.error\(\)/);
@@ -618,7 +629,7 @@ t('the layer’s guided walk is written down, and comes back after a crash', () 
   assert.match(keep, /if \(guardSave\(own, \(\) => db\.addSession\(own\)\)\) dropDraft\(\);/,
     'the draft goes once her record is really kept, not before');
   assert.match(fnSrc('async function recoverKeep()'),
-    /if \(d\.kind === 'walk'\) \{[\s\S]{0,400}walk\.card = d\.plan;\s*\n\s*walk\.offAt = d\.offAt \|\| 0;[\s\S]{0,900}return keepWalk\(\);/,
+    /if \(d\.kind === 'walk'\) \{[\s\S]{0,400}walk\.card = d\.plan;\s*\n\s*walk\.offAt = d\.offAt \|\| 0;[\s\S]{0,1400}return keepWalk\(\);/,
     'a recovered walk is finished the way the button finishes one, asking the same question if it stopped short');
   const cancel = js.slice(js.indexOf("$('walkCancel').addEventListener"), js.indexOf("$('walkCancel').addEventListener") + 400);
   assert.match(cancel, /dropDraft\(\);/, 'a walk cancelled on purpose is never offered back');

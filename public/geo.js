@@ -404,17 +404,11 @@ export function sideAgreement(offs, predictedSide, deadM = 1.5) {
 /* ── Line-length correction ─────────────────────────────────────────
    The phone is in the handler's hand; the dog is a line-length ahead. Grading
    the phone's track against the trail penalises the handler for their own
-   line. Project each fix forward along the handler's heading before offsets
-   are computed.
-
-   The heading is taken over a stretch of the walk at least a line-length
-   long, never from one kept fix to the next. Kept fixes can be only 2.5 m
-   apart, and a heading read off 2.5 m and then carried 10 m ahead multiplies
-   any sideways wobble between two fixes about four times over: a handler
-   walking exactly on the line read as 3 m off it half the time, on a side
-   chosen by the noise. Over a line-length the wobble comes through about one
-   to one, whatever the line. The coach smooths its heading for the same
-   reason. */
+   line. So each fix is moved to where the dog was: the point on the handler's
+   own walk a line-length further on, which is known once the run is over.
+   That follows every bend and overshoot, and GPS wobble comes through one to
+   one rather than magnified. Only the final line-length, with no later walk
+   to read, carries on along the way the walk was going. */
 export function lineCorrect(track, lineM) {
   if (!track?.length || !(lineM > 0)) return track ? track.slice() : [];
   /* Where the dog was is where the handler got to a line-length later. The

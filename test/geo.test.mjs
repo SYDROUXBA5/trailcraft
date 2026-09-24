@@ -355,7 +355,7 @@ t('lineCorrect: a metre of GPS wobble stays about a metre, not four', () => {
   assert.ok(sh.on > 0.95, `on the line ${sh.on.toFixed(2)} of the time`);
 });
 
-t('lineCorrect: the start borrows the way the handler set off; too short a walk is left alone', () => {
+t('lineCorrect: the start reads the walk a line-length on; too short a walk is left alone', () => {
   const track = [0, 2.5, 5, 7.5, 10, 12.5].map((m, i) => ({ ...project(WELLS, 90, m), t: i }));
   const out = lineCorrect(track, 10);
   near(bearing(track[0], out[0]), 90, 0.5, 'the first fix points east, as the walk does');

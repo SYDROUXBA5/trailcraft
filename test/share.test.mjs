@@ -580,4 +580,35 @@ await t('a live run from someone else is held to the same checks as a link', () 
   assert.equal(m.track.length, 2);
 });
 
+
+/* The checkers' second round: what a link could still do after the first fix. */
+await t('weather from a link keeps only real weather, so a kept run cannot jam the backup', async () => {
+  const m = await decodeShared(await forgeLink({
+    kind: 'trail', trail: twoPts,
+    wx: { temp: 12, wind_speed: 3, humidity: 250, wind_direction: -40, '': 2, '__x__': 1, constructor: 4, toString: 5,
+      series: [{ t: 1758000000000, temp: 11, '__name__': 1, '': 1 }] },
+  }));
+  assert.deepEqual(Object.keys(m.wx).sort(), ['series', 'temp', 'wind_speed'],
+    'only the fields the app writes, each within what the air can do');
+  assert.deepEqual(Object.keys(m.wx.series[0]).sort(), ['t', 'temp']);
+});
+
+await t('a link whose label says one thing and whose contents another is read by its contents', async () => {
+  const hidesCalledTrail = await decodeShared(await forgeLink({ kind: 'trail', hides: oneHide }));
+  assert.equal(hidesCalledTrail.kind, 'search', 'hides make a search, whatever the label says');
+  const trailCalledSearch = await decodeShared(await forgeLink({ kind: 'search', trail: twoPts }));
+  assert.equal(trailCalledSearch.kind, 'trail', 'a line makes a trail');
+  await assert.rejects(decodeShared(await forgeLink({ kind: 'trail', trail: { lat: [51200000], lon: [-2600000] } })),
+    'a single point is neither: refused, rather than crashing the screen that opens it');
+});
+
+await t('the encoder refuses exactly what the decoder would', async () => {
+  /* A long walk back and forth over the same few metres packs small but holds
+     more points than a link may carry. It used to make a link that then would
+     not open. */
+  const pts = Array.from({ length: 52000 }, (_, i) => ({ lat: 51.2 + (i % 2) * 1e-5, lon: -2.6, t: 1758000000000 + i * 1000 }));
+  const model = trailModel({ ...session({ trailN: 3 }), data: { ...session({ trailN: 3 }).data, track: pts } }, people);
+  await assert.rejects(encodeShared(model), /too long for a link/);
+});
+
 console.log(`\n${pass} passed total`);

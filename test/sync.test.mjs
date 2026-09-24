@@ -298,4 +298,20 @@ t('the size guard counts the way Firestore counts', () => {
   ]);
 });
 
+
+/* A record written by someone else — a live run is — can claim anything. */
+t('a record never unpacks into more points than it actually holds', () => {
+  const bomb = { __pts: 2e7, lat: [51.2], lon: [-2.6] };
+  const pts = unpackPoints(bomb);
+  assert.equal(pts.length, 1, 'twenty million claimed, one there: one');
+  assert.equal(unpackPoints({ __pts: -3, lat: [1], lon: [2] }).length, 0);
+  assert.equal(unpackPoints({ __pts: 2 ** 32, lat: [1, 2], lon: [3, 4] }).length, 2, 'no RangeError');
+});
+
+t('field names the cloud refuses never reach it', () => {
+  const out = toCloud({ data: { weather: { temp: 5, '': 1, '__x__': 2, series: [{ t: 1, '__name__': 3 }] } } });
+  assert.deepEqual(Object.keys(out.data.weather).sort(), ['series', 'temp']);
+  assert.deepEqual(Object.keys(out.data.weather.series[0]), ['t']);
+});
+
 console.log(`\n${pass} passed total\n`);
