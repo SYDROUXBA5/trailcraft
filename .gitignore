@@ -15,3 +15,5 @@ public/token.js
 
 # Xcode build output and fetched Swift packages
 build/
+.review-batch1.json
+.review-batch2.json
