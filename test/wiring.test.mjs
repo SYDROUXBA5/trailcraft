@@ -196,8 +196,9 @@ t('"backed up" means backed up', () => {
      then report success over the top of it. */
   assert.match(syncJs, /const tooBig = new Set\(\);/);
   assert.match(syncJs, /failed\.set\(rec\.id/, 'a refused write is remembered by record, not by a flag');
-  assert.match(syncJs, /sync\.status = line \? 'partial' : 'synced';/,
-    'anything left behind keeps the backup marked incomplete');
+  assert.match(syncJs, /sync\.status = line \? 'partial' : busy \? 'syncing' : 'synced';/,
+    'anything left behind keeps the backup marked incomplete, and a save still on its way is not "backed up"');
+  assert.match(syncJs, /if \(!busy\) sync\.lastSync = Date\.now\(\);/, '"Backed up just now" only once nothing is on its way');
   const settle = syncJs.slice(syncJs.indexOf('function settle()'), syncJs.indexOf('/* ── Deleting the account'));
   assert.ok(!/status = 'synced';[\s\S]{0,40}error = null/.test(settle), 'success never clears a recorded failure');
   /* A write can land hours later, after a sign-out or a different account. */
@@ -406,8 +407,39 @@ t('a phone carrying another account’s records uploads nothing until it is answ
     'a live link cannot publish records the account has not been given');
   assert.match(syncJs, /if \(db\.kv\.get\('ownerUid', null\) === u\.uid\) db\.kv\.set\('ownerUid', null\);/,
     'deleting one account never un-owns another account’s records');
-  assert.match(js, /db\.wipeAll\(\);\s*\n\s*reclaim\(\);/,
-    'wiping the phone takes the owner mark with it, so the account claims it again');
+  /* Wiping the phone while signed in used to claim it for the account again
+     and keep the mirror running: the next person's records went into it. */
+  assert.ok(!/reclaim/.test(js) && !/export function reclaim/.test(syncJs), 'nothing claims a wiped phone for the account');
+  const wipe = js.slice(js.indexOf("$('btnWipe').addEventListener"), js.indexOf('async function importFromLink'));
+  assert.match(wipe, /if \(signedIn\) \{\s*const ok = await wipeAndSignOut\(\)[\s\S]{0,400}return location\.reload\(\);/,
+    'signed in, a wipe signs out and starts the app again from clean');
+  assert.match(wipe, /This also signs you out\. Your account backup is kept/, 'and says so before it happens');
+  assert.ok(wipe.indexOf('wipeAndSignOut()') < wipe.indexOf('db.wipeAll()'), 'only a signed-out phone is wiped in place');
+  const wipeFn = syncJs.slice(syncJs.indexOf('export async function wipeAndSignOut'), syncJs.indexOf('export async function signOut'));
+  const at = (x) => { const i = wipeFn.indexOf(x); assert.ok(i > 0, `wipeAndSignOut: ${x}`); return i; };
+  assert.ok(at('stopMirror') < at('f.signOut(auth)') && at('f.signOut(auth)') < at('db.wipeAll()'),
+    'nothing uploads, then the account is left, then the phone is cleared');
+  assert.ok(at('await Promise.race([userRun') < at('db.wipeAll()'), 'a sync still running cannot refill the phone');
+  assert.ok(!/ownerUid/.test(wipeFn), 'a wiped phone belongs to nobody');
+});
+
+/* Two phones on one account. The pull and the refusal are run for real in
+   sync-flow.test.mjs; these are the two ends of them that live elsewhere. */
+t('a phone pulls when it comes back, and the cloud refuses a save made from an old copy', () => {
+  assert.match(js, /addEventListener\('visibilitychange', \(\) => \{ if \(document\.visibilityState === 'visible'\) resync\(\); \}\);/,
+    'coming back to the app pulls what another phone changed');
+  assert.match(js, /addEventListener\('online', \(\) => resync\(\)\);/, 'and so does coming back into signal');
+  const own = rules.slice(rules.indexOf('match /users/{uid}/{table}/{recordId}'), rules.indexOf('match /live/{liveId}'));
+  assert.match(own, /allow read, create, delete: if mine\(\);/);
+  assert.match(own, /allow update: if mine\(\)\s*&& \(!\('baseAt' in request\.resource\.data\)\s*\|\| request\.resource\.data\.baseAt == resource\.data\.get\('updatedAt', null\)\);/,
+    'an update names the copy it was made from, and it must be the one the cloud holds');
+  assert.ok(!/allow [a-z, ]*write/.test(own), 'no blanket write left over the top of the check');
+});
+
+t('a wipe waits until the phone knows whether it is signed in', () => {
+  const wipe = js.slice(js.indexOf("$('btnWipe').addEventListener"), js.indexOf('async function importFromLink'));
+  const guard = wipe.indexOf("if (sync.configured && !sync.user && sync.status === 'loading') return toast(");
+  assert.ok(guard > 0 && guard < wipe.indexOf('confirm('), 'asked to wait before anything is asked or wiped');
 });
 
 t('only a live run’s owner can list or delete it; strangers still only read an unexpired link', () => {

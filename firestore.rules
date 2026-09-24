@@ -4,9 +4,22 @@ service cloud.firestore {
 
     // A handler's own records: readable and writable by that account only.
     match /users/{uid}/{table}/{recordId} {
-      allow read, write: if request.auth != null
-                         && request.auth.uid == uid
-                         && table in ['handlers', 'dogs', 'layers', 'sessions', 'calibration'];
+      function mine() {
+        return request.auth != null
+            && request.auth.uid == uid
+            && table in ['handlers', 'dogs', 'layers', 'sessions', 'calibration'];
+      }
+      allow read, create, delete: if mine();
+      // A save names the copy of the record it was made from (baseAt). If
+      // the cloud now holds a different copy, another phone has changed the
+      // record since this one last read it, and a blind overwrite would throw
+      // that change away. So it is refused, and the phone merges the two and
+      // sends the merge (sync.js put). It compares copies, not clocks, which
+      // on two phones can be seconds apart. A save with no baseAt comes from
+      // a build older than this check, and is let through as before.
+      allow update: if mine()
+                    && (!('baseAt' in request.resource.data)
+                        || request.resource.data.baseAt == resource.data.get('updatedAt', null));
     }
 
     // A live run. The id is the key: anyone holding the link can read it

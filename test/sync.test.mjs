@@ -7,6 +7,7 @@ import {
   mergeRecords, visible, tombstone, pruneTombstones,
   packPoints, unpackPoints, toCloud, fromCloud, approxBytes, DOC_LIMIT, mergeCalibration,
   checkAuthFields, authMessage, AUTH_MIN_PASSWORD, syncPlan,
+  mergeOne, calibrationDiffers, syncMessage, fromCloudRecord,
 } from '../public/sync-core.js';
 
 let pass = 0;
@@ -312,6 +313,68 @@ t('field names the cloud refuses never reach it', () => {
   const out = toCloud({ data: { weather: { temp: 5, '': 1, '__x__': 2, series: [{ t: 1, '__name__': 3 }] } } });
   assert.deepEqual(Object.keys(out.data.weather).sort(), ['series', 'temp']);
   assert.deepEqual(Object.keys(out.data.weather.series[0]), ['t']);
+});
+
+/* ── Two phones, one account ──────────────────────────────────────── */
+const run = { id: 's1', name: 'Wood edge', updatedAt: 100, data: { trail: [1], track: [2], result: { found: true } } };
+const renamed = { id: 's1', name: 'Top field', updatedAt: 200, data: { trail: [1] } };
+
+t('a session edited on a phone that missed a run keeps the run and the edit', () => {
+  const { keep, up } = mergeOne(renamed, run, { union: true });
+  assert.equal(keep.name, 'Top field', 'the newer edit wins what both have');
+  assert.deepEqual(keep.data.result, { found: true }, 'and the run only the older copy had is kept');
+  assert.ok(keep.updatedAt > 200, 'stamped newer than both, so every phone takes it');
+  assert.equal(up, true);
+  assert.equal(mergeOne(renamed, run).keep, renamed, 'without union, newest wins whole, as for a dog or a handler');
+});
+
+t('a merge that adds nothing is not sent again', () => {
+  assert.deepEqual(mergeOne(run, { ...run }, { union: true }), { keep: run, up: false }, 'a tie goes to the cloud');
+  const oldBuild = { ...run, syncedAt: { seconds: 1, nanoseconds: 0 }, baseAt: 90 };
+  assert.equal(mergeOne(oldBuild, run, { union: true }).up, false,
+    'the cloud’s own bookkeeping, kept by an older build, is not a field to merge back');
+});
+
+t('a deletion is never merged into, whichever side is newer', () => {
+  const gone = { id: 's1', deleted: true, updatedAt: 300 };
+  assert.equal(mergeOne(gone, run, { union: true }).keep, gone);
+  assert.equal(mergeOne({ ...gone, updatedAt: 50 }, run, { union: true }).keep, run, 'newest still wins');
+});
+
+t('a pull of only what changed does not send the rest again', () => {
+  const local = [{ id: 'a', updatedAt: 5 }, { id: 'b', updatedAt: 5 }];
+  const { merged, toUpload } = mergeRecords(local, [{ id: 'b', updatedAt: 9 }], { partial: true });
+  assert.deepEqual(merged.map(r => [r.id, r.updatedAt]), [['a', 5], ['b', 9]]);
+  assert.deepEqual(toUpload, [], 'a record missing from a partial pull is not missing from the cloud');
+});
+
+t('calibration goes up when its rows differ, not only when their number does', () => {
+  const rows = (a, b) => Array.from({ length: b - a + 1 }, (_, i) => ({ t: a + i, k: 1 }));
+  const merged = mergeCalibration(rows(2, 51), rows(1, 50));
+  assert.equal(merged.length, 50);
+  assert.equal(calibrationDiffers(merged, rows(1, 50)), true, 'fifty rows each, but a new run among them');
+  assert.equal(calibrationDiffers(rows(1, 50), rows(1, 50)), false);
+  assert.equal(calibrationDiffers(rows(1, 3), []), true);
+});
+
+t('a failed backup says what failed, and never that signing in did', () => {
+  const said = (code) => syncMessage({ code });
+  assert.equal(said('resource-exhausted'), 'The free cloud allowance is used up for today.');
+  assert.match(said('unavailable'), /No signal/);
+  assert.match(said('deadline-exceeded'), /No signal/);
+  assert.match(said('permission-denied'), /tries again/);
+  assert.equal(syncMessage({ name: 'SaveError', full: true }), 'This phone is full. Delete an old session to make room.');
+  assert.equal(said('internal'), null, 'unknown: the caller says it in its own words');
+  assert.equal(syncMessage(undefined), null);
+  for (const c of ['unavailable', 'resource-exhausted', 'invalid-argument', 'internal', '']) {
+    assert.ok(!/Sign-in/.test(said(c) || ''), c);
+  }
+});
+
+t('what the cloud writes on a record for itself never lands on the phone', () => {
+  const rec = fromCloudRecord({ id: 's1', updatedAt: 5, baseAt: 4, syncedAt: { toMillis: () => 1 }, data: { trail: { __pts: 1, lat: [1], lon: [2] } } });
+  assert.deepEqual(Object.keys(rec).sort(), ['data', 'id', 'updatedAt']);
+  assert.equal(rec.data.trail.length, 1, 'and the rest comes back as the phone wrote it');
 });
 
 console.log(`\n${pass} passed total\n`);
