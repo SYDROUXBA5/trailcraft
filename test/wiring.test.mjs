@@ -972,4 +972,13 @@ t('a run graded against a drawn plan is given no trail age, and the result shows
   assert.doesNotMatch(js, /ageBand\(x\.data\.result\?\.ageMin\)/, 'the run lists file ages through runAgeMin');
 });
 
+/* The run screen said "and you were right" of any first call on a run that
+   ended in a find, wherever the find was. */
+t('the result card only says a call was right when it was made where the find was', () => {
+  const block = bodyOf('paintCallBlock');
+  assert.doesNotMatch(block, /else if \(d\.outcome === 'found'\) tail = ', and you were right\.';/);
+  assert.match(block, /const at = firstCallWasFind\(s\);\s*\n\s*tail = at === true \? ', and you were right\.'/);
+  assert.match(block, /else if \(why === 'later-find'\) tail \+= ' This one doesn’t count towards your record\.';/);
+});
+
 console.log(`\n${pass} passed total\n`);
