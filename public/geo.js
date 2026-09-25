@@ -230,8 +230,11 @@ export function plumeWidth(ageS, windMs) {
     PV.widthBase + PV.widthGrow * Math.sqrt(Math.max(0, ageS)) * (1 + (windMs ?? 0) / PV.widthWind));
 }
 
-/** Per-point scent field: where the workable line sits, and how wide it is. */
-export function scentField(trail, wx, workedAt, k = DRIFT_PER_MS) {
+/** Per-point scent field: where the workable line sits, and how wide it is.
+    `k` defaults to the bench's live 'Drift per wind' dial, as scentOffset's
+    does. It used to default to DRIFT_PER_MS, the dial's shipped value, and
+    handed that on explicitly, so moving the dial moved nothing on the map. */
+export function scentField(trail, wx, workedAt, k = PV.driftPerMs) {
   if (!trail || trail.length < 2 || !wx) return [];
   const U = wx.wind_speed ?? 0, from = wx.wind_direction ?? 0;
   const end = workedAt ?? trail[trail.length - 1].t;
