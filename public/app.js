@@ -28,7 +28,8 @@ import { sync, onSync, initSync, signInWithGoogle, signInWithApple, signOut, del
          signUpWithEmail, signInWithEmail, resetPassword,
          startLive, pushLive, endLive, watchLive, resumeLive, dropLive } from './sync.js';
 import { trailModel, encodeShared, decodeShared, sharedUrl, toGpx, fileBase,
-         detailSections, headline, notes, liveMeta, liveModel, cleanResult } from './share.js';
+         detailSections, headline, notes, liveMeta, liveModel, cleanResult,
+         sessionFromModel, keptSession, peopleOf } from './share.js';
 import { buildPdf, jpegSize } from './pdf.js';
 import { coachStep, initialCoach, coachPhrase, coachLine, TOL_OPTIONS, COACH_DEFAULTS } from './coach.js';
 import { DEBRIEF, FLAGS, NOTE_TAGS, blankDebrief, debriefDone, debriefLine, labelOf, ownRun, stickyDebrief } from './debrief.js';
@@ -1650,8 +1651,10 @@ function fillSurfaces(s, { reread = false } = {}) {
     and that the model does not use them. */
 function seenHtml(s) {
   const line = seenLine(s.data.seen);
+  /* A run kept from someone's link carries what its own handler saw. */
+  const who = s.data.imported && !ownRun(s) ? 'Its handler recorded' : 'You recorded';
   return line
-    ? `<p class="body small">You recorded: <b>${esc(line.toLowerCase())}</b>. The model doesn’t use this yet.</p>`
+    ? `<p class="body small">${who}: <b>${esc(line.toLowerCase())}</b>. The model doesn’t use this yet.</p>`
     : '';
 }
 
@@ -4525,7 +4528,7 @@ function renderResult(s) {
      whatever the link carried. It is read through the same cleaning a link
      gets now, so a field of the wrong type cannot stop the screen drawing. */
   const r = s.data.imported ? (cleanResult(s.data.result) ?? {}) : s.data.result;
-  const d = S.dogs.find(x => x.id === s.dogId);
+  const d = peopleFor(s).dog;
   $('resWho').textContent = `${d?.name ?? ''} · ${fmtWhen(s.startedAt)}`;
   $('resSentence').textContent = r.kind === 'trail' && !Number.isFinite(r.medAbs)
     ? legacySentence(r, d?.name ?? 'The dog') : r.sentence;
@@ -4792,11 +4795,11 @@ let sharedModel = null, sharedSession = null, sharedFrom = null;
 
 /** A session as the plain model the sharers read: names, not ids. */
 function modelOf(s) {
-  return trailModel(s, {
-    dog: S.dogs.find(d => d.id === s.dogId) ?? null,
-    handler: S.handlers.find(h => h.id === s.handlerId) ?? S.handler ?? null,
-    layer: S.layers.find(l => l.id === s.layerId) ?? null,
-  });
+  return trailModel(s, peopleFor(s));
+}
+/** Who a record belongs to: this phone's people, or a kept run's own names. */
+function peopleFor(s) {
+  return peopleOf(s, { dogs: S.dogs, handlers: S.handlers, layers: S.layers, me: S.handler });
 }
 const unitsForText = () => ({ imperial: imp(), fahrenheit: fahr(), coord: settings.coordFormat, when: fmtWhen });
 const metaLine = (m) => [m.dog?.name, fmtWhen(m.runAt ?? m.laidAt ?? Date.now()),
@@ -4934,22 +4937,6 @@ async function savePdf(m) {
 
 /* ── A trail someone sent ─────────────────────────────────────────── */
 
-/** The model dressed as a session, so the map screen can show it exactly
-    as it shows this phone's own. */
-function sessionFromModel(m) {
-  return {
-    id: 'shared', targetId: m.kind === 'search' ? 'article' : 'person',
-    startedAt: m.laidAt ?? Date.now(), dogId: null, handlerId: null, layerId: null, summary: headline(m),
-    name: m.name ?? null,
-    data: {
-      trail: m.trail ?? undefined, hides: m.hides ?? undefined, contamination: m.contamination ?? [],
-      weather: m.wx ?? null, runWeather: m.runWx ?? undefined, track: m.track ?? undefined, trackWaypoints: m.wps ?? [],
-      trackStarted: m.runAt ?? undefined, result: m.result ?? undefined, plan: m.plan, walked: m.walked, k: m.k,
-      debrief: m.debrief ?? undefined,
-    },
-  };
-}
-
 function paintSharedMini(m) {
   const img = $('sharedMiniImg'), svg = $('sharedMini');
   const all = [m.trail, m.hides, m.track].filter(Boolean).flat();
@@ -4999,9 +4986,7 @@ function openShared(m, from = null) {
    them out of your own calibration: their calls are not your calls. */
 function keepShared() {
   if (!sharedModel || sharedFrom === 'scrLive') return;
-  const s = sessionFromModel(sharedModel);
-  const kept = { ...s, id: uid(),
-    data: { ...s.data, imported: { from: sharedModel.handler ?? null, at: Date.now() } } };
+  const kept = keptSession(sharedModel, { id: uid(), at: Date.now() });
   const saved = guardSave(kept, () => db.addSession(kept));
   /* guardSave returns null when the phone refused it, and has already said so. */
   if (!saved) return;

@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import {
   trailModel, encodeShared, decodeShared, sharedUrl, sharedFromText,
   toGpx, fileBase, detailSections, headline, notes, liveMeta, liveModel,
+  sessionFromModel, keptSession, peopleOf,
 } from '../public/share.js';
 import { through, b64url } from '../public/card.js';
 import { dist } from '../public/geo.js';
@@ -225,6 +226,71 @@ await t('a newer result shows the median, the time per side, and whether the run
   const blind = trailModel({ ...s, data: { ...s.data, coach: { assisted: false, shadow: { tolM: 20, plain: 0, scent: 0 } } } }, people);
   assert.match(detailSections(blind, { when: () => 'x' }).flatMap(sec => sec.rows.map(r => r.join(': '))).join('\n'), /Run: blind — no prompts/);
   assert.match(notes(m).join(' '), /estimates from a forecast, not measurements/);
+});
+
+const rowsOf = (secs) => secs.flatMap(sec => sec.rows.map(r => r.join(': '))).join('\n');
+/* Bob's phone: his own handler and dog, and none of Alice's. */
+const bobs = {
+  dogs: [{ id: 'd9', name: 'Nell' }], handlers: [{ id: 'h9', name: 'Bob' }], layers: [],
+  me: { id: 'h9', name: 'Bob' },
+};
+
+await t('a kept run goes on under its own handler, with its dog, its coach and what was seen', async () => {
+  /* Alice sends Bob a coached run with ground notes, and Bob keeps it. Passed
+     on again, it used to name Bob as the handler, with no dog, no coach and
+     nothing seen on the ground. */
+  const s = session();
+  s.data.coach = { assisted: true, tolM: 20, scent: false, calls: 2 };
+  s.data.seen = { wet: 'damp', sun: 'shade' };
+  const alice = { ...people, handler: { id: 'h1', name: 'Alice' } };
+  const got = await decodeShared(await encodeShared(trailModel(s, alice)));
+  const kept = keptSession(got, { id: 'k1', at: T0 + 60 * 60e3 });
+  assert.equal(kept.handlerId, null, 'no id of this phone’s is pointed at');
+  assert.equal(kept.data.coach.assisted, true);
+  assert.equal(kept.data.seen.wet, 'damp');
+  assert.equal(kept.data.imported.from, 'Alice', 'older builds still read who it came from');
+  const again = trailModel(kept, peopleOf(kept, bobs));
+  const text = rowsOf(detailSections(again, { when: () => 'x' }));
+  assert.match(text, /Handler: Alice/);
+  assert.match(text, /Dog: Bo · Malinois/);
+  assert.match(text, /Laid by: Sophie/);
+  assert.match(text, /Run: assisted — the coach was on/);
+  assert.match(text, /Conditions: Damp/);
+  assert.doesNotMatch(text, /Bob|Nell/);
+  const twice = await decodeShared(await encodeShared(again));
+  assert.equal(twice.handler, 'Alice');
+  assert.equal(twice.dog.name, 'Bo');
+  assert.equal(twice.coach.calls, 2);
+  assert.equal(twice.seen.sun, 'shade');
+  /* The copy on the shared page is the same run, before anyone keeps it. */
+  assert.equal(sessionFromModel(got).data.seen.wet, 'damp');
+});
+
+await t('whose a record is: a run kept by an older build, a run made here on a sent trail, a Trail Card', () => {
+  const at = T0 + 60 * 60e3;
+  /* Kept before the names were stored: only `from`, which was the handler. */
+  const old = { ...session(), dogId: null, handlerId: null, layerId: null };
+  old.data.imported = { from: 'Alice', at };
+  const p = peopleOf(old, bobs);
+  assert.equal(p.handler.name, 'Alice');
+  assert.equal(p.dog, null, 'no dog is better than this phone’s dog');
+  /* A trail Alice sent and Bob kept, then ran himself: his run, her layer. */
+  const ran = { ...session(), dogId: 'd9', handlerId: 'h9', layerId: null };
+  ran.data.imported = { from: 'Alice', at: T0, dog: { name: 'Bo' }, handler: 'Alice', layer: 'Sophie' };
+  const q = peopleOf(ran, bobs);
+  assert.deepEqual([q.handler.name, q.dog.name, q.layer.name], ['Bob', 'Nell', 'Sophie']);
+  /* A Trail Card's trail is filed under this phone's handler, whoever sent it. */
+  const card = { id: 'c1', startedAt: T0, targetId: 'person', handlerId: 'h9', dogId: null, layerId: null,
+    data: { trail: walk(20), imported: { from: 'another phone', at: T0 } } };
+  assert.equal(peopleOf(card, bobs).handler.name, 'Bob');
+  /* This phone's own record reads as it always did. */
+  assert.equal(peopleOf({ ...session(), handlerId: 'gone' }, bobs).handler.name, 'Bob');
+  /* The names came from a stranger's link: only words get through. */
+  const odd = { ...old, data: { ...old.data, imported: { at, handler: { name: 'x' }, layer: 42, dog: { name: 'Bo', photo: 'data:…' } } } };
+  const r = peopleOf(odd, bobs);
+  assert.equal(r.handler, null);
+  assert.equal(r.layer, null);
+  assert.deepEqual(r.dog, { name: 'Bo' });
 });
 
 await t('a search lists its hides and how the dog found them', () => {

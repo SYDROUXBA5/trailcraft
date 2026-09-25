@@ -19,7 +19,7 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import { windAt } from '../public/field.js';
 import { cardinal, fmtSpeed, fmtTemp, forecastNote } from '../public/geo.js';
-import { trailModel, encodeShared, decodeShared } from '../public/share.js';
+import { trailModel, encodeShared, decodeShared, sessionFromModel } from '../public/share.js';
 
 let pass = 0;
 const t = async (name, fn) => { await fn(); pass++; console.log(`  ok  ${name}`); };
@@ -241,10 +241,7 @@ await t('a shared run carries the run’s own weather, and the one who opens it 
     weather: { ...laidWx, series: laidWx.series.map(e => ({ ...e, t: e.t - 26 * 3600e3 })) }, runWeather } };
   const m = await decodeShared(await encodeShared(trailModel(mine, {})));
 
-  const sb = { headline: () => '' };
-  vm.createContext(sb);
-  vm.runInContext(decl('function sessionFromModel('), sb);
-  const theirs = sb.sessionFromModel(m);
+  const theirs = sessionFromModel(m);
   const w = windAt(theirs, RUN);
   assert.equal(w.exact, true, 'the recipient had only the laid weather, a day before the run');
   assert.equal(w.wx.wind_direction, 90);
