@@ -3,6 +3,8 @@ import { handlerStats, ODOURS, targetText, teachesDrift, runAgeMin, driftRows } 
 import { createStore, migrateV1, TARGETS, targetById, verbs, uid,
          dogStats, ageBand, AGE_BANDS, dogAge, SaveError, patchSession, runAgain,
          askDelete, dogsOf, storageWords, healApproach, healSession, APPROACH_V } from '../public/store.js';
+import { mergeCalibration, calibrationDiffers } from '../public/sync-core.js';
+import { readBackup } from '../public/backup.js';
 
 let pass = 0;
 const t = (name, fn) => { fn(); pass++; console.log(`  ok  ${name}`); };
@@ -286,6 +288,48 @@ t('drift rows whose run would not bank today are not read, and nothing is delete
   const st = dogStats('bo', db.sessions(), db.calibration('bo'));
   assert.equal(st.calRows, 5, 'the card counts the rows the figure was worked from');
   assert.equal(driftRows(db.calibration('bo'), []).length, 9, 'with no runs to check, nothing is left out');
+});
+
+/* driftRows reads a row's verdict off its run, and a row whose run cannot be
+   found is read as it was banked. So deleting a coached, revealed or "I
+   knew" run put its row straight back into the dog's figure: five clean runs
+   read 3, and deleting the two coached ones made it 4. */
+t('deleting a run that would not bank leaves its drift row out, on every phone', () => {
+  const db = createStore(fakeBackend());
+  const track = [{ lat: 51.2, lon: -2.64, t: 0 }, { lat: 51.2009, lon: -2.64, t: 60000 }];
+  const T = Date.UTC(2026, 8, 1);             // in the era a backup file keeps
+  const run = (n, data = {}) => ({ id: `r${n}`, handlerId: 'h1', dogId: 'bo', targetId: 'person', startedAt: 1,
+    data: { track, trackStarted: T + n, result: { kind: 'trail', medAbs: 4 }, ...data } });
+  const row = (n, k) => ({ t: T + n, predSide: 1, mean: 8, wind: 4, stability: 'Stable', k });
+  [1, 2, 3, 4, 5].forEach(k => { db.addSession(run(k * 1000)); db.addCalibration('bo', row(k * 1000, k)); });
+  db.addSession(run(6000, { coach: { assisted: true } }));
+  db.addSession(run(7000, { debrief: { outcome: 'found', target: 'real', blind: 'open' } }));
+  db.addCalibration('bo', row(6000, 20));
+  db.addCalibration('bo', row(7000, 20));
+  assert.equal(db.dogDrift('bo'), 3);
+  const heard = [];
+  db.onChange((table, rec) => heard.push(`${table}/${rec.id}`));
+  db.deleteSession('r6000');
+  db.deleteSession('r7000');
+  assert.equal(db.dogDrift('bo'), 3, 'the steered rows stay out once their runs are gone');
+  assert.equal(db.calibration('bo').length, 7, 'and are still kept');
+  assert.equal(dogStats('bo', db.sessions(), db.calibration('bo')).calRows, 5);
+  assert.ok(heard.includes('calibration/bo'), 'the set-aside rows go to the cloud like any change');
+  db.deleteSession('r1000');
+  assert.equal(db.calibration('bo').filter(r => r.skip).length, 2, 'a clean run deleted keeps its row as it was');
+
+  /* The other phone has no run left to judge them by, so the flag travels:
+     through the cloud, whichever side has it, and through a backup file. */
+  const mine = db.calibration('bo');
+  const bare = mine.map(({ skip, ...r }) => r);
+  for (const merged of [mergeCalibration(bare, mine), mergeCalibration(mine, bare)]) {
+    assert.equal(merged.filter(r => r.skip).length, 2);
+  }
+  assert.ok(calibrationDiffers(mine, bare), 'a newly set-aside row is sent');
+  assert.equal(calibrationDiffers(mine, mine), false);
+  db.dogs.upsert({ id: 'bo', handlerId: 'h1', name: 'Bo', photo: null, level: 'Hot', lineM: 10 });
+  const back = readBackup(db.exportAll()).calibration.find(c => c.id === 'bo').rows;
+  assert.equal(back.filter(r => r.skip).length, 2, 'and a backup file keeps it');
 });
 
 t('ageBand: the words the sport uses, with the boundaries stated', () => {

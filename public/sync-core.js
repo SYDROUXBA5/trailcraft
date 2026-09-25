@@ -301,7 +301,11 @@ export const DOC_LIMIT = 1_000_000;
 export function mergeCalibration(localRows = [], remoteRows = [], cap = 50) {
   const seen = new Map();
   for (const r of [...(remoteRows || []), ...(localRows || [])]) {
-    if (r && Number.isFinite(r.t)) seen.set(`${r.t}|${r.k}`, r);
+    if (!r || !Number.isFinite(r.t)) continue;
+    const key = `${r.t}|${r.k}`;
+    /* A row set aside on either phone, when its run was deleted there, stays
+       set aside: the other phone has no run left to judge it by. */
+    seen.set(key, seen.get(key)?.skip === true && r.skip !== true ? { ...r, skip: true } : r);
   }
   return [...seen.values()].sort((a, b) => a.t - b.t).slice(-cap);
 }
@@ -311,7 +315,7 @@ export function mergeCalibration(localRows = [], remoteRows = [], cap = 50) {
     and let the oldest go has fifty rows, the same as the cloud, and was
     never sent. */
 export function calibrationDiffers(rows = [], remoteRows = []) {
-  const key = (r) => `${r?.t}|${r?.k}`;
+  const key = (r) => `${r?.t}|${r?.k}|${r?.skip === true ? 1 : 0}`;
   const theirs = new Set((remoteRows || []).map(key));
   return (rows || []).length !== (remoteRows || []).length || (rows || []).some(r => !theirs.has(key(r)));
 }
