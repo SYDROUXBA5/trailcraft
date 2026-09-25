@@ -13,14 +13,17 @@ export function dist(a, b) {
   return 2 * R * Math.asin(Math.sqrt(h));
 }
 
-/** Project a point `m` metres along `bearing` degrees. */
-export function project(pt, bearing, m) {
+/** Project a point `m` metres along `bearing` degrees. `out` lets the
+    plume's hot loop reuse one object instead of making one per step; it may
+    be `pt` itself, because `pt` is read in full before anything is written. */
+export function project(pt, bearing, m, out = { lat: 0, lon: 0 }) {
   const d = m / R, br = rad(bearing), lat1 = rad(pt.lat), lon1 = rad(pt.lon);
   const lat2 = Math.asin(Math.sin(lat1) * Math.cos(d) + Math.cos(lat1) * Math.sin(d) * Math.cos(br));
   const lon2 = lon1 + Math.atan2(
     Math.sin(br) * Math.sin(d) * Math.cos(lat1),
     Math.cos(d) - Math.sin(lat1) * Math.sin(lat2));
-  return { lat: deg(lat2), lon: deg(lon2) };
+  out.lat = deg(lat2); out.lon = deg(lon2);
+  return out;
 }
 
 export const pathLen = (p) => p.reduce((s, pt, i) => i ? s + dist(p[i - 1], pt) : 0, 0);

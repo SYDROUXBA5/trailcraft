@@ -306,6 +306,24 @@ export function tally() {
   return t;
 }
 
+/** One stability class's creep weight, live, or undefined for a class that
+    has none. flowAt asks for this for every parcel at every step of every
+    frame, so it reads the one dial it needs rather than building a whole
+    stabilityStops() (five arrays and an object) each time it asks. A switch
+    of plain reads, because a looked-up key boxes the number it returns. */
+export function creepOf(key) {
+  switch (key) {
+    case 'convective+': return PV.creepCp;
+    case 'convective': return PV.creepC;
+    case 'neutral': return PV.creepN;
+    case 'stable': return PV.creepS;
+    case 'inversion': return PV.creepI;
+    case 'unknown': return 0.30;
+    default: return undefined;
+  }
+}
+const CREEP_KEYS = ['convective+', 'convective', 'neutral', 'stable', 'inversion', 'unknown'];
+
 /** The stability class's four numbers, live. stability() calls this so the
     boundaries and every multiplier can be moved from the bench. */
 export function stabilityStops() {
@@ -314,7 +332,6 @@ export function stabilityStops() {
     mix: [PV.mixCp, PV.mixC, PV.mixN, PV.mixS, PV.mixI],
     drain: [0, 0, PV.drainN, PV.drainS, PV.drainI],
     life: [PV.lifeCp, PV.lifeC, PV.lifeN, PV.lifeS, PV.lifeI],
-    creep: { 'convective+': PV.creepCp, convective: PV.creepC, neutral: PV.creepN,
-             stable: PV.creepS, inversion: PV.creepI, unknown: 0.30 },
+    creep: Object.fromEntries(CREEP_KEYS.map(k => [k, creepOf(k)])),
   };
 }
