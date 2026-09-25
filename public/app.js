@@ -11,7 +11,7 @@ import {
 } from './geo.js';
 import { stepPoints, contamTimed, trailFrom, walkedOfTrail, gpsTrouble, forecastNote } from './geo.js';
 import { packDraft, unpackDraft, draftAlive, draftStats } from './draft.js';
-import { handlerStats } from './store.js';
+import { handlerStats, teachesDrift } from './store.js';
 import { plumePalette, stepPalette, windPalette, trackPalette, COLOUR_PRESETS, isHex, mix } from './colours.js';
 import { FLAT, buildTerrain, stability, regime, flowAt, normOf, rainRate, RAIN_SUMS_PER_HOUR, windAt } from './field.js';
 import { predictedOffsets, ScentSim, driftFrom, stepByFlow } from './sim.js';
@@ -4090,7 +4090,8 @@ async function applyWalked(sessionId, card) {
   if (s2.data.track) {
     /* Graded for the dog that ran it (s2.dogId), not whichever dog is picked
        on Home today, and banked to that dog. */
-    const { runWeather, ...result } = await computeResult(s2, s2.data.track, s2.data.trackWaypoints || [], s2.data.trackStarted, { bank: true });
+    /* The walk makes the line real; it does not undo a coach or a reveal. */
+    const { runWeather, ...result } = await computeResult(s2, s2.data.track, s2.data.trackWaypoints || [], s2.data.trackStarted, { bank: teachesDrift(s2.data) });
     const graded = { summary: result.sentence, data: { result, ...(runWeather ? { runWeather } : {}) } };
     guardSave(patchSession(s2, graded), () => saveSession(s2, graded));
     snap();
@@ -4318,11 +4319,14 @@ async function finishRun() {
   const raw = { data: { track: rec.pts, trackStarted: run.startedAt, trackWaypoints: rec.wps,
     revealedAt: run.revealedAt || s.data.revealedAt || null } };
   guardSave(patchSession(s, raw), () => saveSession(s, raw));
-  /* A plan-graded run is provisional: the drawn line is a sketch, so it
-     neither banks calibration nor gets the last word — the walked card does. */
-  const provisional = !!s.data.plan && !s.data.walked;
+  /* Only a run where nothing was steering banks towards the dog's drift
+     (teachesDrift): not a plan-graded one, whose drawn line is a sketch and
+     whose walked card gets the last word, not a coached one, and not one with
+     the trail on screen. The coach's record is this run's and is not on the
+     session yet, so it is read from here. */
+  const bank = teachesDrift({ ...s.data, coach: coachRecord, revealedAt: run.revealedAt || s.data.revealedAt || null });
   const dogId = S.dog?.id ?? null;          // the run being recorded now is the picked dog's
-  const { runWeather, ...result } = await computeResult({ ...s, dogId }, rec.pts, rec.wps, run.startedAt, { bank: !provisional });
+  const { runWeather, ...result } = await computeResult({ ...s, dogId }, rec.pts, rec.wps, run.startedAt, { bank });
   liveEnd(result);
   const patch = {
     dogId,
@@ -4419,7 +4423,9 @@ async function computeResult(s, track, wps, startedAt, { bank = true } = {}) {
     ? Math.abs(mean) / (wx.wind_speed * settle) : null;
   const moved = changed();
   const offBaseline = Object.keys(moved).length > 0;
-  if (bank && !offBaseline) {
+  /* Nor from a track the GPS could not place on either side of the line: the
+     sentence below says so, and a banked row would claim the opposite. */
+  if (bank && !offBaseline && !noisy) {
     db.addCalibration(dogRow?.id, {
       t: startedAt, predSide, mean, wind: wx?.wind_speed ?? null,
       stability: st?.label ?? null, k,

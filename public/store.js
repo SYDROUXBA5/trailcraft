@@ -383,13 +383,16 @@ export function createStore(backend) {
         .map(k => ({ id: k.slice(4), rows: o[k] }));
     },
     setCalibration(dogId, rows) { kv.set(`cal:${dogId}`, (rows || []).slice(-50)); },
-    /** Per-dog metres-per-(m/s) drift constant, or null while under-evidenced. */
+    /** Per-dog metres-per-(m/s) drift constant, or null while under-evidenced.
+        It is the median as the runs gave it. It used to be held between 0.5
+        and 6, as if it fed the model, but the dog card is the only thing
+        that reads it: a dog at 0.2 was printed as 0.5 and one at 20 as 6,
+        a clamp bound shown as if it had been measured. */
     dogDrift(dogId) {
       const ks = kv.get(`cal:${dogId}`, []).map(r => r.k).filter(k => Number.isFinite(k) && k > 0);
       if (ks.length < 5) return null;
       const sorted = [...ks].sort((a, b) => a - b);
-      const med = sorted[Math.floor(sorted.length / 2)];
-      return Math.min(6, Math.max(0.5, med));   // no single dog rewrites physics
+      return sorted[Math.floor(sorted.length / 2)];
     },
 
     usage,
@@ -552,6 +555,32 @@ export const AGE_BANDS = [
 export function ageBand(mins) {
   if (!Number.isFinite(mins) || mins < 0) return null;
   return AGE_BANDS.find(b => mins < b.under) ?? AGE_BANDS[AGE_BANDS.length - 1];
+}
+
+/* ── What a run can honestly be counted as ────────────────────────────
+   A trainer judges a dog by these numbers, so a run is only counted as the
+   evidence it actually is. When in doubt it counts for less, and says why. */
+
+/** A run graded against a line drawn on the map, before the layer's walked
+    card came back. The line is a sketch, and so is its clock. */
+export const unwalkedPlan = (data) => !!data?.plan && !data?.walked;
+
+/** Whether the answer was ever on the handler's screen: Reveal pressed, or
+    the coach switched on, which stamps the same moment because it reads out
+    where the trail is. It stays set on a second run of the same trail — the
+    handler has seen it, and running it again does not unsee it. */
+export const trailShown = (data) => Number.isFinite(data?.revealedAt) && data.revealedAt > 0;
+
+/** Whether a run may bank a row towards its dog's drift calibration. The row
+    says "this is where this dog's track sits in this much wind", and that is
+    only true of a run where nothing else was steering. A drawn plan is not
+    the line that was walked. A coached run had a voice telling the handler
+    which side the dog was and how far, and the handler brought it back. A
+    run with the trail on screen was walked along what the handler could see.
+    Each would teach the dog's record a drift the dog never chose, and always
+    a smaller one than its own. */
+export function teachesDrift(data) {
+  return !!data && !unwalkedPlan(data) && !data.coach?.assisted && !trailShown(data);
 }
 
 /** Everything worth showing about one dog's work. `sessions` is newest-first,

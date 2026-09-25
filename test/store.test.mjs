@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { handlerStats, ODOURS, targetText } from '../public/store.js';
+import { handlerStats, ODOURS, targetText, teachesDrift } from '../public/store.js';
 import { createStore, migrateV1, TARGETS, targetById, verbs, uid,
          dogStats, ageBand, AGE_BANDS, dogAge, SaveError, patchSession, runAgain,
          askDelete, dogsOf, storageWords, healApproach, healSession, APPROACH_V } from '../public/store.js';
@@ -196,7 +196,7 @@ t('migration: the field phone keeps its team and its trails', () => {
 });
 
 
-t('calibration: silent under five runs, then the median speaks, clamped', () => {
+t('calibration: silent under five runs, then the median speaks', () => {
   const db = createStore(fakeBackend());
   const row = (k) => ({ t: 1, predSide: 1, mean: 8, wind: 4, stability: 'Stable', k });
   for (const k of [2.1, 1.9, 2.4]) db.addCalibration('bo', row(k));
@@ -209,6 +209,34 @@ t('calibration: silent under five runs, then the median speaks, clamped', () => 
   assert.ok(db.dogDrift('bo') != null, 'null k rows are kept but never counted');
   assert.equal(db.dogDrift('nell'), null, 'another dog starts from zero');
   assert.equal(db.calibration('bo').length, 6, 'rows are all retained');
+});
+
+/* The dog card is the only reader, so it is told what the runs said. It used
+   to be held between 0.5 and 6: a dog at 0.2 was shown as 0.5, and one at
+   20 as 6, a clamp bound passed off as a measurement. */
+t('calibration: the dog card gets the median as measured, never a clamp bound', () => {
+  const db = createStore(fakeBackend());
+  const row = (k) => ({ t: 1, predSide: 1, mean: 2, wind: 6, stability: 'Stable', k });
+  for (const k of [0.2, 0.18, 0.25, 0.21, 0.3]) db.addCalibration('bo', row(k));
+  assert.equal(db.dogDrift('bo'), 0.21, 'a dog that barely drifts is not printed as 0.5');
+  for (const k of [20, 18, 25, 21, 30]) db.addCalibration('rex', row(k));
+  assert.equal(db.dogDrift('rex'), 21, 'nor one that drifts a long way as 6');
+});
+
+/* A coached run, a revealed one and a drawn plan were all banked as the dog's
+   natural drift. The coach tells the handler "left, 12 m" and the dog is
+   brought back; the stored figure came out smaller than the dog's own. */
+t('teachesDrift: only a run nothing was steering banks towards the dog’s drift', () => {
+  assert.equal(teachesDrift({ track: [] }), true, 'coach off, trail never shown, a real line');
+  assert.equal(teachesDrift({ coach: { assisted: false } }), true);
+  assert.equal(teachesDrift({ coach: { assisted: true } }), false, 'the coach was on');
+  assert.equal(teachesDrift({ revealedAt: 5000 }), false, 'the trail was on screen');
+  assert.equal(teachesDrift({ revealedAt: 0 }), true, 'nought is never');
+  assert.equal(teachesDrift({ plan: true }), false, 'a drawn plan, not yet walked');
+  assert.equal(teachesDrift({ plan: true, walked: true }), true, 'the walked card makes the line real');
+  assert.equal(teachesDrift({ plan: true, walked: true, revealedAt: 5000 }), false,
+    'but it does not undo a reveal');
+  assert.equal(teachesDrift(null), false);
 });
 
 t('ageBand: the words the sport uses, with the boundaries stated', () => {

@@ -381,6 +381,21 @@ t('a re-grade is for the dog that ran, not the one picked on Home', () => {
     'a walked card from the camera never re-grades a run kept from someone else');
 });
 
+/* Only the drawn plan was ever held back, so coached runs, revealed runs and
+   runs the result itself called unreadable all taught the dog's drift. */
+t('a run banks towards the dog’s drift only when nothing was steering and the GPS could tell', () => {
+  const stop = js.slice(js.indexOf('async function finishRun'), js.indexOf('/* ── The result'));
+  assert.match(stop, /const bank = teachesDrift\(\{ \.\.\.s\.data, coach: coachRecord, revealedAt: run\.revealedAt \|\| s\.data\.revealedAt \|\| null \}\);/,
+    'Stop judges this run with its own coach record and its own reveal');
+  assert.match(stop, /run\.startedAt, \{ bank \}\);/);
+  assert.match(js, /s2\.data\.trackStarted, \{ bank: teachesDrift\(s2\.data\) \}\);/,
+    'a walked card re-grades without undoing a coach or a reveal');
+  assert.doesNotMatch(js, /\{ bank: (true|!provisional) \}/);
+  const grade = js.slice(js.indexOf('async function computeResult('), js.indexOf('\nfunction searchResult('));
+  assert.match(grade, /if \(bank && !offBaseline && !noisy\) \{\s*\n\s*db\.addCalibration\(/,
+    'a track the GPS could not place on either side banks nothing');
+});
+
 t('Stop works once, and grading cannot wait for ever on the weather', () => {
   assert.match(js, /async function stopRun\(\) \{\s*\n\s*if \(run\.stopping\) return;\s*\n\s*run\.stopping = true;\s*\n\s*\$\('btnRunStop'\)\.disabled = true;/,
     'a second tap does nothing while the first is still grading');
