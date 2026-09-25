@@ -21,6 +21,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import { stepPoints, forecastNote } from '../public/geo.js';
+import { unwalkedPlan } from '../public/debrief.js';
 
 let pass = 0;
 const t = async (name, fn) => { await fn(); pass++; console.log(`  ok  ${name}`); };
@@ -443,6 +444,28 @@ await t('a map screen holds the page at its own size, and the way back lets it b
   assert.equal(a.viewport.content.match(/maximum-scale/g)?.length ?? 0, 0, 'never stacked up');
   a.go('scrRun'); a.go('scrShowMap');
   assert.equal(a.viewport.content.match(/maximum-scale/g).length, 1, 'once, however many map screens in a row');
+});
+
+/* The pick list printed "25 min old" for a plan waiting to be run and for a
+   drawn Trail Card, whose laid time is a guessed walk. One tap later the run
+   screen said "age not known yet". */
+await t('the run picker gives a drawn line no made-up age', () => {
+  const src = [decl('function paintPick('), between('const ageWord = ', '\n\n/* ── Run / Search')].join('\n');
+  const els = {};
+  const now = Date.UTC(2026, 8, 25, 12);
+  const rows = (sessions) => {
+    new Function('S', '$', 'verbs', 'targetById', 'fmtKm', 'pathLen', 'fmtWhen', 'esc', 'targetText', 'unwalkedPlan', 'Date',
+      `${src}\npaintPick();`)(
+      { target: { kind: 'person' }, sessions }, (id) => (els[id] ??= {}), () => ({ run: 'Run a trail' }),
+      () => ({ kind: 'person' }), () => '0.3 km', () => 300, () => 'today', (x) => String(x), () => 'A person',
+      unwalkedPlan, { now: () => now });
+    return els.pickList.innerHTML;
+  };
+  const trail = (data) => ({ id: 'x', targetId: 'person', startedAt: now - 25 * 60e3, data: { trail: [{}, {}], ...data } });
+  assert.match(rows([trail({})]), /A person · 25 min old/, 'a laid trail still gives its age');
+  assert.match(rows([trail({ plan: true })]), /A person · age not known yet</);
+  assert.match(rows([trail({ drawn: true })]), /A person · age not known</);
+  assert.doesNotMatch(rows([trail({ plan: true }), trail({ drawn: true })]), /min old/);
 });
 
 console.log(`\n${pass} passed total\n`);

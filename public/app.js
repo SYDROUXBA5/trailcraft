@@ -4180,10 +4180,13 @@ function paintPick() {
     const what = t.kind === 'hide'
       ? `${s.data.hides?.length ?? 0} hides`
       : `${fmtKm(pathLen(s.data.trail || []))}`;
-    const age = ageWord(Date.now() - s.startedAt);
+    /* A plan waiting to be run, or a drawn card, was timed from a guessed
+       walk, so an age worked from it is made up: the same clock the run
+       screen, one tap on, refuses to show (unwalkedPlan). */
+    const age = unwalkedPlan(s.data) ? `age ${ageUnknown(s.data, true)}` : `${ageWord(Date.now() - s.startedAt)} old`;
     return `<div class="card" data-run-session="${esc(s.id)}">
       <div class="meta"><span>${fmtWhen(s.startedAt)}</span><span>${what}</span></div>
-      <div class="story">${esc(targetText(s))} · ${age} old</div>
+      <div class="story">${esc(targetText(s))} · ${age}</div>
     </div>`;
   }).join('') : `<div class="card"><p class="body muted">Nothing waiting. ${t.kind === 'hide' ? 'Set a hide first.' : 'Lay a trail first, or scan a card.'}</p></div>`;
 }
