@@ -2,6 +2,10 @@
 // Trailcraft — zero-dependency static server.
 // Serves HTTPS when certs/ exists (needed: phones only grant Geolocation on a
 // secure origin, and localhost is the sole exception). Falls back to HTTP.
+//
+// Only this Mac can reach it unless LAN=1 is set (npm run dev:lan). Testing on
+// a phone needs the network; the rest of the time there is no reason for every
+// other device on the same Wi-Fi to reach a development server.
 const http = require('http');
 const https = require('https');
 const fs = require('fs');
@@ -11,6 +15,7 @@ const os = require('os');
 const PORT = process.env.PORT || 2777;
 const ROOT = path.join(__dirname, 'public');
 const CERT_DIR = path.join(__dirname, 'certs');
+const LOOPBACK = '127.0.0.1';
 
 const TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -30,9 +35,31 @@ function lanAddress() {
   return null;
 }
 
+/** Every interface when the environment asks for the LAN, this Mac alone otherwise. */
+function bindHost(env) {
+  return env.LAN && env.LAN !== '0' ? '0.0.0.0' : LOOPBACK;
+}
+
+/* The decoded path a request asks for, or null when it cannot be read. A bad
+   escape such as /%E0%A4%A makes decodeURIComponent throw, "//" is not a URL
+   at all, and a %00 makes fs throw on the spot. Each of those used to be
+   thrown inside the handler and take the whole server down, and with it the
+   phone halfway through a test; now they are a 400. */
+function requestPath(rawUrl) {
+  try {
+    const rel = decodeURIComponent(new URL(rawUrl, 'http://x').pathname);
+    return rel.includes('\0') ? null : rel;
+  } catch {
+    return null;
+  }
+}
+
 const handler = (req, res) => {
-  const url = new URL(req.url, 'http://x');
-  let rel = decodeURIComponent(url.pathname);
+  let rel = requestPath(req.url);
+  if (rel === null) {
+    res.writeHead(400, { 'Content-Type': 'text/plain' }).end('Bad request');
+    return;
+  }
   if (rel === '/') rel = '/index.html';
 
   /* The local authority, so a phone can trust this server and hand over GPS.
@@ -54,9 +81,10 @@ const handler = (req, res) => {
     return;
   }
 
-  // Contain traversal: resolve, then require the result to stay under ROOT.
+  // Contain traversal: resolve, then require the result to sit inside ROOT.
+  // ROOT plus a separator, so a sibling such as public-old/ cannot pass for it.
   const file = path.join(ROOT, path.normalize(rel));
-  if (!file.startsWith(ROOT)) {
+  if (!file.startsWith(ROOT + path.sep)) {
     res.writeHead(403).end('Forbidden');
     return;
   }
@@ -74,21 +102,31 @@ const handler = (req, res) => {
   });
 };
 
-const keyPath = path.join(CERT_DIR, 'key.pem');
-const certPath = path.join(CERT_DIR, 'cert.pem');
-// HTTP=1 forces plain HTTP. Safe on localhost, which browsers already treat as
-// a secure context, so Geolocation still works when testing on this machine.
-const secure = !process.env.HTTP && fs.existsSync(keyPath) && fs.existsSync(certPath);
+module.exports = { handler, bindHost, ROOT };
 
-const server = secure
-  ? https.createServer({ key: fs.readFileSync(keyPath), cert: fs.readFileSync(certPath) }, handler)
-  : http.createServer(handler);
+// Listen only when run as a program; the test requires this file for the handler.
+if (require.main === module) {
+  const keyPath = path.join(CERT_DIR, 'key.pem');
+  const certPath = path.join(CERT_DIR, 'cert.pem');
+  // HTTP=1 forces plain HTTP. Safe on localhost, which browsers already treat as
+  // a secure context, so Geolocation still works when testing on this machine.
+  const secure = !process.env.HTTP && fs.existsSync(keyPath) && fs.existsSync(certPath);
 
-server.listen(PORT, '0.0.0.0', () => {
-  const scheme = secure ? 'https' : 'http';
-  const lan = lanAddress();
-  console.log(`\n  Trailcraft  →  ${scheme}://localhost:${PORT}`);
-  if (lan) console.log(`  On your phone →  ${scheme}://${lan}:${PORT}`);
-  if (!secure) console.log('  ! No certs/ — GPS will not work off localhost. Run: npm run cert');
-  console.log('');
-});
+  const server = secure
+    ? https.createServer({ key: fs.readFileSync(keyPath), cert: fs.readFileSync(certPath) }, handler)
+    : http.createServer(handler);
+
+  const host = bindHost(process.env);
+  server.listen(PORT, host, () => {
+    const scheme = secure ? 'https' : 'http';
+    console.log(`\n  Trailcraft  →  ${scheme}://localhost:${PORT}`);
+    if (host === LOOPBACK) {
+      console.log('  This Mac only. To test on your phone: npm run dev:lan');
+    } else {
+      const lan = lanAddress();
+      if (lan) console.log(`  On your phone →  ${scheme}://${lan}:${PORT}`);
+      if (!secure) console.log('  ! No certs/ — GPS will not work off localhost. Run: npm run cert');
+    }
+    console.log('');
+  });
+}
