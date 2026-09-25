@@ -482,9 +482,10 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.75; cursor: p
 .advanced summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; }
 
 /* ── Toast ───────────────────────────────────────────────────────── */
-/* Top RIGHT, always — the air panel owns the top left, and a message that
-   lands on top of the wind reading hides the one thing that was already on
-   screen for a reason. */
+/* Top right — the air panel owns the top left, and a message that lands on
+   top of the wind reading hides the one thing that was already on screen for
+   a reason. Faded, never hidden: it is the live region a screen reader
+   listens to, and it is empty whenever it is not showing. */
 .toast {
   position: fixed; top: var(--top-row); right: 12px; z-index: 60;
   background: var(--ink); color: var(--paper); border-radius: 999px;
@@ -492,15 +493,29 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.75; cursor: p
   box-shadow: 0 12px 34px rgba(15, 31, 61, 0.3);
   opacity: 0; transform: translateY(-6px);
   transition: opacity 180ms ease, transform 180ms ease;
-  visibility: hidden; text-align: center;
+  text-align: center;
   /* Never wider than the gap the air panel leaves on the left. */
   max-width: min(300px, calc(100vw - 200px));
 }
 .toast.show {
   opacity: 1; transform: translateY(0);
   transition: opacity 250ms var(--ease-out), transform 250ms var(--ease-out);
-  visibility: visible;
 }
+/* On a phone that gap is a sliver — 76px of text at 320px, so a sentence came
+   out as a column of six short lines. There the message goes across the
+   screen instead, under the air panel rather than beside it (--wx-gap is the
+   panel's measured height, nothing on a paper screen), with a card's corners:
+   a pill's round ends clip a wrapped line. */
+@media (max-width: 480px) {
+  .toast {
+    top: calc(var(--top-row) + var(--wx-gap, 0px));
+    left: 12px; right: 12px; width: fit-content; margin: 0 auto;
+    max-width: calc(100vw - 24px); border-radius: 18px;
+  }
+}
+/* A screen's heading takes focus when the screen opens (focusScreen), so a
+   screen reader says where you are. That is not a thing to press; no ring. */
+.screen [tabindex="-1"]:focus { outline: none; }
 
 @media (prefers-reduced-motion: reduce) {
   .btn:active, .chip:active, .wp-pill:active { transform: none; }

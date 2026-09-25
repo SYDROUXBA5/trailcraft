@@ -88,4 +88,83 @@ t('the two GPS filters are named by their labels', () => {
   for (const [, f] of html.matchAll(/<label[^>]*\bfor="([^"]+)"/g)) assert.ok(ids.has(f), `label for="${f}" has a field`);
 });
 
+/* ── What a screen reader is told ────────────────────────────────── */
+
+const css = readFileSync(new URL('../public/app.css', import.meta.url), 'utf8');
+/** The body of the first rule whose selector is exactly this, inside the given CSS. */
+function rule(sel, src = css) {
+  const m = src.match(new RegExp(`(^|\\n)\\s*${sel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\{([^}]*)\\}`));
+  assert.ok(m, `app.css still has ${sel}`);
+  return m[2];
+}
+/** The inside of an @media block that starts with this head. */
+function media(head) {
+  const i = css.indexOf(head);
+  assert.ok(i >= 0, `app.css still has ${head}`);
+  let depth = 0, j = css.indexOf('{', i);
+  for (let k = j; k < css.length; k++) {
+    if (css[k] === '{') depth++;
+    else if (css[k] === '}' && --depth === 0) return css.slice(j + 1, k);
+  }
+  throw new Error(`${head} never closes`);
+}
+
+t('the toast is a live region that is always in the page', () => {
+  assert.match(html, /<div id="toast" class="toast" role="status" aria-live="polite" aria-atomic="true"><\/div>/);
+  const body = js.slice(js.indexOf('const toast = (msg) => {'), js.indexOf('\n};', js.indexOf('const toast = (msg) => {')));
+  assert.ok(!/\.hidden\b/.test(body), 'the toast is never hidden: a hidden live region is not listened to');
+  assert.match(body, /t\.classList\.remove\('show'\);\s*toast\._gone = setTimeout\(\(\) => \{ t\.textContent = ''; \}/,
+    'it fades, then empties, so nothing stale is left to find');
+  assert.ok(!/visibility/.test(rule('.toast')) && !/visibility/.test(rule('.toast.show')),
+    'visibility: hidden takes it out of what a screen reader can hear, the same as hidden');
+});
+
+t('a toast stays up long enough to read', () => {
+  const line = js.match(/^const toastMs = .*$/m)?.[0];
+  assert.ok(line, 'app.js has toastMs');
+  const toastMs = new Function(`${line}; return toastMs;`)();
+  assert.equal(toastMs('Saved'), 3000, 'never under three seconds');
+  assert.equal(toastMs('x'.repeat(25)), 3000);
+  assert.equal(toastMs('x'.repeat(50)), 4500, 'a second and a half, and 60 ms a character');
+  const long = 'Signed in. This phone’s records belong to another account, so nothing was backed up';
+  assert.equal(toastMs(long), 1500 + 60 * long.length);
+  assert.match(js, /\}, toastMs\(msg\)\);/, 'the toast uses it');
+});
+
+t('on a narrow phone a toast goes across the screen, under the air panel', () => {
+  const narrow = media('@media (max-width: 480px) {\n  .toast');
+  const r = rule('.toast', narrow);
+  assert.match(r, /max-width: calc\(100vw - 24px\)/);
+  assert.match(r, /top: calc\(var\(--top-row\) \+ var\(--wx-gap, 0px\)\)/, 'below the wind, not on top of it');
+  assert.match(js, /setProperty\('--wx-gap', on \? `\$\{Math\.round\(p\.offsetHeight\) \+ 8\}px` : '0px'\)/, 'the gap is still measured');
+});
+
+t('a new screen puts focus on its heading, without scrolling or a ring', () => {
+  const f = fnSrc('function focusScreen(id)');
+  assert.match(f, /querySelector\('h1, h2, \.hud-pill, \.nav-banner'\)/);
+  const go = fnSrc('function go(id, { back = false } = {})');
+  assert.match(go, /const from = currentScreen;/);
+  assert.match(go, /if \(id !== from && !mapTut\.open\) focusScreen\(id\);\n\}$/, 'last, and only when the screen changes');
+  assert.match(css, /\.screen \[tabindex="-1"\]:focus \{ outline: none; \}/);
+
+  // Run for real against a small fake of a screen.
+  const made = (head) => {
+    const attrs = new Map(), focused = [];
+    const h = head && {
+      hasAttribute: (a) => attrs.has(a), setAttribute: (a, v) => attrs.set(a, v),
+      focus: (o) => focused.push(o),
+    };
+    const screen = { querySelector: () => h };
+    return { screen, attrs, focused };
+  };
+  const run = (el) => new Function('$', `${f}; focusScreen('scrX');`)(() => el.screen);
+  const a = made(true);
+  run(a);
+  assert.equal(a.attrs.get('tabindex'), '-1');
+  assert.deepEqual(a.focused, [{ preventScroll: true }], 'the map and the page stay where they are');
+  const b = made(false);
+  run(b);                                     // a screen with nothing to stand on is left alone
+  assert.deepEqual(b.focused, []);
+});
+
 console.log(`\n${pass} passed total\n`);

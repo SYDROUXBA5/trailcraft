@@ -96,14 +96,20 @@ const fmtM = (m, dp = 0) => fmtShort(m, imp(), dp);
 const fmtWind = (ms) => fmtSpeed(ms, imp());
 const fmtWhen = (t) => new Date(t).toLocaleString([], { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 
+/* The toast is a live region that never leaves the page, so a screen reader
+   already knows it is there when the words arrive, and says them. It is
+   faded out and emptied rather than hidden: a hidden region is a new one
+   each time, and a new one is not listened to. It stays up long enough to
+   be read — a glance for "Saved", longer for a sentence about an account. */
+const toastMs = (msg) => Math.max(3000, 1500 + 60 * String(msg).length);
 const toast = (msg) => {
-  const t = $('toast'); t.textContent = msg; t.hidden = false;
+  const t = $('toast'); t.textContent = msg;
   requestAnimationFrame(() => t.classList.add('show'));
   clearTimeout(toast._t);
   toast._t = setTimeout(() => {
     t.classList.remove('show');
-    toast._gone = setTimeout(() => { t.hidden = true; }, 200);
-  }, 2100);
+    toast._gone = setTimeout(() => { t.textContent = ''; }, 300);
+  }, toastMs(msg));
   clearTimeout(toast._gone);
 };
 
@@ -268,7 +274,20 @@ function airPanel(id) {
   weatherPanelFor(s, airMomentFor(id, s));
 }
 
+/* A screen reader follows focus, not the eye. The button that was tapped has
+   just gone with its screen, which leaves focus nowhere, so it is put on the
+   new screen's heading and the heading is read out. A map screen has no
+   heading; its status pill says where you are instead. Nothing scrolls for
+   it, and no ring is drawn: it is a place to stand, not something to press. */
+function focusScreen(id) {
+  const head = $(id).querySelector('h1, h2, .hud-pill, .nav-banner');
+  if (!head) return;
+  if (!head.hasAttribute('tabindex')) head.setAttribute('tabindex', '-1');
+  head.focus({ preventScroll: true });
+}
+
 function go(id, { back = false } = {}) {
+  const from = currentScreen;
   stopScan();
   /* A scan for one run's walked card ends when its screen does, however it
      is left. Left set by the top arrow, it refused every later Trail Card
@@ -304,6 +323,8 @@ function go(id, { back = false } = {}) {
     hideWeather();
     mapChromeShow(false);
   }
+  // Last, once the screen has drawn its heading; the map gestures card, when it opens, speaks first.
+  if (id !== from && !mapTut.open) focusScreen(id);
 }
 
 /* ── Map ──────────────────────────────────────────────────────────── */
@@ -4649,7 +4670,7 @@ function showOnMap(from = 'scrResult') {
    The store throws rather than swallows. This is where the handler learns
    of it and keeps what is on screen: the unsaved record stays in memory,
    can be sent as a link or a file right away, and the save is retried once
-   room has been made. A two-second toast would be the wrong shape for this
+   room has been made. A toast that fades would be the wrong shape for this
    message, so it is a banner that stays until dismissed. */
 let saveTrouble = null;   // { session, retry, err }
 

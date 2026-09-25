@@ -32,8 +32,8 @@
      the field screens (lay, run, confirm) are transparent chrome over it. -->
 <div id="map"></div>
 
-<div id="toast" class="toast" hidden></div>
-<!-- The one message that must never be a two-second toast: a save that
+<div id="toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
+<!-- The one message that must never be a toast that fades: a save that
      failed. It stays until the handler has done something about it. -->
 <div id="saveTrouble" class="save-trouble" role="alert" hidden>
   <b id="saveTroubleTitle">Couldn’t save — the phone has no room left</b>
