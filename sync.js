@@ -280,6 +280,7 @@ export function resync() {
 }
 
 async function applyUser(u, { resume = false } = {}) {
+  const was = stopMirror ? sync.user?.uid : null;   // whose saves were being backed up until now
   stopMirror?.(); stopMirror = null;
   sync.user = u ? { uid: u.uid, name: u.displayName, email: u.email, photo: u.photoURL,
     password: (u.providerData || []).some(p => p.providerId === 'password') } : null;
@@ -329,6 +330,20 @@ async function applyUser(u, { resume = false } = {}) {
   } finally {
     stopNoting();
     pulling = false;
+  }
+  /* A pull on coming back that fails took down a mirror that was working,
+     and every save after it went nowhere until a later pull worked, which,
+     with the screen kept on through a session, never came. A failed read
+     does not stop a write (the free allowance counts them apart), so the
+     mirror goes back on for the same account, with what was saved while
+     the pull was trying. From the next save on, the card says how the
+     backup stands again, and the next pull reads everything. */
+  if (was === u.uid && !stopMirror && !deleting && !wiping) {
+    stopMirror = db.onChange((table, rec) => mirror(u.uid, table, rec));
+    for (const [table, id] of meanwhile.values()) {
+      const rec = current(table, id);
+      if (rec) mirror(u.uid, table, rec);
+    }
   }
   emit();
 }
@@ -651,8 +666,9 @@ function mirror(uid, table, rec) {
   if (!fs || !rec?.id) return;
   /* Firestore holds a write until it can send it, which offline can be hours.
      By then the phone may be signed out, or signed in as somebody else, and an
-     answer about the old account must not touch what the screen is saying. */
-  const theirs = () => sync.user?.uid === uid && ['syncing', 'synced', 'partial'].includes(sync.status);
+     answer about the old account must not touch what the screen is saying.
+     An error is a pull that failed with the mirror put back (applyUser). */
+  const theirs = () => sync.user?.uid === uid && ['syncing', 'synced', 'partial', 'error'].includes(sync.status);
   if (!theirs()) return;
   if (approxBytes(toCloud(rec)) > DOC_LIMIT) { tooBig.add(rec.id); settle(); return; }
   const going = { uid };
@@ -681,6 +697,7 @@ function mirror(uid, table, rec) {
    run and every chunk carry the same moment twice (expiry). */
 
 const LIVE_TTL = 24 * 3600e3;
+const CHUNK_TTL = 36 * 3600e3;
 const CHUNK_MS = 60e3;
 /* Offline, Firestore keeps a write for later and does not answer until the
    server has it, which with no signal is never. Share live waits this long
@@ -763,8 +780,14 @@ export function pushLive(pts, wps = []) {
     if (live.chunks.get(n) === sig) continue;
     live.chunks.set(n, sig);
     const clean = g.map(p => ({ lat: p.lat, lon: p.lon, t: p.t, alt: p.alt ?? null, dwellS: p.dwellS || 0 }));
+    /* A day and a half from when it is written, not from the run's start: the
+       run is kept until a day after it ends, and a run picked up again after
+       a crash ends long after it started. Its chunks, dated from the start,
+       went before the run did, or were written already expired, and the link
+       showed a result with no track. Any run shorter than twelve hours keeps
+       every chunk as long as the run itself, and the rules allow two days. */
     fb.setDoc(fb.doc(fs, 'live', live.id, 'chunks', String(n)),
-      { n, ...expiry(live.startedAt + 36 * 3600e3), ...packPoints(clean) }).catch(() => {});
+      { n, ...expiry(Date.now() + CHUNK_TTL), ...packPoints(clean) }).catch(() => {});
   }
   if (wps.length !== live.wpsN) {
     live.wpsN = wps.length;

@@ -7,7 +7,7 @@
 
 import { pathLen } from './geo.js';
 import { visible, tombstone, pruneTombstones, RUN_FIELDS } from './sync-core.js';
-import { makeBackup, planRestore } from './backup.js';
+import { makeBackup, planRestore, BACKUP_FLAGS } from './backup.js';
 
 export const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 
@@ -276,6 +276,7 @@ export function createStore(backend) {
     get: (k, f = null) => read(K.kv, {})[k] ?? f,
     set(k, v) { const o = read(K.kv, {}); o[k] = v; write(K.kv, o); },
   };
+  const flagsHere = () => Object.fromEntries(BACKUP_FLAGS.map(k => [k, kv.get(k) === true]));
 
   /* The recording in progress (draft.js). Its own key, because it is rewritten
      every few seconds while walking and must not drag the rest along with it. */
@@ -393,13 +394,14 @@ export function createStore(backend) {
 
     usage,
 
-    /** The backup file's text (backup.js): every live record and each dog's
-        calibration. Written without indenting: a long history is mostly
-        points, and indenting them made the file about three times larger. */
+    /** The backup file's text (backup.js): every live record, each dog's
+        calibration and the handler's answers (BACKUP_FLAGS). Written
+        without indenting: a long history is mostly points, and indenting
+        them made the file about three times larger. */
     exportAll() {
       return JSON.stringify(makeBackup({
         handlers: handlers.all(), dogs: dogs.all(), layers: layers.all(),
-        sessions: store.sessions(), calibration: store.allCalibration(),
+        sessions: store.sessions(), calibration: store.allCalibration(), flags: flagsHere(),
       }));
     },
 
@@ -408,7 +410,7 @@ export function createStore(backend) {
     previewRestore(file) {
       return planRestore({
         handlers: handlers.raw(), dogs: dogs.raw(), layers: layers.raw(),
-        sessions: read(K.sessions, []), calibration: store.allCalibration(),
+        sessions: read(K.sessions, []), calibration: store.allCalibration(), flags: flagsHere(),
       }, file);
     },
 
@@ -441,6 +443,10 @@ export function createStore(backend) {
         try { store.setCalibration(id, rows); } catch (e) { e.restored = restored; throw e; }
         restored = true;
         notify('calibration', { id, rows, updatedAt: Date.now() });
+      }
+      /* Last, and only ever switched on: a restore never takes an answer back. */
+      for (const k of plan.flags) {
+        try { kv.set(k, true); } catch (e) { e.restored = restored; throw e; }
       }
       return plan;
     },

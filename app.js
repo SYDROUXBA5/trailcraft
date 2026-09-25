@@ -34,7 +34,7 @@ import { coachStep, initialCoach, coachPhrase, coachLine, TOL_OPTIONS, COACH_DEF
 import { DEBRIEF, FLAGS, NOTE_TAGS, blankDebrief, debriefDone, debriefLine, labelOf, ownRun, stickyDebrief } from './debrief.js';
 import { CONFIDENCE, stampCall, confidenceOf, firstCall, calibration, calibrationLine, callVerdict, runsOf } from './call.js';
 import { isNative, watchBackground, canHaptic, haptic, watchHeading, shareFile } from './native.js';
-import { readBackup, restoreChanges, restoreQuestion, BACKUP_MAX_BYTES } from './backup.js';
+import { readBackup, restoreChanges, restoreQuestion, restoreNothing, BACKUP_MAX_BYTES } from './backup.js';
 import { checkAuthFields, AUTH_MIN_PASSWORD } from './sync-core.js';
 import { createStore, migrateV1, TARGETS, ODOURS, targetById, targetText, verbs, uid,
          dogStats, ageBand, AGE_BANDS, LEVELS, levelById, dogAge, patchSession, runAgain,
@@ -3308,7 +3308,7 @@ async function startWatch(hudId) {
           if (e?.code === 'NOT_AUTHORIZED') rec.blocked = true;
           toast(e?.code === 'NOT_AUTHORIZED' ? 'Location is off for Trailcraft — allow it in Settings' : 'GPS error');
         },
-        { message: coach.on ? 'Recording. Coach calls need the screen on' : 'Recording — the phone can go in your pocket' });
+        { message: coach.on && rec.kind === 'run' ? 'Recording. Coach calls need the screen on' : 'Recording — the phone can go in your pocket' });
     } catch { rec.bg = null; }
     if (!rec.bg) { rec.on = false; toast('Could not start GPS'); return false; }
     holdScreen();               // only while the coach is on (holdScreen)
@@ -3346,10 +3346,11 @@ async function startWatch(hudId) {
    page is hidden (the camera, a call, another app) and never takes it back by
    itself, so it is asked for again each time the page comes back. Inside the
    iOS app the shell records with the screen dark, so there it is held only
-   while the coach is on, whose calls cannot play in the dark. Where the app's
-   web view has no such hold, the coach's own note says to keep it awake. */
+   while the coach is on for a run, whose calls cannot play in the dark. A
+   lay or a walk goes in the pocket whatever the coach was left at. Where the
+   app's web view has no such hold, the coach's own note says to keep it awake. */
 async function holdScreen() {
-  if ((isNative() && !coach.on) || !rec.on || rec.lock || document.visibilityState !== 'visible') return;
+  if ((isNative() && !(coach.on && rec.kind === 'run')) || !rec.on || rec.lock || document.visibilityState !== 'visible') return;
   try {
     const lock = await navigator.wakeLock?.request('screen');
     if (!lock) return;
@@ -4171,7 +4172,10 @@ async function startRun(s) {
   };
   $('btnReveal').textContent = t.kind === 'person' ? 'Reveal trail' : 'Reveal hides';
   go('scrRun');
-  if (!(await startWatch('runHudText'))) { dropRunCopy(); return go('scrHome'); }
+  /* The coach went on above, for this run. A run that never started must not
+     leave it on: the next lay or walk would keep the screen awake and say
+     the coach needs it. */
+  if (!(await startWatch('runHudText'))) { coachStop(); dropRunCopy(); return go('scrHome'); }
   startFollowing(null);
   /* Wind, even on a blind run: it says nothing about where the trail is, and
      it is the first thing you want before deciding where to cast. The wind
@@ -6475,7 +6479,7 @@ function wire() {
     stopCountdownUi();
     const s = db.sessions().find(x => x.id === CD.sid);
     if (s) { pendingSession = s; renderShare(s); }
-    go('scrShare');
+    leaveForm('scrShare');
   });
 
   $('btnRecentre').addEventListener('click', locateTap);
@@ -6961,7 +6965,7 @@ async function restoreBackup(file) {
   try { backup = readBackup(await file.text()); }
   catch (e) { return toast(e?.plain ? e.message : 'Could not read that file'); }
   const plan = db.previewRestore(backup);
-  if (!restoreChanges(plan)) return toast('Everything in this backup is already on this phone');
+  if (!restoreChanges(plan)) return toast(restoreNothing(plan));
   const when = backup.exportedAt
     ? new Date(backup.exportedAt).toLocaleDateString([], { day: 'numeric', month: 'long', year: 'numeric' }) : '';
   if (!confirm(restoreQuestion(plan, when))) return;
