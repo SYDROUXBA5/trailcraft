@@ -11,7 +11,7 @@ import {
 } from './geo.js';
 import { stepPoints, contamTimed, trailFrom, walkedOfTrail, gpsTrouble, forecastNote } from './geo.js';
 import { packDraft, unpackDraft, draftAlive, draftStats } from './draft.js';
-import { handlerStats, teachesDrift, trailShown, unwalkedPlan, runAgeMin } from './store.js';
+import { handlerStats, teachesDrift, runAgeMin } from './store.js';
 import { plumePalette, stepPalette, windPalette, trackPalette, COLOUR_PRESETS, isHex, mix } from './colours.js';
 import { FLAT, buildTerrain, stability, regime, flowAt, normOf, rainRate, RAIN_SUMS_PER_HOUR, windAt } from './field.js';
 import { predictedOffsets, ScentSim, driftFrom, stepByFlow } from './sim.js';
@@ -32,7 +32,8 @@ import { trailModel, encodeShared, decodeShared, sharedUrl, toGpx, fileBase,
          resultSentence, sessionFromModel, keptSession, peopleOf } from './share.js';
 import { buildPdf, jpegSize } from './pdf.js';
 import { coachStep, initialCoach, coachPhrase, coachLine, TOL_OPTIONS, COACH_DEFAULTS } from './coach.js';
-import { DEBRIEF, FLAGS, NOTE_TAGS, blankDebrief, debriefDone, debriefLine, labelOf, ownRun, stickyDebrief } from './debrief.js';
+import { DEBRIEF, FLAGS, NOTE_TAGS, blankDebrief, debriefDone, debriefLine, labelOf, ownRun, stickyDebrief,
+         unwalkedPlan, trailShown, ranBlind } from './debrief.js';
 import { CONFIDENCE, stampCall, confidenceOf, firstCall, firstCallWasFind, calibration, calibrationLine, callVerdict, runsOf } from './call.js';
 import { isNative, watchBackground, canHaptic, haptic, watchHeading, shareFile } from './native.js';
 import { readBackup, restoreChanges, restoreQuestion, restoreNothing, BACKUP_MAX_BYTES } from './backup.js';
@@ -5254,16 +5255,31 @@ function coachSummary() {
 
 /** The coach line on the result card. "Blind" is a claim about what the
     handler knew, not only about the coach: a run where Reveal was pressed
-    had the answer on screen, and calling it blind hands a trainer evidence
-    that is not there. `d` is the run's data, for when the trail was shown. */
+    had the answer on screen, and one the debrief says the handler knew had
+    it in their head, and calling either blind hands a trainer evidence that
+    is not there. It is the one test every screen uses (ranBlind). `d` is the
+    run's data, for when the trail was shown and what the debrief says.
+
+    A run kept from a link, or saved before links were checked, can carry
+    anything in these fields, and "null calls with a — corridor" is not a
+    sentence. A clause whose number is not a number is left out. */
 function coachWords(c, d = null) {
   if (!c) return '';
+  const num = Number.isFinite;
   const n = (k) => `${k} call${k === 1 ? '' : 's'}`;
   if (c.assisted) {
-    return `Assisted run — the coach was on with a ${fmtM(c.tolM)} corridor${c.scent ? ' and the experimental scent corridor' : ''}, and made ${n(c.calls ?? 0)}.`;
+    return 'Assisted run — the coach was on'
+      + (num(c.tolM) ? ` with a ${fmtM(c.tolM)} corridor` : '')
+      + (c.scent ? `${num(c.tolM) ? ' and' : ' with'} the experimental scent corridor` : '')
+      + (num(c.calls) ? `, and made ${n(c.calls)}.` : '.');
   }
-  const sh = c.shadow;
-  const had = sh ? ` Had the coach been on: ${n(sh.plain)} with a ${fmtM(sh.tolM)} corridor, ${n(sh.scent)} with the scent corridor.` : '';
+  const sh = c.shadow && typeof c.shadow === 'object' ? c.shadow : {};
+  const clauses = [
+    num(sh.plain) && num(sh.tolM) ? `${n(sh.plain)} with a ${fmtM(sh.tolM)} corridor` : null,
+    num(sh.scent) ? `${n(sh.scent)} with the scent corridor` : null,
+  ].filter(Boolean);
+  const had = clauses.length ? ` Had the coach been on: ${clauses.join(', ')}.` : '';
+  if (ranBlind({ ...d, coach: c })) return `Blind run — no prompts.${had}`;
   if (trailShown(d)) {
     /* Before the run began means an earlier run of the same trail showed it. */
     const into = Number.isFinite(d.trackStarted) ? d.revealedAt - d.trackStarted : NaN;
@@ -5272,7 +5288,8 @@ function coachWords(c, d = null) {
       : `the trail was shown on screen ${fmtDur(into)} into the run`;
     return `Coach off, but ${when}, so this was not a blind run.${had}`;
   }
-  return `Blind run — no prompts.${had}`;
+  /* Not shown, not coached: the debrief says the handler knew. */
+  return `Coach off, but the debrief says the handler knew the answer, so this was not a blind run.${had}`;
 }
 
 /** Tones as WAV files played through <audio>, not the Web Audio API: on an
@@ -5826,8 +5843,10 @@ function paintHandlerCard(id) {
     + cell(st.laid, st.laid === 1 ? 'trail laid' : 'trails laid')
     + cell(st.runs ? fmtKm(st.longest) : '\u2014', 'longest run')
     + cell(st.medOff != null ? fmtM(st.medOff) : '\u2014', 'typical distance from the line')
-    + (st.assisted + st.blind + st.shown
-      ? cell(`${st.assisted}\u2009/\u2009${st.blind}`, `assisted / blind runs${st.shown ? ` \u00b7 ${st.shown} with the trail shown` : ''}`) : '');
+    /* Runs that were neither are said apart, and never folded into blind. */
+    + (st.assisted + st.blind + st.shown + st.knew
+      ? cell(`${st.assisted}\u2009/\u2009${st.blind}`, `assisted / blind runs${st.shown ? ` \u00b7 ${st.shown} with the trail shown` : ''}`
+        + (st.knew ? ` \u00b7 ${st.knew} where the handler knew` : '')) : '');
   $('hRing').innerHTML = ringHtml(st);
   $('hDogsLabel').textContent = dogs.length ? `Dogs \u00b7 ${dogs.length}` : 'Dogs';
   $('hDogs').innerHTML = dogs.length ? dogs.map(d => {

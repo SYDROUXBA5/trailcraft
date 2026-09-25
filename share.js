@@ -10,7 +10,7 @@
 import { simplify, pathLen, cardinal, fmtDist, fmtShort, fmtDur, fmtSpeed, fmtTemp, fmtWeight, fmtCoord } from './geo.js';
 import { through, inflate, b64url, unb64url, needStreams } from './card.js';
 import { targetById, ageBand, dogAge, healApproach } from './store.js';
-import { DEBRIEF, FLAGS, NOTE_TAGS, ownRun, toldField, toldOf } from './debrief.js';
+import { DEBRIEF, FLAGS, NOTE_TAGS, ownRun, toldField, toldOf, trailShown, ranBlind } from './debrief.js';
 import { CONFIDENCE, labelOf as callLabel } from './call.js';
 import { cleanSeen, seenLine } from './ground.js';
 import { rainRate } from './field.js';
@@ -795,11 +795,14 @@ export function detailSections(m, u = {}) {
   const c = m.coach;
   if (c && typeof c === 'object') {
     const rows = [];
-    /* Blind is about what the handler knew. A coach-off run with the trail
-       revealed on screen is not one, and the reader is told when. */
-    const into = !fin(m.revealedAt) ? null : fin(m.runAt) ? m.revealedAt - m.runAt : NaN;
+    /* Blind is about what the handler knew (ranBlind, the test every screen
+       uses). A coach-off run with the trail revealed on screen is not one,
+       and the reader is told when; nor is one whose debrief says the
+       handler knew the answer. */
+    const into = !trailShown(m) ? null : fin(m.runAt) ? m.revealedAt - m.runAt : NaN;
     rows.push(['Run', c.assisted ? 'assisted — the coach was on'
-      : into == null ? 'blind — no prompts'
+      : ranBlind(m) ? 'blind — no prompts'
+      : into == null ? 'coach off, but the handler knew the answer'
       : !fin(into) ? 'coach off, but the trail was shown on screen'
       : into < 0 ? 'coach off, but the trail had been shown on screen on an earlier run'
       : `coach off, but the trail was shown on screen ${clock(into)} into the run`]);
