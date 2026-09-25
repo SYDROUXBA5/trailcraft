@@ -8,7 +8,7 @@
 import assert from 'node:assert/strict';
 import {
   FLAT, buildTerrain, normOf, sample, stability, synoptic, flowAt,
-  scentLife, solarPosition, insolation, regime, lerpDir, wxAt, rainRate,
+  scentLife, solarPosition, insolation, regime, lerpDir, wxAt, rainRate, seriesCovers, windAt,
 } from '../public/field.js';
 import { driftFrom, predictedOffsets, ScentSim, NOSE, AIRBORNE, RESIDENCE,
          stepByFlow, flowBearing } from '../public/sim.js';
@@ -695,6 +695,38 @@ t('flowBearing: the sign convention, stated once', () => {
   // And it matches what synoptic() produces for a plain wind.
   assert.equal(Math.round(flowBearing(synoptic(5, 270))), 90, 'a westerly blows east');
   assert.equal(Math.round(flowBearing(synoptic(5, 0))), 180, 'a northerly blows south');
+});
+
+
+/* Every view of a run reads the wind for its own moment from one place, so
+   the coach, the reveal, the replay and the grade cannot disagree about which
+   side the scent went. And a series is only trusted for moments it reaches. */
+t('windAt: the wind at a moment of a run, and whether it really is that moment\'s', () => {
+  const T0 = Date.UTC(2026, 8, 25, 8, 0);
+  const series = [0, 15, 30, 45, 60].map(m => ({ t: T0 + m * 60e3, wind_speed: 2 + m / 15, wind_direction: m * 2, temp: 10 }));
+  const laid = { wind_speed: 2, wind_direction: 0, temp: 10, series };
+  const s = { data: { weather: laid } };
+
+  const mid = windAt(s, T0 + 22.5 * 60e3);
+  assert.equal(mid.exact, true);
+  near(mid.wx.wind_speed, 3.5, 1e-9, 'half way between the 15 and 30 minute samples');
+  near(mid.wx.wind_direction, 45, 1e-9);
+
+  const nextDay = windAt(s, T0 + 26 * 3600e3);
+  assert.equal(nextDay.exact, false, 'a day later is outside what the laid series knows');
+  assert.equal(nextDay.wx, laid, 'so it is only offered as the laid-time weather, flagged');
+
+  /* When the run's own weather was fetched, that comes first. */
+  const runSeries = [0, 15, 30].map(m => ({ t: T0 + 26 * 3600e3 + m * 60e3, wind_speed: 9, wind_direction: 200, temp: 5 }));
+  const both = { data: { weather: laid, runWeather: { wind_speed: 9, wind_direction: 200, series: runSeries } } };
+  const r = windAt(both, T0 + 26 * 3600e3 + 10 * 60e3);
+  assert.equal(r.exact, true);
+  assert.equal(r.wx.wind_speed, 9);
+
+  assert.equal(seriesCovers(laid, T0 - 10 * 60e3), true, 'within a sample of the first');
+  assert.equal(seriesCovers(laid, T0 - 3600e3), false);
+  assert.equal(seriesCovers({ temp: 3 }, T0), false, 'no series, no claim');
+  assert.deepEqual(windAt(null, T0), { wx: null, exact: false });
 });
 
 console.log(`\n${pass} passed total`);

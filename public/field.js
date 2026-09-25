@@ -132,6 +132,29 @@ export function wxAt(weather, when) {
   return out;
 }
 
+/** Does a weather record's series really reach this moment? Within its first
+    and last sample, give or take one sample's width. Outside that, wxAt can
+    only repeat the nearest end — a guess, however exact it looks. */
+export function seriesCovers(weather, when, slackMs = 20 * 60e3) {
+  const s = weather?.series;
+  if (!Array.isArray(s) || !s.length || !Number.isFinite(when)) return false;
+  return when >= s[0].t - slackMs && when <= s[s.length - 1].t + slackMs;
+}
+
+/** The wind at one moment of a run, from what the session holds, and whether
+    it truly is that moment's. Every view of a run reads it here — the coach
+    while it happens, the plume on Reveal, the replay as its clock moves, and
+    the grade — so none of them can put the scent on a different side from
+    the others. The run's own weather (fetched when the laid series did not
+    reach the run) comes first, then the laid series. */
+export function windAt(session, when) {
+  const d = session?.data ?? {};
+  for (const w of [d.runWeather, d.weather]) {
+    if (seriesCovers(w, when)) return { wx: wxAt(w, when), exact: true };
+  }
+  return { wx: d.runWeather ?? d.weather ?? null, exact: false };
+}
+
 /* ── Stability ────────────────────────────────────────────────────── */
 
 /* The single most useful number in scent work, and the one no competitor

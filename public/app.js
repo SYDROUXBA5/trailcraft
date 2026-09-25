@@ -13,7 +13,7 @@ import { stepPoints, contamTimed, trailFrom, walkedOfTrail, gpsTrouble, forecast
 import { packDraft, unpackDraft, draftAlive, draftStats } from './draft.js';
 import { handlerStats } from './store.js';
 import { plumePalette, stepPalette, windPalette, trackPalette, COLOUR_PRESETS, isHex, mix } from './colours.js';
-import { FLAT, buildTerrain, stability, regime, flowAt, normOf, rainRate, RAIN_SUMS_PER_HOUR } from './field.js';
+import { FLAT, buildTerrain, stability, regime, flowAt, normOf, rainRate, RAIN_SUMS_PER_HOUR, windAt } from './field.js';
 import { predictedOffsets, ScentSim, driftFrom, stepByFlow } from './sim.js';
 import { PARAMS, DIALS, PV, setParam, resetParams, changed, isDefault, tally, dialById, PRESETS, applyPreset } from './params.js';
 import { encodeTrail, decodeTrail, cardUrl, cardFromText, walkedPlanFor } from './card.js';
@@ -977,6 +977,10 @@ const SERIES_SPAN = 6 * 3600e3;
    used instead. The laid-time asks themselves have no limit. They wait in the
    background, and a late answer is written as the one field it is. */
 const WX_WAIT = 10000;
+/* The forecast window reaches two days back and three ahead, and its nearest
+   sample to a moment outside it can be days off. That is not the weather at
+   that moment, so it is refused rather than handed over as if it were. */
+const WX_MAX_GAP = 90 * 60e3;
 
 async function fetchWeather(lat, lon, when, { within = 0 } = {}) {
   const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat.toFixed(4)}&longitude=${lon.toFixed(4)}`
@@ -994,6 +998,7 @@ async function fetchWeather(lat, lon, when, { within = 0 } = {}) {
   const times = block.time.map(t => new Date(t).getTime());
   let best = 0, bestGap = Infinity;
   times.forEach((t, i) => { const g = Math.abs(t - when); if (g < bestGap) { bestGap = g; best = i; } });
+  if (bestGap > WX_MAX_GAP) throw new Error('weather: nothing near that time');
   const at = (k, i = best) => block[MAP_VARS[k]]?.[i] ?? null;
   const snapshot = { time: block.time[best], gap: bestGap };
   for (const k of Object.keys(MAP_VARS)) snapshot[k] = at(k);
@@ -2736,7 +2741,8 @@ function openReplay(s) {
     if (s.data.planTrail?.length > 1) setSrc('plan', lineOf(s.data.planTrail));
     /* On the replay's clock from the first frame, and pruned by the start of
        the run, because the slider can be dragged back there at any time. */
-    if (s.data.weather) plumeStart(trailOf(s), s.data.weather, plume.T, s.data.contamination,
+    const w0 = windAt(s, replay.at).wx;
+    if (w0) plumeStart(trailOf(s), w0, plume.T, s.data.contamination,
       { at: replay.at, since: replay.from });
   }
   // Only once the map is drawn, so a replay that fails to open is not left half open.
@@ -2775,9 +2781,13 @@ function paintReplay() {
 
   /* The scent as it was. plumeFrame reads plume.clock, so setting it and
      painting one frame shows that instant instead of this one. */
+  /* The wind as it was at this moment of the replay, not as it was when the
+     trail was laid: over an hour's run it can swing right round. */
+  const w = windAt(s, at).wx;
+  if (w && plume.sim) { plume.wx = w; plume.st = stability(w.soil_temp, w.temp); }
   if (plume.sim) { plume.clock = at; plumeFrame(); }
-  if (s.data.weather) {
-    const field = scentField(trailOf(s), s.data.weather, at);
+  if (w) {
+    const field = scentField(trailOf(s), w, at);
     setSrc('drift', field.length ? plumePolygon(field) : EMPTY);
     paintBandWalls(field);
   }
@@ -3992,8 +4002,8 @@ async function applyWalked(sessionId, card) {
   if (s2.data.track) {
     /* Graded for the dog that ran it (s2.dogId), not whichever dog is picked
        on Home today, and banked to that dog. */
-    const result = await computeResult(s2, s2.data.track, s2.data.trackWaypoints || [], s2.data.trackStarted, { bank: true });
-    const graded = { summary: result.sentence, data: { result } };
+    const { runWeather, ...result } = await computeResult(s2, s2.data.track, s2.data.trackWaypoints || [], s2.data.trackStarted, { bank: true });
+    const graded = { summary: result.sentence, data: { result, ...(runWeather ? { runWeather } : {}) } };
     guardSave(patchSession(s2, graded), () => saveSession(s2, graded));
     snap();
     s2 = db.sessions().find(x => x.id === s.id);
@@ -4123,7 +4133,7 @@ function toggleReveal() {
     setTrail(run.revealed ? s.data.trail : null);
     /* The plume is the trail, drawn in air. Showing it before Reveal would
        hand the handler the answer, so it waits for the same button. */
-    if (run.revealed) plumeStart(trailOf(s), s.data.weather, undefined, s.data.contamination);
+    if (run.revealed) plumeStart(trailOf(s), windAt(s, Date.now()).wx, undefined, s.data.contamination);
     else plumeStop();
     setSrc('contam', run.revealed
       ? { type: 'FeatureCollection',
@@ -4214,14 +4224,15 @@ async function finishRun() {
      neither banks calibration nor gets the last word — the walked card does. */
   const provisional = !!s.data.plan && !s.data.walked;
   const dogId = S.dog?.id ?? null;          // the run being recorded now is the picked dog's
-  const result = await computeResult({ ...s, dogId }, rec.pts, rec.wps, run.startedAt, { bank: !provisional });
+  const { runWeather, ...result } = await computeResult({ ...s, dogId }, rec.pts, rec.wps, run.startedAt, { bank: !provisional });
   liveEnd(result);
   const patch = {
     dogId,
     handlerId: S.handler.id,
     summary: result.sentence,
     data: { track: rec.pts, trackStarted: run.startedAt, trackWaypoints: rec.wps,
-      revealedAt: run.revealedAt || s.data.revealedAt || null, result, coach: coachRecord },
+      revealedAt: run.revealedAt || s.data.revealedAt || null, result, coach: coachRecord,
+      ...(runWeather ? { runWeather } : {}) },
   };
   /* If the phone refuses the save, the run stays in memory and on screen:
      the result still shows, it can be sent as a link or a file, and the
@@ -4251,12 +4262,24 @@ async function computeResult(s, track, wps, startedAt, { bank = true } = {}) {
   const dogName = dogRow?.name ?? 'The dog';
   const ageMin = Math.max(0, Math.round((startedAt - s.startedAt) / 60000));
 
-  // The wind that moved scent during THIS run.
-  let wx = s.data.weather;
-  try { wx = await fetchWeather(track[0].lat, track[0].lon, startedAt, { within: WX_WAIT }); } catch { /* keep laid-time weather */ }
+  /* The wind that moved scent during THIS run: the session's own series read
+     at the run's start when it reaches that far — the very wind the coach and
+     the replay show — and otherwise fetched for the run's time and kept, so
+     the replay can show the same. If neither works, the laid-time weather is
+     used to explain the run but nothing is banked from it: a dog's drift
+     constant must not be learned from a wind that was not blowing. */
+  let { wx, exact } = windAt(s, startedAt);
+  let runWeather = null;
+  if (!exact) {
+    try {
+      runWeather = await fetchWeather(track[0].lat, track[0].lon, startedAt, { within: WX_WAIT });
+      ({ wx, exact } = windAt({ data: { runWeather } }, startedAt));
+    } catch { /* keep the laid-time weather, unbanked */ }
+  }
+  if (!exact) bank = false;
   const st = stability(wx?.soil_temp, wx?.temp);
 
-  if (t.kind === 'hide') return searchResult(s, track, wps, startedAt, wx, dogName, ageMin);
+  if (t.kind === 'hide') return { ...searchResult(s, track, wps, startedAt, wx, dogName, ageMin), runWeather };
 
   const trail = s.data.trail;
   /* The phone's track, projected a line-length ahead: an ESTIMATE of where
@@ -4338,11 +4361,15 @@ async function computeResult(s, track, wps, startedAt, { bank = true } = {}) {
     regimeWord: reg?.word ?? null, regimeKey: reg?.key ?? null,
     stability: st?.label ?? null, stabilityPlain: st?.plain ?? null,
     wind: wx ? { speed: wx.wind_speed, from: wx.wind_direction } : null,
+    /* Whether that wind was the run's own. When it was not, the explanation
+       above is offered on the laid-time wind and nothing was banked. */
+    windExact: exact,
     /* Which model produced this. `mv` is the app that graded it; `mp` is any
        dial that was not where it shipped, and is absent on every normal run.
        Without these a result cannot be reproduced, and a picture that cannot
        be reproduced is not a record of anything. */
     mv: BUILD, ...(offBaseline ? { mp: moved } : {}),
+    runWeather,
   };
 }
 
@@ -4498,7 +4525,9 @@ function showOnMap(from = 'scrResult') {
   mapCameFrom = from;
   const t = targetById(s.targetId);
   clearMap();
-  const wx = s.data.weather;
+  /* A run is shown in the wind it was run in; a trail not run yet, in the
+     wind it was laid in. */
+  const wx = Number.isFinite(s.data.trackStarted) ? windAt(s, s.data.trackStarted).wx : s.data.weather;
   if (t.kind === 'person') {
     setTrail(s.data.trail);
     setSrc('start', pointsOf([s.data.trail[0]]));
@@ -5180,7 +5209,7 @@ function coachStart(s) {
   coach.reading = null; coach.status = 'on'; coach.line = '';
   coach.everOn = false; coach.used = null;
   coach.shadow = coach.trail ? { plain: initialCoach(), scent: initialCoach(), log: { plain: [], scent: [] } } : null;
-  const wx = s.data.weather;
+  const wx = windAt(s, run.startedAt).wx;
   coach.field = wx && coach.trail ? scentField(trailOf(s), wx, run.startedAt) : [];
   if (coach.trail && wx && !surfValid(s)) {
     fillSurfaces(s).then(f => { if (f && run.session?.id === s.id) coach.field = scentField(trailOf(s), wx, run.startedAt); });

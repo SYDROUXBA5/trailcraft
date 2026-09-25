@@ -528,6 +528,19 @@ t('the session list deletes from a card without opening it, only once Delete ses
   assert.match(handler, /if \(confirmDeleteSession\(del\.dataset\.delSession\)\) renderSessions\(\);\s*return;/);
 });
 
+t('every view of a run takes its wind from windAt, and the grade only banks the run\'s own wind', () => {
+  const grade = js.slice(js.indexOf('async function computeResult('), js.indexOf('async function computeResult(') + 2400);
+  assert.match(grade, /let \{ wx, exact \} = windAt\(s, startedAt\);/, 'the grade reads the same wind the coach and replay show');
+  assert.match(grade, /if \(!exact\) bank = false;/, 'and banks nothing from a wind that was not the run\'s');
+  assert.match(js, /coach\.field = wx && coach\.trail \? scentField\(trailOf\(s\), wx, run\.startedAt\) : \[\];/);
+  assert.match(js, /const wx = windAt\(s, run\.startedAt\)\.wx;/, 'the coach');
+  assert.match(js, /plumeStart\(trailOf\(s\), windAt\(s, Date\.now\(\)\)\.wx/, 'the reveal');
+  assert.match(js, /const w0 = windAt\(s, replay\.at\)\.wx;/, 'the replay as it opens');
+  assert.match(js, /const w = windAt\(s, at\)\.wx;\s*\n\s*if \(w && plume\.sim\) \{ plume\.wx = w;/, 'and as its clock moves');
+  assert.match(js, /if \(bestGap > WX_MAX_GAP\) throw new Error/, 'weather days away from the moment is refused');
+  assert.ok(!/s\.data\.weather, undefined, s\.data\.contamination/.test(js), 'nothing draws a run in the laid-time snapshot any more');
+});
+
 t('batch 1 follow-ups the checkers asked for', () => {
   /* A session the phone refused to keep still has its crash copy: deleting the
      session must take that copy too, or it is offered back at the next launch. */
@@ -615,8 +628,8 @@ t('a replay shows the air as it was, and a search can be replayed', () => {
   assert.match(frame, /plume\.sim\.prune\(now, plume\.wx, plume\.st, \{ max: 9000, since: plume\.since \}\)/);
   assert.match(frame, /plume\.contam\.prune\(now, plume\.wx, plume\.st, \{ max: 5000, since: plume\.since \}\)/);
   const open = bodyOf('openReplay');
-  assert.match(open, /plumeStart\(trailOf\(s\), s\.data\.weather, plume\.T, s\.data\.contamination,\s*\{ at: replay\.at, since: replay\.from \}\)/,
-    'on the replay’s clock, pruned by the start of the run');
+  assert.match(open, /plumeStart\(trailOf\(s\), w0, plume\.T, s\.data\.contamination,\s*\{ at: replay\.at, since: replay\.from \}\)/,
+    'on the replay’s clock, pruned by the start of the run, in the wind of that moment');
   assert.doesNotMatch(open, /plume\.clock =/, 'the clock is plumeStart’s to set');
   const hide = open.indexOf("if (targetById(s.targetId).kind === 'hide') {");
   assert.ok(hide > 0 && hide < open.indexOf('s.data.trail[0]'), 'a search never reads a trail it does not have');
