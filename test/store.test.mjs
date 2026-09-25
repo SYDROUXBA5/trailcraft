@@ -452,16 +452,50 @@ t('store: every change is announced, and a deletion leaves a tombstone', () => {
 const fullBackend = (limitChars) => {
   const m = new Map();
   const total = () => [...m.entries()].reduce((n, [k, v]) => n + k.length + v.length, 0);
-  return {
+  const b = {
+    limit: limitChars, total,
     getItem: (k) => (m.has(k) ? m.get(k) : null),
     setItem: (k, v) => {
       const next = total() - (m.has(k) ? k.length + m.get(k).length : 0) + k.length + String(v).length;
-      if (next > limitChars) throw new DOMException('quota', 'QuotaExceededError');
+      if (next > b.limit) throw new DOMException('quota', 'QuotaExceededError');
       m.set(k, String(v));
     },
     removeItem: (k) => m.delete(k),
   };
+  return b;
 };
+
+/* Deleting is how a full phone makes room. Setting a steered run's drift row
+   aside makes the kv blob a little bigger, and it was written before the run
+   went, so on a full phone exactly the runs with such a row ("I knew",
+   coached, revealed) could not be deleted at all. */
+t('a full phone can still delete a run whose drift row must be set aside', () => {
+  const b = fullBackend(Infinity);
+  const db = createStore(b);
+  const T = Date.UTC(2026, 8, 1);
+  const track = Array.from({ length: 300 }, (_, i) => ({ lat: 51 + i * 1e-5, lon: -2.6, t: T + i * 1000, acc: 5 }));
+  db.addSession({ id: 'r1', handlerId: 'h1', dogId: 'bo', targetId: 'person', startedAt: T,
+    data: { track, trackStarted: T, coach: { assisted: true }, result: { kind: 'trail' } } });
+  db.addCalibration('bo', { t: T, k: 2.1 });
+  b.limit = b.total();                          // exactly full
+  db.deleteSession('r1');
+  assert.deepEqual(db.sessions(), [], 'the run is gone and its room freed');
+  assert.ok(b.total() < 1000);
+  assert.equal(db.calibration('bo')[0].skip, true, 'and its row is set aside in the room it freed');
+
+  /* If the row's write still fails, the delete stands and the row is read
+     as it was banked, never the other way round. */
+  const kvFails = fullBackend(Infinity);
+  const db2 = createStore(kvFails);
+  db2.addSession({ id: 'r2', handlerId: 'h1', dogId: 'bo', targetId: 'person', startedAt: T,
+    data: { track, trackStarted: T, coach: { assisted: true }, result: { kind: 'trail' } } });
+  db2.addCalibration('bo', { t: T, k: 2.1 });
+  const set = kvFails.setItem;
+  kvFails.setItem = (k, v) => { if (k === 'tc.kv') throw new DOMException('quota', 'QuotaExceededError'); set(k, v); };
+  db2.deleteSession('r2');
+  assert.deepEqual(db2.sessions(), []);
+  assert.equal(db2.calibration('bo')[0].skip, undefined);
+});
 
 t('a full phone throws a SaveError that says so, and loses nothing already saved', () => {
   const db = createStore(fullBackend(2500));
