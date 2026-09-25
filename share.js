@@ -582,10 +582,13 @@ export function detailSections(m, u = {}) {
   team.push(['Looking for', m.target]);
   out.push({ title: 'Team', rows: team });
 
-  const ageMin = fin(r?.ageMin) ? r.ageMin
+  /* A drawn plan's laid time is when it was drawn, less a guessed walk, so
+     any age worked from it is made up and too old. None until it is walked. */
+  const ageMin = drawn ? null : fin(r?.ageMin) ? r.ageMin
     : fin(m.runAt) && fin(m.laidAt) ? Math.max(0, Math.round((m.runAt - m.laidAt) / 60000)) : null;
   const ageRow = fin(ageMin) ? [m.kind === 'search' ? 'Hide age at start' : 'Trail age at start',
-    `${minutes(ageMin)}${ageBand(ageMin) ? ` · ${ageBand(ageMin).label}` : ''}`] : null;
+    `${minutes(ageMin)}${ageBand(ageMin) ? ` · ${ageBand(ageMin).label}` : ''}`]
+    : drawn && fin(m.runAt) ? ['Trail age at start', 'not known — drawn, not yet walked'] : null;
 
   if (m.kind === 'trail' && m.trail) {
     const tr = m.trail, a = tr[0], b = tr[tr.length - 1];
