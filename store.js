@@ -411,12 +411,7 @@ export function createStore(backend) {
       const ks = driftRows(kv.get(`cal:${dogId}`, []), store.sessions())
         .map(r => r.k).filter(k => Number.isFinite(k) && k > 0);
       if (ks.length < 5) return null;
-      /* With an even count the median is halfway between the middle two.
-         Taking the upper one gave six runs of 1 to 6 a drift of 4, where the
-         middle of them is 3.5, and always erred the same way: high. */
-      const sorted = [...ks].sort((a, b) => a - b);
-      const mid = sorted.length >> 1;
-      return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+      return median(ks);
     },
 
     usage,
@@ -679,7 +674,7 @@ export function handlerStats(handlerId, sessions) {
     const r = s.data.result;
     if (r && Number.isFinite(r.medAbs)) offs.push(r.medAbs);
   }
-  if (offs.length) { const a = [...offs].sort((x, y) => x - y); out.medOff = a[Math.floor(a.length / 2)]; }
+  out.medOff = median(offs);
   return out;
 }
 
@@ -726,6 +721,18 @@ export function dogStats(dogId, sessions, calibration = []) {
   if (offs.length) out.meanOffset = offs.reduce((a, b) => a + b, 0) / offs.length;
   if (sides.length) out.sideAgree = sides.reduce((a, b) => a + b, 0) / sides.length;
   return out;
+}
+
+/** The middle of some numbers, or null for none. With an even count it is
+    halfway between the middle two. Taking the upper one gave six runs of 1
+    to 6 a drift of 4 where the middle of them is 3.5, and a handler with
+    runs 4 m and 8 m off the line a typical 8: always wrong the same way,
+    high. */
+function median(xs) {
+  if (!xs?.length) return null;
+  const a = [...xs].sort((x, y) => x - y);
+  const mid = a.length >> 1;
+  return a.length % 2 ? a[mid] : (a[mid - 1] + a[mid]) / 2;
 }
 
 /* store.js must not depend on geo.js — the store is about rows, not geometry —
