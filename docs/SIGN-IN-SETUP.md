@@ -121,10 +121,10 @@ up once:
    Firestore → **Rules** → paste the whole file again → **Publish**.
 
    The rules check what a live run holds, and they expect a `deleteAt`
-   field, which only builds after 24 September 2026 write. Put the new
-   build on the website and on every phone first, then publish the rules. A phone still
-   on an older build is refused when it shares live ("Missing or
-   insufficient permissions") until it is updated.
+   field, which only builds newer than 2026-09-24a write. Put the new
+   build on the website and on every phone first, then publish the
+   rules. A phone still on 2026-09-24a or older is refused when it shares
+   live ("Missing or insufficient permissions") until it is updated.
 2. **Clean-up.** A live run is readable for 24 hours after it ends, then it
    should be deleted. Firestore → **Time-to-live (TTL)** → **Create policy**,
    twice:
