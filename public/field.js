@@ -20,7 +20,7 @@
    tidiness, it is the reason the maths can be checked in Node instead of being
    eyeballed on a phone in a field. */
 
-import { PV, stabilityStops } from './params.js';
+import { PV, stabilityStops, creepOf } from './params.js';
 
 /* ── Terrain ──────────────────────────────────────────────────────── */
 
@@ -67,14 +67,15 @@ export function buildTerrain(h, n, cell, bbox) {
 
 /** Where a coordinate sits in the grid: 0,0 is the north-west corner. Points
     outside the grid clamp, because a particle that drifts off the edge should
-    keep moving on the last known air rather than stop dead. */
-export function normOf(T, lat, lon) {
+    keep moving on the last known air rather than stop dead. `out` is for the
+    plume's hot loop, which asks this for every parcel at every step and
+    would otherwise make a fresh object each time. */
+export function normOf(T, lat, lon, out = { x: 0, y: 0 }) {
   const b = T?.bbox;
-  if (!b) return { x: 0.5, y: 0.5 };
-  return {
-    x: Math.min(1, Math.max(0, (lon - b.west) / (b.east - b.west || 1e-9))),
-    y: Math.min(1, Math.max(0, (b.north - lat) / (b.north - b.south || 1e-9))),
-  };
+  if (!b) { out.x = 0.5; out.y = 0.5; return out; }
+  out.x = Math.min(1, Math.max(0, (lon - b.west) / (b.east - b.west || 1e-9)));
+  out.y = Math.min(1, Math.max(0, (b.north - lat) / (b.north - b.south || 1e-9)));
+  return out;
 }
 
 /** Bilinear sample of one of a terrain's grids at normalised (x, y). */
@@ -196,10 +197,13 @@ export function stability(soilT, airT) {
 /* Live from the bench (params.js stabilityStops). The defaults are the
    values this model shipped with; every one of them was chosen, not measured. */
 
-/** Metres per second the synoptic wind blows, as an east/south vector. */
-export function synoptic(speedMs, fromDeg) {
+/** Metres per second the synoptic wind blows, as an east/south vector.
+    `out` as for flowAt, which calls this first thing every time. */
+export function synoptic(speedMs, fromDeg, out = { u: 0, v: 0 }) {
   const to = ((fromDeg ?? 0) + 180) * Math.PI / 180;    // direction it blows TOWARD
-  return { u: Math.sin(to) * (speedMs ?? 0), v: -Math.cos(to) * (speedMs ?? 0) };
+  out.u = Math.sin(to) * (speedMs ?? 0);
+  out.v = -Math.cos(to) * (speedMs ?? 0);
+  return out;
 }
 
 /**
@@ -213,13 +217,16 @@ export function synoptic(speedMs, fromDeg) {
  * @returns {{u:number, v:number}} u = eastward m/s, v = southward m/s
  */
 export function flowAt(T, x, y, wx, st, out = { u: 0, v: 0 }) {
-  const s = synoptic(wx?.wind_speed, wx?.wind_direction);
+  const s = synoptic(wx?.wind_speed, wx?.wind_direction, out);   // `out` is written again below
   let u = s.u, v = s.v;
 
   if (T && !T.flat) {
     const n = T.n;
     const gx = sample(T.gx, n, x, y), gy = sample(T.gy, n, x, y);
-    const gm = Math.hypot(gx, gy);
+    /* Math.sqrt, not Math.hypot: V8 boxes both of hypot's arguments on the
+       heap, and this runs for every parcel at every step. The two agree to
+       the last bit or so for any slope a hill can have. */
+    const gm = Math.sqrt(gx * gx + gy * gy);
 
     if (gm > 1e-4) {
       const ux = gx / gm, uy = gy / gm;        // unit vector pointing UPHILL
@@ -252,7 +259,7 @@ export function flowAt(T, x, y, wx, st, out = { u: 0, v: 0 }) {
          wind, but never zero on a hillside: strongest in stable air, still
          present in neutral, mostly lifted away once the sun has the ground
          cooking. */
-      const creep = Math.min(PV.creepCap, gm * PV.creepGain * (stabilityStops().creep[st?.key] ?? 0.3));
+      const creep = Math.min(PV.creepCap, gm * PV.creepGain * (creepOf(st?.key) ?? 0.3));
       u -= ux * creep;
       v -= uy * creep;
     }
@@ -374,7 +381,7 @@ export function regime(T, trailPts, wx, st) {
        while this verdict word went on saying something else. */
     const drain = (st.drain > 0 && st.dT < 0)
       ? Math.min(PV.drainCap, PV.drainGain * gm * st.drain * (-st.dT) * 0.5) : 0;
-    const creep = Math.min(PV.creepCap, gm * PV.creepGain * (stabilityStops().creep[st.key] ?? 0.3));
+    const creep = Math.min(PV.creepCap, gm * PV.creepGain * (creepOf(st.key) ?? 0.3));
     downMag = Math.max(downMag, drain + creep);
   }
   return downMag > windMag

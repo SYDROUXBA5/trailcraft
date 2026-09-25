@@ -13,6 +13,8 @@ import {
 import { driftFrom, predictedOffsets, ScentSim, NOSE, AIRBORNE, RESIDENCE,
          stepByFlow, flowBearing } from '../public/sim.js';
 import { dist, scentOffset, bearing } from '../public/geo.js';
+import { readFileSync } from 'node:fs';
+import { scenes } from './plume-scenes.mjs';
 
 let pass = 0;
 const t = (name, fn) => { fn(); pass++; console.log(`  ok  ${name}`); };
@@ -727,6 +729,28 @@ t('windAt: the wind at a moment of a run, and whether it really is that moment\'
   assert.equal(seriesCovers(laid, T0 - 3600e3), false);
   assert.equal(seriesCovers({ temp: 3 }, T0), false, 'no series, no claim');
   assert.deepEqual(windAt(null, T0), { wx: null, exact: false });
+});
+
+t('the plume draws what it drew before the hot loop stopped allocating', () => {
+  /* driftFrom, flowAt and advance were made to reuse scratch objects, skip
+     the five steps on level open ground, and stop building a stabilityStops()
+     per sample. None of that may move a parcel. plume-golden.json is what the
+     allocating code drew for the same seeded scenes: open ground, a hill in
+     stable air, and a street of houses with wakes and the tarmac rule. A
+     millimetre or so of floating point is allowed; anything more is a change
+     to the scent, and belongs in a commit that says so. */
+  const golden = JSON.parse(readFileSync(new URL('./plume-golden.json', import.meta.url), 'utf8'));
+  const now = scenes();
+  for (const [scene, parts] of Object.entries(golden)) {
+    for (const [name, want] of Object.entries(parts)) {
+      const got = now[scene][name];
+      assert.equal(got.length, want.length, `${scene}.${name}: same number of values`);
+      let worst = 0;
+      for (let i = 0; i < want.length; i++) worst = Math.max(worst, Math.abs(got[i] - want[i]));
+      assert.ok(worst <= 3, `${scene}.${name}: off by ${worst} units (1e-8° or 1e-6 strength)`);
+    }
+  }
+  assert.ok(golden.street.late.length > 500 && golden.hill.offsets.length > 40, 'the scenes are not empty');
 });
 
 console.log(`\n${pass} passed total`);
