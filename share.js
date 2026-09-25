@@ -7,7 +7,7 @@
    the page and never learns where anyone trained. The price is said where the
    link is made — it is long, and once sent it cannot be called back. */
 
-import { simplify, pathLen, cardinal, fmtDist, fmtShort, fmtSpeed, fmtTemp, fmtWeight, fmtCoord } from './geo.js';
+import { simplify, pathLen, cardinal, fmtDist, fmtShort, fmtDur, fmtSpeed, fmtTemp, fmtWeight, fmtCoord } from './geo.js';
 import { through, inflate, b64url, unb64url, needStreams } from './card.js';
 import { targetById, ageBand, dogAge, healApproach } from './store.js';
 import { DEBRIEF, FLAGS, NOTE_TAGS, ownRun, toldField, toldOf } from './debrief.js';
@@ -602,11 +602,10 @@ export function fileBase(m) {
 
 /* ── Every detail, in words ───────────────────────────────────────── */
 
-const clock = (ms) => {
-  const s = Math.max(0, Math.round(ms / 1000));
-  const h = Math.floor(s / 3600), mm = Math.floor((s % 3600) / 60), ss = s % 60;
-  return h ? `${h}:${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}` : `${mm}:${String(ss).padStart(2, '0')}`;
-};
+/* Durations are said as the rest of the app says them (geo.js, fmtDur). This
+   page had its own hours form, so a search the sentence timed at "1:15:00"
+   sat above a grid, and a saved summary, reading "75:00". */
+const clock = fmtDur;
 const minutes = (min) => (min < 60 ? `${min} min` : `${Math.floor(min / 60)} h${min % 60 ? ` ${min % 60} min` : ''}`);
 
 /** A result's one sentence, built from its numbers in the reader's units.
