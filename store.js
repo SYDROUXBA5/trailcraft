@@ -6,7 +6,7 @@
    two stay one product: same tables, same remembered choices, same wording. */
 
 import { pathLen } from './geo.js';
-import { visible, tombstone, pruneTombstones } from './sync-core.js';
+import { visible, tombstone, pruneTombstones, RUN_FIELDS } from './sync-core.js';
 import { makeBackup, planRestore } from './backup.js';
 
 export const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
@@ -101,10 +101,10 @@ export function patchSession(s, patch) {
   return { ...s, ...patch, data: { ...(s?.data || {}), ...(patch?.data || {}) } };
 }
 
-/* What belongs to one run rather than to the trail or hides it ran on. When
-   was the answer shown is not here: a handler who has seen the line once
-   knows it on every later run. */
-const RUN_FIELDS = ['track', 'trackStarted', 'trackWaypoints', 'result', 'coach', 'debrief', 'seen'];
+/* What belongs to one run rather than to the trail or hides it ran on is
+   RUN_FIELDS in sync-core.js, shared with the merge of two copies. When the
+   answer was shown is not in it: a handler who has seen the line once knows
+   it on every later run. */
 
 /** A fresh session for running a trail or hide set again. One session holds
     one run, so a second run gets its own copy, the way each scanned Trail
