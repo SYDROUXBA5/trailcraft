@@ -181,7 +181,7 @@ await t('the question says what it adds, what it updates, what it leaves, and th
     calibration: [{}], learned: 1, damaged: { sessions: 2, dogs: 0, handlers: 0, layers: 0 },
   }, '20 September 2026');
   assert.equal(q, 'Restore the backup from 20 September 2026? It adds 12 sessions, 2 dogs and 1 handler and brings 3 sessions up to date.'
-    + ' It also brings back what the app learned about 1 dog. 1 session deleted on this phone since then stays deleted.'
+    + ' It also brings back what the app learned about 1 dog. 1 session deleted since the backup was made stays deleted.'
     + ' 2 sessions in the file are damaged and left out. Nothing on this phone is deleted.');
   assert.ok(!/[—–]/.test(q), 'no dashes');
   const onlyLearned = restoreQuestion({
@@ -326,7 +326,7 @@ await t('when a restore changes nothing, it says why instead of claiming it is a
   assert.equal(restoreNothing({ tables: none, damaged: {} }), 'Everything in this backup is already on this phone.');
   const deleted = { sessions: { added: 0, updated: 0, stayDeleted: 2, changed: [] } };
   assert.equal(restoreNothing({ tables: deleted, damaged: {} }),
-    '2 sessions in this backup were deleted on this phone since, so they stay deleted.');
+    '2 sessions in this backup were deleted since the backup was made, so they stay deleted.');
   assert.equal(restoreNothing({ tables: none, damaged: { sessions: 3 } }),
     '3 sessions in the file are damaged and cannot be restored.');
 });
@@ -338,7 +338,7 @@ await t('a session deleted by mistake, and a file of damaged rows, are named for
   db.deleteSession('s2');
   const plan = db.previewRestore(file);
   assert.equal(restoreChanges(plan), false, 'the deletion stays, so nothing would change');
-  assert.equal(restoreNothing(plan), '2 sessions in this backup were deleted on this phone since, so they stay deleted.');
+  assert.equal(restoreNothing(plan), '2 sessions in this backup were deleted since the backup was made, so they stay deleted.');
   const broken = readBackup(wrap({ sessions: [{ id: 'x', startedAt: NOW, data: { trail: 'x' } }] }), { now: NOW });
   assert.equal(restoreNothing(createStore(fakeBackend()).previewRestore(broken)),
     '1 session in the file is damaged and cannot be restored.');

@@ -181,9 +181,14 @@ await t('laid weather arriving during a run is drawn at the run’s moment, and 
   assert.ok(sb.run.airAt >= now, 'and the panel on the run screen is for the moment it was drawn');
   assert.deepEqual(calls.field.at(-1), [90, start], 'the coach reasons in the wind the dog set off in');
   assert.deepEqual(sb.coach.field, ['scent'], 'a coach that began with no weather was left with no scent');
+  /* The panel is refreshed on its own, at the moment the scent was drawn:
+     with the plume switched off in Settings nothing else would carry the new
+     wind to it. */
+  assert.deepEqual(calls.panel, [sb.run.airAt], 'the panel follows the drawn moment even if no plume draws');
 
   sb.run = { session: live(), revealed: false, startedAt: start, airAt: start };
   calls.plume.length = 0;
+  calls.panel.length = 0;
   sb.keepWeather('r1', wx);
   assert.equal(calls.plume.length, 0, 'a blind run draws no scent');
   assert.deepEqual(calls.panel, [start], 'the panel shows the run’s start, not the laid snapshot');
