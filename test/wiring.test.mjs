@@ -14,6 +14,9 @@ import { readFileSync, readdirSync, mkdtempSync, copyFileSync, rmSync } from 'no
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import vm from 'node:vm';
+import { fmtShort, fmtDur } from '../public/geo.js';
+import { ranBlind, trailShown, unwalkedPlan } from '../public/debrief.js';
 
 let pass = 0;
 const t = (name, fn) => { fn(); pass++; console.log(`  ok  ${name}`); };
@@ -943,10 +946,13 @@ t('the result card never calls a run blind when the trail was on screen', () => 
   const words = bodyOf('coachWords');
   assert.match(words, /function coachWords\(c, d = null\)/);
   assert.match(words, /if \(trailShown\(d\)\) \{[\s\S]*return `Coach off, but \$\{when\}, so this was not a blind run\.\$\{had\}`;/);
-  assert.ok(words.indexOf('trailShown(d)') < words.indexOf('Blind run'), 'the reveal is checked before anything is called blind');
+  /* Nothing is called blind but through the one shared test (ranBlind). */
+  assert.match(words, /if \(ranBlind\(\{ \.\.\.d, coach: c \}\)\) return `Blind run — no prompts\.\$\{had\}`;/);
+  assert.equal(words.match(/Blind run/g).length, 1, 'and only there');
   assert.match(js, /\$\('resCoach'\)\.textContent = coachWords\(s\.data\.coach, s\.data\);/);
   assert.match(js, /`assisted \/ blind runs\$\{st\.shown \? ` \\u00b7 \$\{st\.shown\} with the trail shown` : ''\}`/,
     'the handler card says how many were neither');
+  assert.match(js, /\(st\.knew \? ` \\u00b7 \$\{st\.knew\} where the handler knew` : ''\)/);
 });
 
 /* A search with no indication was timed against the wall clock, so a run kept
@@ -979,6 +985,31 @@ t('the result card only says a call was right when it was made where the find wa
   assert.doesNotMatch(block, /else if \(d\.outcome === 'found'\) tail = ', and you were right\.';/);
   assert.match(block, /const at = firstCallWasFind\(s\);\s*\n\s*tail = at === true \? ', and you were right\.'/);
   assert.match(block, /else if \(why === 'later-find'\) tail \+= ' This one doesn’t count towards your record\.';/);
+});
+
+/* The coach line said "Blind run — no prompts" of a coach-off run the
+   debrief said the handler knew, on the same screen as "you knew the
+   answer". And a link's odd fields printed "null calls with a — corridor". */
+t('the coach line on the result card is blind only when nobody knew, and prints no placeholders', () => {
+  const sb = { fmtM: (m, dp = 0) => fmtShort(m, false, dp), fmtDur, ranBlind, trailShown };
+  vm.createContext(sb);
+  vm.runInContext(bodyOf('coachWords'), sb);
+  const off = { assisted: false, shadow: { tolM: 20, plain: 2, scent: 1 } };
+  assert.equal(sb.coachWords(off, { revealedAt: null }),
+    'Blind run — no prompts. Had the coach been on: 2 calls with a 20 m corridor, 1 call with the scent corridor.');
+  const knew = sb.coachWords(off, { debrief: { outcome: 'found', blind: 'open' } });
+  assert.match(knew, /^Coach off, but the debrief says the handler knew the answer, so this was not a blind run\./);
+  assert.doesNotMatch(knew, /Blind run/);
+  assert.match(sb.coachWords(off, { revealedAt: 65e3, trackStarted: 0 }), /the trail was shown on screen 1:05 into the run/);
+  for (const shadow of [{}, { plain: null, tolM: null, scent: null }, { plain: 'x', tolM: {} }, null]) {
+    assert.equal(sb.coachWords({ assisted: false, shadow }, {}), 'Blind run — no prompts.', JSON.stringify(shadow));
+  }
+  assert.equal(sb.coachWords({ assisted: false, shadow: { plain: 3 } }, {}), 'Blind run — no prompts.',
+    'a count with no corridor is not said as "a — corridor"');
+  assert.equal(sb.coachWords({ assisted: true, tolM: null, calls: null }, {}), 'Assisted run — the coach was on.');
+  assert.equal(sb.coachWords({ assisted: true, tolM: 20, scent: true, calls: 2 }, {}),
+    'Assisted run — the coach was on with a 20 m corridor and the experimental scent corridor, and made 2 calls.');
+  assert.equal(sb.coachWords({ assisted: true, scent: true }, {}), 'Assisted run — the coach was on with the experimental scent corridor.');
 });
 
 console.log(`\n${pass} passed total\n`);

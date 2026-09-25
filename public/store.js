@@ -8,6 +8,7 @@
 import { pathLen } from './geo.js';
 import { visible, tombstone, pruneTombstones, RUN_FIELDS } from './sync-core.js';
 import { makeBackup, planRestore, BACKUP_FLAGS } from './backup.js';
+import { unwalkedPlan, trailShown, ranBlind } from './debrief.js';
 
 export const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 
@@ -389,10 +390,16 @@ export function createStore(backend) {
         that reads it: a dog at 0.2 was printed as 0.5 and one at 20 as 6,
         a clamp bound shown as if it had been measured. */
     dogDrift(dogId) {
-      const ks = kv.get(`cal:${dogId}`, []).map(r => r.k).filter(k => Number.isFinite(k) && k > 0);
+      /* Only the rows whose runs would still be banked today (driftRows). */
+      const ks = driftRows(kv.get(`cal:${dogId}`, []), store.sessions())
+        .map(r => r.k).filter(k => Number.isFinite(k) && k > 0);
       if (ks.length < 5) return null;
+      /* With an even count the median is halfway between the middle two.
+         Taking the upper one gave six runs of 1 to 6 a drift of 4, where the
+         middle of them is 3.5, and always erred the same way: high. */
       const sorted = [...ks].sort((a, b) => a - b);
-      return sorted[Math.floor(sorted.length / 2)];
+      const mid = sorted.length >> 1;
+      return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
     },
 
     usage,
@@ -558,34 +565,46 @@ export function ageBand(mins) {
 }
 
 /* ── What a run can honestly be counted as ────────────────────────────
-   A trainer judges a dog by these numbers, so a run is only counted as the
-   evidence it actually is. When in doubt it counts for less, and says why. */
-
-/** A run graded against a line drawn on the map, before the layer's walked
-    card came back. The line is a sketch, and so is its clock. */
-export const unwalkedPlan = (data) => !!data?.plan && !data?.walked;
+   The questions themselves (unwalkedPlan, trailShown, ranBlind) are asked in
+   debrief.js, so that call.js, which loads before this file, can ask them
+   too. What follows is what the store makes of the answers. */
 
 /** A run's trail age at the start, in minutes, as it may be counted. A run
     graded against a drawn plan has none until the walk is scanned, whatever
     a result saved before that was understood still carries. */
 export const runAgeMin = (s) => (unwalkedPlan(s?.data) ? null : s?.data?.result?.ageMin ?? null);
 
-/** Whether the answer was ever on the handler's screen: Reveal pressed, or
-    the coach switched on, which stamps the same moment because it reads out
-    where the trail is. It stays set on a second run of the same trail — the
-    handler has seen it, and running it again does not unsee it. */
-export const trailShown = (data) => Number.isFinite(data?.revealedAt) && data.revealedAt > 0;
-
 /** Whether a run may bank a row towards its dog's drift calibration. The row
     says "this is where this dog's track sits in this much wind", and that is
     only true of a run where nothing else was steering. A drawn plan is not
     the line that was walked. A coached run had a voice telling the handler
     which side the dog was and how far, and the handler brought it back. A
-    run with the trail on screen was walked along what the handler could see.
-    Each would teach the dog's record a drift the dog never chose, and always
-    a smaller one than its own. */
+    run with the trail on screen was walked along what the handler could see,
+    and so was one the handler says they knew. Each would teach the dog's
+    record a drift the dog never chose, and always a smaller one than its
+    own. It is the same "blind" the result card and the handler card use
+    (ranBlind), so no run is blind on one screen and steered on another. */
 export function teachesDrift(data) {
-  return !!data && !unwalkedPlan(data) && !data.coach?.assisted && !trailShown(data);
+  return !!data && !unwalkedPlan(data) && ranBlind(data);
+}
+
+/** The drift rows that may still be read, from `rows` as banked. A row's
+    `t` is its run's trackStarted, which is how the run is found again. Rows
+    banked before teachesDrift existed came from coached runs, revealed runs
+    and tracks the GPS could not place either side of the line, and a debrief
+    written after Stop can say the handler knew. A row whose run is on the
+    phone and fails today's test is left out of what is read, never deleted:
+    the record is the phone's, and a rule can change again. A row whose run
+    cannot be found is read as it was. */
+export function driftRows(rows, sessions) {
+  const runAt = new Map();
+  for (const s of sessions || []) {
+    if (Number.isFinite(s?.data?.trackStarted)) runAt.set(s.data.trackStarted, s);
+  }
+  return (rows || []).filter(r => {
+    const s = runAt.get(r?.t);
+    return !s || (teachesDrift(s.data) && s.data.result?.noisy !== true);
+  });
 }
 
 /** Everything worth showing about one dog's work. `sessions` is newest-first,
@@ -604,7 +623,7 @@ export function handlerStats(handlerId, sessions) {
     metres: 0, laidMetres: 0, seconds: 0, longest: 0,
     firstAt: null, lastAt: null,
     bands: { hot: 0, warm: 0, cold: 0 }, unknownAge: 0, unwalked: 0,
-    dogs: {}, assisted: 0, blind: 0, shown: 0, medOff: null,
+    dogs: {}, assisted: 0, blind: 0, shown: 0, knew: 0, medOff: null,
   };
   for (const s of laid) out.laidMetres += pathLenOf(s.data.trail);
   const offs = [];
@@ -625,11 +644,13 @@ export function handlerStats(handlerId, sessions) {
     if (band) out.bands[band.key]++; else if (unwalkedPlan(s.data)) out.unwalked++; else out.unknownAge++;
     if (s.dogId) out.dogs[s.dogId] = (out.dogs[s.dogId] || 0) + 1;
     /* Blind means the handler did not know, not merely that the coach was
-       off: a run with the trail on screen is neither, and is counted apart. */
+       off (ranBlind): a run with the trail on screen, or one the debrief says
+       the handler knew, is neither, and each is counted apart. */
     if (s.data.coach) {
       if (s.data.coach.assisted) out.assisted++;
+      else if (ranBlind(s.data)) out.blind++;
       else if (trailShown(s.data)) out.shown++;
-      else out.blind++;
+      else out.knew++;
     }
     const r = s.data.result;
     if (r && Number.isFinite(r.medAbs)) offs.push(r.medAbs);
@@ -653,7 +674,9 @@ export function dogStats(dogId, sessions, calibration = []) {
     graded: 0,
     meanOffset: null,
     sideAgree: null,
-    calRows: (calibration || []).filter(r => Number.isFinite(r?.k) && r.k > 0).length,
+    /* Counted as dogDrift reads them, or the card said "across 6 runs" of a
+       figure worked from 4. */
+    calRows: driftRows(calibration, sessions).filter(r => Number.isFinite(r?.k) && r.k > 0).length,
   };
   if (!runs.length) return out;
 

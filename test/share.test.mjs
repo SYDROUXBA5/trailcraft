@@ -815,4 +815,18 @@ await t('a search over an hour is timed the same way in the sentence and the row
   assert.doesNotMatch(text + headline(m), /1:15:05/);
 });
 
+/* Coach off and nothing revealed, but the debrief says "I knew": the page
+   still said "blind — no prompts". */
+await t('a coach-off run whose debrief says the handler knew is not sent as blind', async () => {
+  const s = session();
+  s.data.coach = { assisted: false, shadow: { tolM: 20, plain: 0, scent: 0 } };
+  s.data.debrief = { outcome: 'found', target: 'real', blind: 'open' };
+  const m = trailModel(s, people);
+  assert.match(rowsOf(detailSections(m, { when: () => 'x' })), /Run: coach off, but the handler knew the answer/);
+  const back = await decodeShared(await encodeShared(m));
+  assert.match(rowsOf(detailSections(back, { when: () => 'x' })), /Run: coach off, but the handler knew the answer/);
+  s.data.debrief.blind = 'double';
+  assert.match(rowsOf(detailSections(trailModel(s, people), { when: () => 'x' })), /Run: blind — no prompts/);
+});
+
 console.log(`\n${pass} passed total`);

@@ -164,6 +164,44 @@ export function ownRun(session) {
   return !!(at && Number.isFinite(d.trackStarted) && d.trackStarted >= at);
 }
 
+/* ── What a run can honestly be counted as ────────────────────────────
+   A trainer judges a dog by these numbers, so a run is only counted as the
+   evidence it actually is. When in doubt it counts for less, and says why.
+   They live here, the first module that reads a run, so the result card,
+   the shared page, the handler card, the drift record and the call maths
+   (call.js, store.js, share.js, app.js) all ask the same question the same
+   way. */
+
+/** A run graded against a line drawn on the map, before the layer's walked
+    card came back. The line is a sketch, and so is its clock. A drawn trail
+    that arrived as a Trail Card is the same sketch: it carries `drawn`
+    rather than `plan`, and no walked card will ever come for it. */
+export const unwalkedPlan = (data) => (!!data?.plan || !!data?.drawn) && !data?.walked;
+
+/** Whether the answer was ever on the handler's screen: Reveal pressed, or
+    the coach switched on, which stamps the same moment because it reads out
+    where the trail is. It stays set on a second run of the same trail — the
+    handler has seen it, and running it again does not unsee it. */
+export const trailShown = (data) => Number.isFinite(data?.revealedAt) && data.revealedAt > 0;
+
+/** The handler said, in the debrief, that they knew the answer. */
+export const handlerKnew = (data) => data?.debrief?.blind === 'open';
+
+/** Was this run blind? Only when nothing told the handler where the answer
+    was: no coach reading it out, no trail on screen, and not a run the
+    handler says they already knew. Each of those alone used to be missed
+    somewhere, so a run could be "blind" on the result card, counted blind
+    on the handler card and "you knew the answer" in the call block, all on
+    the same screen. Every one of them asks here now.
+
+    The call maths is stricter in one direction and kinder in another, and
+    both on purpose (call.js, callVerdict): it wants the debrief to say
+    positively that nobody knew, and a call made before Reveal was pressed
+    was still made blind, even though the run as a whole was not. */
+export function ranBlind(data) {
+  return !!data && !data.coach?.assisted && !trailShown(data) && !handlerKnew(data);
+}
+
 /** The debrief a new one borrows its sticky fields from: the newest one the
     same handler wrote on a run of their own. It used to be the newest on the
     phone, whoever's it was, so one handler's "Nobody there knew" was already

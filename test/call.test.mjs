@@ -347,4 +347,27 @@ t('the only call of a found run is never scored wrong', () => {
   assert.equal(firstCallWasFind(close), true, 'near the hide it is the find');
 });
 
+/* A drawn trail that arrived as a Trail Card carries `drawn`, not `plan`, and
+   was scored against the end of its drawn line as if a layer had walked it. */
+t('a drawn card\u2019s end is not where the find was', () => {
+  const START = { lat: 51, lon: -2.6 };
+  const end = project(START, 0, 300);
+  const at = project(end, 180, 150);
+  const s = {
+    data: {
+      trail: [START, end], drawn: true, imported: { from: 'Kim', at: 1 },
+      track: [{ ...at, t: 1000, acc: 5 }],
+      trackWaypoints: [
+        { kind: 'Indication', lat: at.lat, lon: at.lon, t: 1000, call: { v: CALL_V, conf: 'fairly', seen: false, at: 1000 } },
+        { kind: 'Indication', lat: end.lat, lon: end.lon, t: 2000 },
+      ],
+      trackStarted: 500,
+      debrief: { outcome: 'found', target: 'real', blind: 'handler' },
+    },
+  };
+  assert.equal(firstCallWasFind(s), null, 'the marks decide, and two leave it open');
+  s.data.trackWaypoints.pop();
+  assert.equal(firstCallWasFind(s), true, 'one mark on a found run is the find');
+});
+
 console.log(`\n${pass} passed total\n`);

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { handlerStats, ODOURS, targetText, teachesDrift, runAgeMin } from '../public/store.js';
+import { handlerStats, ODOURS, targetText, teachesDrift, runAgeMin, driftRows } from '../public/store.js';
 import { createStore, migrateV1, TARGETS, targetById, verbs, uid,
          dogStats, ageBand, AGE_BANDS, dogAge, SaveError, patchSession, runAgain,
          askDelete, dogsOf, storageWords, healApproach, healSession, APPROACH_V } from '../public/store.js';
@@ -239,6 +239,55 @@ t('teachesDrift: only a run nothing was steering banks towards the dog’s drift
   assert.equal(teachesDrift(null), false);
 });
 
+/* A run the debrief says the handler knew was walked along what they knew,
+   and a drawn Trail Card is a sketch just as a plan is. Both banked. */
+t('teachesDrift agrees with "blind": a run the handler knew, or a drawn card, teaches nothing', () => {
+  assert.equal(teachesDrift({ coach: { assisted: false }, debrief: { outcome: 'found', blind: 'open' } }), false,
+    'the handler knew the answer');
+  assert.equal(teachesDrift({ debrief: { outcome: 'found', blind: 'handler' } }), true);
+  assert.equal(teachesDrift({ drawn: true }), false, 'a drawn card, which carries `drawn`, not `plan`');
+  assert.equal(runAgeMin({ data: { drawn: true, result: { ageMin: 35 } } }), null, 'and has no age');
+});
+
+/* Six rows of 1 to 6 gave the dog card a drift of 4, the upper of the middle
+   two, and always erred high. */
+t('calibration: an even number of runs gives the middle of the two middle ones', () => {
+  const db = createStore(fakeBackend());
+  const row = (k) => ({ t: 1, predSide: 1, mean: 2, wind: 6, stability: 'Stable', k });
+  for (const k of [6, 1, 5, 2, 4, 3]) db.addCalibration('bo', row(k));
+  assert.equal(db.dogDrift('bo'), 3.5);
+  db.addCalibration('bo', row(7));
+  assert.equal(db.dogDrift('bo'), 4, 'an odd count is its middle, as before');
+});
+
+/* Rows banked before teachesDrift came from coached, revealed and noisy runs,
+   and a debrief written after Stop can say the handler knew. They are kept,
+   but neither the drift figure nor the card's count reads them. */
+t('drift rows whose run would not bank today are not read, and nothing is deleted', () => {
+  const db = createStore(fakeBackend());
+  const track = [{ lat: 51.2, lon: -2.64, t: 0 }, { lat: 51.2009, lon: -2.64, t: 60000 }];
+  const run = (t0, data = {}) => ({ id: `r${t0}`, handlerId: 'h1', dogId: 'bo', targetId: 'person', startedAt: 1,
+    data: { track, trackStarted: t0, result: { kind: 'trail', medAbs: 4 }, ...data } });
+  const runs = [
+    run(1000), run(2000), run(3000), run(4000), run(5000),
+    run(6000, { coach: { assisted: true } }),
+    run(7000, { revealedAt: 7500 }),
+    run(8000, { result: { kind: 'trail', medAbs: 4, noisy: true } }),
+    run(9000, { debrief: { outcome: 'found', blind: 'open' } }),
+  ];
+  for (const r of runs) db.addSession(r);
+  const row = (t, k) => ({ t, predSide: 1, mean: 8, wind: 4, stability: 'Stable', k });
+  for (const t0 of [1000, 2000, 3000, 4000]) db.addCalibration('bo', row(t0, 2));
+  for (const t0 of [6000, 7000, 8000, 9000]) db.addCalibration('bo', row(t0, 20));
+  assert.equal(db.dogDrift('bo'), null, 'four good rows are not five: the steered ones do not make up the number');
+  db.addCalibration('bo', row(424242, 2));   // its run was deleted: read as it was
+  assert.equal(db.dogDrift('bo'), 2, 'the steered rows no longer drag the figure');
+  assert.equal(db.calibration('bo').length, 9, 'every row is still stored');
+  const st = dogStats('bo', db.sessions(), db.calibration('bo'));
+  assert.equal(st.calRows, 5, 'the card counts the rows the figure was worked from');
+  assert.equal(driftRows(db.calibration('bo'), []).length, 9, 'with no runs to check, nothing is left out');
+});
+
 t('ageBand: the words the sport uses, with the boundaries stated', () => {
   assert.equal(ageBand(5).key, 'hot');
   assert.equal(ageBand(29).key, 'hot');
@@ -427,6 +476,19 @@ t('handlerStats: a coach-off run with the trail shown is not a blind run', () =>
   assert.equal(st.blind, 2, 'never shown, or nought');
   assert.equal(st.shown, 1);
   assert.equal(handlerStats('nobody', []).shown, 0);
+});
+
+/* Coach off, nothing revealed, and the debrief says "I knew": the handler
+   card counted it blind while the call block said "you knew the answer". */
+t('handlerStats: a run the handler knew is not counted blind', () => {
+  const track = [{ lat: 51.2, lon: -2.64, t: 0 }, { lat: 51.2009, lon: -2.64, t: 60000 }];
+  const run = (id, data) => ({ id, handlerId: 'h1', dogId: 'bo', startedAt: 1, data: { track, coach: { assisted: false }, ...data } });
+  const st = handlerStats('h1', [
+    run('a', { debrief: { outcome: 'found', blind: 'open' } }),
+    run('b', { debrief: { outcome: 'found', blind: 'double' } }),
+    run('c', {}),
+  ]);
+  assert.deepEqual([st.assisted, st.blind, st.shown, st.knew], [0, 2, 0, 1]);
 });
 
 /* A drawn plan's laid time is when it was drawn, less a guessed walk. An 800 m

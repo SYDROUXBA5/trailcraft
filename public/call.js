@@ -22,7 +22,7 @@
    - A call on a run the handler knew the answer to proves nothing either.
    Both are excluded from the maths, not quietly folded in. */
 
-import { ownRun } from './debrief.js';
+import { ownRun, trailShown, unwalkedPlan } from './debrief.js';
 import { dist } from './geo.js';
 
 export const CALL_V = 1;
@@ -85,11 +85,11 @@ export const AT_FIND_M = 15;
 export const OFF_FIND_M = 30;
 
 /* Where the target actually was: the hides of a search, or the end of a laid
-   or walked trail. Not a drawn plan's end, which is only where a finger
-   stopped. */
+   or walked trail. Not a drawn line's end (unwalkedPlan), a plan's or a drawn
+   card's, which is only where a finger stopped. */
 function targetsOf(d) {
   const pts = d?.hides?.length ? d.hides
-    : d?.trail?.length > 1 && !(d.plan && !d.walked) ? [d.trail[d.trail.length - 1]] : [];
+    : d?.trail?.length > 1 && !unwalkedPlan(d) ? [d.trail[d.trail.length - 1]] : [];
   return pts.filter(p => Number.isFinite(p?.lat) && Number.isFinite(p?.lon));
 }
 
@@ -161,11 +161,13 @@ export function callVerdict(session) {
   if (session?.data?.coach?.assisted) return { ok: false, why: 'helped' };
   /* Belt and braces against the run screen: the moment the answer was put on
      screen, against the moment the call was actually given. */
-  const shown = session?.data?.revealedAt;
   const when = Number.isFinite(c.call?.at) ? c.call.at : c.t;
-  if (Number.isFinite(shown) && shown > 0 && when >= shown) return { ok: false, why: 'seen' };
+  if (trailShown(session?.data) && when >= session.data.revealedAt) return { ok: false, why: 'seen' };
   const d = session?.data?.debrief;
   if (!d || (d.outcome !== 'found' && d.outcome !== 'false')) return { ok: false, why: 'nodebrief' };
+  /* Everything ranBlind (debrief.js) refuses is refused here too, but a
+     call wants the debrief to say outright that nobody knew: a run with no
+     answer to that question is not evidence of a blind call. */
   if (d.blind !== 'handler' && d.blind !== 'double') return { ok: false, why: 'notblind' };
   if (d.outcome === 'false') return { ok: true, conf: c.call.conf, right: false, at: c.t };
   /* A find is only this call's find when it happened where the call was. */
