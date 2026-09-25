@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import {
   trailModel, encodeShared, decodeShared, sharedUrl, sharedFromText,
   toGpx, fileBase, detailSections, headline, notes, liveMeta, liveModel,
+  resultSentence, sessionFromModel, keptSession, peopleOf,
 } from '../public/share.js';
 import { through, b64url } from '../public/card.js';
 import { dist } from '../public/geo.js';
@@ -202,7 +203,10 @@ await t('details follow the reader’s units and never print a hole', () => {
   assert.match(imperial, /Air: 58 °F/);
   assert.match(imperial, /Start: 51°12'/);
   for (const text of [metric, imperial]) assert.doesNotMatch(text, /undefined|NaN|null|: $/m);
-  assert.equal(headline(m), m.result.sentence);
+  /* An older result's saved sentence claimed too much. It is said again in
+     today's words, and in the units the rows under it are in. */
+  assert.equal(headline(m), 'Bo’s track sat mainly to the right of the line — about 4 m from it on average.');
+  assert.equal(headline(m, { imperial: true }), 'Bo’s track sat mainly to the right of the line — about 14 ft from it on average.');
 });
 
 await t('a newer result shows the median, the time per side, and whether the run was coached', async () => {
@@ -267,6 +271,107 @@ await t('a run on a drawn plan is sent with no trail age until the walk comes ba
   assert.match(rows(trailModel(walked, people)), /Trail age at start: 25 min · Hot/);
 });
 
+const rowsOf = (secs) => secs.flatMap(sec => sec.rows.map(r => r.join(': '))).join('\n');
+/* Bob's phone: his own handler and dog, and none of Alice's. */
+const bobs = {
+  dogs: [{ id: 'd9', name: 'Nell' }], handlers: [{ id: 'h9', name: 'Bob' }], layers: [],
+  me: { id: 'h9', name: 'Bob' },
+};
+
+await t('a kept run goes on under its own handler, with its dog, its coach and what was seen', async () => {
+  /* Alice sends Bob a coached run with ground notes, and Bob keeps it. Passed
+     on again, it used to name Bob as the handler, with no dog, no coach and
+     nothing seen on the ground. */
+  const s = session();
+  s.data.coach = { assisted: true, tolM: 20, scent: false, calls: 2 };
+  s.data.seen = { wet: 'damp', sun: 'shade' };
+  const alice = { ...people, handler: { id: 'h1', name: 'Alice' } };
+  const got = await decodeShared(await encodeShared(trailModel(s, alice)));
+  const kept = keptSession(got, { id: 'k1', at: T0 + 60 * 60e3 });
+  assert.equal(kept.handlerId, null, 'no id of this phone’s is pointed at');
+  assert.equal(kept.data.coach.assisted, true);
+  assert.equal(kept.data.seen.wet, 'damp');
+  assert.equal(kept.data.imported.from, 'Alice', 'older builds still read who it came from');
+  const again = trailModel(kept, peopleOf(kept, bobs));
+  const text = rowsOf(detailSections(again, { when: () => 'x' }));
+  assert.match(text, /Handler: Alice/);
+  assert.match(text, /Dog: Bo · Malinois/);
+  assert.match(text, /Laid by: Sophie/);
+  assert.match(text, /Run: assisted — the coach was on/);
+  assert.match(text, /Conditions: Damp/);
+  assert.doesNotMatch(text, /Bob|Nell/);
+  const twice = await decodeShared(await encodeShared(again));
+  assert.equal(twice.handler, 'Alice');
+  assert.equal(twice.dog.name, 'Bo');
+  assert.equal(twice.coach.calls, 2);
+  assert.equal(twice.seen.sun, 'shade');
+  /* The copy on the shared page is the same run, before anyone keeps it. */
+  assert.equal(sessionFromModel(got).data.seen.wet, 'damp');
+});
+
+await t('whose a record is: a run kept by an older build, a run made here on a sent trail, a Trail Card', () => {
+  const at = T0 + 60 * 60e3;
+  /* Kept before the names were stored: only `from`, which was the handler. */
+  const old = { ...session(), dogId: null, handlerId: null, layerId: null };
+  old.data.imported = { from: 'Alice', at };
+  const p = peopleOf(old, bobs);
+  assert.equal(p.handler.name, 'Alice');
+  assert.equal(p.dog, null, 'no dog is better than this phone’s dog');
+  /* A trail Alice sent and Bob kept, then ran himself: his run, her layer. */
+  const ran = { ...session(), dogId: 'd9', handlerId: 'h9', layerId: null };
+  ran.data.imported = { from: 'Alice', at: T0, dog: { name: 'Bo' }, handler: 'Alice', layer: 'Sophie' };
+  const q = peopleOf(ran, bobs);
+  assert.deepEqual([q.handler.name, q.dog.name, q.layer.name], ['Bob', 'Nell', 'Sophie']);
+  /* A Trail Card's trail is filed under this phone's handler, whoever sent it. */
+  const card = { id: 'c1', startedAt: T0, targetId: 'person', handlerId: 'h9', dogId: null, layerId: null,
+    data: { trail: walk(20), imported: { from: 'another phone', at: T0 } } };
+  assert.equal(peopleOf(card, bobs).handler.name, 'Bob');
+  /* This phone's own record reads as it always did. */
+  assert.equal(peopleOf({ ...session(), handlerId: 'gone' }, bobs).handler.name, 'Bob');
+  /* The names came from a stranger's link: only words get through. */
+  const odd = { ...old, data: { ...old.data, imported: { at, handler: { name: 'x' }, layer: 42, dog: { name: 'Bo', photo: 'data:…' } } } };
+  const r = peopleOf(odd, bobs);
+  assert.equal(r.handler, null);
+  assert.equal(r.layer, null);
+  assert.deepEqual(r.dog, { name: 'Bo' });
+});
+
+await t('the sentence is said from its numbers, in the reader’s units, wherever it is read', async () => {
+  /* Graded in metres, read in feet: the headline said "4 m" above rows in
+     feet, on the shared page, in the report and in the GPX file. */
+  const s = session();
+  s.data.result = { ...s.data.result, sentence: 'Anything the sending phone saved.',
+    medAbs: 3.7, shares: { left: 0.5, on: 0.3, right: 0.2 }, mainSide: 'left', accMed: 4, noisy: false };
+  const m = trailModel(s, people);
+  const us = { imperial: true, when: () => 'x' };
+  assert.equal(headline(m), 'Bo’s track ran mainly to the left of the line — typically 4 m from it.');
+  assert.equal(headline(m, us), 'Bo’s track ran mainly to the left of the line — typically 12 ft from it.');
+  assert.match(rowsOf(detailSections(m, us)), /Typical distance from the line: 12\.1 ft/);
+  assert.match(toGpx(m, us), /<desc>Bo’s track ran mainly to the left of the line — typically 12 ft from it\.<\/desc>/);
+  const back = await decodeShared(await encodeShared(m));
+  assert.equal(headline(back, us), headline(m, us));
+  const noisy = { ...s.data.result, noisy: true, accMed: 8 };
+  assert.equal(resultSentence(noisy, 'Bo', us),
+    'Bo’s track sat about 12 ft from the line, but GPS uncertainty (±26 ft) is too large to read which side.');
+  /* 69.6 % rounds to 0.70 in a link. Judged on the raw share, the phone that
+     ran it said one thing and the phone it was sent to said another. */
+  const close = { ...s.data.result, shares: { left: 0.2, on: 0.696, right: 0.104 } };
+  const sent = trailModel({ ...s, data: { ...s.data, result: close } }, people);
+  const read = await decodeShared(await encodeShared(sent));
+  assert.equal(headline(sent), 'Bo’s track stayed within 3 m of the line for 70 % of the run.');
+  assert.equal(headline(read), headline(sent));
+  /* A search: the distance to the hide in the reader's units; with no
+     indication there are no numbers to say it from, so its own words stay. */
+  const found = { kind: 'search', sentence: 'x', toFirst: 100e3, catchM: 2, catchApprox: true, approach: 'into the wind' };
+  assert.equal(resultSentence(found, 'Bo', us),
+    'Bo indicated in 1:40, roughly 7 ft from the hide (the GPS had dropped out), coming into the wind.');
+  assert.equal(resultSentence({ kind: 'search', sentence: 'Bo searched 4:10 — no indication marked.' }, 'Bo'),
+    'Bo searched 4:10 — no indication marked.');
+  assert.equal(resultSentence({ kind: 'trail' }, ''), 'The dog ran, but the track could not be compared with the line.');
+  assert.equal(resultSentence(null, 'Bo'), null);
+  assert.equal(resultSentence({ kind: '<b>', sentence: 'x' }, 'Bo'), null);
+});
+
 await t('a search lists its hides and how the dog found them', () => {
   const hides = [{ lat: 51.2, lon: -2.6 }];
   const track = walk(50).map(p => ({ ...p, t: p.t + 60e3 }));
@@ -322,7 +427,7 @@ await t('live: the meta holds the trail but not the run, and chunks rebuild the 
   assert.equal(back.runAt, T0 + 25 * 60e3);
   assert.equal(back.ended, true);
   assert.equal(back.wps[0].kind, 'Indication');
-  assert.equal(headline(back), m.result.sentence);
+  assert.equal(headline(back), headline(m));
   const empty = liveModel(meta, []);
   assert.equal(empty.track, null);
   assert.match(headline(empty), /not yet run/);
