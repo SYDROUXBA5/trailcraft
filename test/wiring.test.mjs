@@ -974,7 +974,7 @@ t('a run graded against a drawn plan is given no trail age, and the result shows
   assert.match(grade, /const ageMin = unwalkedPlan\(s\.data\) \? null : Math\.max\(0, Math\.round\(\(startedAt - s\.startedAt\) \/ 60000\)\);/);
   const show = js.slice(js.indexOf('\nfunction renderResult('), js.indexOf('\nfunction walkVsPlan('));
   assert.match(show, /const age = !drawnOnly && Number\.isFinite\(r\.ageMin\)/, 'an older result\u2019s made-up age is not shown');
-  assert.match(show, /cell\(age, 'trail age at start', drawnOnly \? 'known once the walk is scanned' : ''\)/);
+  assert.match(show, /cell\(age, 'trail age at start', drawnOnly \? ageUnknown\(s\.data\) : ''\)/);
   assert.doesNotMatch(js, /ageBand\(x\.data\.result\?\.ageMin\)/, 'the run lists file ages through runAgeMin');
 });
 
@@ -1010,6 +1010,37 @@ t('the coach line on the result card is blind only when nobody knew, and prints 
   assert.equal(sb.coachWords({ assisted: true, tolM: 20, scent: true, calls: 2 }, {}),
     'Assisted run — the coach was on with a 20 m corridor and the experimental scent corridor, and made 2 calls.');
   assert.equal(sb.coachWords({ assisted: true, scent: true }, {}), 'Assisted run — the coach was on with the experimental scent corridor.');
+});
+
+/* The result screen stopped showing a drawn plan's made-up age, but the run's
+   HUD and the replay caption still counted it from the moment it was drawn. */
+t('the run HUD and the replay caption give a drawn line no age either', () => {
+  const start = js.slice(js.indexOf('\nasync function startRun('), js.indexOf('\nfunction toggleReveal('));
+  assert.match(start, /const age = unwalkedPlan\(s\.data\) \? `age \$\{ageUnknown\(s\.data, true\)\}` : `\$\{ageWord\(Date\.now\(\) - s\.startedAt\)\} old`;/);
+  const followed = [], cap = { textContent: '' };
+  const s = { targetId: 'person', startedAt: 0, data: { plan: true, trail: [{ lat: 51, lon: -2 }, { lat: 51.001, lon: -2 }],
+    track: [0, 30].map(k => ({ lat: 51, lon: -2, t: 3600e3 + k * 1000 })) } };
+  const sb = {
+    replay: { s, at: 3600e3 + 30e3, from: 3600e3, to: 3600e3 + 30e3 },
+    setDogTrack() {}, setSrc() {}, pointsOf: () => ({}), plume: { sim: null, bandWalls: 0 },
+    stability: () => null, windAt: () => ({ wx: null }), followWeather: (w) => followed.push(w),
+    scentField: () => [], plumePolygon: () => ({}), paintBandWalls() {}, EMPTY: {},
+    trailOf: () => [], signedOffsets: () => [], targetById: () => ({ kind: 'person' }),
+    fmtM: String, fmtDur, unwalkedPlan, bandWallNote: () => '', document: { activeElement: null },
+    $: (id) => (id === 'repCaption' ? cap : { textContent: '', value: '' }),
+  };
+  vm.createContext(sb);
+  vm.runInContext(js.slice(js.indexOf('\nconst ageUnknown = '), js.indexOf(';\n', js.indexOf('\nconst ageUnknown = ')) + 2), sb);
+  vm.runInContext(bodyOf('paintReplay'), sb);
+  sb.ageUnknown = vm.runInContext('ageUnknown', sb);
+  sb.paintReplay();
+  assert.equal(cap.textContent, 'Trail age known once the walk is scanned');
+  s.data.walked = true;
+  sb.paintReplay();
+  assert.equal(cap.textContent, 'Trail 61 min old here', 'a walked line has its real age');
+  s.data = { ...s.data, plan: false, walked: false, drawn: true };
+  sb.paintReplay();
+  assert.equal(cap.textContent, 'Trail age not known — drawn, not walked', 'a drawn card never gets a walk');
 });
 
 console.log(`\n${pass} passed total\n`);
