@@ -4956,7 +4956,7 @@ async function reportMap(m) {
   // The dog's track under the trail: where they overlap, the line that was laid must still show.
   if (m.track) paths.push({ pts: m.track.map(at), stroke: [1, 1, 1], casing: INKC, width: 2.2 });
   if (m.trail) paths.push({ pts: m.trail.map(at), stroke: [0.96, 0.82, 0.29], casing: INKC, width: 2.6,
-    dash: m.plan && !m.walked ? [4, 3] : null });
+    dash: unwalkedPlan(m) ? [4, 3] : null });
   (m.hides ?? []).forEach(h => { const [x, y] = at(h); dots.push({ x, y, fill: [0.79, 0.6, 0.18], r: 4.5 }); });
   (m.wps ?? []).forEach(w => { const [x, y] = at(w); dots.push({ x, y, fill: [1, 1, 1], rim: INKC, r: 2.6 }); });
   if (m.trail) {
@@ -5023,7 +5023,7 @@ function paintSharedMini(m) {
   };
   const dot = (p, fill) => { const [x, y] = view.at(p); return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="5.5" fill="${fill}" stroke="#FFFFFF" stroke-width="2"/>`; };
   // The dog's track under the trail, so the line that was laid always shows.
-  svg.innerHTML = line(m.track, '#FFFFFF', 2.6) + line(m.trail, '#F5D14A', 3.2, m.plan && !m.walked)
+  svg.innerHTML = line(m.track, '#FFFFFF', 2.6) + line(m.trail, '#F5D14A', 3.2, unwalkedPlan(m))
     + (m.hides ?? []).map(h => dot(h, '#C99A2E')).join('')
     + (m.trail ? dot(m.trail[0], '#2F9E44') + dot(m.trail[m.trail.length - 1], '#C99A2E') : '');
   const url = miniImgUrl(view);

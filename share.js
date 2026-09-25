@@ -10,7 +10,7 @@
 import { simplify, pathLen, cardinal, fmtDist, fmtShort, fmtDur, fmtSpeed, fmtTemp, fmtWeight, fmtCoord } from './geo.js';
 import { through, inflate, b64url, unb64url, needStreams } from './card.js';
 import { targetById, ageBand, dogAge, healApproach } from './store.js';
-import { DEBRIEF, FLAGS, NOTE_TAGS, ownRun, toldField, toldOf, trailShown, ranBlind } from './debrief.js';
+import { DEBRIEF, FLAGS, NOTE_TAGS, ownRun, toldField, toldOf, trailShown, ranBlind, unwalkedPlan } from './debrief.js';
 import { CONFIDENCE, labelOf as callLabel } from './call.js';
 import { cleanSeen, seenLine } from './ground.js';
 import { rainRate } from './field.js';
@@ -63,6 +63,10 @@ export function trailModel(s, { dog = null, handler = null, layer = null, k = nu
     layer: layer?.name ?? null,
     plan: !!d.plan,
     walked: !!d.walked,
+    /* A drawn line that arrived as a Trail Card. Without it the link, the
+       report and a kept copy took the sketch for a laid trail, and worked a
+       trail age out of the guessed laid time the phone that ran it refused. */
+    drawn: !!d.drawn,
     trail: d.trail?.length ? d.trail : null,
     hides: d.hides?.length ? d.hides : null,
     contamination: (d.contamination ?? []).filter(c => c?.points?.length > 1).map(c => ({ points: c.points })),
@@ -293,7 +297,7 @@ function pack(m) {
     kind: m.kind, name: m.name ?? undefined, target: m.target, laidAt: m.laidAt, runAt: m.runAt,
     dog: m.dog ? pick(m.dog, DOG_KEYS) : undefined,
     handler: m.handler, layer: m.layer,
-    plan: m.plan ? 1 : undefined, walked: m.walked ? 1 : undefined,
+    plan: m.plan ? 1 : undefined, walked: m.walked ? 1 : undefined, drawn: m.drawn ? 1 : undefined,
     trail: packPts(m.trail), hides: packPts(m.hides), track: packPts(m.track), wps: packPts(m.wps),
     contam: m.contamination?.length ? m.contamination.map(c => packPts(c.points)) : undefined,
     wx: packWx(m.wx), runWx: packWx(m.runWx), result: m.result ? roundDeep(m.result) : undefined,
@@ -336,6 +340,8 @@ function unpack(o) {
     layer: str(o.layer),
     plan: !!o.plan,
     walked: !!o.walked,
+    /* Absent from a link made before it was carried: read as laid, as it was. */
+    drawn: !!o.drawn,
     trail, hides,
     track: track?.length > 1 ? track : null,
     wps: unpackPts(o.wps) ?? [],
@@ -460,7 +466,8 @@ export function sessionFromModel(m) {
     data: {
       trail: m.trail ?? undefined, hides: m.hides ?? undefined, contamination: m.contamination ?? [],
       weather: m.wx ?? null, runWeather: m.runWx ?? undefined, track: m.track ?? undefined, trackWaypoints: m.wps ?? [],
-      trackStarted: m.runAt ?? undefined, result: m.result ?? undefined, plan: m.plan, walked: m.walked, k: m.k,
+      trackStarted: m.runAt ?? undefined, result: m.result ?? undefined, plan: m.plan, walked: m.walked,
+      drawn: !!m.drawn, k: m.k,
       debrief: m.debrief ?? undefined, coach: m.coach ?? undefined, seen: m.seen ?? undefined,
       /* Kept with the run, or a run the sender revealed would be called blind
          once it is on this phone. */
@@ -549,7 +556,9 @@ export function toGpx(m, u = {}) {
   const said = m.result ? resultSentence(m.result, m.dog?.name, u) : null;
   const all = [m.trail, m.hides, m.track, ...(m.contamination ?? []).map(c => c.points)].filter(Boolean).flat();
   const lats = all.map(p => p.lat), lons = all.map(p => p.lon);
-  const drawn = m.plan && !m.walked;
+  /* Asked as the app asks it (unwalkedPlan), so a drawn card is a drawn line
+     here too, not a laid trail. */
+  const drawn = unwalkedPlan(m);
   const title = m.kind === 'search' ? `${dogName} — ${m.target.toLowerCase()} search` : `${dogName} — trail`;
 
   const wpts = [];
@@ -680,7 +689,8 @@ export function headline(m, u = {}) {
   if (said) return said;
   const n = m.hides?.length ?? 0;
   if (m.kind === 'search') return `${n} hide${n === 1 ? '' : 's'} set, not yet searched.`;
-  if (m.plan && !m.walked) return 'A trail drawn on the map, not yet walked.';
+  /* A drawn card has no walk coming, so it is not said to be waiting for one. */
+  if (unwalkedPlan(m)) return m.plan ? 'A trail drawn on the map, not yet walked.' : 'A trail drawn on the map, not yet run.';
   return `A trail laid${m.layer ? ` by ${m.layer}` : ''}, not yet run.`;
 }
 
@@ -693,7 +703,7 @@ export function detailSections(m, u = {}) {
     weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }));
   const r = m.result;
   const out = [];
-  const drawn = m.plan && !m.walked;
+  const drawn = unwalkedPlan(m);
 
   const team = [];
   if (m.dog?.name) {
@@ -707,12 +717,13 @@ export function detailSections(m, u = {}) {
   out.push({ title: 'Team', rows: team });
 
   /* A drawn plan's laid time is when it was drawn, less a guessed walk, so
-     any age worked from it is made up and too old. None until it is walked. */
+     any age worked from it is made up and too old. None until it is walked,
+     and none ever for a drawn card, which no walk will come back for. */
   const ageMin = drawn ? null : fin(r?.ageMin) ? r.ageMin
     : fin(m.runAt) && fin(m.laidAt) ? Math.max(0, Math.round((m.runAt - m.laidAt) / 60000)) : null;
   const ageRow = fin(ageMin) ? [m.kind === 'search' ? 'Hide age at start' : 'Trail age at start',
     `${minutes(ageMin)}${ageBand(ageMin) ? ` · ${ageBand(ageMin).label}` : ''}`]
-    : drawn && fin(m.runAt) ? ['Trail age at start', 'not known — drawn, not yet walked'] : null;
+    : drawn && fin(m.runAt) ? ['Trail age at start', m.plan ? 'not known — drawn, not yet walked' : 'not known — drawn, not walked'] : null;
 
   if (m.kind === 'trail' && m.trail) {
     const tr = m.trail, a = tr[0], b = tr[tr.length - 1];
@@ -847,7 +858,7 @@ export function detailSections(m, u = {}) {
 /** Caveats the reader has to see, in the order they matter. */
 export function notes(m) {
   const n = [];
-  if (m.plan && !m.walked && m.result) n.push('Compared against a line drawn on the map, not the trail as walked.');
+  if (unwalkedPlan(m) && m.result) n.push('Compared against a line drawn on the map, not the trail as walked.');
   if (m.thinnedM > 0) n.push(`Lines thinned by up to ${m.thinnedM} m to fit in the link.`);
   n.push('The wind side and the scent band are estimates from a forecast, not measurements. They suggest an explanation; they do not judge the dog.');
   return n;
