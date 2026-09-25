@@ -172,8 +172,8 @@
 
     <span class="label" style="margin-top:20px">Sex</span>
     <div class="age-row" id="obDogSex">
-      <button type="button" class="age-chip" data-sex="Male">Male</button>
-      <button type="button" class="age-chip" data-sex="Female">Female</button>
+      <button type="button" class="age-chip" data-sex="Male" aria-pressed="false">Male</button>
+      <button type="button" class="age-chip" data-sex="Female" aria-pressed="false">Female</button>
     </div>
 
     <label class="field-label" for="obDogDob" style="margin-top:20px">Date of birth <i class="opt">optional</i></label>
@@ -183,11 +183,11 @@
     <label class="field-label" for="obDogWeight">Weight, <b id="obDogWeightUnit">kg</b> <i class="opt">optional</i></label>
     <input id="obDogWeight" type="number" inputmode="decimal" step="0.1" min="0" max="200">
 
-    <span class="label" style="margin-top:20px">Trail level</span>
-    <div class="radio-cards" id="obDogLevel">
-      <button class="radio-card selected" data-level="Hot"><b>Hot</b><i>fresh trails, minutes old</i><span class="radio-dot"></span></button>
-      <button class="radio-card" data-level="Warm"><b>Warm</b><i>up to an hour or so</i><span class="radio-dot"></span></button>
-      <button class="radio-card" data-level="Cold"><b>Cold</b><i>hours old, real work</i><span class="radio-dot"></span></button>
+    <span class="label" id="obDogLevelLabel" style="margin-top:20px">Trail level</span>
+    <div class="radio-cards" id="obDogLevel" role="radiogroup" aria-labelledby="obDogLevelLabel">
+      <button type="button" class="radio-card selected" role="radio" aria-checked="true" data-level="Hot"><b>Hot</b><i>fresh trails, minutes old</i><span class="radio-dot"></span></button>
+      <button type="button" class="radio-card" role="radio" aria-checked="false" data-level="Warm"><b>Warm</b><i>up to an hour or so</i><span class="radio-dot"></span></button>
+      <button type="button" class="radio-card" role="radio" aria-checked="false" data-level="Cold"><b>Cold</b><i>hours old, real work</i><span class="radio-dot"></span></button>
     </div>
     <label class="field-label" for="obDogLine" style="margin-top:20px">Line length, metres</label>
     <input id="obDogLine" type="number" inputmode="decimal" value="10" min="0" max="40" step="0.5">
@@ -278,10 +278,10 @@
     <div class="card" id="ageCard" hidden>
       <span class="label" style="margin-top:0">Dog starts after</span>
       <div class="age-row" id="ageRow">
-        <button class="age-chip" data-age="0">Now</button>
-        <button class="age-chip" data-age="5">5 min</button>
-        <button class="age-chip selected" data-age="10">10 min</button>
-        <button class="age-chip" data-age="custom">Custom</button>
+        <button class="age-chip" data-age="0" aria-pressed="false">Now</button>
+        <button class="age-chip" data-age="5" aria-pressed="false">5 min</button>
+        <button class="age-chip selected" data-age="10" aria-pressed="true">10 min</button>
+        <button class="age-chip" data-age="custom" aria-pressed="false">Custom</button>
       </div>
       <div class="age-custom" id="ageCustom" hidden>
         <input id="ageMins" type="number" inputmode="numeric" min="0" max="1440" step="1" placeholder="minutes">
@@ -914,8 +914,8 @@
           <div><b>The coach</b><i>Watches the dog’s track against the line and speaks only when it matters. The review says which kind of run it was.</i></div>
         </div>
         <div class="mode-cards" id="coachModeRow" role="radiogroup" aria-label="Kind of run">
-          <button type="button" class="radio-card" data-coach="0"><b>Blind run</b><i>No prompts. The model still keeps its silent log.</i><span class="radio-dot"></span></button>
-          <button type="button" class="radio-card" data-coach="1"><b>Assisted run</b><i>A call when the track leaves the corridor, and when it comes back.</i><span class="radio-dot"></span></button>
+          <button type="button" class="radio-card" role="radio" aria-checked="false" data-coach="0"><b>Blind run</b><i>No prompts. The model still keeps its silent log.</i><span class="radio-dot"></span></button>
+          <button type="button" class="radio-card" role="radio" aria-checked="true" data-coach="1"><b>Assisted run</b><i>A call when the track leaves the corridor, and when it comes back.</i><span class="radio-dot"></span></button>
         </div>
         <input id="coachOn" type="checkbox" hidden>
         <div class="coach-when" id="coachWhen">
@@ -961,9 +961,9 @@
         <span>Show the scent plume<i>Parcels of scent drifting off the line, while you lay it</i></span>
         <input id="plumeOn" type="checkbox" checked>
       </label>
-      <label class="field-label">Reject GPS fixes worse than <b id="accCapVal">25</b> m</label>
+      <label class="field-label" for="accCap">Reject GPS fixes worse than <b id="accCapVal">25</b> m</label>
       <input id="accCap" type="range" min="8" max="60" step="1" value="25">
-      <label class="field-label">Ignore movement under <b id="stillCapVal">2.5</b> m</label>
+      <label class="field-label" for="stillCap">Ignore movement under <b id="stillCapVal">2.5</b> m</label>
       <input id="stillCap" type="range" min="0" max="10" step="0.5" value="2.5">
       <label class="field-label" for="mbToken">Mapbox token</label>
       <input id="mbToken" type="text" placeholder="pk.eyJ1…">
