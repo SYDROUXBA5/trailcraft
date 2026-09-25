@@ -485,14 +485,20 @@ export function keptSession(m, { id, at }) {
     passed on again went out under the name of someone who never ran it, with
     no dog at all. It now goes out under the names it came with. A run this
     phone made on a trail someone sent is this phone's, and only the layer is
-    theirs. */
+    theirs.
+
+    So is a kept trail with no track yet: nobody has run it, and whoever runs
+    it will be on this phone. ownRun cannot say so until Stop writes the
+    run's start, and a live run on a kept trail went out meanwhile under the
+    sender's handler and dog. Only the layer keeps its kept name. */
 export function peopleOf(s, { dogs = [], handlers = [], layers = [], me = null } = {}) {
   const byId = (list, id) => (id == null ? null : list.find(x => x?.id === id) ?? null);
   const named = (v) => (str(v) ? { name: str(v) } : null);
   const own = { dog: byId(dogs, s?.dogId), handler: byId(handlers, s?.handlerId), layer: byId(layers, s?.layerId) };
   const imp = s?.data?.imported;
   if (!imp || typeof imp !== 'object') return { ...own, handler: own.handler ?? me };
-  if (ownRun(s)) return { ...own, handler: own.handler ?? me, layer: own.layer ?? named(imp.layer) };
+  const unrun = !(Array.isArray(s.data.track) && s.data.track.length);
+  if (unrun || ownRun(s)) return { ...own, handler: own.handler ?? me, layer: own.layer ?? named(imp.layer) };
   /* A run kept before the names were stored has only `from`, which on a kept
      run was always the sender's handler. A Trail Card's trail is filed under
      this phone's handler, so its `from`, whoever sent the card, is not read. */

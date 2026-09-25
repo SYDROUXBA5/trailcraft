@@ -5123,7 +5123,11 @@ async function goLive() {
     liveStarting = true;
     paintLiveBtn();
     let id;
-    try { id = await startLive(liveMeta(modelOf(run.session), from)); }
+    /* The run being recorded is the picked dog's and this phone's handler's,
+       as Stop will file it, not whoever the session was laid or kept for. */
+    const who = { ...run.session, dogId: S.dog?.id ?? run.session.dogId ?? null,
+      handlerId: S.handler?.id ?? run.session.handlerId ?? null };
+    try { id = await startLive(liveMeta(modelOf(who), from)); }
     catch (e) { if (same()) toast(e?.message || 'Could not go live'); return; }
     finally { liveStarting = false; paintLiveBtn(); }
     /* The run ended, or another began, while the cloud was answering. Nobody
