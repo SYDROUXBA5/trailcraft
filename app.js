@@ -4484,7 +4484,14 @@ function searchResult(s, track, wps, startedAt, wx, dogName, ageMin) {
 
   let sentence, toFirst = null, catchM = null, approach = null;
   if (!ind) {
-    sentence = `${dogName} searched ${fmtDur(Date.now() - rec.started)} — no indication marked.`;
+    /* How long the track itself lasted, never the clock on the wall: a run
+       kept after a crash is graded hours later, and the time the app lay
+       dead is not time the dog searched. */
+    const first = track[0]?.t, last = track[track.length - 1]?.t;
+    const dur = Number.isFinite(first) && Number.isFinite(last) ? Math.max(0, last - first) : null;
+    sentence = dur != null
+      ? `${dogName} searched ${fmtDur(dur)} — no indication marked.`
+      : `${dogName} searched — no indication marked.`;
   } else {
     toFirst = ind.t - rec.started;
     const nearest = hides.reduce((best, h) => {
@@ -4501,7 +4508,7 @@ function searchResult(s, track, wps, startedAt, wx, dogName, ageMin) {
       approach = approachToWind(bearing(path[back], path[path.length - 1]), wx.wind_direction);
     }
     sentence = `${dogName} indicated in ${fmtDur(toFirst)}`
-      + (catchM != null ? `, ${ind.approx ? 'roughly ' : ''}${catchM} m from the hide` : '')
+      + (catchM != null ? `, ${ind.approx ? 'roughly ' : ''}${fmtM(catchM)} from the hide` : '')
       + (catchM != null && ind.approx ? ' (the GPS had dropped out)' : '')
       + (approach ? `, coming ${approach}.` : '.');
   }
@@ -4546,7 +4553,7 @@ function renderResult(s) {
   if (r.kind === 'search') {
     $('resGrid').innerHTML =
       cell(r.toFirst != null ? fmtDur(r.toFirst) : '—', 'to first indication') +
-      cell(r.catchM != null ? `${r.catchApprox ? '~' : ''}${r.catchM} m` : '—', 'from the hide') +
+      cell(r.catchM != null ? `${r.catchApprox ? '~' : ''}${fmtM(r.catchM)}` : '—', 'from the hide') +
       cell(age, 'hide age at start') +
       cell(r.approach ?? '—', 'approach vs wind');
   } else {
