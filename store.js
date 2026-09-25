@@ -339,11 +339,17 @@ export function createStore(backend) {
       notify('sessions', all[i]);
       return all[i];
     },
+    /* The run goes first and its drift row is set aside after. Deleting is
+       how a full phone makes room, and the row's write makes the blob a
+       little bigger, so writing it first refused exactly the runs that have
+       one. If the row's write still fails, the row is read as it was banked. */
     deleteSession(id) {
-      settleDrift(read(K.sessions, []).find(s => s?.id === id && !s.deleted));
+      const all = read(K.sessions, []);
+      const s = all.find(r => r?.id === id && !r.deleted);
       const gone = tombstone(id);
-      write(K.sessions, pruneTombstones([...read(K.sessions, []).filter(s => s.id !== id), gone]));
+      write(K.sessions, pruneTombstones([...all.filter(r => r.id !== id), gone]));
       notify('sessions', gone);
+      try { settleDrift(s); } catch (e) { if (e?.name !== 'SaveError') throw e; }
     },
     /** Replace everything, newest first — used only after a cloud merge. */
     replaceSessions(rows) {
