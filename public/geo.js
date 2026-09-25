@@ -663,6 +663,17 @@ export function fmtTemp(c, imperial = false) {
   return imperial ? `${Math.round(c * 9 / 5 + 32)} °F` : `${Math.round(c)} °C`;
 }
 
+/** The line under the wind: which forecast it is. One from another day
+    carries its date, or a trail's saved wind from yesterday reads as the
+    air today. `time` is the forecast's own stamp, as Open-Meteo gives it. */
+export function forecastNote(time, now = Date.now()) {
+  const at = new Date(time ?? NaN);
+  if (!time || Number.isNaN(at.getTime())) return '10 m forecast';
+  const hm = at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  if (at.toDateString() === new Date(now).toDateString()) return `10 m forecast, ${hm}`;
+  return `10 m forecast, ${at.toLocaleDateString([], { day: 'numeric', month: 'short' })} ${hm}`;
+}
+
 /** The bare unit word, for a form field's suffix. */
 export const unitShort = (imperial) => (imperial ? 'ft' : 'm');
 

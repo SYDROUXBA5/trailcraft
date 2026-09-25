@@ -697,14 +697,35 @@ t('a walked card names its plan, and one that does not is asked about', () => {
 
 t('a web recording keeps the screen awake after the page has been hidden', () => {
   const hold = fnSrc('async function holdScreen()');
-  assert.match(hold, /if \(isNative\(\) \|\| !rec\.on \|\| rec\.lock \|\| document\.visibilityState !== 'visible'\) return;/);
+  assert.match(hold, /if \(\(isNative\(\) && !coach\.on\) \|\| !rec\.on \|\| rec\.lock \|\| document\.visibilityState !== 'visible'\) return;/,
+    'in the app only while the coach is on, whose calls need the screen');
   assert.match(hold, /lock\.addEventListener\?\.\('release', \(\) => \{ if \(rec\.lock === lock\) rec\.lock = null; \}\);/,
     'a lock the browser let go of is known to be gone');
-  assert.match(js, /document\.addEventListener\('visibilitychange', \(\) => \{\s*\n\s*if \(document\.visibilityState === 'visible'\) holdScreen\(\);/,
+  assert.match(js, /document\.addEventListener\('visibilitychange', \(\) => \{\s*\n\s*if \(document\.visibilityState !== 'visible'\) return;\s*\n\s*holdScreen\(\);/,
     'and asked for again when the page comes back');
   const watch = fnSrc('async function startWatch(hudId)');
   assert.match(watch, /await holdScreen\(\);/);
   assert.ok(!/wakeLock/.test(watch), 'one place asks for the lock');
+});
+
+/* In the iPhone app a run records with the screen dark, and the app said the
+   phone could go in a pocket. The coach's calls cannot play then: iOS gives
+   a dark app no sound, speech or buzz. So a coached run says so where the
+   handler will read it. The hold itself is run in screens.test.mjs. */
+t('in the iPhone app a coached run says its calls need the screen on', () => {
+  const watch = fnSrc('async function startWatch(hudId)');
+  assert.match(watch, /message: coach\.on \? 'Recording\. Coach calls need the screen on' : 'Recording — the phone can go in your pocket'/,
+    'a coached run does not promise the pocket');
+  assert.match(watch, /if \(!rec\.bg\) \{[^\n]*\}\s*\n\s*holdScreen\(\);/, 'the app asks to hold the screen once it records');
+  assert.match(fnSrc('async function stopWatch()'), /await letScreenGo\(\);/);
+  const sync = fnSrc('function coachSync()');
+  assert.match(sync, /holdScreen\(\);/, 'turned on mid-run, the coach asks for the screen');
+  assert.match(sync, /if \(isNative\(\)\) letScreenGo\(\);/, 'turned off, the app goes back to recording in the dark');
+  assert.match(fnSrc('function paintCoachControls()'),
+    /const dark = isNative\(\) \? ' Calls only play while the screen is on, so keep it awake during a coached run\.' : '';/);
+  assert.match(fnSrc('function paintCoachControls()'), /\$\('coachNote'\)\.textContent = \(canBuzz[\s\S]*\) \+ dark;/);
+  assert.match(fnSrc('async function startRun(s) {'),
+    /toast\(isNative\(\) && coach\.on \? 'Coach on\. Its calls only play while the screen is on'/);
 });
 
 t('the HUD says when the GPS is keeping nothing, and a mark says when it is a guess', () => {
