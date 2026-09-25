@@ -10,7 +10,7 @@
 import { simplify, pathLen, cardinal, fmtDist, fmtShort, fmtSpeed, fmtTemp, fmtWeight, fmtCoord } from './geo.js';
 import { through, inflate, b64url, unb64url, needStreams } from './card.js';
 import { targetById, ageBand, dogAge, healApproach } from './store.js';
-import { DEBRIEF, FLAGS, NOTE_TAGS, toldField, toldOf } from './debrief.js';
+import { DEBRIEF, FLAGS, NOTE_TAGS, ownRun, toldField, toldOf } from './debrief.js';
 import { CONFIDENCE, labelOf as callLabel } from './call.js';
 import { cleanSeen, seenLine } from './ground.js';
 import { rainRate } from './field.js';
@@ -446,6 +446,60 @@ export function sharedFromText(text) {
   return m ? m[1] : null;
 }
 
+/* ── A run someone sent, kept on this phone ───────────────────────── */
+
+/** The model dressed as a session, so the map screen can show it exactly
+    as it shows this phone's own. The coach and what was seen on the ground
+    come with it: the shared page lists both as part of the run, and a kept
+    copy that dropped them passed on less than it was given. */
+export function sessionFromModel(m) {
+  return {
+    id: 'shared', targetId: m.kind === 'search' ? 'article' : 'person',
+    startedAt: m.laidAt ?? Date.now(), dogId: null, handlerId: null, layerId: null, summary: headline(m),
+    name: m.name ?? null,
+    data: {
+      trail: m.trail ?? undefined, hides: m.hides ?? undefined, contamination: m.contamination ?? [],
+      weather: m.wx ?? null, runWeather: m.runWx ?? undefined, track: m.track ?? undefined, trackWaypoints: m.wps ?? [],
+      trackStarted: m.runAt ?? undefined, result: m.result ?? undefined, plan: m.plan, walked: m.walked, k: m.k,
+      debrief: m.debrief ?? undefined, coach: m.coach ?? undefined, seen: m.seen ?? undefined,
+    },
+  };
+}
+
+/** A shared run saved among this phone's records. None of its people are on
+    this phone, so there are no ids to point at: the dog, the handler and the
+    layer are kept as the names they came with. `from` stays for the builds
+    that read only that. */
+export function keptSession(m, { id, at }) {
+  const s = sessionFromModel(m);
+  return { ...s, id, data: { ...s.data, imported: {
+    from: m.handler ?? null, at, dog: m.dog ?? null, handler: m.handler ?? null, layer: m.layer ?? null } } };
+}
+
+/** The dog, handler and layer behind a record, as trailModel wants them.
+    This phone's own are looked up by id. A run kept from someone else's link
+    has no ids here, and used to fall back to this phone's handler: a kept run
+    passed on again went out under the name of someone who never ran it, with
+    no dog at all. It now goes out under the names it came with. A run this
+    phone made on a trail someone sent is this phone's, and only the layer is
+    theirs. */
+export function peopleOf(s, { dogs = [], handlers = [], layers = [], me = null } = {}) {
+  const byId = (list, id) => (id == null ? null : list.find(x => x?.id === id) ?? null);
+  const named = (v) => (str(v) ? { name: str(v) } : null);
+  const own = { dog: byId(dogs, s?.dogId), handler: byId(handlers, s?.handlerId), layer: byId(layers, s?.layerId) };
+  const imp = s?.data?.imported;
+  if (!imp || typeof imp !== 'object') return { ...own, handler: own.handler ?? me };
+  if (ownRun(s)) return { ...own, handler: own.handler ?? me, layer: own.layer ?? named(imp.layer) };
+  /* A run kept before the names were stored has only `from`, which on a kept
+     run was always the sender's handler. A Trail Card's trail is filed under
+     this phone's handler, so its `from`, whoever sent the card, is not read. */
+  return {
+    dog: own.dog ?? cleanDog(imp.dog),
+    handler: s.handlerId == null ? named('handler' in imp ? imp.handler : imp.from) : own.handler,
+    layer: own.layer ?? named(imp.layer),
+  };
+}
+
 /* ── GPX ──────────────────────────────────────────────────────────── */
 
 const xml = (v) => String(v ?? '')
@@ -481,8 +535,9 @@ function gpxTrack(name, desc, type, pts) {
 
 /** The laid trail and the dog's run as two tracks in one file, with the start,
     the end, every hide and every mark as waypoints. */
-export function toGpx(m) {
+export function toGpx(m, u = {}) {
   const dogName = m.dog?.name || 'Dog';
+  const said = m.result ? resultSentence(m.result, m.dog?.name, u) : null;
   const all = [m.trail, m.hides, m.track, ...(m.contamination ?? []).map(c => c.points)].filter(Boolean).flat();
   const lats = all.map(p => p.lat), lons = all.map(p => p.lon);
   const drawn = m.plan && !m.walked;
@@ -518,7 +573,7 @@ export function toGpx(m) {
       + 'xsi:schemaLocation="http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd">',
     '  <metadata>',
     `    <name>${xml(title)}</name>`,
-    m.result?.sentence ? `    <desc>${xml(m.result.sentence)}</desc>` : null,
+    said ? `    <desc>${xml(said)}</desc>` : null,
     inEra(m.laidAt) ? `    <time>${isoTime(m.laidAt)}</time>` : null,
     all.length ? `    <bounds minlat="${deg(Math.min(...lats))}" minlon="${deg(Math.min(...lons))}" `
       + `maxlat="${deg(Math.max(...lats))}" maxlon="${deg(Math.max(...lons))}"/>` : null,
@@ -551,9 +606,51 @@ const clock = (ms) => {
 };
 const minutes = (min) => (min < 60 ? `${min} min` : `${Math.floor(min / 60)} h${min % 60 ? ` ${min % 60} min` : ''}`);
 
+/** A result's one sentence, built from its numbers in the reader's units.
+    The sentence saved with a result was fixed when it was graded, in the
+    units in force then, so a shared page or report headed by it said "4 m"
+    above rows in feet; and a result from before the median was kept carries
+    a sentence that claimed too much. Grading, the result screen, the lists,
+    the link and the report all say it from here, so they cannot disagree.
+    A search with no indication has no numbers to say it from, and keeps its
+    own; null when there is no result to read. */
+export function resultSentence(r, dogName, u = {}) {
+  const c = cleanResult(r);
+  if (!c) return null;
+  const dog = typeof dogName === 'string' && dogName.trim() ? dogName : 'The dog';
+  const len = (x) => fmtShort(x, !!u.imperial);
+  if (c.kind === 'search') {
+    if (c.toFirst == null) return c.sentence ?? null;
+    return `${dog} indicated in ${clock(c.toFirst)}`
+      + (c.catchM != null ? `, ${c.catchApprox ? 'roughly ' : ''}${len(c.catchM)} from the hide` : '')
+      + (c.catchM != null && c.catchApprox ? ' (the GPS had dropped out)' : '')
+      + (c.approach ? `, coming ${c.approach}.` : '.');
+  }
+  const unread = `${dog} ran, but the track could not be compared with the line.`;
+  /* Saved before the wording changed: only a signed mean. Its numbers still
+     read; its sentence is said in today's words rather than as it was. */
+  if (c.medAbs == null) {
+    if (c.mean == null) return unread;
+    const a = Math.abs(c.mean);
+    return a < 3
+      ? `${dog}’s track stayed close to the line — under ${len(3)} from it on average.`
+      : `${dog}’s track sat mainly to the ${c.side ?? (c.mean > 0 ? 'right' : 'left')} of the line — about ${len(a)} from it on average.`;
+  }
+  if (!c.shares) return unread;
+  if (c.noisy) return `${dog}’s track sat about ${len(c.medAbs)} from the line, but GPS uncertainty (±${len(c.accMed)}) is too large to read which side.`;
+  /* Judged on the share it prints. A link rounds the share to two places, so
+     judging on the raw one let a run at 69.6 % read one way on the phone that
+     ran it and "70 %" on the phone it was sent to. */
+  const on = Math.round(c.shares.on * 100);
+  if (on >= 70) return `${dog}’s track stayed within ${len(3)} of the line for ${on} % of the run.`;
+  if (c.mainSide) return `${dog}’s track ran mainly to the ${c.mainSide} of the line — typically ${len(c.medAbs)} from it.`;
+  return `${dog}’s track worked both sides of the line — typically ${len(c.medAbs)} from it.`;
+}
+
 /** The one sentence that leads — the verdict when there is one. */
-export function headline(m) {
-  if (m.result?.sentence) return m.result.sentence;
+export function headline(m, u = {}) {
+  const said = m.result ? resultSentence(m.result, m.dog?.name, u) : null;
+  if (said) return said;
   const n = m.hides?.length ?? 0;
   if (m.kind === 'search') return `${n} hide${n === 1 ? '' : 's'} set, not yet searched.`;
   if (m.plan && !m.walked) return 'A trail drawn on the map, not yet walked.';
