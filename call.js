@@ -179,8 +179,12 @@ export function callVerdict(session) {
   if (!d || (d.outcome !== 'found' && d.outcome !== 'false')) return { ok: false, why: 'nodebrief' };
   /* Everything ranBlind (debrief.js) refuses is refused here too, but a
      call wants the debrief to say outright that nobody knew: a run with no
-     answer to that question is not evidence of a blind call. */
-  if (d.blind !== 'handler' && d.blind !== 'double') return { ok: false, why: 'notblind' };
+     answer to that question is not evidence of a blind call. Nor is it
+     evidence that the handler knew, and the two are said apart: a blank
+     "Who knew the answer" used to tell the handler they knew it, on the
+     same card that called the run blind. */
+  if (d.blind === 'open') return { ok: false, why: 'notblind' };
+  if (d.blind !== 'handler' && d.blind !== 'double') return { ok: false, why: 'blind-unasked' };
   if (d.outcome === 'false') return { ok: true, conf: c.call.conf, right: false, at: c.t };
   /* A find is only this call's find when it happened where the call was. */
   const found = firstCallWasFind(session);
@@ -259,6 +263,7 @@ export function calibrationLosses(sessions) {
     seen: count('seen', 'helped'),
     helped: count('helped'),
     notBlind: count('notblind'),
+    blindUnasked: count('blind-unasked'),
     noDebrief: count('nodebrief'),
     laterFind: count('later-find'),
   };
