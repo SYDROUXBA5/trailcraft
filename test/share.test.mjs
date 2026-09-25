@@ -887,11 +887,13 @@ await t('a kept trail nobody has run yet is this phone’s to run', () => {
 
 /* A run kept by an older build, or one whose dog was deleted, has no name to
    say the sentence with. Rebuilt, it read "The dog’s track…" and the one
-   place the name survived, the saved sentence, was thrown away. */
-await t('with no dog’s name to hand, the saved sentence is said rather than rebuilt nameless', async () => {
+   place the name survived, the saved sentence, was thrown away. Said as it
+   was saved, it kept the units it was graded in instead. */
+await t('with no dog’s name to hand, the saved sentence gives the name, and the reader gives the units', async () => {
   const r = { kind: 'trail', sentence: 'Bo’s track ran mainly to the left of the line — typically 4 m from it.',
     medAbs: 3.7, shares: { left: 0.5, on: 0.3, right: 0.2 }, mainSide: 'left', accMed: 4, noisy: false };
-  assert.equal(resultSentence(r, null, { imperial: true }), r.sentence);
+  /* This used to be the saved sentence word for word, "4 m" to a reader in feet. */
+  assert.equal(resultSentence(r, null, { imperial: true }), 'Bo’s track ran mainly to the left of the line — typically 12 ft from it.');
   assert.equal(resultSentence(r, '  ', {}), r.sentence, 'a blank name is no name');
   assert.equal(resultSentence(r, 'Bo', { imperial: true }), 'Bo’s track ran mainly to the left of the line — typically 12 ft from it.',
     'with a name it is still said in the reader’s units');
@@ -913,6 +915,19 @@ await t('with no dog’s name to hand, the saved sentence is said rather than re
   assert.equal(headline(m), r.sentence);
   assert.equal(headline(await decodeShared(await encodeShared(m))), r.sentence);
   assert.match(toGpx(m), /<desc>Bo’s track ran mainly to the left/);
+
+  /* A run with no dog at all is graded as "The dog", in the units of the day:
+     the saved words hold no name, and kept whole they only lost the units. */
+  const dogless = { ...r, sentence: 'The dog’s track ran mainly to the left of the line — typically 4 m from it.' };
+  assert.equal(resultSentence(dogless, undefined, { imperial: true }),
+    'The dog’s track ran mainly to the left of the line — typically 12 ft from it.');
+  assert.match(headline({ kind: 'trail', dog: null, result: dogless }, { imperial: true }), /12 ft/);
+  assert.match(toGpx({ ...m, result: dogless }, { imperial: true }), /<desc>The dog’s track[^<]*12 ft/);
+  const search = { kind: 'search', sentence: 'Rex indicated in 4:10, 4 m from the hide, coming into the wind.',
+    toFirst: 250e3, catchM: 4, approach: 'into the wind' };
+  assert.equal(resultSentence(search, null, { imperial: true }), 'Rex indicated in 4:10, 13 ft from the hide, coming into the wind.');
+  assert.equal(resultSentence({ ...r, sentence: 'Worked well today, 4 m out.' }, null, { imperial: true }),
+    'Worked well today, 4 m out.', 'words this app did not write are said as they are');
 });
 
 /* "(±—)": a noisy result from a link that carried no accuracy figure. */
