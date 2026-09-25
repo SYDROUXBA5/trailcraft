@@ -260,8 +260,28 @@ t('the map gestures card takes focus when it opens, and gives it back when it cl
   assert.match(html, /<b id="mapTutTitle" tabindex="-1"><\/b>/);
   assert.match(fnSrc('function openMapTut()'), /\$\('mapTut'\)\.hidden = false;\n  \$\('mapTutTitle'\)\.focus\(\{ preventScroll: true \}\);\n\}$/,
     'once the card is showing: a hidden element cannot take focus');
-  assert.match(fnSrc('function closeMapTut()'), /\n  if \(currentScreen\) focusScreen\(currentScreen\);\n\}$/, 'back to the screen underneath');
   assert.match(css, /\n\.map-tut \[tabindex="-1"\]:focus \{ outline: none; \}/, 'no ring on the card either');
+
+  /* Where focus goes on closing, run for real. It used to go to the screen
+     underneath whatever opened the card, and from Settings → Help that is
+     the Settings heading, not the button the handler pressed. */
+  const src = `${fnSrc('function openMapTut()')}\n${fnSrc('function closeMapTut()')}`;
+  const walk = ({ opener, onScreen = true }) => {
+    const focused = [];
+    const el = (name) => ({ name, focus: () => focused.push(name) });
+    const card = { hidden: true, contains: (x) => x?.inCard === true };
+    const btn = opener && { ...el('button'), isConnected: true, offsetParent: onScreen ? {} : null };
+    const $ = (id) => (id === 'mapTut' ? card : el(id));
+    new Function('$', 'document', 'db', 'focusScreen', 'paintMapTut', 'mapTut', 'currentScreen',
+      `${src}\nopenMapTut(); closeMapTut();`)(
+      $, { activeElement: btn ?? { inCard: false }, body: {} }, { kv: { set() {} } },
+      (id) => focused.push(`screen ${id}`), () => {}, { i: 0, open: false, opener: null }, 'scrSettings');
+    return focused;
+  };
+  assert.deepEqual(walk({ opener: true }), ['mapTutTitle', 'button'], 'back to the button that opened it');
+  assert.deepEqual(walk({ opener: true, onScreen: false }), ['mapTutTitle', 'screen scrSettings'],
+    'a button no longer on screen: the screen underneath');
+  assert.deepEqual(walk({ opener: false }), ['mapTutTitle', 'screen scrSettings'], 'opened by a map appearing: the screen');
 });
 
 /* ── Larger text, and zoom ─────────────────────────────────────────── */
