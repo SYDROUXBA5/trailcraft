@@ -629,6 +629,17 @@ export function driftRows(rows, sessions) {
 /** Everything worth showing about one dog's work. `sessions` is newest-first,
     as the store keeps them. Only RUN sessions count — a trail that was laid
     and never worked says nothing about the dog. */
+/* One run into a card's age bands, or counted apart when it has no age: a
+   run on a drawn line (`unwalked`), and among those the runs on a drawn
+   Trail Card (`drawnCards`), which carries no plan and so has no walked card
+   coming to give it one; or a run with no weather to work an age from. */
+function countAge(out, s) {
+  const band = ageBand(runAgeMin(s));
+  if (band) out.bands[band.key]++;
+  else if (unwalkedPlan(s.data)) { out.unwalked++; if (!s.data.plan) out.drawnCards++; }
+  else out.unknownAge++;
+}
+
 /** Everything the phone knows about a handler's work: the runs they handled
     (a session with a track), the trails they walked themselves (laid with no
     other layer), time on the trail, the age of the trails at the start, the
@@ -641,7 +652,7 @@ export function handlerStats(handlerId, sessions) {
     runs: runs.length, laid: laid.length,
     metres: 0, laidMetres: 0, seconds: 0, longest: 0,
     firstAt: null, lastAt: null,
-    bands: { hot: 0, warm: 0, cold: 0 }, unknownAge: 0, unwalked: 0,
+    bands: { hot: 0, warm: 0, cold: 0 }, unknownAge: 0, unwalked: 0, drawnCards: 0,
     dogs: {}, assisted: 0, blind: 0, shown: 0, knew: 0, medOff: null,
   };
   for (const s of laid) out.laidMetres += pathLenOf(s.data.trail);
@@ -659,8 +670,7 @@ export function handlerStats(handlerId, sessions) {
     out.lastAt = out.lastAt == null ? at : Math.max(out.lastAt, at);
     /* A drawn plan's age is made up and too old: filed in a band, a Hot
        trail was counted as Warm. It waits, counted apart, for the walk. */
-    const band = ageBand(runAgeMin(s));
-    if (band) out.bands[band.key]++; else if (unwalkedPlan(s.data)) out.unwalked++; else out.unknownAge++;
+    countAge(out, s);
     if (s.dogId) out.dogs[s.dogId] = (out.dogs[s.dogId] || 0) + 1;
     /* Blind means the handler did not know, not merely that the coach was
        off (ranBlind): a run with the trail on screen, or one the debrief says
@@ -689,6 +699,7 @@ export function dogStats(dogId, sessions, calibration = []) {
     bands: { hot: 0, warm: 0, cold: 0 },
     unknownAge: 0,
     unwalked: 0,
+    drawnCards: 0,
     targets: {},
     graded: 0,
     meanOffset: null,
@@ -708,8 +719,7 @@ export function dogStats(dogId, sessions, calibration = []) {
     out.firstAt = out.firstAt == null ? at : Math.min(out.firstAt, at);
     out.lastAt = out.lastAt == null ? at : Math.max(out.lastAt, at);
 
-    const band = ageBand(runAgeMin(s));
-    if (band) out.bands[band.key]++; else if (unwalkedPlan(s.data)) out.unwalked++; else out.unknownAge++;
+    countAge(out, s);
 
     const t = s.targetId || 'person';
     out.targets[t] = (out.targets[t] || 0) + 1;

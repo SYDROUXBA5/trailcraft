@@ -5,6 +5,7 @@ import { createStore, migrateV1, TARGETS, targetById, verbs, uid,
          askDelete, dogsOf, storageWords, healApproach, healSession, APPROACH_V } from '../public/store.js';
 import { mergeCalibration, calibrationDiffers } from '../public/sync-core.js';
 import { readBackup } from '../public/backup.js';
+import { readFileSync } from 'node:fs';
 
 let pass = 0;
 const t = (name, fn) => { fn(); pass++; console.log(`  ok  ${name}`); };
@@ -556,6 +557,30 @@ t('a run graded against a drawn plan has no age, and joins no band, until it is 
     assert.equal(st.unwalked, 1, 'the drawn one is counted apart');
     assert.equal(st.unknownAge, 0, 'and not as a run with no weather');
   }
+});
+
+/* A drawn line that arrived as a Trail Card carries `drawn`, not `plan`, and
+   no walked card will ever come for it. The dog and handler cards told its
+   runs to wait for one all the same. */
+t('the cards count a drawn Trail Card\u2019s runs apart, and never tell them to wait for a walk', () => {
+  const track = [{ lat: 51.2, lon: -2.64, t: 0 }, { lat: 51.2009, lon: -2.64, t: 60000 }];
+  const run = (id, data) => ({ id, handlerId: 'h1', dogId: 'bo', targetId: 'person', startedAt: 1,
+    data: { track, result: { ageMin: 35 }, ...data } });
+  const runs = [run('a', { plan: true }), run('b', { drawn: true, imported: { from: 'Kim', at: 1 } }),
+    run('c', { drawn: true }), run('d', { plan: true, walked: true })];
+  for (const st of [dogStats('bo', runs), handlerStats('h1', runs)]) {
+    assert.deepEqual([st.unwalked, st.drawnCards, st.bands.warm], [3, 2, 1]);
+  }
+  const js = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8');
+  const i = js.indexOf('\nfunction unwalkedNote(st) {');
+  assert.ok(i >= 0, 'app.js still has unwalkedNote');
+  const note = new Function(`${js.slice(i, js.indexOf('\n}', i + 1) + 2)}\nreturn unwalkedNote;`)();
+  const said = (runs) => note(handlerStats('h1', runs)).replace(/<[^>]+>/g, '\n').trim();
+  assert.equal(said(runs.slice(0, 1)), '1 run graded against a drawn plan — no age until the layer’s walked card is scanned.');
+  assert.equal(said(runs.slice(1, 3)), '2 runs on a Trail Card drawn on the map — nobody walked it, so they have no age.');
+  assert.doesNotMatch(said(runs.slice(1, 2)), /walked card/, 'no walked card is coming for a drawn card');
+  assert.match(said(runs), /^1 run graded against a drawn plan[^\n]*\n+2 runs on a Trail Card/);
+  assert.equal(note(handlerStats('h1', [runs[3]])), '', 'a walked plan has its age');
 });
 
 t('odours: narcotics and explosives name theirs, each target remembers its own, the record says which', () => {
