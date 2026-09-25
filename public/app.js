@@ -7,7 +7,7 @@
    without. Weather: Open-Meteo, the one public API with soil temperature. */
 
 import {
-  pathLen, cardinal, dist, dwellFold, bearing, project, fmtDist, fmtShort, fmtSpeed, fmtTemp, unitShort, fmtWeight, kgToShown, shownToKg, fmtCoord, scentField, plumePolygon, densify, timestamps, signedOffsets, meanSigned, sideOfDrift, sideAgreement, lineCorrect, departure, timestampsEndingAt, progressAlong, splitLine, smoothBearing, medianAbs, sideShares, approachToWind,
+  pathLen, cardinal, dist, dwellFold, bearing, project, fmtDist, fmtShort, fmtDur, fmtSpeed, fmtTemp, unitShort, fmtWeight, kgToShown, shownToKg, fmtCoord, scentField, plumePolygon, densify, timestamps, signedOffsets, meanSigned, sideOfDrift, sideAgreement, lineCorrect, departure, timestampsEndingAt, progressAlong, splitLine, smoothBearing, medianAbs, sideShares, approachToWind,
 } from './geo.js';
 import { stepPoints, contamTimed, trailFrom, walkedOfTrail, gpsTrouble, forecastNote } from './geo.js';
 import { packDraft, unpackDraft, draftAlive, draftStats } from './draft.js';
@@ -82,10 +82,6 @@ const snap = () => { S = db.snapshot(); return S; };
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-const fmtDur = (ms) => {
-  const s = Math.max(0, Math.round(ms / 1000));
-  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
-};
 /* One place asks which units, so nothing on screen can disagree with
    anything else on screen. The model never sees these. */
 const imp = () => settings.distUnits === 'imperial';
@@ -2937,12 +2933,11 @@ function paintReplay() {
     paintBandWalls(field);
   }
 
-  const el = Math.max(0, Math.round((at - replay.from) / 1000));
   const ageMin = Math.max(0, Math.round((at - s.startedAt) / 60000));
   const here = sofar[sofar.length - 1];
   const off = s.data.trail?.length > 1
     ? signedOffsets(s.data.trail, [here]).filter(Number.isFinite)[0] : null;
-  $('repHudText').textContent = `${Math.floor(el / 60)}:${String(el % 60).padStart(2, '0')}`;
+  $('repHudText').textContent = fmtDur(at - replay.from);
   const laid = targetById(s.targetId).kind === 'hide' ? 'Hides' : 'Trail';
   $('repCaption').textContent = `${laid} ${ageMin} min old here`
     + (off == null ? '' : ` · dog ${fmtM(Math.abs(off))} ${off >= 0 ? 'right' : 'left'} of the line`)

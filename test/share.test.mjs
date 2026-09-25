@@ -801,4 +801,18 @@ await t('the run’s weather from a link is held to exactly what the laid weathe
   assert.equal((await decodeShared(await forgeLink({ kind: 'trail', trail: twoPts, runWx: 'x' }))).runWx, null);
 });
 
+/* The sentence said "1:15:00" above a grid and a saved summary reading
+   "75:00": two duration formats on one screen. */
+await t('a search over an hour is timed the same way in the sentence and the rows', () => {
+  const hides = [{ lat: 51.2, lon: -2.6 }];
+  const track = walk(50).map(p => ({ ...p, t: p.t + 60e3 }));
+  const found = { kind: 'search', sentence: 'x', toFirst: 75 * 60e3 + 5e3, catchM: 2, ageMin: 1 };
+  assert.equal(resultSentence(found, 'Bo'), 'Bo indicated in 75:05, 2 m from the hide.');
+  const m = trailModel({ startedAt: T0, targetId: 'cadaver', data: {
+    hides, track, trackStarted: T0 + 60e3, trackWaypoints: [], result: found } }, people);
+  const text = rowsOf(detailSections(m, { when: () => 'x' }));
+  assert.match(text, /First indication: 75:05/);
+  assert.doesNotMatch(text + headline(m), /1:15:05/);
+});
+
 console.log(`\n${pass} passed total`);

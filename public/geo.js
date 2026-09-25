@@ -658,6 +658,16 @@ export function fmtShort(m, imperial = false, dp = 0) {
   return imperial ? `${(m * FT).toFixed(dp)} ft` : `${m.toFixed(dp)} m`;
 }
 
+/** A length of time, as minutes and seconds: "4:05", and "75:00" past the
+    hour rather than "1:15:00". Every duration the app shows comes from here,
+    the result screen and the shared page alike, so they read the same. The
+    sentence saved with a result was written this way, so a search's saved
+    "searched 75:00" matches the grid and the page beside it. */
+export function fmtDur(ms) {
+  const s = Math.max(0, Math.round((Number.isFinite(ms) ? ms : 0) / 1000));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
 /** Wind, from the metres per second the forecast is asked for. */
 export function fmtSpeed(ms, imperial = false) {
   if (!Number.isFinite(ms)) return '—';

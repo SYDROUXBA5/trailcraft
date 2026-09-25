@@ -18,7 +18,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import { windAt } from '../public/field.js';
-import { cardinal, fmtSpeed, fmtTemp, forecastNote } from '../public/geo.js';
+import { cardinal, fmtSpeed, fmtTemp, forecastNote, fmtDur } from '../public/geo.js';
 import { trailModel, encodeShared, decodeShared, sessionFromModel } from '../public/share.js';
 
 let pass = 0;
@@ -209,7 +209,7 @@ await t('the replay’s clock moves the panel with the plume', () => {
     stability: () => 'neutral', windAt, followWeather: (w) => followed.push(w),
     scentField: () => [], plumePolygon: () => ({}), paintBandWalls() {}, EMPTY: {},
     trailOf: () => [], signedOffsets: () => [], targetById: () => ({ kind: 'hide' }),
-    fmtM: String, bandWallNote: () => '', $: () => fakeEl(), document: { activeElement: null },
+    fmtM: String, fmtDur, bandWallNote: () => '', $: () => fakeEl(), document: { activeElement: null },
   };
   vm.createContext(sb);
   vm.runInContext(decl('function paintReplay('), sb);
