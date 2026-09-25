@@ -183,6 +183,8 @@ function calRow(r) {
     predSide: [-1, 0, 1].includes(r.predSide) ? r.predSide : null,
     mean: num(r.mean), wind: num(r.wind), k: num(r.k),
     stability: typeof r.stability === 'string' ? r.stability.slice(0, 40) : null,
+    /* Set aside when its run was deleted (store.js, driftRows). */
+    ...(r.skip === true ? { skip: true } : {}),
   };
 }
 

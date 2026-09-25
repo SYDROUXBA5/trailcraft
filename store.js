@@ -279,6 +279,22 @@ export function createStore(backend) {
   };
   const flagsHere = () => Object.fromEntries(BACKUP_FLAGS.map(k => [k, kv.get(k) === true]));
 
+  /* A run's drift verdict, written onto its row before the run is deleted.
+     driftRows reads the verdict off the run, and a row whose run cannot be
+     found is read as it was banked, so deleting a coached, revealed or "I
+     knew" run put its row straight back into the dog's figure. The row is
+     kept, as every row is, but set aside for good. */
+  function settleDrift(s) {
+    const t = s?.data?.trackStarted;
+    if (!s?.dogId || !Number.isFinite(t) || banksDrift(s)) return;
+    const key = `cal:${s.dogId}`;
+    const rows = kv.get(key, []);
+    if (!rows.some(r => r?.t === t && r.skip !== true)) return;
+    const next = rows.map(r => (r?.t === t ? { ...r, skip: true } : r));
+    kv.set(key, next);
+    notify('calibration', { id: s.dogId, rows: next, updatedAt: Date.now() });
+  }
+
   /* The recording in progress (draft.js). Its own key, because it is rewritten
      every few seconds while walking and must not drag the rest along with it. */
   const draft = {
@@ -324,6 +340,7 @@ export function createStore(backend) {
       return all[i];
     },
     deleteSession(id) {
+      settleDrift(read(K.sessions, []).find(s => s?.id === id && !s.deleted));
       const gone = tombstone(id);
       write(K.sessions, pruneTombstones([...read(K.sessions, []).filter(s => s.id !== id), gone]));
       notify('sessions', gone);
@@ -588,22 +605,29 @@ export function teachesDrift(data) {
   return !!data && !unwalkedPlan(data) && ranBlind(data);
 }
 
+/* Whether a run's drift row may be read, by today's rules. */
+const banksDrift = (s) => teachesDrift(s?.data) && s.data.result?.noisy !== true;
+
 /** The drift rows that may still be read, from `rows` as banked. A row's
     `t` is its run's trackStarted, which is how the run is found again. Rows
     banked before teachesDrift existed came from coached runs, revealed runs
     and tracks the GPS could not place either side of the line, and a debrief
     written after Stop can say the handler knew. A row whose run is on the
     phone and fails today's test is left out of what is read, never deleted:
-    the record is the phone's, and a rule can change again. A row whose run
-    cannot be found is read as it was. */
+    the record is the phone's, and a rule can change again. A row set aside
+    when its run was deleted (`skip`, store.deleteSession) stays out. Any
+    other row whose run cannot be found is read as it was, and that includes
+    the rows of runs recorded over in place by builds that did so: the run
+    that banked them is gone, and nothing is left to judge them by. */
 export function driftRows(rows, sessions) {
   const runAt = new Map();
   for (const s of sessions || []) {
     if (Number.isFinite(s?.data?.trackStarted)) runAt.set(s.data.trackStarted, s);
   }
   return (rows || []).filter(r => {
+    if (r?.skip === true) return false;
     const s = runAt.get(r?.t);
-    return !s || (teachesDrift(s.data) && s.data.result?.noisy !== true);
+    return !s || banksDrift(s);
   });
 }
 
