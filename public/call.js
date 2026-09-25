@@ -75,11 +75,12 @@ export function firstCall(session) {
 /** How near where the target was a first call has to be to count as the
     find, and how far from it before it plainly was not. The mark is where the
     handler's phone was, not the dog's nose, and the hide or the end of the
-    trail was placed by another fix: fifteen metres covers both on a fair day.
-    Past thirty the call was somewhere else, and that distance grows with the
-    phone's own stated uncertainty, because a poor fix should make the app
-    less sure a call was wrong, never more sure it was right. In between, the
-    map cannot say, and nothing is scored. */
+    trail was placed by another fix, or more often by a tap on the map:
+    fifteen metres covers both on a fair day. Past thirty, and a later
+    Indication at the target, the call was somewhere else, and that distance
+    grows with the phone's own stated uncertainty, because a poor fix should
+    make the app less sure a call was wrong, never more sure it was right. In
+    between, the map cannot say, and nothing is scored. */
 export const AT_FIND_M = 15;
 export const OFF_FIND_M = 30;
 
@@ -91,6 +92,10 @@ function targetsOf(d) {
     : d?.trail?.length > 1 && !(d.plan && !d.walked) ? [d.trail[d.trail.length - 1]] : [];
   return pts.filter(p => Number.isFinite(p?.lat) && Number.isFinite(p?.lon));
 }
+
+/* A mark with a place the phone stood behind: not one made after the GPS
+   dropped out, which is only where the phone last was. */
+const placed = (w) => !w?.approx && Number.isFinite(w?.lat) && Number.isFinite(w?.lon);
 
 /* The phone's stated uncertainty at the fix nearest a moment, or nought. */
 function accAt(track, t) {
@@ -109,23 +114,30 @@ function accAt(track, t) {
     dog well — the opposite of what this is for.
 
     true when the call was made where the target was; false when it plainly
-    was not; null when nothing shows which. With no map to measure against —
-    a drawn plan, a mark made after the GPS dropped out — the only Indication
-    of a run is taken as the find, as it always was. With more than one, the
-    find may have been a later one, and the call is not scored. */
+    was not; null when nothing shows which. A call is only wrong when a later
+    Indication, made at the target, shows the find was that one. A run's only
+    Indication on a found run is never scored wrong, however far it sat from
+    a hide placed with a tap on the map: nothing else shows where the find
+    was. Near the target it is right; further off it is not scored. With no
+    map to measure against — a drawn line, a mark made after the GPS dropped
+    out — the only Indication of a run is taken as the find, as it always
+    was. With more than one, the find may have been a later one, and the call
+    is not scored. */
 export function firstCallWasFind(session) {
   const c = firstCall(session);
   if (!c) return null;
   const d = session?.data ?? {};
   const targets = targetsOf(d);
-  if (targets.length && !c.approx && Number.isFinite(c.lat) && Number.isFinite(c.lon)) {
-    const gap = Math.min(...targets.map(p => dist(c, p)));
+  const marks = (d.trackWaypoints ?? []).filter(w => w?.kind === 'Indication');
+  if (targets.length && placed(c)) {
+    const gapOf = (w) => Math.min(...targets.map(p => dist(w, p)));
+    const gap = gapOf(c);
     if (gap <= AT_FIND_M) return true;
-    if (gap > OFF_FIND_M + accAt(d.track, c.t)) return false;
+    const foundLater = marks.some(w => w !== c && Number.isFinite(w.t) && w.t > c.t && placed(w) && gapOf(w) <= AT_FIND_M);
+    if (foundLater && gap > OFF_FIND_M + accAt(d.track, c.t)) return false;
     return null;
   }
-  const marks = (d.trackWaypoints ?? []).filter(w => w?.kind === 'Indication').length;
-  return marks <= 1 ? true : null;
+  return marks.length <= 1 ? true : null;
 }
 
 /** Can this run's call be scored, and if not, why not?

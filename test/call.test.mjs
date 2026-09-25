@@ -256,21 +256,28 @@ t('a first call is only right when it was made where the find was', () => {
       },
     };
   };
-  assert.deepEqual(scorable(search(40)), { conf: 'sure', right: false, at: 1000 },
+  /* The find, marked at the hide after the first call. */
+  const later = { kind: 'Indication', lat: HIDE.lat, lon: HIDE.lon, t: 2000 };
+  assert.deepEqual(scorable(search(40, { more: [later] })), { conf: 'sure', right: false, at: 1000 },
     'forty metres off and found later: a wrong call, not a right one');
-  assert.equal(firstCallWasFind(search(40)), false);
+  assert.equal(firstCallWasFind(search(40, { more: [later] })), false);
   assert.deepEqual(scorable(search(4)), { conf: 'sure', right: true, at: 1000 }, 'at the hide: right');
   assert.equal(scorable(search(AT_FIND_M - 1)).right, true, 'just inside the find counts');
-  assert.equal(callVerdict(search(22)).why, 'later-find', 'between the two the map cannot say, so nothing is scored');
-  assert.equal(callVerdict(search(40, { acc: 20 })).why, 'later-find',
+  assert.equal(callVerdict(search(22, { more: [later] })).why, 'later-find', 'between the two the map cannot say, so nothing is scored');
+  assert.equal(callVerdict(search(40, { acc: 20, more: [later] })).why, 'later-find',
     'a poor fix makes a far call less certainly wrong, never right');
-  assert.equal(scorable(search(OFF_FIND_M + 25, { acc: 20 })).right, false);
+  assert.equal(scorable(search(OFF_FIND_M + 25, { acc: 20, more: [later] })).right, false);
   assert.equal(scorable(search(40, { outcome: 'false' })).right, false, 'called it wrong is wrong wherever it was');
+  const early = { ...later, t: 500 };
+  assert.equal(firstCallWasFind(search(40, { more: [early] })), null,
+    'an Indication at the hide before the call does not show the call missed the find');
+  const approxLater = { ...later, approx: true };
+  assert.equal(firstCallWasFind(search(40, { more: [approxLater] })), null,
+    'nor does one made after the GPS dropped out, which is only where the phone last was');
 
   /* A mark made after the GPS dropped out is where the phone last was, not
      where the call was: the marks decide, as they did before. */
   assert.equal(scorable(search(40, { approx: true })).right, true, 'the only indication of a found run');
-  const later = { kind: 'Indication', lat: HIDE.lat, lon: HIDE.lon, t: 2000 };
   assert.equal(callVerdict(search(40, { approx: true, more: [later] })).why, 'later-find',
     'with a second indication, the find may have been that one');
 
@@ -282,7 +289,7 @@ t('a first call is only right when it was made where the find was', () => {
   assert.equal(callVerdict(bare).why, 'later-find');
   assert.equal(scorable(sess()).right, true, 'one indication and a find, with nothing to measure against, is as it was');
 
-  const lost = calibrationLosses([search(4), search(22), bare]);
+  const lost = calibrationLosses([search(4), search(22, { more: [later] }), bare]);
   assert.equal(lost.laterFind, 2);
   assert.equal(lost.total, 3, 'out of every call of your own');
 });
@@ -303,11 +310,41 @@ t('on a trail the find is at the end the layer walked to, not the end of a drawn
       },
     };
   };
+  /* The dog reached the person, and the handler marked it there. */
+  const atEnd = (extra = {}) => { const r = run(150, extra); r.data.trackWaypoints.push({ kind: 'Indication', lat: end.lat, lon: end.lon, t: 2000 }); return r; };
   assert.equal(scorable(run(8)).right, true, 'a line\u2019s length short of the person');
-  assert.equal(scorable(run(150)).right, false, 'halfway down the trail was not the find');
-  assert.equal(scorable(run(150, { plan: true, walked: true })).right, false, 'a walked plan\u2019s end is real');
+  assert.equal(scorable(atEnd()).right, false, 'halfway down the trail was not the find, and the find at the end says so');
+  assert.equal(scorable(atEnd({ plan: true, walked: true })).right, false, 'a walked plan\u2019s end is real');
   assert.equal(scorable(run(150, { plan: true })).right, true,
     'a drawn line\u2019s end is only where a finger stopped, so the marks decide');
+  assert.equal(scorable(atEnd({ plan: true })), null, 'and a second mark leaves it unscored');
+  assert.equal(scorable(run(150)), null, 'the only mark of a found run is never called wrong');
+});
+
+/* The review's case: one hide placed with a tap on the map, one Indication
+   36 m from it, the debrief says "Found it", the handler did not know. The
+   screen said "The dog found it, but not where you called it, so that call
+   was wrong" — about the only call of the find. A tapped hide can be tens of
+   metres out, and nothing else on the run says the find was anywhere else. */
+t('the only call of a found run is never scored wrong', () => {
+  const HIDE = { lat: 51, lon: -2.6 };
+  const at = project(HIDE, 90, 36);
+  const s = {
+    data: {
+      hides: [HIDE],
+      track: [{ ...at, t: 900, acc: 4 }, { ...at, t: 1100, acc: 4 }],
+      trackWaypoints: [{ kind: 'Indication', lat: at.lat, lon: at.lon, t: 1000,
+        call: { v: CALL_V, conf: 'sure', seen: false, at: 1000 } }],
+      debrief: { outcome: 'found', target: 'real', blind: 'handler' },
+    },
+  };
+  assert.equal(firstCallWasFind(s), null, 'not wrong: not scored');
+  assert.equal(callVerdict(s).why, 'later-find');
+  assert.equal(scorable(s), null);
+  const far = { ...s, data: { ...s.data, trackWaypoints: s.data.trackWaypoints.map(w => ({ ...w, ...project(HIDE, 90, 400) })) } };
+  assert.equal(firstCallWasFind(far), null, 'however far off');
+  const close = { ...s, data: { ...s.data, trackWaypoints: s.data.trackWaypoints.map(w => ({ ...w, ...project(HIDE, 90, 9) })) } };
+  assert.equal(firstCallWasFind(close), true, 'near the hide it is the find');
 });
 
 console.log(`\n${pass} passed total\n`);
