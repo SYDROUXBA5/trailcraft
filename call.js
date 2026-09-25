@@ -23,6 +23,7 @@
    Both are excluded from the maths, not quietly folded in. */
 
 import { ownRun } from './debrief.js';
+import { dist } from './geo.js';
 
 export const CALL_V = 1;
 
@@ -71,6 +72,62 @@ export function firstCall(session) {
   return callsIn(session)[0] ?? null;
 }
 
+/** How near where the target was a first call has to be to count as the
+    find, and how far from it before it plainly was not. The mark is where the
+    handler's phone was, not the dog's nose, and the hide or the end of the
+    trail was placed by another fix: fifteen metres covers both on a fair day.
+    Past thirty the call was somewhere else, and that distance grows with the
+    phone's own stated uncertainty, because a poor fix should make the app
+    less sure a call was wrong, never more sure it was right. In between, the
+    map cannot say, and nothing is scored. */
+export const AT_FIND_M = 15;
+export const OFF_FIND_M = 30;
+
+/* Where the target actually was: the hides of a search, or the end of a laid
+   or walked trail. Not a drawn plan's end, which is only where a finger
+   stopped. */
+function targetsOf(d) {
+  const pts = d?.hides?.length ? d.hides
+    : d?.trail?.length > 1 && !(d.plan && !d.walked) ? [d.trail[d.trail.length - 1]] : [];
+  return pts.filter(p => Number.isFinite(p?.lat) && Number.isFinite(p?.lon));
+}
+
+/* The phone's stated uncertainty at the fix nearest a moment, or nought. */
+function accAt(track, t) {
+  let best = null;
+  for (const p of track ?? []) {
+    if (Number.isFinite(p?.t) && (!best || Math.abs(p.t - t) < Math.abs(best.t - t))) best = p;
+  }
+  return Number.isFinite(best?.acc) && best.acc > 0 ? best.acc : 0;
+}
+
+/** Was the first call the find? The debrief says how the run ended, not
+    whether the handler's first commitment was right: "Certain" forty metres
+    from the hide, nothing there, the dog works on and finds it, and the
+    handler taps "Found it". Scored against the outcome alone, that was a
+    right "Certain", and an over-confident handler was told they read their
+    dog well — the opposite of what this is for.
+
+    true when the call was made where the target was; false when it plainly
+    was not; null when nothing shows which. With no map to measure against —
+    a drawn plan, a mark made after the GPS dropped out — the only Indication
+    of a run is taken as the find, as it always was. With more than one, the
+    find may have been a later one, and the call is not scored. */
+export function firstCallWasFind(session) {
+  const c = firstCall(session);
+  if (!c) return null;
+  const d = session?.data ?? {};
+  const targets = targetsOf(d);
+  if (targets.length && !c.approx && Number.isFinite(c.lat) && Number.isFinite(c.lon)) {
+    const gap = Math.min(...targets.map(p => dist(c, p)));
+    if (gap <= AT_FIND_M) return true;
+    if (gap > OFF_FIND_M + accAt(d.track, c.t)) return false;
+    return null;
+  }
+  const marks = (d.trackWaypoints ?? []).filter(w => w?.kind === 'Indication').length;
+  return marks <= 1 ? true : null;
+}
+
 /** Can this run's call be scored, and if not, why not?
 
     One answer, used by the maths, by the tally of what was thrown away and by
@@ -98,7 +155,11 @@ export function callVerdict(session) {
   const d = session?.data?.debrief;
   if (!d || (d.outcome !== 'found' && d.outcome !== 'false')) return { ok: false, why: 'nodebrief' };
   if (d.blind !== 'handler' && d.blind !== 'double') return { ok: false, why: 'notblind' };
-  return { ok: true, conf: c.call.conf, right: d.outcome === 'found', at: c.t };
+  if (d.outcome === 'false') return { ok: true, conf: c.call.conf, right: false, at: c.t };
+  /* A find is only this call's find when it happened where the call was. */
+  const found = firstCallWasFind(session);
+  if (found == null) return { ok: false, why: 'later-find' };
+  return { ok: true, conf: c.call.conf, right: found, at: c.t };
 }
 
 /** The call as the maths wants it, or nothing. */
@@ -173,6 +234,7 @@ export function calibrationLosses(sessions) {
     helped: count('helped'),
     notBlind: count('notblind'),
     noDebrief: count('nodebrief'),
+    laterFind: count('later-find'),
   };
 }
 

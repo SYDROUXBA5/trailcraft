@@ -32,7 +32,7 @@ import { trailModel, encodeShared, decodeShared, sharedUrl, toGpx, fileBase,
 import { buildPdf, jpegSize } from './pdf.js';
 import { coachStep, initialCoach, coachPhrase, coachLine, TOL_OPTIONS, COACH_DEFAULTS } from './coach.js';
 import { DEBRIEF, FLAGS, NOTE_TAGS, blankDebrief, debriefDone, debriefLine, labelOf, ownRun, stickyDebrief } from './debrief.js';
-import { CONFIDENCE, stampCall, confidenceOf, firstCall, calibration, calibrationLine, callVerdict, runsOf } from './call.js';
+import { CONFIDENCE, stampCall, confidenceOf, firstCall, firstCallWasFind, calibration, calibrationLine, callVerdict, runsOf } from './call.js';
 import { isNative, watchBackground, canHaptic, haptic, watchHeading, shareFile } from './native.js';
 import { readBackup, restoreChanges, restoreQuestion, restoreNothing, BACKUP_MAX_BYTES } from './backup.js';
 import { checkAuthFields, AUTH_MIN_PASSWORD } from './sync-core.js';
@@ -2674,7 +2674,13 @@ function paintCallBlock(s) {
   const d = s?.data?.debrief;
   let tail;
   if (!d?.outcome) tail = '. Write the debrief to find out if you were right.';
-  else if (d.outcome === 'found') tail = ', and you were right.';
+  else if (d.outcome === 'found') {
+    /* A find later in the run is not this call's find (firstCallWasFind). */
+    const at = firstCallWasFind(s);
+    tail = at === true ? ', and you were right.'
+      : at === false ? '. The dog found it, but not where you called it, so that call was wrong.'
+      : '. The dog found it, but nothing shows it was where you called it.';
+  }
   else if (d.outcome === 'false') tail = ', and you were wrong.';
   else tail = `. The debrief says: ${labelOf('outcome', d.outcome)}.`;
   /* Say plainly when a call cannot count, rather than letting it look banked.
@@ -2684,6 +2690,7 @@ function paintCallBlock(s) {
   else if (why === 'helped') tail += ' This one doesn’t count, because the coach was on.';
   else if (why === 'seen') tail += ' This one doesn’t count, because the answer was already on screen.';
   else if (why === 'someone-elses') tail += ' This one doesn’t count towards your record: it is someone else’s run.';
+  else if (why === 'later-find') tail += ' This one doesn’t count towards your record.';
   $('callSummary').textContent = `You called it “${band?.label ?? c.call.conf}”${tail}`;
   /* The run's own handler's record only. A run kept from someone else's
      link has no handler here, and its summary already speaks of "your
