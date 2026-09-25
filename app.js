@@ -4671,9 +4671,11 @@ function keepWeather(id, wx) {
     if (run.revealed && targetById(live.targetId).kind === 'person') {
       run.airAt = Date.now();
       plumeStart(trailOf(live), windAt(live, run.airAt).wx, undefined, live.data.contamination);
-    } else if (currentScreen === 'scrRun') {
-      weatherPanelFor(live, run.airAt || run.startedAt);
     }
+    /* The panel follows whatever the screen is showing. It is refreshed on its
+       own, because with the plume switched off in Settings nothing else would
+       carry the new wind to it. */
+    if (currentScreen === 'scrRun') weatherPanelFor(live, run.airAt || run.startedAt);
     /* A coach that set off with no weather had no scent to reason about.
        It has now, and in the wind the dog set off in. */
     if (coach.trail) {
@@ -6965,7 +6967,9 @@ async function restoreBackup(file) {
   try { backup = readBackup(await file.text()); }
   catch (e) { return toast(e?.plain ? e.message : 'Could not read that file'); }
   const plan = db.previewRestore(backup);
-  if (!restoreChanges(plan)) return toast(restoreNothing(plan));
+  /* A reason, not a flash: someone looking for a session they deleted by
+     mistake needs to read why it is not coming back. */
+  if (!restoreChanges(plan)) return alert(restoreNothing(plan));
   const when = backup.exportedAt
     ? new Date(backup.exportedAt).toLocaleDateString([], { day: 'numeric', month: 'long', year: 'numeric' }) : '';
   if (!confirm(restoreQuestion(plan, when))) return;

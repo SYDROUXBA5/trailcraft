@@ -321,7 +321,7 @@ export function restoreQuestion(plan, when = '') {
   if (does.length) say.push(`It ${andList(does)}.`);
   if (plan.learned) say.push(`It ${does.length ? 'also ' : ''}brings back what the app learned about ${dogs}.`);
   const kept = tally(column(plan, 'stayDeleted'));
-  if (kept.n) say.push(`${firstUp(kept.words)} deleted on this phone since then ${kept.n === 1 ? 'stays' : 'stay'} deleted.`);
+  if (kept.n) say.push(`${firstUp(kept.words)} deleted since the backup was made ${kept.n === 1 ? 'stays' : 'stay'} deleted.`);
   const bad = tally(plan.damaged);
   if (bad.n) say.push(`${firstUp(bad.words)} in the file ${bad.n === 1 ? 'is' : 'are'} damaged and left out.`);
   say.push('Nothing on this phone is deleted.');
@@ -338,7 +338,7 @@ export function restoreNothing(plan) {
   const bad = tally(plan.damaged || {});
   const say = [];
   if (kept.n) {
-    say.push(`${firstUp(kept.words)} in this backup ${kept.n === 1 ? 'was' : 'were'} deleted on this phone since, `
+    say.push(`${firstUp(kept.words)} in this backup ${kept.n === 1 ? 'was' : 'were'} deleted since the backup was made, `
       + `so ${kept.n === 1 ? 'it stays' : 'they stay'} deleted.`);
   }
   if (bad.n) say.push(`${firstUp(bad.words)} in the file ${bad.n === 1 ? 'is' : 'are'} damaged and cannot be restored.`);
