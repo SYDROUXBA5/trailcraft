@@ -12,7 +12,7 @@ const V = 'trailcraft-v111';
 const SHELL = [
   './', 'index.html', 'app.css',
   'app.js', 'geo.js', 'colours.js', 'draft.js', 'mvt.js', 'ground.js', 'params.js', 'debrief.js', 'call.js', 'field.js', 'walls.js', 'sim.js', 'card.js', 'store.js',
-  'sync-core.js', 'sync.js', 'firebase-config.js', 'share.js', 'pdf.js', 'coach.js', 'native.js',
+  'sync-core.js', 'sync.js', 'firebase-config.js', 'share.js', 'pdf.js', 'coach.js', 'native.js', 'backup.js',
   'vendor/qrcode.js', 'vendor/jsQR.js',
 ];
 /* Wanted, but not worth failing an update over, and none of them stops the app

@@ -63,6 +63,48 @@ export async function watchBackground(onFix, onError, { message = 'Recording the
   return { id, stop: () => BG.removeWatcher({ id }).catch(() => {}) };
 }
 
+/* ── Files out of the iPhone app ──────────────────────────────────────
+   In a browser a file leaves through the share sheet or as a download. Inside
+   the app a download does nothing: the web view hands the blob: link to the
+   system to open, and nothing there can, so the tap did nothing and said
+   nothing. Where the web view offers no share sheet for files, the file is
+   written to the app's cache folder and the phone's own share sheet takes it
+   from there (Save to Files, AirDrop, Mail). Both plugins are Capacitor's own
+   (@capacitor/filesystem, @capacitor/share). */
+/* A name for the cache folder: one plain file, never a path out of it. */
+const safeName = (name) => String(name || '').replace(/[^\w.-]+/g, '-').replace(/^[.-]+/, '').slice(0, 120) || 'trailcraft';
+function base64Of(bytes) {
+  const u8 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  let bin = '';
+  for (let i = 0; i < u8.length; i += 0x8000) bin += String.fromCharCode(...u8.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+
+/** Hand a file to the phone's share sheet from inside the app. `bytes` is
+    text or a Uint8Array. Says what happened: 'shared', 'cancelled' (the
+    handler closed the sheet), 'failed', or 'none' when there is no shell or
+    no plugin to do it with (a browser, or an app built before they were in). */
+export async function shareFile(bytes, name) {
+  const FS = plugin('Filesystem'), SH = plugin('Share');
+  if (!FS?.writeFile || !SH?.share) return 'none';
+  let uri;
+  try {
+    const text = typeof bytes === 'string';
+    ({ uri } = await FS.writeFile({
+      path: safeName(name), directory: 'CACHE',
+      data: text ? bytes : base64Of(bytes),
+      ...(text ? { encoding: 'utf8' } : {}),
+    }));
+  } catch { return 'failed'; }
+  if (!uri) return 'failed';
+  try {
+    await SH.share({ title: name, files: [uri] });
+    return 'shared';
+  } catch (e) {
+    return /cancel/i.test(String(e?.message ?? e)) ? 'cancelled' : 'failed';
+  }
+}
+
 /** Can the shell tap the wrist? (iPhones cannot from a web page.) */
 export const canHaptic = () => !!plugin('Haptics');
 

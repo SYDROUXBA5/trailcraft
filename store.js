@@ -7,6 +7,7 @@
 
 import { pathLen } from './geo.js';
 import { visible, tombstone, pruneTombstones } from './sync-core.js';
+import { makeBackup, planRestore } from './backup.js';
 
 export const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 
@@ -392,12 +393,56 @@ export function createStore(backend) {
 
     usage,
 
+    /** The backup file's text (backup.js): every live record and each dog's
+        calibration. Written without indenting: a long history is mostly
+        points, and indenting them made the file about three times larger. */
     exportAll() {
-      return JSON.stringify({
-        version: 2, exportedAt: new Date().toISOString(),
+      return JSON.stringify(makeBackup({
         handlers: handlers.all(), dogs: dogs.all(), layers: layers.all(),
-        sessions: store.sessions(),
-      }, null, 2);
+        sessions: store.sessions(), calibration: store.allCalibration(),
+      }));
+    },
+
+    /** What restore(file) would do, with nothing written: the question asked
+        first is built from this (backup.js restoreQuestion). */
+    previewRestore(file) {
+      return planRestore({
+        handlers: handlers.raw(), dogs: dogs.raw(), layers: layers.raw(),
+        sessions: read(K.sessions, []), calibration: store.allCalibration(),
+      }, file);
+    },
+
+    /** Lay a checked backup (backup.js readBackup) over what is here. Nothing
+        is deleted, and a record already here is replaced only by a newer copy
+        of itself. Every record that changed is announced like any save, so a
+        phone signed in to its account backs it up; one whose records belong
+        to another account, or that has not been told whose they are, sends
+        nothing (sync-core.js syncPlan), exactly as for a save made by hand.
+        Sessions are written first: they are the bulk, and a phone without
+        room for them then refuses before anything else has changed. A
+        refusal is thrown as it is for any save, with `restored` saying
+        whether some tables were already written. The recording in progress
+        is never touched. */
+    restore(file) {
+      const plan = store.previewRestore(file);
+      let restored = false;
+      const put = (name, save) => {
+        const t = plan.tables[name];
+        if (!t.changed.length) return;
+        try { save(t.rows); } catch (e) { e.restored = restored; throw e; }
+        restored = true;
+        for (const row of t.changed) notify(name, row);
+      };
+      put('sessions', (rows) => write(K.sessions, pruneTombstones([...rows].sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0)))));
+      put('dogs', dogs.replaceAll);
+      put('handlers', handlers.replaceAll);
+      put('layers', layers.replaceAll);
+      for (const { id, rows } of plan.calibration) {
+        try { store.setCalibration(id, rows); } catch (e) { e.restored = restored; throw e; }
+        restored = true;
+        notify('calibration', { id, rows, updatedAt: Date.now() });
+      }
+      return plan;
     },
 
     wipeAll() {

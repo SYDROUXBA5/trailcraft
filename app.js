@@ -33,7 +33,8 @@ import { buildPdf, jpegSize } from './pdf.js';
 import { coachStep, initialCoach, coachPhrase, coachLine, TOL_OPTIONS, COACH_DEFAULTS } from './coach.js';
 import { DEBRIEF, FLAGS, NOTE_TAGS, blankDebrief, debriefDone, debriefLine, labelOf, ownRun, stickyDebrief } from './debrief.js';
 import { CONFIDENCE, stampCall, confidenceOf, firstCall, calibration, calibrationLine, callVerdict, runsOf } from './call.js';
-import { isNative, watchBackground, canHaptic, haptic, watchHeading } from './native.js';
+import { isNative, watchBackground, canHaptic, haptic, watchHeading, shareFile } from './native.js';
+import { readBackup, restoreChanges, restoreQuestion, BACKUP_MAX_BYTES } from './backup.js';
 import { checkAuthFields, AUTH_MIN_PASSWORD } from './sync-core.js';
 import { createStore, migrateV1, TARGETS, ODOURS, targetById, targetText, verbs, uid,
          dogStats, ageBand, AGE_BANDS, LEVELS, levelById, dogAge, patchSession, runAgain,
@@ -1029,6 +1030,7 @@ function openHandlerForm({ id = null, returnTo = null, firstLaunch = false } = {
   $('scrOnboardHandler').classList.toggle('first-launch', firstLaunch);
   $('obHandlerNext').textContent = firstLaunch ? 'Next: your dog' : 'Save';
   $('obHandlerLayOnly').hidden = !firstLaunch;   // the person who only lays: a name, then straight in
+  $('obRestore').hidden = !firstLaunch;          // a handler coming back from a wipe or a new phone
   paintObAva('obHandlerAva', existing?.name);
   go('scrOnboardHandler');
 }
@@ -1044,6 +1046,7 @@ function openLayerForm({ id = null, returnTo = 'scrHome' } = {}) {
   $('scrOnboardHandler').classList.remove('first-launch');
   $('obHandlerNext').textContent = 'Save';
   $('obHandlerLayOnly').hidden = true;
+  $('obRestore').hidden = true;
   paintObAva('obHandlerAva', existing?.name);
   go('scrOnboardHandler');
 }
@@ -4643,6 +4646,13 @@ async function deliverFile(bytes, name, type) {
     try { await navigator.share({ files: [file], title: name }); return; }
     catch (e) { if (e?.name === 'AbortError') return; }
   }
+  /* Inside the iPhone app a download goes nowhere and says nothing, so the
+     file goes to the phone's own share sheet (native.js shareFile). */
+  if (isNative()) {
+    const how = await shareFile(bytes, name);
+    if (how !== 'shared' && how !== 'cancelled') toast('Could not share the file from this app');
+    return;
+  }
   const a = document.createElement('a');
   a.href = URL.createObjectURL(file);
   a.download = name;
@@ -6682,7 +6692,7 @@ function wire() {
     }
     if (b.dataset.account === 'fresh') {
       const who = sync.user?.email || 'this account';
-      if (!confirm(`Clear this phone and use ${who}? The ${S.sessions.length} sessions and ${S.dogs.length} dogs on it are not this account's, so they are not uploaded. They go. Export everything first if you want to keep them.`)) return;
+      if (!confirm(`Clear this phone and use ${who}? The ${S.sessions.length} sessions and ${S.dogs.length} dogs on it are not this account's, so they are not uploaded. They go. Save a backup file first if you want to keep them.`)) return;
       const ok = await useThisAccount().catch(() => false);
       if (!ok) { snap(); renderSettings(); return toast('That did not work — nothing was changed'); }
       /* The old account's copy in the database's own cache went with it, which
@@ -6719,12 +6729,18 @@ function wire() {
     setTimeout(() => location.reload(), 800);
   });
 
+  /* The backup file goes out the way every other file does, so the iPhone
+     app gets the share sheet rather than a download that never happens. */
   $('btnExportAll').addEventListener('click', () => {
-    const url = URL.createObjectURL(new Blob([db.exportAll()], { type: 'application/json' }));
-    const a = document.createElement('a');
-    a.href = url; a.download = `trailcraft-backup-${new Date().toISOString().slice(0, 10)}.json`;
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    deliverFile(db.exportAll(), `trailcraft-backup-${new Date().toISOString().slice(0, 10)}.json`, 'application/json')
+      .catch(() => toast('Could not make the file'));
+  });
+  $('btnRestore').addEventListener('click', () => pickBackup('scrSettings'));
+  $('obRestore').addEventListener('click', () => pickBackup('first'));
+  $('restoreFile').addEventListener('change', (e) => {
+    const f = e.target.files?.[0];
+    e.target.value = '';
+    restoreBackup(f);
   });
   $('btnWipe').addEventListener('click', async () => {
     /* Signed in, a wipe also signs out (sync.js wipeAndSignOut). Staying signed
@@ -6739,7 +6755,7 @@ function wire() {
     const backup = signedIn
       ? ` This also signs you out. Your account backup is kept: signing in again brings it back. To delete the backup too, use Delete my account first.${behind}`
       : '';
-    if (!confirm(`Wipe everything? ${S.sessions.length} sessions, ${S.dogs.length} dogs and all profiles. Export first if you want to keep them.${backup}`)) return;
+    if (!confirm(`Wipe everything? ${S.sessions.length} sessions, ${S.dogs.length} dogs and all profiles. Save a backup file first if you want them back later.${backup}`)) return;
     if (signedIn) {
       const ok = await wipeAndSignOut().catch(() => false);
       if (!ok) return toast('That did not work. Nothing was changed.');
@@ -6752,6 +6768,47 @@ function wire() {
     snap();
     boot();
   });
+}
+
+/* ── Restoring a backup ─────────────────────────────────────────────
+   The way back from Wipe, or onto a new phone without an account: from
+   Settings, or from the first screen of a phone with nothing on it yet, so
+   nobody has to make up a profile first. The file is checked before anything
+   is shown (backup.js readBackup), the handler is told what it will add, and
+   only then is anything written (store.js restore). */
+let restoreFrom = 'scrSettings';
+function pickBackup(from) {
+  restoreFrom = from;
+  $('restoreFile').click();
+}
+async function restoreBackup(file) {
+  if (!file) return;
+  if (file.size > BACKUP_MAX_BYTES) return toast('This file is too big to be a Trailcraft backup');
+  let backup;
+  try { backup = readBackup(await file.text()); }
+  catch (e) { return toast(e?.plain ? e.message : 'Could not read that file'); }
+  const plan = db.previewRestore(backup);
+  if (!restoreChanges(plan)) return toast('Everything in this backup is already on this phone');
+  const when = backup.exportedAt
+    ? new Date(backup.exportedAt).toLocaleDateString([], { day: 'numeric', month: 'long', year: 'numeric' }) : '';
+  if (!confirm(restoreQuestion(plan, when))) return;
+  try {
+    db.restore(backup);
+  } catch (e) {
+    if (e?.name !== 'SaveError') throw e;
+    toast(!e.full ? 'Could not save the backup on this phone'
+      : e.restored ? 'The phone ran out of room. Part of the backup is restored.'
+        : 'This phone has no room for this backup. Nothing was changed.');
+    /* What did fit is on the phone now, and the screen shows it. */
+    snap();
+    if (restoreFrom === 'scrSettings') return renderSettings();
+    if (e.restored) boot();
+    return;
+  }
+  snap();
+  toast('Backup restored');
+  if (restoreFrom === 'scrSettings') return renderSettings();
+  boot();
 }
 
 /* A link the camera app opened: the card is in the fragment, which never
