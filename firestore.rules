@@ -15,11 +15,16 @@ service cloud.firestore {
       // record since this one last read it, and a blind overwrite would throw
       // that change away. So it is refused, and the phone merges the two and
       // sends the merge (sync.js put). It compares copies, not clocks, which
-      // on two phones can be seconds apart. A save with no baseAt comes from
-      // a build older than this check, and is let through as before.
+      // on two phones can be seconds apart.
+      //
+      // Only a build that knows about the check is held to it, and such a
+      // build always stamps syncedAt with the server's own time, which the
+      // rules see as request.time. An older build sends back whatever it
+      // pulled, a stale baseAt and syncedAt included, so testing for baseAt
+      // alone refused every save it made; it is let through as before.
       allow update: if mine()
-                    && (!('baseAt' in request.resource.data)
-                        || request.resource.data.baseAt == resource.data.get('updatedAt', null));
+                    && (request.resource.data.get('syncedAt', null) != request.time
+                        || request.resource.data.get('baseAt', null) == resource.data.get('updatedAt', null));
     }
 
     // A live run. The id is the key: anyone holding the link can read it
@@ -29,7 +34,7 @@ service cloud.firestore {
     //
     // Anyone can make an account, so what a run may hold is checked, not
     // trusted: only the fields the app writes (sync.js startLive, pushLive,
-    // endLive), each of the kind it writes, none without a limit, and an
+    // endLive), each of the kind it writes, the lines and texts bounded, and an
     // expiry no more than two days off (a day, plus room for a phone whose
     // clock is wrong). deleteAt is the same moment as expiresAt, as a
     // Timestamp: Firestore's clean-up (a TTL policy) reads only that kind,
@@ -46,9 +51,13 @@ service cloud.firestore {
             || (v is list && v.size() <= n)
             || (v is map && v.get('__pts', -1) is int && v.get('__pts', -1) >= 0 && v.get('__pts', -1) <= n);
       }
+      // deleteAt is required only once a build writes it: phones still on an
+      // older build share live runs without one, and refusing those would
+      // break Share live on them. Their runs are simply not cleaned up by
+      // the TTL policy; the number still bounds when viewers can read them.
       function expires(d) {
         return d.expiresAt is number && d.expiresAt <= request.time.toMillis() + 172800000
-            && d.deleteAt is timestamp && d.deleteAt <= request.time + duration.value(48, 'h');
+            && (!('deleteAt' in d) || (d.deleteAt is timestamp && d.deleteAt <= request.time + duration.value(48, 'h')));
       }
       // The dog, as share.js liveMeta picks it. A birthday is a date number,
       // or text in records from older builds.

@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import {
   mergeRecords, visible, tombstone, pruneTombstones,
   packPoints, unpackPoints, toCloud, fromCloud, approxBytes, DOC_LIMIT, mergeCalibration,
-  checkAuthFields, authMessage, AUTH_MIN_PASSWORD, syncPlan,
+  checkAuthFields, authMessage, AUTH_MIN_PASSWORD, syncPlan, RUN_FIELDS,
   mergeOne, calibrationDiffers, syncMessage, fromCloudRecord,
 } from '../public/sync-core.js';
 
@@ -375,6 +375,34 @@ t('what the cloud writes on a record for itself never lands on the phone', () =>
   const rec = fromCloudRecord({ id: 's1', updatedAt: 5, baseAt: 4, syncedAt: { toMillis: () => 1 }, data: { trail: { __pts: 1, lat: [1], lon: [2] } } });
   assert.deepEqual(Object.keys(rec).sort(), ['data', 'id', 'updatedAt']);
   assert.equal(rec.data.trail.length, 1, 'and the rest comes back as the phone wrote it');
+});
+
+
+/* The checker's own case: phone A ran the dog; phone B, which never pulled,
+   renamed its old copy later. Both must survive, and B's never-heard-of-it
+   'no dog, not run yet' must not undo A's run. */
+t('merging a stale copy keeps the run whole and never lets an empty value win', () => {
+  const laid = { id: 's1', name: 'Field', dogId: null, handlerId: 'h1', summary: 'Trail laid, not run yet.',
+    data: { trail: [{ lat: 51.2, lon: -2.6, t: 1 }, { lat: 51.21, lon: -2.61, t: 2 }], weather: null, contamination: [] } };
+  const ranOnA = { ...laid, updatedAt: 100, dogId: 'd1', handlerId: 'h2', summary: 'Found in 4 min',
+    data: { ...laid.data, weather: { temp: 11, wind_speed: 3 }, contamination: [{ who: 'Sam', points: [] }],
+      track: [{ lat: 51.2, lon: -2.6, t: 10 }], result: { kind: 'trail', sentence: 'Found' } } };
+  const renamedOnB = { ...laid, updatedAt: 200, name: 'Top field' };
+  const { keep, up } = mergeOne(renamedOnB, ranOnA, { union: true });
+  assert.equal(up, true);
+  assert.equal(keep.name, 'Top field', 'the rename survives');
+  assert.equal(keep.dogId, 'd1', 'the run is still that dog’s');
+  assert.equal(keep.handlerId, 'h2');
+  assert.equal(keep.summary, 'Found in 4 min', 'and still says what happened');
+  assert.deepEqual(keep.data.weather, { temp: 11, wind_speed: 3 }, 'a copy that never had the weather did not remove it');
+  assert.equal(keep.data.contamination.length, 1);
+  assert.equal(keep.data.track.length, 1);
+  assert.equal(keep.data.result.sentence, 'Found');
+  assert.ok(keep.updatedAt > 200, 'stamped newer than both, so every phone takes it');
+});
+
+t('a second run starts without the first run’s fetched weather', () => {
+  assert.ok(RUN_FIELDS.includes('runWeather'), 'the wind a run was graded in belongs to that run');
 });
 
 console.log(`\n${pass} passed total\n`);

@@ -431,8 +431,12 @@ t('a phone pulls when it comes back, and the cloud refuses a save made from an o
   assert.match(js, /addEventListener\('online', \(\) => resync\(\)\);/, 'and so does coming back into signal');
   const own = rules.slice(rules.indexOf('match /users/{uid}/{table}/{recordId}'), rules.indexOf('match /live/{liveId}'));
   assert.match(own, /allow read, create, delete: if mine\(\);/);
-  assert.match(own, /allow update: if mine\(\)\s*&& \(!\('baseAt' in request\.resource\.data\)\s*\|\| request\.resource\.data\.baseAt == resource\.data\.get\('updatedAt', null\)\);/,
-    'an update names the copy it was made from, and it must be the one the cloud holds');
+  assert.match(own, /allow update: if mine\(\)\s*&& \(request\.resource\.data\.get\('syncedAt', null\) != request\.time\s*\|\| request\.resource\.data\.get\('baseAt', null\) == resource\.data\.get\('updatedAt', null\)\);/,
+    'a build that stamps syncedAt with the server time must name the copy the cloud holds; an older build is let through');
+  /* An older build echoes back the baseAt it pulled, so testing for baseAt
+     alone refused every save it made. The server-time stamp is what only the
+     new build sends. */
+  assert.match(syncJs, /syncedAt: fb\.serverTimestamp\(\)/, 'the new build always sends it');
   assert.ok(!/allow [a-z, ]*write/.test(own), 'no blanket write left over the top of the check');
 });
 
@@ -841,8 +845,8 @@ t('a live run holds only what the app writes, within limits, and cannot outlive 
   assert.match(run, /d\.keys\(\)\.hasOnly\(\[/, 'no fields beyond the app’s own');
   assert.match(run, /&& d\.uid == request\.auth\.uid/, 'written under the account writing it, and it stays that account’s');
   assert.match(run, /&& expires\(d\)/);
-  assert.match(live, /function expires\(d\) \{\s*return d\.expiresAt is number && d\.expiresAt <= request\.time\.toMillis\(\) \+ 172800000\s*&& d\.deleteAt is timestamp && d\.deleteAt <= request\.time \+ duration\.value\(48, 'h'\);/,
-    'an expiry at most two days off, as a number and as a Timestamp');
+  assert.match(live, /function expires\(d\) \{\s*return d\.expiresAt is number && d\.expiresAt <= request\.time\.toMillis\(\) \+ 172800000\s*&& \(!\('deleteAt' in d\) \|\| \(d\.deleteAt is timestamp && d\.deleteAt <= request\.time \+ duration\.value\(48, 'h'\)\)\);/,
+    'an expiry at most two days off, and a Timestamp copy of it when the build writes one — older builds still share live');
   assert.match(live, /v is map && v\.get\('__pts', -1\) is int && v\.get\('__pts', -1\) >= 0 && v\.get\('__pts', -1\) <= n/, 'a line says how many points, within a cap');
   assert.match(run, /points\(d\.get\('trail', null\), 50000\)/);
   assert.match(run, /d\.get\('contamination', \[\]\) is list && d\.get\('contamination', \[\]\)\.size\(\) <= 200/);

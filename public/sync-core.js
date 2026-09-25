@@ -53,25 +53,39 @@ const plainObject = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
    laying new fields over it (patchSession): nothing takes a field away, and
    clearing one sets it to null, which counts as having it. So a field the
    newer copy lacks was never there, not removed. */
+/* What belongs to one run of a trail rather than to the trail. These move
+   together: a second run starts without them (store.js runAgain), and when two
+   copies of a session meet, the copy that holds the run gives all of them —
+   which dog ran it, who handled it and what it said, as well as the track. */
+export const RUN_FIELDS = ['track', 'trackStarted', 'trackWaypoints', 'result', 'coach', 'debrief', 'seen', 'runWeather'];
+const RUN_TOP = ['dogId', 'handlerId', 'summary'];
+const hasRun = (r) => (Array.isArray(r?.data?.track) && r.data.track.length > 0) || !!r?.data?.result;
+const empty = (v) => v == null || v === '' || (Array.isArray(v) && v.length === 0);
+
 function withMissing(win, lose) {
   if (!plainObject(win) || !plainObject(lose) || win.deleted || lose.deleted) return null;
   const out = { ...win };
+  const data = plainObject(win.data) ? { ...win.data } : {};
   let added = 0;
-  for (const [k, v] of Object.entries(lose)) {
-    if (cloudless(k) || CLOUD_ONLY.has(k) || k === 'updatedAt' || k === 'data' || k in win || v === undefined) continue;
-    out[k] = v; added++;
+  /* The run, whole, from the copy that has it. The newer copy is often a
+     phone that never pulled the run and then changed something small — its
+     "no dog, not run yet" is not a decision, just what it had not heard. */
+  if (!hasRun(win) && hasRun(lose)) {
+    for (const k of RUN_TOP) if (k in lose && lose[k] !== undefined) { out[k] = lose[k]; added++; }
+    for (const k of RUN_FIELDS) if (plainObject(lose.data) && lose.data[k] !== undefined) { data[k] = lose.data[k]; added++; }
   }
-  if (plainObject(lose.data)) {
-    if (!('data' in win)) { out.data = lose.data; added++; }
-    else if (plainObject(win.data)) {
-      const data = { ...win.data };
-      for (const [k, v] of Object.entries(lose.data)) {
-        if (cloudless(k) || k in win.data || v === undefined) continue;
-        data[k] = v; added++;
-      }
-      out.data = data;
+  /* Otherwise the newer copy wins, except that an empty value never replaces
+     a real one: a phone that never had the weather or a contamination line
+     did not remove them. */
+  const fill = (to, from, skip) => {
+    for (const [k, v] of Object.entries(from)) {
+      if (skip(k) || v === undefined) continue;
+      if (!(k in to) || (empty(to[k]) && !empty(v))) { to[k] = v; added++; }
     }
-  }
+  };
+  fill(out, lose, (k) => cloudless(k) || CLOUD_ONLY.has(k) || k === 'updatedAt' || k === 'data');
+  if (plainObject(lose.data)) fill(data, lose.data, cloudless);
+  if (plainObject(win.data) || plainObject(lose.data)) out.data = data;
   return added ? out : null;
 }
 
