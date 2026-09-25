@@ -500,7 +500,11 @@ t('handlerStats: runs, laid trails, time, age bands, dogs and the typical offset
   assert.deepEqual(st.bands, { hot: 1, warm: 1, cold: 0 });
   assert.deepEqual(st.dogs, { d1: 1, d2: 1 });
   assert.equal(st.assisted, 1); assert.equal(st.blind, 1);
-  assert.equal(st.medOff, 8);
+  /* This was 8, the upper of the two middle values. The typical distance is
+     the median, and with an even count that is halfway between the two. */
+  assert.equal(st.medOff, 6, 'runs 4 m and 8 m off the line: typically 6');
+  const third = { ...sessions[1], id: 'e', data: { ...sessions[1].data, result: { ageMin: 45, medAbs: 5 } } };
+  assert.equal(handlerStats('h1', [...sessions, third]).medOff, 5, 'an odd count is its middle, as before');
   assert.equal(handlerStats('h2', sessions).bands.cold, 1);
   assert.equal(handlerStats('nobody', sessions).runs, 0);
 });
