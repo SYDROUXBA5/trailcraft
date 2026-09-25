@@ -9,6 +9,7 @@ import {
 } from '../public/share.js';
 import { through, b64url } from '../public/card.js';
 import { dist } from '../public/geo.js';
+import { runAgeMin } from '../public/store.js';
 
 let pass = 0;
 const t = async (name, fn) => { await fn(); pass++; console.log(`  ok  ${name}`); };
@@ -272,6 +273,39 @@ await t('a run on a drawn plan is sent with no trail age until the walk comes ba
 });
 
 const rowsOf = (secs) => secs.flatMap(sec => sec.rows.map(r => r.join(': '))).join('\n');
+
+/* A drawn line that arrived as a Trail Card carries `drawn`, not `plan`, and
+   no walked card will ever come for it. The phone that ran it gave it no age,
+   but the model and the link carried only `plan` and `walked`, so the shared
+   page, the report, the GPX and a kept copy took it for a laid trail: "Laid",
+   "Walked in" and an age worked out from the guessed laid time. */
+await t('a run on a drawn Trail Card has no made-up age on the shared page or a kept copy', async () => {
+  const s = session();
+  s.data.drawn = true;
+  s.data.imported = { from: 'Kim', at: T0 + 60e3 };
+  s.data.result = { ...s.data.result, ageMin: null };
+  const m = trailModel(s, people);
+  const back = await decodeShared(await encodeShared(m));
+  for (const [x, said] of [[m, 'the model'], [back, 'the link']]) {
+    const r = rowsOf(detailSections(x, { when: () => 'x' }));
+    assert.match(r, /Trail age at start: not known — drawn, not walked/, said);
+    assert.doesNotMatch(r, /Trail age at start: \d/, `${said}: no age from the guessed laid time`);
+    assert.doesNotMatch(r, /Walked in/, `${said}: nobody walked it`);
+    assert.match(toGpx(x), /<name>Drawn plan<\/name>/, `${said}: the GPX says it was drawn`);
+    assert.match(notes(x).join(' '), /line drawn on the map/, said);
+  }
+  const kept = keptSession(back, { id: 'k1', at: T0 + 99 * 60e3 });
+  assert.equal(kept.data.drawn, true, 'a kept copy knows it too');
+  assert.equal(runAgeMin(kept), null, 'and so has no age');
+  assert.equal(headline({ ...m, result: null, track: null }), 'A trail drawn on the map, not yet run.',
+    'not "not yet walked": no walk is coming');
+
+  /* A link made before `drawn` was carried still opens, as the laid trail it
+     always opened as. */
+  const old = await decodeShared(await encodeShared({ ...m, drawn: undefined }));
+  assert.equal(old.drawn, false);
+  assert.match(rowsOf(detailSections(old, { when: () => 'x' })), /Trail age at start: 25 min/);
+});
 /* Bob's phone: his own handler and dog, and none of Alice's. */
 const bobs = {
   dogs: [{ id: 'd9', name: 'Nell' }], handlers: [{ id: 'h9', name: 'Bob' }], layers: [],
