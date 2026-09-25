@@ -530,8 +530,9 @@ function gpxTrack(name, desc, type, pts) {
 
 /** The laid trail and the dog's run as two tracks in one file, with the start,
     the end, every hide and every mark as waypoints. */
-export function toGpx(m) {
+export function toGpx(m, u = {}) {
   const dogName = m.dog?.name || 'Dog';
+  const said = m.result ? resultSentence(m.result, m.dog?.name, u) : null;
   const all = [m.trail, m.hides, m.track, ...(m.contamination ?? []).map(c => c.points)].filter(Boolean).flat();
   const lats = all.map(p => p.lat), lons = all.map(p => p.lon);
   const drawn = m.plan && !m.walked;
@@ -567,7 +568,7 @@ export function toGpx(m) {
       + 'xsi:schemaLocation="http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd">',
     '  <metadata>',
     `    <name>${xml(title)}</name>`,
-    m.result?.sentence ? `    <desc>${xml(m.result.sentence)}</desc>` : null,
+    said ? `    <desc>${xml(said)}</desc>` : null,
     inEra(m.laidAt) ? `    <time>${isoTime(m.laidAt)}</time>` : null,
     all.length ? `    <bounds minlat="${deg(Math.min(...lats))}" minlon="${deg(Math.min(...lons))}" `
       + `maxlat="${deg(Math.max(...lats))}" maxlon="${deg(Math.max(...lons))}"/>` : null,
@@ -600,9 +601,51 @@ const clock = (ms) => {
 };
 const minutes = (min) => (min < 60 ? `${min} min` : `${Math.floor(min / 60)} h${min % 60 ? ` ${min % 60} min` : ''}`);
 
+/** A result's one sentence, built from its numbers in the reader's units.
+    The sentence saved with a result was fixed when it was graded, in the
+    units in force then, so a shared page or report headed by it said "4 m"
+    above rows in feet; and a result from before the median was kept carries
+    a sentence that claimed too much. Grading, the result screen, the lists,
+    the link and the report all say it from here, so they cannot disagree.
+    A search with no indication has no numbers to say it from, and keeps its
+    own; null when there is no result to read. */
+export function resultSentence(r, dogName, u = {}) {
+  const c = cleanResult(r);
+  if (!c) return null;
+  const dog = typeof dogName === 'string' && dogName.trim() ? dogName : 'The dog';
+  const len = (x) => fmtShort(x, !!u.imperial);
+  if (c.kind === 'search') {
+    if (c.toFirst == null) return c.sentence ?? null;
+    return `${dog} indicated in ${clock(c.toFirst)}`
+      + (c.catchM != null ? `, ${c.catchApprox ? 'roughly ' : ''}${len(c.catchM)} from the hide` : '')
+      + (c.catchM != null && c.catchApprox ? ' (the GPS had dropped out)' : '')
+      + (c.approach ? `, coming ${c.approach}.` : '.');
+  }
+  const unread = `${dog} ran, but the track could not be compared with the line.`;
+  /* Saved before the wording changed: only a signed mean. Its numbers still
+     read; its sentence is said in today's words rather than as it was. */
+  if (c.medAbs == null) {
+    if (c.mean == null) return unread;
+    const a = Math.abs(c.mean);
+    return a < 3
+      ? `${dog}’s track stayed close to the line — under ${len(3)} from it on average.`
+      : `${dog}’s track sat mainly to the ${c.side ?? (c.mean > 0 ? 'right' : 'left')} of the line — about ${len(a)} from it on average.`;
+  }
+  if (!c.shares) return unread;
+  if (c.noisy) return `${dog}’s track sat about ${len(c.medAbs)} from the line, but GPS uncertainty (±${len(c.accMed)}) is too large to read which side.`;
+  /* Judged on the share it prints. A link rounds the share to two places, so
+     judging on the raw one let a run at 69.6 % read one way on the phone that
+     ran it and "70 %" on the phone it was sent to. */
+  const on = Math.round(c.shares.on * 100);
+  if (on >= 70) return `${dog}’s track stayed within ${len(3)} of the line for ${on} % of the run.`;
+  if (c.mainSide) return `${dog}’s track ran mainly to the ${c.mainSide} of the line — typically ${len(c.medAbs)} from it.`;
+  return `${dog}’s track worked both sides of the line — typically ${len(c.medAbs)} from it.`;
+}
+
 /** The one sentence that leads — the verdict when there is one. */
-export function headline(m) {
-  if (m.result?.sentence) return m.result.sentence;
+export function headline(m, u = {}) {
+  const said = m.result ? resultSentence(m.result, m.dog?.name, u) : null;
+  if (said) return said;
   const n = m.hides?.length ?? 0;
   if (m.kind === 'search') return `${n} hide${n === 1 ? '' : 's'} set, not yet searched.`;
   if (m.plan && !m.walked) return 'A trail drawn on the map, not yet walked.';

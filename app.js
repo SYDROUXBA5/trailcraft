@@ -29,7 +29,7 @@ import { sync, onSync, initSync, signInWithGoogle, signInWithApple, signOut, del
          startLive, pushLive, endLive, watchLive, resumeLive, dropLive } from './sync.js';
 import { trailModel, encodeShared, decodeShared, sharedUrl, toGpx, fileBase,
          detailSections, headline, notes, liveMeta, liveModel, cleanResult,
-         sessionFromModel, keptSession, peopleOf } from './share.js';
+         resultSentence, sessionFromModel, keptSession, peopleOf } from './share.js';
 import { buildPdf, jpegSize } from './pdf.js';
 import { coachStep, initialCoach, coachPhrase, coachLine, TOL_OPTIONS, COACH_DEFAULTS } from './coach.js';
 import { DEBRIEF, FLAGS, NOTE_TAGS, blankDebrief, debriefDone, debriefLine, labelOf, ownRun, stickyDebrief } from './debrief.js';
@@ -1448,7 +1448,7 @@ function sessionCard(s, { del = false } = {}) {
   return `<div class="card" data-open-session="${esc(s.id)}">
     <div class="meta"><span>${fmtWhen(s.startedAt)}</span><span>${esc(d?.name ?? '')}${d ? ' · ' : ''}${esc(targetText(s))}</span></div>
     ${s.name ? `<div class="card-name">${esc(s.name)}</div>` : ''}
-    <div class="story">${esc(s.summary)}</div>
+    <div class="story">${esc(storyOf(s))}</div>
     ${del ? `<button type="button" class="btn ghost small del-link" data-del-session="${esc(s.id)}">Delete</button>` : ''}
   </div>`;
 }
@@ -4433,13 +4433,10 @@ async function computeResult(s, track, wps, startedAt, { bank = true } = {}) {
 
   /* Two layers, kept apart. RECORDED: what the track did, in numbers the
      GPS can actually support. MODELLED: what the forecast wind suggests —
-     an explanation offered, never a verdict on the dog. */
-  let sentence;
-  if (medAbs == null || !shares) sentence = `${dogName} ran, but the track could not be compared with the line.`;
-  else if (noisy) sentence = `${dogName}’s track sat about ${fmtM(medAbs)} from the line, but GPS uncertainty (±${fmtM(accMed)}) is too large to read which side.`;
-  else if (shares.on >= 0.7) sentence = `${dogName}’s track stayed within ${fmtM(3)} of the line for ${Math.round(shares.on * 100)} % of the run.`;
-  else if (mainSide) sentence = `${dogName}’s track ran mainly to the ${mainSide} of the line — typically ${fmtM(medAbs)} from it.`;
-  else sentence = `${dogName}’s track worked both sides of the line — typically ${fmtM(medAbs)} from it.`;
+     an explanation offered, never a verdict on the dog. The sentence is
+     saved in the units in force now; every screen says it again from the
+     numbers, in whatever units it is read in (share.js, resultSentence). */
+  const sentence = resultSentence({ kind: 'trail', medAbs, shares, noisy, accMed, mainSide }, dogName, unitsForText());
 
   let modelled = '';
   if (predSide !== 0) {
@@ -4511,17 +4508,6 @@ function searchResult(s, track, wps, startedAt, wx, dogName, ageMin) {
   };
 }
 
-/** A result saved before the wording changed carries only a signed mean and
-    a sentence that claimed too much. Its numbers still read; its sentence
-    is rebuilt in today's words rather than shown as it was. */
-function legacySentence(r, dogName) {
-  if (!Number.isFinite(r.mean)) return `${dogName} ran, but the track could not be compared with the line.`;
-  const a = Math.abs(r.mean);
-  return a < 3
-    ? `${dogName}’s track stayed close to the line — under ${fmtM(3)} from it on average.`
-    : `${dogName}’s track sat mainly to the ${r.side ?? (r.mean > 0 ? 'right' : 'left')} of the line — about ${fmtM(a)} from it on average.`;
-}
-
 function renderResult(s) {
   paintGround('resGround', s);
   /* A run kept from someone else's link before links were checked still holds
@@ -4530,8 +4516,9 @@ function renderResult(s) {
   const r = s.data.imported ? (cleanResult(s.data.result) ?? {}) : s.data.result;
   const d = peopleFor(s).dog;
   $('resWho').textContent = `${d?.name ?? ''} · ${fmtWhen(s.startedAt)}`;
-  $('resSentence').textContent = r.kind === 'trail' && !Number.isFinite(r.medAbs)
-    ? legacySentence(r, d?.name ?? 'The dog') : r.sentence;
+  /* Said from the numbers in today's units and words: a result saved before
+     the wording changed carried a sentence that claimed too much. */
+  $('resSentence').textContent = resultSentence(r, d?.name, unitsForText()) ?? r.sentence ?? '';
 
   /* Every value is escaped here, not just trusted to be a number: a run kept
      from someone else's link, or saved before links were checked, carries
@@ -4801,6 +4788,11 @@ function modelOf(s) {
 function peopleFor(s) {
   return peopleOf(s, { dogs: S.dogs, handlers: S.handlers, layers: S.layers, me: S.handler });
 }
+/** The line a record reads as in a list: its result said in this reader's
+    units, or the summary it was saved with when it has no result to say. */
+function storyOf(s) {
+  return (s.data?.result && resultSentence(s.data.result, peopleFor(s).dog?.name, unitsForText())) || s.summary || '';
+}
 const unitsForText = () => ({ imperial: imp(), fahrenheit: fahr(), coord: settings.coordFormat, when: fmtWhen });
 const metaLine = (m) => [m.dog?.name, fmtWhen(m.runAt ?? m.laidAt ?? Date.now()),
   m.handler ? `handler ${m.handler}` : null].filter(Boolean).join(' · ');
@@ -4824,7 +4816,7 @@ async function sendLink(m) {
   try { code = await encodeShared(m); } catch (e) { return toast(e.message); }
   const url = sharedUrl(code, SHARE_BASE);
   if (navigator.share) {
-    try { await navigator.share({ title: 'Trailcraft', text: headline(m), url }); return; }
+    try { await navigator.share({ title: 'Trailcraft', text: headline(m, unitsForText()), url }); return; }
     catch (e) { if (e?.name === 'AbortError') return; }
   }
   try { await navigator.clipboard.writeText(url); toast('Link copied — paste it anywhere'); }
@@ -4865,7 +4857,7 @@ async function deliverFile(bytes, name, type) {
    can hold a value no file can be made from. The tap then says so, rather
    than doing nothing at all. */
 async function saveGpx(m) {
-  try { await deliverFile(toGpx(m), `${fileBase(m)}.gpx`, 'application/gpx+xml'); }
+  try { await deliverFile(toGpx(m, unitsForText()), `${fileBase(m)}.gpx`, 'application/gpx+xml'); }
   catch { toast('Could not make the file'); }
 }
 
@@ -4921,7 +4913,7 @@ async function savePdf(m) {
     const bytes = buildPdf({
       title: `${search ? 'Search' : 'Trail'} report${m.dog?.name ? ` — ${m.dog.name}` : ''}`,
       eyebrow: `Trailcraft · ${search ? 'search' : 'trail'} report`,
-      headline: headline(m),
+      headline: headline(m, unitsForText()),
       meta: metaLine(m),
       map,
       sections: detailSections(m, unitsForText()),
@@ -4966,7 +4958,7 @@ function openShared(m, from = null) {
   sharedSession = sessionFromModel(m);
   sharedFrom = from;
   run.session = null;
-  $('sharedHead').textContent = headline(m);
+  $('sharedHead').textContent = headline(m, unitsForText());
   $('sharedName').textContent = m.name || '';
   $('sharedName').hidden = !m.name;
   $('sharedMeta').textContent = metaLine(m);
@@ -5127,7 +5119,7 @@ function paintLiveHud() {
   $('liveHudText').textContent = m.ended
     ? `${dog} · finished${m.track ? ` · ${fmtKm(pathLen(m.track))}` : ''}`
     : `${dog} · live${m.track ? ` · ${fmtKm(pathLen(m.track))}` : ''}`;
-  $('liveNote').textContent = m.ended ? headline(m)
+  $('liveNote').textContent = m.ended ? headline(m, unitsForText())
     : !last ? 'Waiting for the first fix…'
     : ago < 15 ? 'Updated just now'
     : ago < 120 ? `Updated ${ago} s ago`
@@ -5761,7 +5753,7 @@ function paintHandlerCard(id) {
     const band = ageBand(x.data.result?.ageMin);
     return `<div class="card" data-open-session="${esc(x.id)}">
       <div class="meta"><span>${fmtWhen(x.data.trackStarted ?? x.startedAt)}</span><span>${esc(d?.name ?? '')}${d ? ' \u00b7 ' : ''}${fmtKm(pathLen(x.data.track || []))}${band ? ' \u00b7 ' + esc(band.label) : ''}</span></div>
-      <p class="body small">${esc(x.data.result?.sentence ?? x.summary ?? '')}</p>
+      <p class="body small">${esc(storyOf(x))}</p>
     </div>`;
   }).join('') : `<div class="card"><p class="body muted">No trail run yet.</p></div>`;
 }
@@ -5853,7 +5845,7 @@ function paintDogCard(id) {
     return `<div class="card" data-open-session="${esc(x.id)}">
       <div class="meta"><span>${fmtWhen(x.data.trackStarted ?? x.startedAt)}</span>
         <span>${band ? `${band.label} · ` : ''}${len}</span></div>
-      <div class="story">${esc(x.summary || '')}</div>
+      <div class="story">${esc(storyOf(x))}</div>
     </div>`;
   }).join('') : `<div class="card"><p class="body muted">Nothing run yet.</p></div>`;
 }
