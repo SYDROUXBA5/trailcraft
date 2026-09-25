@@ -113,6 +113,7 @@ function app() {
     mapTut: { open: false }, openMapTut() {},
     closeShared() {}, closeLive() {}, closeBench() {}, closeReplay() {}, closeFix() {}, closeDraw() {},
     closeContam() {}, plumeStop() {}, stopCountdownUi() {}, setSrc() {}, EMPTY: {}, onHideTap() {},
+    CD: { sid: 's1' }, renderShare() {},
     // The real openers draw a screen and then go() to it; that last step is what matters here.
     openDebrief: (s) => { sb.dbFor = s; sb.dbDraft = { flags: [] }; sb.dbSeen = {}; sb.go('scrDebrief'); },
     openPick: () => sb.go('scrPick'),
@@ -128,7 +129,7 @@ function app() {
     decl('function saveDebrief('),
     decl('async function openScan('),
     ...['benchDone', 'repBack', 'repDebrief', 'dbCancel', 'fixCancel', 'btnSessBack', 'btnShareOutBack',
-      'btnDeleteCancel', 'btnSkipSignIn', 'btnScanBack', 'btnScanWalked', 'scrDebrief']
+      'btnDeleteCancel', 'btnSkipSignIn', 'btnScanBack', 'btnScanWalked', 'scrDebrief', 'cdBack']
       .map(id => `var on_${id} = ${onClick(id)};`),
     'var where = () => ({ screen: currentScreen, stack: [...navStack] });',
   ].join('\n');
@@ -204,6 +205,17 @@ await t('Back from the session list, Keep my account, and Not now on sign-in: on
     a.arrow();
     assert.equal(a.where(), 'scrHome', `after ${close}, the arrow on Settings did not go home`);
   }
+});
+
+await t('Back on the countdown returns to sharing, and the arrow there goes home, not into a stopped countdown', () => {
+  const a = app();
+  a.sessions.set('s1', { id: 's1', data: {} });
+  a.go('scrHome'); a.go('scrShare'); a.go('scrCountdown');
+  a.click('cdBack');
+  assert.equal(a.where(), 'scrShare');
+  assert.ok(!a.sb.where().stack.includes('scrCountdown'), 'the stopped countdown is not in the history');
+  a.arrow();
+  assert.equal(a.where(), 'scrHome', 'the arrow led back into the countdown just closed');
 });
 
 await t('Back from the scanner returns to Pick, and the arrow there goes home', () => {
@@ -353,7 +365,7 @@ await t('an emptied map stops the footprints’ timer, and the next map screen d
 await t('in the app the screen is held only while the coach is on, and let go when it goes off', async () => {
   const asked = [];
   const sb = {
-    isNative: () => true, coach: { on: false }, rec: { on: true, lock: null },
+    isNative: () => true, coach: { on: false }, rec: { on: true, lock: null, kind: 'run' },
     document: { visibilityState: 'visible' },
     navigator: { wakeLock: { request: async (kind) => {
       asked.push(kind);
@@ -370,6 +382,9 @@ await t('in the app the screen is held only while the coach is on, and let go wh
   const lock = sb.rec.lock;
   await sb.letScreenGo();
   assert.ok(lock.released && sb.rec.lock === null, 'and lets it go');
+  sb.rec.kind = 'lay';
+  await sb.holdScreen();
+  assert.equal(asked.length, 1, 'a lay goes in the pocket, even with the coach left on by a run that never started');
   sb.isNative = () => false; sb.coach.on = false;
   await sb.holdScreen();
   assert.equal(asked.length, 2, 'a web recording holds it whatever the coach does');

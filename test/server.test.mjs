@@ -85,6 +85,20 @@ t('it listens on this Mac alone unless LAN is asked for', () => {
   assert.equal(bindHost({ LAN: '1', HTTP: '1' }), '0.0.0.0');
 });
 
+/* npm run dev listens on this Mac alone, so the steps for the phone that
+   still said to run it led to a connection the server refuses. */
+t('the phone steps and the certificate script start the server the phone can reach', () => {
+  const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
+  const cert = readFileSync(new URL('../scripts/make-cert.sh', import.meta.url), 'utf8');
+  assert.match(pkg, /"dev:lan": "LAN=1 node server\.cjs"/);
+  const phone = readme.slice(readme.indexOf('## On your phone'), readme.indexOf('## Trusting the certificate'));
+  assert.match(phone, /2\. `npm run dev:lan` and note the `https:\/\/192\.168\.x\.x:2777` address it prints/);
+  const trust = readme.slice(readme.indexOf('## Trusting the certificate'));
+  assert.match(trust, /On the iPhone, with `npm run dev:lan` running:/);
+  assert.match(cert, /echo "Run npm run dev:lan, then on the phone open: {2}https:\/\/\$LAN:2777\/ca\.crt"/);
+  assert.ok(!/Start the server, then on the phone/.test(cert));
+});
+
 for (const [name, fn] of tests) {
   await fn();
   pass++;

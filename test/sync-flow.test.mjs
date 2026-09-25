@@ -109,6 +109,30 @@ await t('a phone that has not pulled for hours cannot send its old copy over a r
   assert.ok(local(A, 's1').data.result, 'and keeps its run');
 });
 
+/* A trail is laid with no dog, no weather and no contamination (confirmLay).
+   The stale rename used to keep all three empty over the run: the run's dog,
+   its summary and the saved weather went, and it dropped out of the dog's
+   history on both phones. */
+await t('a stale rename over a run keeps the run’s dog, what it said, and the weather', async () => {
+  const laid = { id: 's1', handlerId: 'h1', dogId: null, startedAt: 1000, summary: 'Trail laid, not run yet.',
+    data: { trail: walk(5), weather: null, contamination: [] } };
+  const A = await phone({ setup: st => { st.kv.set('ownerUid', 'alice'); st.addSession(laid); } });
+  const B = await phone();
+  A.store.updateSession('s1', { data: { weather: { temp: 11, wind_speed: 3 } } });
+  A.store.updateSession('s1', { dogId: 'd1', handlerId: 'h2', summary: 'Found in 4 min',
+    data: { track: walk(40), result: { found: true } } });
+  await done(A);
+  B.store.updateSession('s1', { name: 'Top field' });
+  await done(B);
+  const up = doc('sessions', 's1');
+  assert.equal(up.name, 'Top field');
+  assert.equal(up.dogId, 'd1', 'the run still belongs to its dog');
+  assert.equal(up.handlerId, 'h2');
+  assert.equal(up.summary, 'Found in 4 min');
+  assert.deepEqual(up.data.weather, { temp: 11, wind_speed: 3 });
+  assert.equal(local(B, 's1').dogId, 'd1', 'and the tablet has it the same way');
+});
+
 await t('before the new rules are live, a run overwritten in the cloud is put back by the phone that has it', async () => {
   fake.cloud.baseRule = false;
   const A = await phone({ setup: st => { st.kv.set('ownerUid', 'alice'); st.addSession(trail('s1')); } });
@@ -264,6 +288,19 @@ await t('a failed sync says what failed, not that signing in did', async () => {
   assert.ok(!/Sign-in/.test(A.s.sync.error));
 });
 
+await t('a pull on coming back that fails leaves the backup on', async () => {
+  const A = await phone({ setup: st => { st.kv.set('ownerUid', 'alice'); st.addSession(trail('s1')); } });
+  A.store.updateSession('s1', { name: 'before' });
+  await until('the rename to go up', () => doc('sessions', 's1')?.name === 'before');
+  fake.cloud.fail = 'resource-exhausted';
+  await comeBack(A);
+  assert.equal(A.s.sync.status, 'error', 'the failed pull is said');
+  /* Reads ran out, writes did not: the free allowance counts them apart. */
+  A.store.updateSession('s1', { name: 'after' });
+  await until('the save after the failed pull to go up', () => doc('sessions', 's1')?.name === 'after');
+  await until('the card to settle', () => A.s.sync.status === 'synced');
+});
+
 await t('no pull on coming back starts while the account is being deleted', async () => {
   const A = await phone({ setup: st => { st.kv.set('ownerUid', 'alice'); st.addSession(trail('s1')); } });
   const check = fake.holdReauth();
@@ -361,6 +398,30 @@ await t('a live run, its chunks and its end all carry a Timestamp a TTL policy c
   assert.equal(ended.ended, true);
   fitsRule('liveRun', ended);
   assert.ok(ended.expiresAt > from + 23 * 3600e3, 'readable for a day after the end');
+});
+
+/* A run picked up again after the app died carries on under its first start,
+   and ends a day after the resume. Its chunks were dated from the start, so
+   they went before the run, or were written already expired. */
+await t('a live run picked up long after it started keeps its track as long as the run', async () => {
+  const A = await phone({ setup: st => st.kv.set('ownerUid', 'alice') });
+  const from = Date.now();
+  const id = await A.s.startLive(meta(from));
+  later(40 * 3600e3);                              // the app died, and the draft was kept until now
+  assert.equal(A.s.resumeLive(id, from), true);
+  const at = Date.now();
+  A.s.pushLive(walk(30).map((p, i) => ({ ...p, t: at + i * 1000 })));
+  await tick(); await tick();
+  await A.s.endLive({ result: { found: true, score: 70 }, track: [], wps: [] });
+  const ended = fake.cloudDoc(`live/${id}`);
+  const pieces = liveDocs().filter(k => k.includes('/chunks/'));
+  assert.ok(pieces.length > 0);
+  for (const k of pieces) {
+    const c = fake.cloudDoc(k);
+    fitsRule('livePiece', c, k.split('/').pop());
+    assert.ok(c.expiresAt >= ended.expiresAt, `${k} goes before the run it belongs to`);
+    assert.ok(c.expiresAt <= Date.now() + 48 * 3600e3, 'and within the two days the rules allow');
+  }
 });
 
 await t('Share live with no signal gives up, and the run it queued never goes live', async () => {

@@ -7,7 +7,7 @@
 
 import assert from 'node:assert/strict';
 import { createStore, SaveError } from '../public/store.js';
-import { readBackup, planRestore, restoreQuestion, restoreChanges, makeBackup, BACKUP_VERSION } from '../public/backup.js';
+import { readBackup, planRestore, restoreQuestion, restoreChanges, restoreNothing, makeBackup, BACKUP_VERSION } from '../public/backup.js';
 
 let pass = 0;
 const t = async (name, fn) => { await fn(); pass++; console.log(`  ok  ${name}`); };
@@ -319,6 +319,81 @@ await t('a phone without room for the backup is left as it was, and says so', ()
   } });
   assert.throws(() => part.restore(file), (e) => e instanceof SaveError && e.restored === true);
   assert.equal(part.sessions().length, 2, 'what fitted is kept');
+});
+
+await t('when a restore changes nothing, it says why instead of claiming it is all here', () => {
+  const none = { sessions: { added: 0, updated: 0, stayDeleted: 0, changed: [] } };
+  assert.equal(restoreNothing({ tables: none, damaged: {} }), 'Everything in this backup is already on this phone.');
+  const deleted = { sessions: { added: 0, updated: 0, stayDeleted: 2, changed: [] } };
+  assert.equal(restoreNothing({ tables: deleted, damaged: {} }),
+    '2 sessions in this backup were deleted on this phone since, so they stay deleted.');
+  assert.equal(restoreNothing({ tables: none, damaged: { sessions: 3 } }),
+    '3 sessions in the file are damaged and cannot be restored.');
+});
+
+await t('a session deleted by mistake, and a file of damaged rows, are named for what they are', () => {
+  const { db } = seasonPhone();
+  const file = readBackup(db.exportAll());
+  db.deleteSession('s1');
+  db.deleteSession('s2');
+  const plan = db.previewRestore(file);
+  assert.equal(restoreChanges(plan), false, 'the deletion stays, so nothing would change');
+  assert.equal(restoreNothing(plan), '2 sessions in this backup were deleted on this phone since, so they stay deleted.');
+  const broken = readBackup(wrap({ sessions: [{ id: 'x', startedAt: NOW, data: { trail: 'x' } }] }), { now: NOW });
+  assert.equal(restoreNothing(createStore(fakeBackend()).previewRestore(broken)),
+    '1 session in the file is damaged and cannot be restored.');
+});
+
+/* A handler who only lays trails has no dog, and the app lets them in on an
+   answer kept outside the records. A restore onto a new phone lost it, and
+   the dog form that then opened has no way back to the choice. */
+await t('a layer who only lays trails gets that answer back on a new phone, and the tutorial seen', () => {
+  const db = createStore(fakeBackend());
+  db.handlers.upsert({ id: 'sam', name: 'Sam', photo: null });
+  db.addSession({ id: 'l1', handlerId: 'sam', dogId: null, targetId: 'person', startedAt: NOW - 3600e3, data: { trail } });
+  db.kv.set('layerOnly', true);
+  db.kv.set('tutorialDone', true);
+  const file = readBackup(db.exportAll());
+  assert.deepEqual(file.flags, { layerOnly: true, tutorialDone: true });
+
+  const fresh = createStore(fakeBackend());
+  fresh.restore(file);
+  assert.equal(fresh.kv.get('layerOnly'), true, 'home, not the dog form');
+  assert.equal(fresh.kv.get('tutorialDone'), true);
+
+  /* Only ever switched on: a file without them takes nothing back. */
+  const { db: season } = seasonPhone();
+  const plain = readBackup(season.exportAll());
+  assert.deepEqual(plain.flags, {}, 'a phone that never gave the answers has none in its file');
+  fresh.restore(plain);
+  assert.equal(fresh.kv.get('layerOnly'), true);
+
+  /* And from a stranger's file, only the two answers, and only as true. */
+  const odd = readBackup(wrap({ flags: JSON.parse('{"layerOnly":"yes","tutorialDone":true,"ownerUid":"x","__proto__":{"layerOnly":true}}') }), { now: NOW });
+  assert.deepEqual(odd.flags, { tutorialDone: true });
+});
+
+await t('a backup from before the file carried the answers still lets a layer in', () => {
+  const old = (dogs) => readBackup(JSON.stringify({ app: 'trailcraft', version: 3, exportedAt: new Date(NOW).toISOString(),
+    handlers: [{ id: 'sam', name: 'Sam', updatedAt: NOW - 1e6 }], dogs, layers: [], sessions: [] }), { now: NOW });
+  assert.equal(old([]).flags, null, 'no answers in the file at all');
+  const fresh = createStore(fakeBackend());
+  fresh.restore(old([]));
+  assert.equal(fresh.kv.get('layerOnly'), true, 'a handler and no dog is someone who only lays trails');
+  const withDog = createStore(fakeBackend());
+  withDog.restore(old([{ id: 'bo', handlerId: 'sam', name: 'Bo', updatedAt: NOW - 1e6 }]));
+  assert.equal(withDog.kv.get('layerOnly'), null, 'a handler with a dog is not');
+});
+
+await t('a name the app saved longer than the reader expects is kept, shortened, not refused', () => {
+  const { db } = seasonPhone();
+  db.handlers.upsert({ id: 'remi', name: 'R'.repeat(250), photo: null });
+  const file = readBackup(db.exportAll());
+  assert.equal(file.damaged.handlers, 0, 'the app’s own record is not damage');
+  assert.equal(file.handlers[0].name, 'R'.repeat(200));
+  assert.equal(file.dogs[0].handlerId, 'remi', 'and the dog still has its handler to come back to');
+  const cut = readBackup(wrap({ handlers: [{ id: 'h', name: 'a'.repeat(199) + '🐕', updatedAt: NOW }] }), { now: NOW });
+  assert.equal(cut.handlers[0].name, 'a'.repeat(199), 'never half a character');
 });
 
 console.log(`\n${pass} passed total\n`);

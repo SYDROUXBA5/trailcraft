@@ -19,6 +19,11 @@ import { mergeOne, mergeCalibration, calibrationDiffers } from './sync-core.js';
 export const BACKUP_VERSION = 3;
 const APP = 'trailcraft';
 export const BACKUP_TABLES = ['handlers', 'dogs', 'layers', 'sessions'];
+/* Two answers the handler gave on this phone, which no record holds: that
+   they only lay trails for someone else's dog, and that they have seen the
+   tutorial. Without them a layer restoring onto a new phone was sent to the
+   dog form, whose first-launch screen has no way back to the choice. */
+export const BACKUP_FLAGS = ['layerOnly', 'tutorialDone'];
 
 /* Limits no genuine backup comes near. The iPhone app keeps about fifty
    megabytes of records, and the file is the same records written once. */
@@ -43,11 +48,12 @@ const T_MIN = Date.UTC(2000, 0, 1), T_MAX = Date.UTC(2100, 0, 1);
 const inEra = (ms) => fin(ms) && ms >= T_MIN && ms <= T_MAX;
 
 /** The file itself: every live record, and what each dog has taught the model. */
-export function makeBackup({ handlers = [], dogs = [], layers = [], sessions = [], calibration = [] } = {}, now = new Date()) {
+export function makeBackup({ handlers = [], dogs = [], layers = [], sessions = [], calibration = [], flags = {} } = {}, now = new Date()) {
   const kept = new Set(dogs.map(d => d.id));
   return {
     app: APP, version: BACKUP_VERSION, exportedAt: now.toISOString(),
     handlers, dogs, layers, sessions,
+    flags: Object.fromEntries(BACKUP_FLAGS.filter(k => flags?.[k] === true).map(k => [k, true])),
     /* Only for dogs that are in the file: a deleted dog's rows are kept on
        the phone but nothing can reach them, and a restore would skip them. */
     calibration: calibration.filter(c => kept.has(c?.id) && c.rows?.length),
@@ -128,9 +134,15 @@ function common(raw, now) {
   return row;
 }
 
+/* The name forms have no length limit, so the app itself can save a longer
+   name than this. Such a row is the app's own and is kept, cut to a length
+   the screens can show, rather than refused as damaged while the dogs and
+   sessions that point at it come back without it. */
+const NAME_MAX = 200;
 function profile(raw, now) {
   const row = common(raw, now);
-  if (typeof row.name !== 'string' || row.name.length > 200) throw new Damaged();
+  if (typeof row.name !== 'string') throw new Damaged();
+  if (row.name.length > NAME_MAX) row.name = row.name.slice(0, NAME_MAX).replace(/[\uD800-\uDBFF]$/, '');
   if (row.photo != null && !(typeof row.photo === 'string' && PHOTO_RE.test(row.photo))) row.photo = null;
   return row;
 }
@@ -191,7 +203,7 @@ export function readBackup(textIn, { now = Date.now() } = {}) {
   if (!BACKUP_TABLES.every(k => o[k] == null || Array.isArray(o[k]))) throw refuse(DAMAGED);
   if (o.calibration != null && !Array.isArray(o.calibration)) throw refuse(DAMAGED);
 
-  const out = { version: o.version, exportedAt: null, damaged: {}, calibration: [] };
+  const out = { version: o.version, exportedAt: null, damaged: {}, calibration: [], flags: null };
   const at = typeof o.exportedAt === 'string' ? Date.parse(o.exportedAt) : NaN;
   if (inEra(at)) out.exportedAt = at;
   for (const name of BACKUP_TABLES) {
@@ -218,6 +230,9 @@ export function readBackup(textIn, { now = Date.now() } = {}) {
     if (rows.length) cal.set(c.id, mergeCalibration(cal.get(c.id), rows));
   }
   out.calibration = [...cal].map(([id, rows]) => ({ id, rows }));
+  /* Only the two answers, and only ever switched on. null is a file from
+     before backups carried them (planRestore). */
+  if (plainObject(o.flags)) out.flags = Object.fromEntries(BACKUP_FLAGS.filter(k => o.flags[k] === true).map(k => [k, true]));
   return out;
 }
 
@@ -225,12 +240,14 @@ export function readBackup(textIn, { now = Date.now() } = {}) {
 
 /** Lay a checked backup over the phone's own tables, without writing
     anything. `phone` holds each table's rows tombstones and all, plus
-    `calibration` as [{ id, rows }]. For each table: `rows`, what the table
-    would hold; `changed`, the rows that are new or different and so must be
-    saved and backed up; and counts of what was added, brought up to date,
-    and deleted here since the backup (which stays deleted). */
+    `calibration` as [{ id, rows }] and `flags`, the answers set on it.
+    For each table: `rows`, what the table would hold; `changed`, the rows
+    that are new or different and so must be saved and backed up; and counts
+    of what was added, brought up to date, and deleted here since the backup
+    (which stays deleted). `flags`: the answers the file switches on that
+    the phone has not. */
 export function planRestore(phone, file) {
-  const plan = { tables: {}, calibration: [], learned: 0, damaged: { ...(file?.damaged || {}) } };
+  const plan = { tables: {}, calibration: [], learned: 0, damaged: { ...(file?.damaged || {}) }, flags: [] };
   for (const name of BACKUP_TABLES) {
     const rows = [...(phone?.[name] || [])];
     const at = new Map(rows.map((r, i) => [r?.id, i]));
@@ -262,6 +279,17 @@ export function planRestore(phone, file) {
     plan.calibration.push({ id, rows: merged });
     plan.learned++;
   }
+
+  const has = (k) => phone?.flags?.[k] === true;
+  plan.flags = BACKUP_FLAGS.filter(k => file?.flags?.[k] === true && !has(k));
+  /* A backup made before the file carried the answers: a phone left with a
+     handler and no dog is someone who only lays trails, since everyone else
+     adds a dog before the app opens. Home, where a dog can be added any day,
+     is better than a dog form with no way back. */
+  if (file && !file.flags && !has('layerOnly')) {
+    const live = (name) => plan.tables[name].rows.some(r => r && !r.deleted);
+    if (live('handlers') && !live('dogs')) plan.flags.push('layerOnly');
+  }
   return plan;
 }
 
@@ -275,7 +303,7 @@ function tally(counts) {
   const names = ORDER.filter(n => counts[n] > 0);
   return { words: andList(names.map(n => count(n, counts[n]))), n: names.reduce((a, n) => a + counts[n], 0) };
 }
-const column = (plan, key) => Object.fromEntries(ORDER.map(n => [n, plan.tables[n][key]]));
+const column = (plan, key) => Object.fromEntries(ORDER.map(n => [n, plan.tables[n]?.[key] ?? 0]));
 
 /** Whether a restore would change anything at all. */
 export const restoreChanges = (plan) =>
@@ -298,4 +326,21 @@ export function restoreQuestion(plan, when = '') {
   if (bad.n) say.push(`${firstUp(bad.words)} in the file ${bad.n === 1 ? 'is' : 'are'} damaged and left out.`);
   say.push('Nothing on this phone is deleted.');
   return `Restore the backup${when ? ` from ${when}` : ''}? ${say.join(' ')}`;
+}
+
+/** What to say when a restore would change nothing. That is not always
+    because it is all here already: the file's records may have been deleted
+    on this phone since the backup, and a deletion stays, or every row in
+    the file may be damaged. Saying "already on this phone" then sent the
+    handler looking for a session that is not there. */
+export function restoreNothing(plan) {
+  const kept = tally(column(plan, 'stayDeleted'));
+  const bad = tally(plan.damaged || {});
+  const say = [];
+  if (kept.n) {
+    say.push(`${firstUp(kept.words)} in this backup ${kept.n === 1 ? 'was' : 'were'} deleted on this phone since, `
+      + `so ${kept.n === 1 ? 'it stays' : 'they stay'} deleted.`);
+  }
+  if (bad.n) say.push(`${firstUp(bad.words)} in the file ${bad.n === 1 ? 'is' : 'are'} damaged and cannot be restored.`);
+  return say.length ? say.join(' ') : 'Everything in this backup is already on this phone.';
 }

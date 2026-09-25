@@ -21,7 +21,9 @@ Then open https://localhost:2777
 Both devices must be on the same wifi.
 
 1. `npm run cert` — already done; re-run if your LAN IP changes
-2. `npm run dev` and note the `https://192.168.x.x:2777` address it prints
+2. `npm run dev:lan` and note the `https://192.168.x.x:2777` address it prints.
+   Plain `npm run dev` and the Desktop launcher serve this Mac only, so the
+   phone cannot reach them.
 3. Open that on your phone and install the certificate — see below. GPS only
    works on an origin the phone fully trusts, so this step is not optional.
 4. Share → **Add to Home Screen** to run it fullscreen like an app.
@@ -36,7 +38,7 @@ this into a field.
 server certificate signed by it. You install the authority on the phone **once**
 — it lasts ten years, so later address changes need nothing on the phone.
 
-On the iPhone, with the server running:
+On the iPhone, with `npm run dev:lan` running:
 
 1. Open **`https://<your-lan-ip>:2777/ca.crt`** — accept the warning this once.
 2. Safari says a profile was downloaded. Go to

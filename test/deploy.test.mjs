@@ -8,10 +8,10 @@
 
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { REQUIRED, checkBranch, uncommitted, splitPublic, checkSplit } from '../scripts/deploy.mjs';
+import { REQUIRED, checkBranch, uncommitted, splitPublic, checkSplit, gitEnv } from '../scripts/deploy.mjs';
 
 // Keep this machine's git settings (signing, hooks, templates) out of the throwaway repo.
 Object.assign(process.env, {
@@ -24,7 +24,8 @@ Object.assign(process.env, {
 });
 
 const dir = mkdtempSync(join(tmpdir(), 'trailcraft-deploy-'));
-const git = (...args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+// Found from cwd alone, never from a GIT_DIR a git hook left set (deploy.mjs gitEnv).
+const git = (...args) => execFileSync('git', args, { cwd: dir, env: gitEnv(), encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 const put = (rel, text) => {
   mkdirSync(dirname(join(dir, rel)), { recursive: true });
   writeFileSync(join(dir, rel), text);
@@ -97,7 +98,7 @@ t('deploying from another branch, or a detached HEAD, is refused', () => {
 
 t('an empty split is refused before it can become a delete refspec', () => {
   assert.throws(() => checkSplit('', dir), /deletes it/);
-  const emptyTree = execFileSync('git', ['hash-object', '-w', '-t', 'tree', '/dev/null'], { cwd: dir, encoding: 'utf8' }).trim();
+  const emptyTree = git('hash-object', '-w', '-t', 'tree', '/dev/null');
   const emptyCommit = git('commit-tree', emptyTree, '-m', 'empty');
   assert.throws(() => checkSplit(emptyCommit, dir), new RegExp(REQUIRED.join(', ')));
   git('rm', '-rq', 'public');
@@ -114,6 +115,28 @@ t('a split without any one of the four files is refused, and names it', () => {
     assert.throws(() => checkSplit(sha, dir), (err) => err.message.includes(`has no ${name} at its root`));
     reset();
   }
+});
+
+/* Run from a git hook, which points GIT_DIR and GIT_WORK_TREE at the real
+   repository: every command above would have worked there instead, and the
+   reset and clean -x would have taken the ignored token and certificates. */
+t('a git hook pointing git at another repository never steers the checks or the test there', () => {
+  const decoy = mkdtempSync(join(tmpdir(), 'trailcraft-decoy-'));
+  const inDecoy = (...args) => execFileSync('git', args, { cwd: decoy, env: gitEnv(), encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  inDecoy('init', '-q', '-b', 'other');
+  mkdirSync(join(decoy, 'public'));
+  writeFileSync(join(decoy, 'public', 'stray.js'), 'export {};\n');
+  const hook = { GIT_DIR: join(decoy, '.git'), GIT_WORK_TREE: decoy, GIT_INDEX_FILE: join(decoy, '.git', 'index') };
+  Object.assign(process.env, hook);
+  try {
+    checkBranch(dir);                              // the decoy is on "other"
+    assert.deepEqual(uncommitted(dir), [], 'the decoy’s stray file is not this repository’s');
+    assert.equal(realpathSync(git('rev-parse', '--show-toplevel')), realpathSync(dir));
+  } finally {
+    for (const k of Object.keys(hook)) delete process.env[k];
+  }
+  assert.equal(inDecoy('rev-list', '--all'), '', 'nothing was committed there');
+  rmSync(decoy, { recursive: true, force: true });
 });
 
 try {

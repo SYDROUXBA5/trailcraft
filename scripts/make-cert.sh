@@ -57,4 +57,4 @@ rm -f "$CERTS/csr.pem" "$CERTS/ext.cnf"
 chmod 600 "$CERTS/key.pem"
 
 echo "Issued a server certificate for localhost and $LAN (valid 800 days)."
-echo "Start the server, then on the phone open:  https://$LAN:2777/ca.crt"
+echo "Run npm run dev:lan, then on the phone open:  https://$LAN:2777/ca.crt"

@@ -360,7 +360,7 @@ t('running a trail or hide set again records a new session', () => {
   assert.match(start, /const had = db\.sessions\(\)\.find\(x => x\.id === s\.id\) \?\? s;\s*\n\s*run\.copy = !!had\.data\?\.track;/,
     'decided on what is stored, not on the copy the button was holding');
   assert.match(start, /guardSave\(s, \(\) => db\.addSession\(s\)\)/, 'saved at once, so a recording cut short can come back to it');
-  assert.match(start, /if \(!\(await startWatch\('runHudText'\)\)\) \{ dropRunCopy\(\); return go\('scrHome'\); \}/,
+  assert.match(start, /if \(!\(await startWatch\('runHudText'\)\)\) \{[^}\n]* dropRunCopy\(\); return go\('scrHome'\); \}/,
     'a copy for a run that never started is not left behind');
   const stop = js.slice(js.indexOf('async function finishRun'), js.indexOf('/* ── The result'));
   assert.ok(stop.indexOf('dropRunCopy();') > 0 && stop.indexOf('dropRunCopy();') < stop.indexOf("toast('Too short to grade"),
@@ -725,8 +725,8 @@ t('a walked card names its plan, and one that does not is asked about', () => {
 
 t('a web recording keeps the screen awake after the page has been hidden', () => {
   const hold = fnSrc('async function holdScreen()');
-  assert.match(hold, /if \(\(isNative\(\) && !coach\.on\) \|\| !rec\.on \|\| rec\.lock \|\| document\.visibilityState !== 'visible'\) return;/,
-    'in the app only while the coach is on, whose calls need the screen');
+  assert.match(hold, /if \(\(isNative\(\) && !\(coach\.on && rec\.kind === 'run'\)\) \|\| !rec\.on \|\| rec\.lock \|\| document\.visibilityState !== 'visible'\) return;/,
+    'in the app only while the coach is on for a run, whose calls need the screen');
   assert.match(hold, /lock\.addEventListener\?\.\('release', \(\) => \{ if \(rec\.lock === lock\) rec\.lock = null; \}\);/,
     'a lock the browser let go of is known to be gone');
   assert.match(js, /document\.addEventListener\('visibilitychange', \(\) => \{\s*\n\s*if \(document\.visibilityState !== 'visible'\) return;\s*\n\s*holdScreen\(\);/,
@@ -742,8 +742,13 @@ t('a web recording keeps the screen awake after the page has been hidden', () =>
    handler will read it. The hold itself is run in screens.test.mjs. */
 t('in the iPhone app a coached run says its calls need the screen on', () => {
   const watch = fnSrc('async function startWatch(hudId)');
-  assert.match(watch, /message: coach\.on \? 'Recording\. Coach calls need the screen on' : 'Recording — the phone can go in your pocket'/,
-    'a coached run does not promise the pocket');
+  assert.match(watch, /message: coach\.on && rec\.kind === 'run' \? 'Recording\. Coach calls need the screen on' : 'Recording — the phone can go in your pocket'/,
+    'a coached run does not promise the pocket, and a lay or walk is never a coached run');
+  /* A run whose GPS would not start left the coach on, and the next lay held
+     the screen awake and said the coach needed it. */
+  assert.match(fnSrc('async function startRun(s) {'),
+    /if \(!\(await startWatch\('runHudText'\)\)\) \{ coachStop\(\); dropRunCopy\(\); return go\('scrHome'\); \}/,
+    'a run that never started turns its coach off');
   assert.match(watch, /if \(!rec\.bg\) \{[^\n]*\}\s*\n\s*holdScreen\(\);/, 'the app asks to hold the screen once it records');
   assert.match(fnSrc('async function stopWatch()'), /await letScreenGo\(\);/);
   const sync = fnSrc('function coachSync()');
@@ -858,6 +863,13 @@ t('a live run holds only what the app writes, within limits, and cannot outlive 
   assert.match(run, /&& expires\(d\)/);
   assert.match(live, /function expires\(d\) \{\s*return d\.expiresAt is number && d\.expiresAt <= request\.time\.toMillis\(\) \+ 172800000\s*&& \(!\('deleteAt' in d\) \|\| \(d\.deleteAt is timestamp && d\.deleteAt <= request\.time \+ duration\.value\(48, 'h'\)\)\);/,
     'an expiry at most two days off, and a Timestamp copy of it when the build writes one — older builds still share live');
+  /* The setup guide told the owner an older phone is refused when it shares
+     live, and named the last such build by a stamp the next deploy replaces. */
+  const guide = readFileSync(new URL('../docs/SIGN-IN-SETUP.md', import.meta.url), 'utf8');
+  const said = guide.slice(guide.indexOf('## Live sharing'), guide.indexOf('2. **Clean-up.**')).replace(/\s+/g, ' ');
+  assert.ok(!/is refused when it shares live/.test(said), 'the rules no longer refuse a run without deleteAt');
+  assert.match(said, /Builds after 2026-09-24a also give each live run a `deleteAt` field/, 'true of every build deployed from here on');
+  assert.match(said, /can go on sharing live, but its runs are never cleaned up/);
   assert.match(live, /v is map && v\.get\('__pts', -1\) is int && v\.get\('__pts', -1\) >= 0 && v\.get\('__pts', -1\) <= n/, 'a line says how many points, within a cap');
   assert.match(run, /points\(d\.get\('trail', null\), 50000\)/);
   assert.match(run, /d\.get\('contamination', \[\]\) is list && d\.get\('contamination', \[\]\)\.size\(\) <= 200/);

@@ -24,8 +24,21 @@ export const REQUIRED = ['index.html', 'app.js', 'sw.js', 'build.txt'];
 
 const REPO = fileURLToPath(new URL('..', import.meta.url));
 
+/* Git obeys these over the directory it is run in, and a git hook exports
+   them. Left in, a command meant for one repository works on another: the
+   test runs commit, reset --hard and clean -x on a throwaway copy, and in
+   this repository clean -x deletes the ignored token and certificates. So
+   every git command here finds its repository from `cwd` alone. */
+const ELSEWHERE = ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_OBJECT_DIRECTORY',
+  'GIT_ALTERNATE_OBJECT_DIRECTORIES', 'GIT_COMMON_DIR', 'GIT_PREFIX', 'GIT_NAMESPACE'];
+export function gitEnv(env = process.env) {
+  const out = { ...env };
+  for (const k of ELSEWHERE) delete out[k];
+  return out;
+}
+
 export function git(args, cwd = REPO) {
-  return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trimEnd();
+  return execFileSync('git', args, { cwd, env: gitEnv(), encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trimEnd();
 }
 
 /** Throws unless HEAD is main: main is what gets pushed, HEAD is what gets split. */
@@ -81,15 +94,15 @@ export function deploy(cwd = REPO) {
     throw new Error(`commit or stash these first, so the tests run on what gets published:\n${dirty.join('\n')}`);
   }
   try {
-    execFileSync('npm', ['test'], { cwd, stdio: 'inherit' });
+    execFileSync('npm', ['test'], { cwd, env: gitEnv(), stdio: 'inherit' });
   } catch {
     throw new Error('the tests failed. Nothing was pushed.');
   }
   // Split and inspect before the first push, so a bad split leaves both branches untouched.
   const sha = splitPublic(cwd);
   checkSplit(sha, cwd);
-  execFileSync('git', ['push', 'origin', BRANCH], { cwd, stdio: 'inherit' });
-  execFileSync('git', ['push', '-f', 'origin', `${sha}:refs/heads/gh-pages`], { cwd, stdio: 'inherit' });
+  execFileSync('git', ['push', 'origin', BRANCH], { cwd, env: gitEnv(), stdio: 'inherit' });
+  execFileSync('git', ['push', '-f', 'origin', `${sha}:refs/heads/gh-pages`], { cwd, env: gitEnv(), stdio: 'inherit' });
   console.log(`\n  gh-pages is now ${sha.slice(0, 7)}, public/ from ${git(['rev-parse', '--short', 'HEAD'], cwd)}\n`);
 }
 
