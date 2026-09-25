@@ -26,22 +26,91 @@ service cloud.firestore {
     // until it expires (24 h after the run ends); only the account that
     // started it can write to it. The only listing allowed is an account
     // finding its own runs, and only to delete them with the account.
+    //
+    // Anyone can make an account, so what a run may hold is checked, not
+    // trusted: only the fields the app writes (sync.js startLive, pushLive,
+    // endLive), each of the kind it writes, none without a limit, and an
+    // expiry no more than two days off (a day, plus room for a phone whose
+    // clock is wrong). deleteAt is the same moment as expiresAt, as a
+    // Timestamp: Firestore's clean-up (a TTL policy) reads only that kind,
+    // and the rules and the viewers go on reading the number.
     match /live/{liveId} {
+      function text(v, n) { return v == null || (v is string && v.size() <= n); }
+      function num(v) { return v == null || v is number; }
+      function flag(v) { return v == null || v is bool; }
+      function block(v) { return v == null || v is map; }
+      // A line of points: packed into columns (a map that says how many), or
+      // left as a list when something in it was not a point.
+      function points(v, n) {
+        return v == null
+            || (v is list && v.size() <= n)
+            || (v is map && v.get('__pts', -1) is int && v.get('__pts', -1) >= 0 && v.get('__pts', -1) <= n);
+      }
+      function expires(d) {
+        return d.expiresAt is number && d.expiresAt <= request.time.toMillis() + 172800000
+            && d.deleteAt is timestamp && d.deleteAt <= request.time + duration.value(48, 'h');
+      }
+      // The dog, as share.js liveMeta picks it. A birthday is a date number,
+      // or text in records from older builds.
+      function dogOk(g) {
+        return g == null
+            || (g is map && g.keys().hasOnly(['name', 'breed', 'sex', 'dob', 'weightKg', 'lineM'])
+                && text(g.get('name', null), 500) && text(g.get('breed', null), 500)
+                && text(g.get('sex', null), 20) && num(g.get('weightKg', null)) && num(g.get('lineM', null))
+                && (num(g.get('dob', null)) || text(g.get('dob', null), 40)));
+      }
+      function liveRun(d) {
+        return d.keys().hasOnly(['v', 'kind', 'target', 'dog', 'handler', 'layer', 'laidAt', 'startedAt',
+                                 'plan', 'walked', 'trail', 'hides', 'contamination', 'wx', 'k',
+                                 'uid', 'expiresAt', 'deleteAt', 'ended', 'createdAt', 'at',
+                                 'wps', 'endedAt', 'result'])
+            && d.uid == request.auth.uid
+            && expires(d)
+            && text(d.get('kind', null), 20) && text(d.get('target', null), 500)
+            && text(d.get('handler', null), 500) && text(d.get('layer', null), 500)
+            && num(d.get('v', null)) && num(d.get('k', null)) && num(d.get('laidAt', null))
+            && num(d.get('startedAt', null)) && num(d.get('createdAt', null))
+            && num(d.get('at', null)) && num(d.get('endedAt', null))
+            && flag(d.get('plan', null)) && flag(d.get('walked', null)) && flag(d.get('ended', null))
+            && dogOk(d.get('dog', null))
+            && points(d.get('trail', null), 50000) && points(d.get('hides', null), 50000)
+            && points(d.get('wps', null), 5000)
+            && d.get('contamination', []) is list && d.get('contamination', []).size() <= 200
+            && block(d.get('wx', null)) && block(d.get('result', null));
+      }
+      // A minute of the dog's track: the chunk's id is its minute, two days
+      // of minutes at most, and no more points than a phone takes in one.
+      function column(v) { return v is list && v.size() <= 3000; }
+      function livePiece(d, id) {
+        return d.keys().hasOnly(['n', 'expiresAt', 'deleteAt', '__pts', 'lat', 'lon', 't', 'alt', 'dwellS'])
+            && d.n is int && d.n >= 0 && d.n <= 2880 && id == string(d.n)
+            && expires(d)
+            && d.get('__pts', -1) is int && d.get('__pts', -1) >= 1 && d.get('__pts', -1) <= 3000
+            && column(d.get('lat', [])) && column(d.get('lon', [])) && column(d.get('t', []))
+            && column(d.get('alt', [])) && column(d.get('dwellS', []));
+      }
+
       // get = opening one run by its id (the link). list = a query, which a
       // stranger could filter by expiresAt to find every run: owner only.
       allow get: if resource.data.expiresAt > request.time.toMillis()
                  || (request.auth != null && resource.data.uid == request.auth.uid);
       allow list: if request.auth != null && resource.data.uid == request.auth.uid;
-      allow create: if request.auth != null && request.resource.data.uid == request.auth.uid;
-      allow update: if request.auth != null && resource.data.uid == request.auth.uid;
+      allow create: if request.auth != null && liveRun(request.resource.data);
+      // The owner's own run, and it stays theirs: liveRun holds the uid to
+      // the account writing, which is the one that made it.
+      allow update: if request.auth != null && resource.data.uid == request.auth.uid
+                    && liveRun(request.resource.data);
       allow delete: if request.auth != null && resource.data.uid == request.auth.uid;
 
       match /chunks/{chunk} {
         allow read: if get(/databases/$(database)/documents/live/$(liveId)).data.expiresAt > request.time.toMillis()
                     || (request.auth != null
                         && get(/databases/$(database)/documents/live/$(liveId)).data.uid == request.auth.uid);
-        allow write: if request.auth != null
-                     && get(/databases/$(database)/documents/live/$(liveId)).data.uid == request.auth.uid;
+        allow create, update: if request.auth != null
+                              && get(/databases/$(database)/documents/live/$(liveId)).data.uid == request.auth.uid
+                              && livePiece(request.resource.data, chunk);
+        allow delete: if request.auth != null
+                      && get(/databases/$(database)/documents/live/$(liveId)).data.uid == request.auth.uid;
       }
     }
 

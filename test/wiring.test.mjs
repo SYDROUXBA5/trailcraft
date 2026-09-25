@@ -776,4 +776,48 @@ t('Save GPX and Save PDF say when a file cannot be made, rather than doing nothi
   assert.match(fnSrc('async function savePdf('), /try \{[\s\S]*buildPdf\([\s\S]*\} catch \{\n\s*toast\('Could not make the report'\);/);
 });
 
+/* Share live with no signal: the tap used to wait on the cloud with nothing
+   on screen, a second tap started a second run with its own timer, and a
+   start that landed after Stop left a link open that nothing would end.
+   Waiting and giving up are run for real in sync-flow.test.mjs. */
+t('Share live says when there is no signal, starts one run at a time, and takes back a start that came too late', () => {
+  const go = fnSrc('async function goLive()');
+  assert.match(go, /if \(!run\.session \|\| liveStarting\) return;/, 'a second tap while it starts does nothing');
+  assert.match(go, /if \(navigator\.onLine === false\) return toast\('No signal/, 'no signal is said at once');
+  const busy = go.indexOf('liveStarting = true'), ask = go.indexOf('await startLive('), free = go.indexOf('finally { liveStarting = false;');
+  assert.ok(busy > 0 && busy < ask && ask < free, 'busy from before it asks until it has an answer');
+  assert.match(go, /const same = \(\) => rec\.on && rec\.kind === 'run' && !run\.stopping && run\.session\?\.id === sid && run\.startedAt === from;/);
+  assert.ok(go.indexOf('if (liveState || !same()) return dropLive(id);') > free
+    && go.indexOf('if (liveState || !same()) return dropLive(id);') < go.indexOf('setInterval('),
+    'a run that ended, or one already live, is taken back before any timer starts');
+  assert.equal(go.match(/setInterval\(/g).length, 1, 'one timer, made in one place');
+  assert.match(fnSrc('function paintLiveBtn()'), /b\.disabled = liveStarting;/, 'the button shows it is busy');
+  assert.match(syncJs, /export async function startLive\(meta, \{ waitMs = LIVE_WAIT \} = \{\}\)[\s\S]{0,900}Promise\.race\(\[wrote, late\]\)[\s\S]{0,200}dropLive\(id\);\s*throw/,
+    'the cloud gets a limited wait, and a start given up on is taken back');
+});
+
+/* Anyone can make an account, so a live run is checked, not trusted. That
+   what the app writes passes these checks is run in sync-flow.test.mjs. */
+t('a live run holds only what the app writes, within limits, and cannot outlive two days', () => {
+  const live = rules.slice(rules.indexOf('match /live/{liveId}'), rules.indexOf('match /{document=**}'));
+  assert.match(live, /allow create: if request\.auth != null && liveRun\(request\.resource\.data\);/);
+  assert.match(live, /allow update: if request\.auth != null && resource\.data\.uid == request\.auth\.uid\s*&& liveRun\(request\.resource\.data\);/,
+    'only the owner changes a run, and it is checked again');
+  const run = live.slice(live.indexOf('function liveRun('), live.indexOf('function column('));
+  assert.match(run, /d\.keys\(\)\.hasOnly\(\[/, 'no fields beyond the app’s own');
+  assert.match(run, /&& d\.uid == request\.auth\.uid/, 'written under the account writing it, and it stays that account’s');
+  assert.match(run, /&& expires\(d\)/);
+  assert.match(live, /function expires\(d\) \{\s*return d\.expiresAt is number && d\.expiresAt <= request\.time\.toMillis\(\) \+ 172800000\s*&& d\.deleteAt is timestamp && d\.deleteAt <= request\.time \+ duration\.value\(48, 'h'\);/,
+    'an expiry at most two days off, as a number and as a Timestamp');
+  assert.match(live, /v is map && v\.get\('__pts', -1\) is int && v\.get\('__pts', -1\) >= 0 && v\.get\('__pts', -1\) <= n/, 'a line says how many points, within a cap');
+  assert.match(run, /points\(d\.get\('trail', null\), 50000\)/);
+  assert.match(run, /d\.get\('contamination', \[\]\) is list && d\.get\('contamination', \[\]\)\.size\(\) <= 200/);
+  const chunks = live.slice(live.indexOf('match /chunks/{chunk}'));
+  assert.match(chunks, /allow create, update: if request\.auth != null[\s\S]{0,120}\.data\.uid == request\.auth\.uid\s*&& livePiece\(request\.resource\.data, chunk\);/);
+  assert.ok(!/allow write/.test(chunks), 'no unchecked write left on the chunks');
+  const piece = live.slice(live.indexOf('function livePiece('), live.indexOf('// get = opening one run'));
+  assert.match(piece, /d\.n is int && d\.n >= 0 && d\.n <= 2880 && id == string\(d\.n\)/, 'a chunk is one minute of two days');
+  assert.match(piece, /d\.get\('__pts', -1\) >= 1 && d\.get\('__pts', -1\) <= 3000/);
+});
+
 console.log(`\n${pass} passed total\n`);

@@ -5,7 +5,10 @@
 
 import assert from 'node:assert/strict';
 import { register } from 'node:module';
+import { readFileSync } from 'node:fs';
 import { createStore } from '../public/store.js';
+import { trailModel, liveMeta } from '../public/share.js';
+import { unpackPoints } from '../public/sync-core.js';
 import * as fake from './fake-firebase.mjs';
 
 /* sync.js loads Firebase from Google's CDN, and its config from a file that
@@ -297,6 +300,89 @@ await t('wiping the phone while signed in signs out, and the next person’s rec
   await done({ s });
   assert.equal(s.sync.status, 'signed-out');
   assert.deepEqual(again.rawSessions().map(x => x.id), ['sams']);
+});
+
+/* ── Live runs ─────────────────────────────────────────────────────────
+   What the rules let into live/ is read from firestore.rules itself, so a
+   field the app starts writing, or a limit it outgrows, fails here rather
+   than as a live link that silently never starts. */
+const rules = readFileSync(new URL('../firestore.rules', import.meta.url), 'utf8');
+const rule = (name) => {
+  const at = rules.indexOf(`function ${name}(`);
+  assert.ok(at > 0, `firestore.rules has ${name}`);
+  return rules.slice(at, rules.indexOf('\n      }', at));
+};
+function fitsRule(name, data, id) {
+  const body = rule(name);
+  const allowed = JSON.parse(body.match(/hasOnly\((\[[\s\S]*?\])\)/)[1].replace(/'/g, '"'));
+  assert.deepEqual(Object.keys(data).filter(k => !allowed.includes(k)), [], `${name}: fields the rules refuse`);
+  for (const [, k, n] of body.matchAll(/text\(d\.get\('(\w+)', null\), (\d+)\)/g)) {
+    assert.ok(data[k] == null || (typeof data[k] === 'string' && data[k].length <= Number(n)), `${name}: ${k} is short text`);
+  }
+  for (const [, k] of body.matchAll(/num\(d\.get\('(\w+)', null\)\)/g)) {
+    assert.ok(data[k] == null || typeof data[k] === 'number', `${name}: ${k} is a number`);
+  }
+  for (const [, k] of body.matchAll(/flag\(d\.get\('(\w+)', null\)\)/g)) {
+    assert.ok(data[k] == null || typeof data[k] === 'boolean', `${name}: ${k} is true or false`);
+  }
+  assert.equal(typeof data.expiresAt, 'number', `${name}: expiresAt stays a number for the rules and viewers`);
+  assert.ok(data.deleteAt instanceof fake.Timestamp, `${name}: deleteAt is a Timestamp, the only kind a TTL policy acts on`);
+  assert.equal(data.deleteAt.toMillis(), data.expiresAt, `${name}: and it is the same moment`);
+  if (name === 'livePiece') {
+    assert.equal(id, String(data.n), 'a chunk’s id is its minute');
+    assert.ok(Number.isInteger(data.__pts) && data.__pts >= 1 && data.__pts <= 3000);
+  }
+}
+const liveDocs = () => [...fake.cloud.docs.keys()].filter(k => k.startsWith('live/'));
+const runSession = { id: 'r1', targetId: 'person', startedAt: 1000,
+  data: { trail: walk(30), contamination: [{ points: walk(3) }] } };
+const meta = (startedAt) => liveMeta(trailModel(runSession, {
+  dog: { name: 'Bramble', breed: 'Bloodhound', sex: 'female', dob: 1_600_000_000_000, weightKg: 41, lineM: 10, photo: 'x' },
+  handler: { name: 'Alice' }, layer: { name: 'Sam' } }), startedAt);
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+await t('a live run, its chunks and its end all carry a Timestamp a TTL policy can delete them by, and fit the rules', async () => {
+  const A = await phone({ setup: st => st.kv.set('ownerUid', 'alice') });
+  const from = Date.now();
+  const id = await A.s.startLive(meta(from));
+  fitsRule('liveRun', fake.cloudDoc(`live/${id}`));
+  A.s.pushLive(walk(90).map((p, i) => ({ ...p, t: from + i * 1000 })), [{ lat: 51.2, lon: -2.6, t: from, kind: 'mark' }]);
+  await tick(); await tick();
+  const pieces = liveDocs().filter(k => k.includes('/chunks/'));
+  assert.equal(pieces.length, 2, 'ninety seconds of track is two minutes of chunks');
+  for (const k of pieces) fitsRule('livePiece', fake.cloudDoc(k), k.split('/').pop());
+  /* A viewer unpacks a chunk whole: the Timestamp beside the points must not
+     turn up as part of one. */
+  assert.deepEqual(pieces.flatMap(k => unpackPoints(fake.cloudDoc(k))).map(p => Object.keys(p).sort().join()),
+    Array(90).fill('dwellS,lat,lon,t'), 'the viewer gets the points and nothing else');
+  fitsRule('liveRun', fake.cloudDoc(`live/${id}`));
+  await A.s.endLive({ result: { found: true, score: 80 }, track: [], wps: [] });
+  const ended = fake.cloudDoc(`live/${id}`);
+  assert.equal(ended.ended, true);
+  fitsRule('liveRun', ended);
+  assert.ok(ended.expiresAt > from + 23 * 3600e3, 'readable for a day after the end');
+});
+
+await t('Share live with no signal gives up, and the run it queued never goes live', async () => {
+  const A = await phone({ setup: st => st.kv.set('ownerUid', 'alice') });
+  fake.setOnline(A.fs, false);
+  const tried = A.s.startLive(meta(Date.now()), { waitMs: 30 }).then(() => 'live', e => e.message);
+  const said = await Promise.race([tried, sleep(1000).then(() => 'still waiting')]);
+  assert.match(said, /No signal/, 'it says so instead of waiting for ever');
+  assert.equal(A.s.liveNow(), null, 'nothing is left open on this phone');
+  fake.setOnline(A.fs, true);
+  await tick(); await tick();
+  assert.deepEqual(liveDocs(), [], 'the start that was waiting reaches the cloud, and so does its delete');
+});
+
+await t('a live run that started after its run ended is taken back', async () => {
+  const A = await phone({ setup: st => st.kv.set('ownerUid', 'alice') });
+  const id = await A.s.startLive(meta(Date.now()));
+  assert.ok(fake.cloudDoc(`live/${id}`));
+  A.s.dropLive(id);
+  assert.equal(A.s.liveNow(), null);
+  await tick();
+  assert.equal(fake.cloudDoc(`live/${id}`), null, 'nobody had the link, so nothing is left behind');
 });
 
 console.log(`\n${pass} passed total\n`);

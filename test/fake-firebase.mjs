@@ -29,7 +29,10 @@ let signedIn = null;
 export const startSignedIn = (u) => { signedIn = u; };
 
 const err = (code) => Object.assign(new Error(code), { code });
-const clone = (v) => JSON.parse(JSON.stringify(v));
+/* A copy, as the server keeps one. A Timestamp stays a Timestamp, as it does
+   in Firestore, so a test can tell it from a plain number. */
+const clone = (v) => JSON.parse(JSON.stringify(v),
+  (k, x) => (x && typeof x === 'object' && Object.keys(x).length === 1 && '__ts' in x ? new Timestamp(x.__ts) : x));
 
 /** Hold the next read of `table` until released, and say when it gets there. */
 export function pause(table) {
@@ -110,6 +113,7 @@ export async function clearIndexedDbPersistence(fs) { fs.cleared = true; }
 export class Timestamp {
   constructor(ms) { this.ms = ms; }
   toMillis() { return this.ms; }
+  toJSON() { return { __ts: this.ms }; }
   static fromMillis(ms) { return new Timestamp(ms); }
 }
 export const serverTimestamp = () => ({ [SERVER]: true });

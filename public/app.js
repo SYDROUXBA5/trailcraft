@@ -26,7 +26,7 @@ import { GROUND_LAYERS, buildGround, surfaceAt, surfaceAlong, surfaceRows, withS
 import { sync, onSync, initSync, signInWithGoogle, signInWithApple, signOut, deleteAccount, useThisAccount, forgetSkipped,
          adoptRecords, wipeAndSignOut, resync,
          signUpWithEmail, signInWithEmail, resetPassword,
-         startLive, pushLive, endLive, watchLive, resumeLive } from './sync.js';
+         startLive, pushLive, endLive, watchLive, resumeLive, dropLive } from './sync.js';
 import { trailModel, encodeShared, decodeShared, sharedUrl, toGpx, fileBase,
          detailSections, headline, notes, liveMeta, liveModel, cleanResult } from './share.js';
 import { buildPdf, jpegSize } from './pdf.js';
@@ -4830,6 +4830,10 @@ function openFromHash() {
 
 /* ── Live: publishing a run, and following one ────────────────────── */
 let liveState = null;   // this phone's own live run: { id, url, timer }
+/* Share live is on its way: the cloud has not taken the run yet. A second tap
+   used to start a second live run, and each one that landed brought its own
+   timer, of which only the last was ever stopped. */
+let liveStarting = false;
 let liveWatch = null;   // following someone else's: the unsubscribe
 const liveView = { model: null, tick: 0, fitted: false };
 
@@ -4838,7 +4842,8 @@ function paintLiveBtn() {
   if (!b) return;
   b.hidden = !sync.configured || sync.status === 'other' || sync.status === 'ask';
   b.classList.toggle('on', !!liveState);
-  b.textContent = liveState ? '● Live — send the link again' : 'Share live';
+  b.disabled = liveStarting;
+  b.textContent = liveStarting ? 'Going live…' : liveState ? '● Live — send the link again' : 'Share live';
 }
 
 async function goLive() {
@@ -4846,14 +4851,27 @@ async function goLive() {
   if (sync.status === 'other' || sync.status === 'ask') {
     return toast('Settle whose records are on this phone first (Settings → Account)');
   }
-  if (!run.session) return;
+  if (!run.session || liveStarting) return;
   if (!liveState) {
-    try {
-      const id = await startLive(liveMeta(modelOf(run.session), run.startedAt));
-      liveState = { id, url: `${SHARE_BASE}#live=${id}`, timer: setInterval(() => pushLive(rec.pts, rec.wps), 10000) };
-      pushLive(rec.pts, rec.wps);
-      paintLiveBtn();
-    } catch (e) { return toast(e?.message || 'Could not go live'); }
+    if (navigator.onLine === false) return toast('No signal, so the run cannot go live yet');
+    const sid = run.session.id, from = run.startedAt, asked = Date.now();
+    /* Still the run this was tapped for, and still being recorded. */
+    const same = () => rec.on && rec.kind === 'run' && !run.stopping && run.session?.id === sid && run.startedAt === from;
+    liveStarting = true;
+    paintLiveBtn();
+    let id;
+    try { id = await startLive(liveMeta(modelOf(run.session), from)); }
+    catch (e) { if (same()) toast(e?.message || 'Could not go live'); return; }
+    finally { liveStarting = false; paintLiveBtn(); }
+    /* The run ended, or another began, while the cloud was answering. Nobody
+       has the link yet, so it is taken back rather than left open for ever. */
+    if (liveState || !same()) return dropLive(id);
+    liveState = { id, url: `${SHARE_BASE}#live=${id}`, timer: setInterval(() => pushLive(rec.pts, rec.wps), 10000) };
+    pushLive(rec.pts, rec.wps);
+    paintLiveBtn();
+    /* A share sheet only opens straight after a tap. After a slow answer the
+       button says the run is live, and a tap on it sends the link. */
+    if (Date.now() - asked > 4000) return toast('Live now. Tap the button to send the link.');
   }
   const { url } = liveState;
   if (navigator.share) {

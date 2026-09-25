@@ -119,14 +119,28 @@ up once:
 
 1. **Rules.** `firestore.rules` in this repo has grown a `live` section.
    Firestore → **Rules** → paste the whole file again → **Publish**.
+
+   The rules check what a live run holds, and they expect a `deleteAt`
+   field, which only builds after 24 September 2026 write. Put the new
+   build on the website and on every phone first, then publish the rules. A phone still
+   on an older build is refused when it shares live ("Missing or
+   insufficient permissions") until it is updated.
 2. **Clean-up.** A live run is readable for 24 hours after it ends, then it
    should be deleted. Firestore → **Time-to-live (TTL)** → **Create policy**,
    twice:
-   - Collection group `live`, timestamp field `expiresAt`
-   - Collection group `chunks`, timestamp field `expiresAt`
+   - Collection group `live`, timestamp field `deleteAt`
+   - Collection group `chunks`, timestamp field `deleteAt`
+
+   The field is `deleteAt`, not `expiresAt`. A TTL policy only deletes by a
+   Timestamp field, and `expiresAt` is a number (the rules and the viewers
+   read it), so a policy on `expiresAt` deletes nothing. If you made those
+   two earlier, delete them and make these instead.
 
    Without these the links still stop working after 24 hours (the rules
-   refuse them) — the data would just sit there, unreadable, until deleted.
+   refuse them), but the data sits there, unreadable, until deleted. Runs
+   shared before `deleteAt` existed have no such field, so the policy never
+   reaches them: delete those by hand in Firestore → Data if you want them
+   gone, with the `chunks` under each.
 
 What a viewer sees: the laid trail and the dog's track as it happens, on a
 plain web page, no app and no account needed. The link is 20 random
