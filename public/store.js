@@ -565,6 +565,11 @@ export function ageBand(mins) {
     card came back. The line is a sketch, and so is its clock. */
 export const unwalkedPlan = (data) => !!data?.plan && !data?.walked;
 
+/** A run's trail age at the start, in minutes, as it may be counted. A run
+    graded against a drawn plan has none until the walk is scanned, whatever
+    a result saved before that was understood still carries. */
+export const runAgeMin = (s) => (unwalkedPlan(s?.data) ? null : s?.data?.result?.ageMin ?? null);
+
 /** Whether the answer was ever on the handler's screen: Reveal pressed, or
     the coach switched on, which stamps the same moment because it reads out
     where the trail is. It stays set on a second run of the same trail — the
@@ -598,7 +603,7 @@ export function handlerStats(handlerId, sessions) {
     runs: runs.length, laid: laid.length,
     metres: 0, laidMetres: 0, seconds: 0, longest: 0,
     firstAt: null, lastAt: null,
-    bands: { hot: 0, warm: 0, cold: 0 }, unknownAge: 0,
+    bands: { hot: 0, warm: 0, cold: 0 }, unknownAge: 0, unwalked: 0,
     dogs: {}, assisted: 0, blind: 0, shown: 0, medOff: null,
   };
   for (const s of laid) out.laidMetres += pathLenOf(s.data.trail);
@@ -614,8 +619,10 @@ export function handlerStats(handlerId, sessions) {
     const at = s.data.trackStarted ?? s.startedAt;
     out.firstAt = out.firstAt == null ? at : Math.min(out.firstAt, at);
     out.lastAt = out.lastAt == null ? at : Math.max(out.lastAt, at);
-    const band = ageBand(s.data.result?.ageMin);
-    if (band) out.bands[band.key]++; else out.unknownAge++;
+    /* A drawn plan's age is made up and too old: filed in a band, a Hot
+       trail was counted as Warm. It waits, counted apart, for the walk. */
+    const band = ageBand(runAgeMin(s));
+    if (band) out.bands[band.key]++; else if (unwalkedPlan(s.data)) out.unwalked++; else out.unknownAge++;
     if (s.dogId) out.dogs[s.dogId] = (out.dogs[s.dogId] || 0) + 1;
     /* Blind means the handler did not know, not merely that the coach was
        off: a run with the trail on screen is neither, and is counted apart. */
@@ -641,6 +648,7 @@ export function dogStats(dogId, sessions, calibration = []) {
     lastAt: null,
     bands: { hot: 0, warm: 0, cold: 0 },
     unknownAge: 0,
+    unwalked: 0,
     targets: {},
     graded: 0,
     meanOffset: null,
@@ -658,8 +666,8 @@ export function dogStats(dogId, sessions, calibration = []) {
     out.firstAt = out.firstAt == null ? at : Math.min(out.firstAt, at);
     out.lastAt = out.lastAt == null ? at : Math.max(out.lastAt, at);
 
-    const band = ageBand(s.data.result?.ageMin);
-    if (band) out.bands[band.key]++; else out.unknownAge++;
+    const band = ageBand(runAgeMin(s));
+    if (band) out.bands[band.key]++; else if (unwalkedPlan(s.data)) out.unwalked++; else out.unknownAge++;
 
     const t = s.targetId || 'person';
     out.targets[t] = (out.targets[t] || 0) + 1;

@@ -11,7 +11,7 @@ import {
 } from './geo.js';
 import { stepPoints, contamTimed, trailFrom, walkedOfTrail, gpsTrouble, forecastNote } from './geo.js';
 import { packDraft, unpackDraft, draftAlive, draftStats } from './draft.js';
-import { handlerStats, teachesDrift, trailShown } from './store.js';
+import { handlerStats, teachesDrift, trailShown, unwalkedPlan, runAgeMin } from './store.js';
 import { plumePalette, stepPalette, windPalette, trackPalette, COLOUR_PRESETS, isHex, mix } from './colours.js';
 import { FLAT, buildTerrain, stability, regime, flowAt, normOf, rainRate, RAIN_SUMS_PER_HOUR, windAt } from './field.js';
 import { predictedOffsets, ScentSim, driftFrom, stepByFlow } from './sim.js';
@@ -4362,7 +4362,11 @@ async function computeResult(s, track, wps, startedAt, { bank = true } = {}) {
      dog, and its name, line length and calibration are that run's dog's. */
   const dogRow = S.dogs.find(d => d.id === s.dogId) ?? null;
   const dogName = dogRow?.name ?? 'The dog';
-  const ageMin = Math.max(0, Math.round((startedAt - s.startedAt) / 60000));
+  /* A drawn plan's laid time is the moment it was drawn, less a walk that was
+     guessed, and the real walk happens later on the layer's phone. The age
+     that gives is made up, and always too old, so there is none until the
+     walked card brings the real laid time and the run is graded again. */
+  const ageMin = unwalkedPlan(s.data) ? null : Math.max(0, Math.round((startedAt - s.startedAt) / 60000));
 
   /* The wind that moved scent during THIS run: the session's own series read
      at the run's start when it reaches that far — the very wind the coach and
@@ -4548,7 +4552,10 @@ function renderResult(s) {
      whatever the link held, and this grid is markup. */
   const cell = (b, i, sub = '') =>
     `<div><b>${esc(b)}</b><i>${esc(i)}</i>${sub ? `<span class="sub-line">${esc(sub)}</span>` : ''}</div>`;
-  const age = Number.isFinite(r.ageMin) ? `${r.ageMin} min` : '—';
+  /* Results graded before a drawn plan's age was held back still carry the
+     made-up one, so it is not shown whatever they hold. */
+  const drawnOnly = unwalkedPlan(s.data);
+  const age = !drawnOnly && Number.isFinite(r.ageMin) ? `${r.ageMin} min` : '—';
 
   if (r.kind === 'search') {
     $('resGrid').innerHTML =
@@ -4571,7 +4578,7 @@ function renderResult(s) {
       cell(typical != null ? fmtM(typical, 1) : '—', 'typical distance from the line',
         r.noisy && Number.isFinite(r.accMed) ? `GPS ±${fmtM(r.accMed)}` : '') +
       sideCell +
-      cell(age, 'trail age at start') +
+      cell(age, 'trail age at start', drawnOnly ? 'known once the walk is scanned' : '') +
       cell(dur != null ? fmtDur(dur) : '—', 'run', tr.length > 1 ? fmtKm(pathLen(tr)) : '');
   }
   const modelled = r.modelled
@@ -5742,9 +5749,14 @@ const fmtHours = (sec) => {
   const m = Math.round(sec / 60);
   return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')}`;
 };
+/** Runs graded against a drawn plan sit outside the age bands until the walk
+    is scanned, and the cards say so rather than leave them unaccounted for. */
+const unwalkedNote = (st) => (st.unwalked
+  ? `<p class="body small muted">${st.unwalked} run${st.unwalked === 1 ? '' : 's'} graded against a drawn plan — no age until the layer’s walked card is scanned.</p>`
+  : '');
 function ringHtml(st) {
   const total = AGE_BANDS.reduce((n, b) => n + st.bands[b.key], 0);
-  if (!total) return `<p class="body small muted">No graded runs yet. The ring fills in as trails are run.</p>`;
+  if (!total) return `<p class="body small muted">No graded runs yet. The ring fills in as trails are run.</p>${unwalkedNote(st)}`;
   const r = 46, C = 2 * Math.PI * r;
   let off = 0;
   const arcs = AGE_BANDS.map(b => {
@@ -5764,7 +5776,8 @@ function ringHtml(st) {
     </svg>
     <div class="ring-legend">${legend}</div>
   </div>` + (st.unknownAge
-    ? `<p class="body small muted" style="margin-top:10px">${st.unknownAge} run${st.unknownAge === 1 ? '' : 's'} had no weather, so no age was worked out.</p>` : '');
+    ? `<p class="body small muted" style="margin-top:10px">${st.unknownAge} run${st.unknownAge === 1 ? '' : 's'} had no weather, so no age was worked out.</p>` : '')
+    + unwalkedNote(st);
 }
 function paintHandlerCard(id) {
   const h = db.handlers.byId(id);
@@ -5798,7 +5811,7 @@ function paintHandlerCard(id) {
   $('hRunsLabel').textContent = runs.length ? `Every trail \u00b7 ${runs.length}` : 'Every trail';
   $('hRuns').innerHTML = runs.length ? runs.map(x => {
     const d = S.dogs.find(z => z.id === x.dogId);
-    const band = ageBand(x.data.result?.ageMin);
+    const band = ageBand(runAgeMin(x));
     return `<div class="card" data-open-session="${esc(x.id)}">
       <div class="meta"><span>${fmtWhen(x.data.trackStarted ?? x.startedAt)}</span><span>${esc(d?.name ?? '')}${d ? ' \u00b7 ' : ''}${fmtKm(pathLen(x.data.track || []))}${band ? ' \u00b7 ' + esc(band.label) : ''}</span></div>
       <p class="body small">${esc(x.data.result?.sentence ?? x.summary ?? '')}</p>
@@ -5858,7 +5871,7 @@ function paintDogCard(id) {
   /* A bar rather than three numbers: the shape of a dog's training is the
      point, and the shape is what you are looking for. */
   const total = AGE_BANDS.reduce((n, b) => n + st.bands[b.key], 0);
-  $('dogBands').innerHTML = total
+  $('dogBands').innerHTML = (total
     ? AGE_BANDS.map(b => {
         const n = st.bands[b.key];
         const pct = Math.round((n / total) * 100);
@@ -5869,7 +5882,8 @@ function paintDogCard(id) {
       }).join('') + (st.unknownAge
         ? `<p class="body small muted">${st.unknownAge} run${st.unknownAge === 1 ? '' : 's'} had no weather, so no age was worked out.</p>`
         : '')
-    : `<p class="body small muted">No graded runs yet. The bands fill in as ${esc(d.name)} works trails.</p>`;
+    : `<p class="body small muted">No graded runs yet. The bands fill in as ${esc(d.name)} works trails.</p>`)
+    + unwalkedNote(st);
 
   /* An observation of the TRACK, said as such. It is not fed back into the
      scent model: a model tuned to the runs it is asked to explain would only
@@ -5888,7 +5902,7 @@ function paintDogCard(id) {
   $('dogRunsLabel').textContent = runs.length
     ? `Every trail · ${runs.length}` : 'Every trail';
   $('dogRuns').innerHTML = runs.length ? runs.map(x => {
-    const band = ageBand(x.data.result?.ageMin);
+    const band = ageBand(runAgeMin(x));
     const len = fmtKm(pathLen(x.data.track || []));
     return `<div class="card" data-open-session="${esc(x.id)}">
       <div class="meta"><span>${fmtWhen(x.data.trackStarted ?? x.startedAt)}</span>

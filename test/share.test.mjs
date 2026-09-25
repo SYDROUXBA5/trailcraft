@@ -252,6 +252,21 @@ await t('a coach-off run with the trail shown on screen is never sent as blind',
   }
 });
 
+/* The shared page worked the age out again from the laid time when the result
+   had none, and a drawn plan's laid time is when it was drawn, less a guess. */
+await t('a run on a drawn plan is sent with no trail age until the walk comes back', async () => {
+  const rows = (m) => detailSections(m, { when: () => 'x' }).flatMap(sec => sec.rows.map(r => r.join(': '))).join('\n');
+  const drawn = session({ plan: true });
+  for (const ageMin of [35, null]) {
+    const m = trailModel({ ...drawn, data: { ...drawn.data, result: { ...drawn.data.result, ageMin } } }, people);
+    assert.match(rows(m), /Trail age at start: not known — drawn, not yet walked/);
+    assert.doesNotMatch(rows(m), /Trail age at start: \d/);
+  }
+  const walked = session({ plan: true });
+  walked.data.walked = true;
+  assert.match(rows(trailModel(walked, people)), /Trail age at start: 25 min · Hot/);
+});
+
 await t('a search lists its hides and how the dog found them', () => {
   const hides = [{ lat: 51.2, lon: -2.6 }];
   const track = walk(50).map(p => ({ ...p, t: p.t + 60e3 }));

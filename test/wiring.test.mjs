@@ -962,4 +962,14 @@ t('a search is timed by its own track, and its distance to the hide is in the ha
   assert.match(js, /cell\(r\.catchM != null \? `\$\{r\.catchApprox \? '~' : ''\}\$\{fmtM\(r\.catchM\)\}` : '—', 'from the hide'\)/);
 });
 
+/* A drawn plan's age is made up and too old, and was shown as a fact. */
+t('a run graded against a drawn plan is given no trail age, and the result shows none', () => {
+  const grade = js.slice(js.indexOf('async function computeResult('), js.indexOf('\nfunction searchResult('));
+  assert.match(grade, /const ageMin = unwalkedPlan\(s\.data\) \? null : Math\.max\(0, Math\.round\(\(startedAt - s\.startedAt\) \/ 60000\)\);/);
+  const show = js.slice(js.indexOf('\nfunction renderResult('), js.indexOf('\nfunction walkVsPlan('));
+  assert.match(show, /const age = !drawnOnly && Number\.isFinite\(r\.ageMin\)/, 'an older result\u2019s made-up age is not shown');
+  assert.match(show, /cell\(age, 'trail age at start', drawnOnly \? 'known once the walk is scanned' : ''\)/);
+  assert.doesNotMatch(js, /ageBand\(x\.data\.result\?\.ageMin\)/, 'the run lists file ages through runAgeMin');
+});
+
 console.log(`\n${pass} passed total\n`);

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { handlerStats, ODOURS, targetText, teachesDrift } from '../public/store.js';
+import { handlerStats, ODOURS, targetText, teachesDrift, runAgeMin } from '../public/store.js';
 import { createStore, migrateV1, TARGETS, targetById, verbs, uid,
          dogStats, ageBand, AGE_BANDS, dogAge, SaveError, patchSession, runAgain,
          askDelete, dogsOf, storageWords, healApproach, healSession, APPROACH_V } from '../public/store.js';
@@ -427,6 +427,25 @@ t('handlerStats: a coach-off run with the trail shown is not a blind run', () =>
   assert.equal(st.blind, 2, 'never shown, or nought');
   assert.equal(st.shown, 1);
   assert.equal(handlerStats('nobody', []).shown, 0);
+});
+
+/* A drawn plan's laid time is when it was drawn, less a guessed walk. An 800 m
+   plan drawn at 10:00, walked 10:05-10:15 and run at 10:25 is a 20-minute
+   (Hot) trail, but was graded 35 minutes old and filed Warm. */
+t('a run graded against a drawn plan has no age, and joins no band, until it is walked', () => {
+  const track = [{ lat: 51.2, lon: -2.64, t: 0 }, { lat: 51.2009, lon: -2.64, t: 60000 }];
+  const run = (id, data) => ({ id, handlerId: 'h1', dogId: 'bo', targetId: 'person', startedAt: 1,
+    data: { track, result: { ageMin: 35 }, ...data } });
+  const drawn = run('a', { plan: true });
+  const walked = run('b', { plan: true, walked: true });
+  assert.equal(runAgeMin(drawn), null, 'the 35 minutes an older result saved is not believed');
+  assert.equal(runAgeMin(walked), 35);
+  assert.equal(runAgeMin(run('c', {})), 35);
+  for (const st of [dogStats('bo', [drawn, walked]), handlerStats('h1', [drawn, walked])]) {
+    assert.deepEqual(st.bands, { hot: 0, warm: 1, cold: 0 }, 'only the walked one is filed');
+    assert.equal(st.unwalked, 1, 'the drawn one is counted apart');
+    assert.equal(st.unknownAge, 0, 'and not as a run with no weather');
+  }
 });
 
 t('odours: narcotics and explosives name theirs, each target remembers its own, the record says which', () => {
