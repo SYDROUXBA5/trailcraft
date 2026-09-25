@@ -378,13 +378,18 @@ const MAP_TUT = [
   { g: 'tilt', title: 'Tilt the ground', body: 'Drag up or down with two fingers. The map is 3D \u2014 tilt it to see the slopes scent runs down.' },
   { g: 'turn', title: 'Turn the map', body: 'Twist with two fingers. The GPS button at the top right brings you back onto yourself.' },
 ];
-const mapTut = { i: 0, open: false };
+const mapTut = { i: 0, open: false, opener: null };
 /* go() leaves focus alone while this card is open, so the card has to take
    it: its title, the way a screen's heading does, or a screen reader stands
-   nowhere and never hears the card. Closed, focus goes to the screen that
-   was waiting underneath. */
+   nowhere and never hears the card. Closed, focus goes back to the button
+   that opened it (Settings → Help), when it is still on screen; otherwise,
+   the first time a map appears, to the screen waiting underneath. Sent to
+   the screen from Settings, it landed on the Settings heading, and the
+   handler had to find their place again. */
 function openMapTut() {
   mapTut.i = 0; mapTut.open = true;
+  const was = document.activeElement;
+  mapTut.opener = was && was !== document.body && !$('mapTut').contains(was) ? was : null;
   paintMapTut();
   $('mapTut').hidden = false;
   $('mapTutTitle').focus({ preventScroll: true });
@@ -402,7 +407,10 @@ function closeMapTut() {
   $('mapTut').hidden = true;
   mapTut.open = false;
   db.kv.set('mapTutDone', true);
-  if (currentScreen) focusScreen(currentScreen);
+  const back = mapTut.opener;
+  mapTut.opener = null;
+  if (back?.isConnected && back.offsetParent !== null) back.focus({ preventScroll: true });
+  else if (currentScreen) focusScreen(currentScreen);
 }
 
 /* ── The map style ────────────────────────────────────────────────────
