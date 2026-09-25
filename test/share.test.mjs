@@ -611,4 +611,38 @@ await t('the encoder refuses exactly what the decoder would', async () => {
   await assert.rejects(encodeShared(model), /too long for a link/);
 });
 
+/* A run started too long after laying for the laid forecast to reach it has
+   its own weather, fetched for the grade. A link carried only the laid one,
+   so whoever opened it replayed the run in the wrong wind beside a result
+   quoting the right one. */
+await t('a link carries the run’s own weather, cut to the stretch the dog ran', async () => {
+  const s = session({ trailN: 20, trackN: 60 });
+  const from = s.data.trackStarted, to = s.data.track.at(-1).t;
+  const series = Array.from({ length: 49 }, (_, i) => ({ t: from - 6 * 3600e3 + i * 15 * 60e3,
+    wind_speed: 5.04, wind_direction: 90, temp: 8 }));
+  s.data.runWeather = { time: '2026-09-16T13:30', wind_speed: 5.04, wind_direction: 90, temp: 8, series };
+  const m = trailModel(s, people);
+  assert.ok(m.runWx.series.length < 12, `only the run and a sample either side, got ${m.runWx.series.length}`);
+  assert.ok(m.runWx.series[0].t <= from && m.runWx.series.at(-1).t >= to, 'every moment of the run is still inside it');
+  const back = await decodeShared(await encodeShared(m));
+  assert.equal(back.runWx.wind_direction, 90);
+  assert.equal(back.runWx.wind_speed, 5, 'one decimal, as the laid weather');
+  assert.equal(back.runWx.series.length, m.runWx.series.length);
+  assert.equal(back.runWx.time, '2026-09-16T13:30');
+  assert.equal((await decodeShared(await encodeShared(trailModel(session(), people)))).runWx, null,
+    'a run the laid forecast reached has none to carry');
+});
+
+await t('the run’s weather from a link is held to exactly what the laid weather is', async () => {
+  const m = await decodeShared(await forgeLink({
+    kind: 'trail', trail: twoPts,
+    runWx: { wind_speed: '<img src=x>', temp: 12, wind_direction: 400, '__x__': 1, note: '<b>hi</b>',
+      series: Array.from({ length: 300 }, (_, i) => ({ t: T0 + i, wind_speed: i % 2 ? 'x' : 3, '': 1 })) },
+  }));
+  assert.deepEqual(Object.keys(m.runWx).sort(), ['series', 'temp'], 'only real weather, each within what the air can do');
+  assert.ok(m.runWx.series.length <= 96, `series capped, got ${m.runWx.series.length}`);
+  assert.ok(m.runWx.series.every(e => Object.keys(e).every(k => ['t', 'wind_speed'].includes(k))));
+  assert.equal((await decodeShared(await forgeLink({ kind: 'trail', trail: twoPts, runWx: 'x' }))).runWx, null);
+});
+
 console.log(`\n${pass} passed total`);

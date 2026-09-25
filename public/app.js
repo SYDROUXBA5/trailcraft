@@ -239,6 +239,28 @@ function airSessionFor(id) {
   }
 }
 
+/* And which moment of that trail's air. A screen about a run shows the wind
+   its plume, band and coach are drawn in: the replay's own clock, the moment
+   the dog set off, or on the run screen once Reveal has drawn the scent, the
+   moment it was drawn. Anything else, a trail not run yet among them, shows
+   the air it was laid in (null). The panel, the arrow and the streaks used to
+   show the laid-time wind on all of these, beside a plume blowing another way. */
+function airMomentFor(id, s) {
+  if (!s) return null;
+  switch (id) {
+    case 'scrReplay': return replay.at;
+    case 'scrShowMap': return s.data?.trackStarted ?? null;
+    case 'scrRun': return s === run.session ? (run.airAt || run.startedAt || null) : null;
+    default: return null;
+  }
+}
+
+/** The wind panel for a screen: its trail's air at its moment, or the air here. */
+function airPanel(id) {
+  const s = airSessionFor(id);
+  weatherPanelFor(s, airMomentFor(id, s));
+}
+
 function go(id, { back = false } = {}) {
   stopScan();
   /* A scan for one run's walked card ends when its screen does, however it
@@ -264,7 +286,7 @@ function go(id, { back = false } = {}) {
     /* The bench supplies its own weather from the dials. Letting the screen
        go looking for a forecast means that answer lands a second later and
        overwrites what the dials are asking about. */
-    if (id !== 'scrBench') weatherPanelFor(airSessionFor(id));
+    if (id !== 'scrBench') airPanel(id);
     mapChromeShow(true);
     stepsRun(true);
     if (!db.kv.get('mapTutDone') && !mapTut.open) openMapTut();
@@ -1887,7 +1909,17 @@ function wxGap() {
   document.documentElement.style.setProperty('--wx-w', on ? `${Math.round(p.offsetWidth)}px` : '0px');
 }
 let wxWatch = null;
+/* What the panel last showed: a count that any newer showing moves on, so a
+   slow answer can tell it has been overtaken, and the wind it showed, as it
+   reads on screen. */
+const wxShown = { gen: 0, key: '' };
+const wxRound = (v, per) => (Number.isFinite(v) ? Math.round(v * per) : '');
+const wxKey = (wx) => (wx?.wind_speed == null ? ''
+  : `${wxRound(wx.wind_speed, 10)},${wxRound(wx.wind_direction, 1)},${wxRound(wx.temp, 10)},${wxRound(wx.soil_temp, 10)},`
+    + (Number.isFinite(wx.t) ? Math.floor(wx.t / 60000) : wx.time));
 function showWeather(wx) {
+  wxShown.gen++;
+  wxShown.key = '';
   const p = $('wxPanel');
   if (!p) return;
   // A late answer must not surface over a paper screen.
@@ -1915,11 +1947,21 @@ function showWeather(wx) {
   // The arrow points where the air is GOING, in the real world once the compass is live.
   compass.wind = Number.isFinite(wx.wind_direction) ? (wx.wind_direction + 180) % 360 : null;
   paintRose();
-  $('wxNote').textContent = forecastNote(wx.time);
+  /* The moment these numbers are for. A wind read off the series for a run's
+     moment keeps the laid forecast's own time beside it, which labelled the
+     run's wind with the hour the trail was laid. */
+  $('wxNote').textContent = forecastNote(wx.t ?? wx.time);
+  wxShown.key = wxKey(wx);
   wxGap();
   /* The wind moves on every map screen once it is known, not only when a
      plume runs: laying a trail is exactly when you want to see it. */
   airStart(wx);
+}
+/** The panel, the arrow and the streaks on a wind that moves with a clock,
+    the replay's. Drawn again only when the panel would read differently: the
+    clock moves every frame, and the panel measures itself each time. */
+function followWeather(wx) {
+  if (wx && wxKey(wx) !== wxShown.key) showWeather(wx);
 }
 const hideWeather = () => { const p = $('wxPanel'); if (p) p.hidden = true; $('wxRose').hidden = true; wxGap(); };
 
@@ -2029,12 +2071,20 @@ function headingStop() {
    refreshes it every quarter hour, which is far finer than a forecast
    actually changes. A session's own weather still wins where there is one:
    looking at a trail from last week should show last week's air. */
-const wxNow = { at: 0, wx: null, asking: false };
+const wxNow = { at: 0, wx: null, asking: null };
 
-async function weatherHere(hint = null) {
-  if (wxNow.wx && Date.now() - wxNow.at < 15 * 60000) return wxNow.wx;
-  if (wxNow.asking) return wxNow.wx;
-  wxNow.asking = true;
+function weatherHere(hint = null) {
+  if (wxNow.wx && Date.now() - wxNow.at < 15 * 60000) return Promise.resolve(wxNow.wx);
+  /* One ask at a time, and a screen that wants the air while it is out waits
+     for the same answer. Handed the old reading instead, it kept that once
+     the first screen's answer was turned away as late. */
+  if (wxNow.asking) return wxNow.asking;
+  const ask = askWeatherHere(hint);
+  wxNow.asking = ask;
+  ask.then(() => { if (wxNow.asking === ask) wxNow.asking = null; });
+  return ask;
+}
+async function askWeatherHere(hint) {
   try {
     /* Where "here" is, cheapest first: a fix the app already holds, then
        the trail's own start, and only then a fresh ask of the browser —
@@ -2051,19 +2101,24 @@ async function weatherHere(hint = null) {
     wxNow.wx = wx; wxNow.at = Date.now();
     return wx;
   } catch { return wxNow.wx; }          // offline or blocked: the panel stays away
-  finally { wxNow.asking = false; }
 }
 
-/** Show whatever is most true for this screen: the session's air if it has
-    any, otherwise the air here now. */
-function weatherPanelFor(session) {
-  const own = session?.data?.weather;
-  if (own) return showWeather(own);
+/** Show whatever is most true for this screen: the session's air at the
+    moment the screen is about (airMomentFor) if it has any, otherwise the
+    air here now. */
+function weatherPanelFor(session, at = null) {
   const d = session?.data;
+  const own = Number.isFinite(at) ? windAt(session, at).wx : d?.weather;
+  if (own) return showWeather(own);
   const t = d?.trail?.[0] ?? d?.plan?.[0] ?? d?.track?.[0];
   const asked = weatherHere(t ? { lat: t.lat, lon: t.lon } : null);   // marks itself as asking at once
   showWeather(wxNow.wx);                     // the panel now; the numbers follow
-  asked.then(wx => showWeather(wx));
+  /* ...onto the screen that asked, and only while nothing newer is on it. A
+     fix and a fetch on one bar can take twenty seconds, and the answer used
+     to land on whatever map screen was up by then: today's wind here, over
+     the replay of a run from last week. */
+  const screen = currentScreen, gen = wxShown.gen;
+  asked.then(wx => { if (currentScreen === screen && wxShown.gen === gen) showWeather(wx); });
 }
 
 function airStop() {
@@ -2785,6 +2840,9 @@ function paintReplay() {
      trail was laid: over an hour's run it can swing right round. */
   const w = windAt(s, at).wx;
   if (w && plume.sim) { plume.wx = w; plume.st = stability(w.soil_temp, w.temp); }
+  /* The panel, the arrow and the streaks in the same air, or they sat on
+     the wind the trail was laid in while the scent swung round under them. */
+  followWeather(w);
   if (plume.sim) { plume.clock = at; plumeFrame(); }
   if (w) {
     const field = scentField(trailOf(s), w, at);
@@ -4045,7 +4103,9 @@ const ageWord = (ms) => {
 };
 
 /* ── Run / Search ─────────────────────────────────────────────────── */
-const run = { session: null, revealed: false, startedAt: 0, copy: false, stopping: false };
+/* airAt: the moment whose wind the run screen shows. The start of the run,
+   until Reveal draws the scent in the air of the moment it is revealed. */
+const run = { session: null, revealed: false, startedAt: 0, airAt: 0, copy: false, stopping: false };
 
 async function startRun(s) {
   if (rec.on) return toast('A run is already going — stop that one first');
@@ -4073,6 +4133,7 @@ async function startRun(s) {
   run.revealedAt = s.data.revealedAt || 0;
   closeCall();
   run.startedAt = Date.now();
+  run.airAt = run.startedAt;
   rec.kind = 'run';
   rec.wps = [];
   clearMap();
@@ -4113,9 +4174,10 @@ async function startRun(s) {
   if (!(await startWatch('runHudText'))) { dropRunCopy(); return go('scrHome'); }
   startFollowing(null);
   /* Wind, even on a blind run: it says nothing about where the trail is, and
-     it is the first thing you want before deciding where to cast. */
-  airStart(s.data.weather);
-  showWeather(s.data.weather);
+     it is the first thing you want before deciding where to cast. The wind
+     as the dog set off, which is the one the coach reasons with, not the
+     one the trail was laid in hours before. */
+  weatherPanelFor(s, run.airAt);
   terrainFor(s.data.trail || s.data.hides || []).then(T => { air.T = T; }).catch(() => {});
   $('runHudText').textContent = hudText();
   toast(isNative() && coach.on ? 'Coach on. Its calls only play while the screen is on'
@@ -4133,8 +4195,11 @@ function toggleReveal() {
     setTrail(run.revealed ? s.data.trail : null);
     /* The plume is the trail, drawn in air. Showing it before Reveal would
        hand the handler the answer, so it waits for the same button. */
-    if (run.revealed) plumeStart(trailOf(s), windAt(s, Date.now()).wx, undefined, s.data.contamination);
-    else plumeStop();
+    if (run.revealed) {
+      /* In the air of the moment it is shown, and the panel with it. */
+      run.airAt = Date.now();
+      plumeStart(trailOf(s), windAt(s, run.airAt).wx, undefined, s.data.contamination);
+    } else plumeStop();
     setSrc('contam', run.revealed
       ? { type: 'FeatureCollection',
           features: (s.data.contamination || []).map(c => lineOf(c.points).features[0]).filter(Boolean) }
@@ -4526,7 +4591,8 @@ function showOnMap(from = 'scrResult') {
   const t = targetById(s.targetId);
   clearMap();
   /* A run is shown in the wind it was run in; a trail not run yet, in the
-     wind it was laid in. */
+     wind it was laid in. The panel, the arrow and the streaks take the same
+     moment from airMomentFor once go() below puts the screen up. */
   const wx = Number.isFinite(s.data.trackStarted) ? windAt(s, s.data.trackStarted).wx : s.data.weather;
   if (t.kind === 'person') {
     setTrail(s.data.trail);
@@ -4548,7 +4614,6 @@ function showOnMap(from = 'scrResult') {
          clock, a run from yesterday had every parcel pruned before one was
          drawn. A trail not yet run has no such moment and shows the air now. */
       plumeStart(trailOf(s), wx, undefined, s.data.contamination, { at: s.data.trackStarted ?? null });
-      showWeather(wx);
     }
   } else {
     setSrc('hides', pointsOf(s.data.hides));
@@ -4596,10 +4661,20 @@ function keepWeather(id, wx) {
   const kept = db.updateSession(id, { data: { weather: wx } });
   snap();
   if (live && rec.on && rec.kind === 'run') {
-    airStart(wx);
-    showWeather(wx);
+    /* At the run's own moment, as everything else on the run screen is. The
+       raw laid-time record drew a revealed scent in the air of hours before,
+       beside a coach and a grade working from the run's. */
     if (run.revealed && targetById(live.targetId).kind === 'person') {
-      plumeStart(trailOf(live), wx, undefined, live.data.contamination);
+      run.airAt = Date.now();
+      plumeStart(trailOf(live), windAt(live, run.airAt).wx, undefined, live.data.contamination);
+    } else if (currentScreen === 'scrRun') {
+      weatherPanelFor(live, run.airAt || run.startedAt);
+    }
+    /* A coach that set off with no weather had no scent to reason about.
+       It has now, and in the wind the dog set off in. */
+    if (coach.trail) {
+      const w = windAt(live, run.startedAt).wx;
+      coach.field = w ? scentField(trailOf(live), w, run.startedAt) : [];
     }
   }
   if (kept && pendingSession?.id === id) {
@@ -4833,7 +4908,7 @@ function sessionFromModel(m) {
     name: m.name ?? null,
     data: {
       trail: m.trail ?? undefined, hides: m.hides ?? undefined, contamination: m.contamination ?? [],
-      weather: m.wx ?? null, track: m.track ?? undefined, trackWaypoints: m.wps ?? [],
+      weather: m.wx ?? null, runWeather: m.runWx ?? undefined, track: m.track ?? undefined, trackWaypoints: m.wps ?? [],
       trackStarted: m.runAt ?? undefined, result: m.result ?? undefined, plan: m.plan, walked: m.walked, k: m.k,
       debrief: m.debrief ?? undefined,
     },
@@ -7093,7 +7168,7 @@ if ('ResizeObserver' in window) {
   for (const id of MAP_SCREENS) { const bar = $(id)?.querySelector('.glass-bottom'); if (bar) new ResizeObserver(styleGap).observe(bar); }
 }
 $('wxNote').addEventListener('click', () => {
-  if (!wxNow.wx && currentScreen !== 'scrBench') weatherPanelFor(airSessionFor(currentScreen));
+  if (!wxNow.wx && currentScreen !== 'scrBench') airPanel(currentScreen);
 });
 
 /* The arrow, placed once on every page that can be left. */

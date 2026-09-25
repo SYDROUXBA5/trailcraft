@@ -538,11 +538,22 @@ t('every view of a run takes its wind from windAt, and the grade only banks the 
   assert.match(grade, /if \(!exact\) bank = false;/, 'and banks nothing from a wind that was not the run\'s');
   assert.match(js, /coach\.field = wx && coach\.trail \? scentField\(trailOf\(s\), wx, run\.startedAt\) : \[\];/);
   assert.match(js, /const wx = windAt\(s, run\.startedAt\)\.wx;/, 'the coach');
-  assert.match(js, /plumeStart\(trailOf\(s\), windAt\(s, Date\.now\(\)\)\.wx/, 'the reveal');
+  assert.match(js, /run\.airAt = Date\.now\(\);\s*\n\s*plumeStart\(trailOf\(s\), windAt\(s, run\.airAt\)\.wx/, 'the reveal');
   assert.match(js, /const w0 = windAt\(s, replay\.at\)\.wx;/, 'the replay as it opens');
   assert.match(js, /const w = windAt\(s, at\)\.wx;\s*\n\s*if \(w && plume\.sim\) \{ plume\.wx = w;/, 'and as its clock moves');
   assert.match(js, /if \(bestGap > WX_MAX_GAP\) throw new Error/, 'weather days away from the moment is refused');
   assert.ok(!/s\.data\.weather, undefined, s\.data\.contamination/.test(js), 'nothing draws a run in the laid-time snapshot any more');
+  /* Nor through a variable holding a raw record: a saved trail's plume takes
+     its wind from windAt, inline or through a name set from it in the same
+     function. keepWeather drew a revealed run in the late laid snapshot. */
+  const drawn = [...js.matchAll(/plumeStart\(trailOf\((\w+)\), ([^,]+),/g)];
+  assert.ok(drawn.length >= 4, `every plume of a saved trail is checked, found ${drawn.length}`);
+  for (const m of drawn) {
+    const arg = m[2].trim();
+    if (arg.startsWith('windAt(')) continue;
+    const fn = js.slice(Math.max(js.lastIndexOf('\nfunction ', m.index), js.lastIndexOf('\nasync function ', m.index)), m.index);
+    assert.match(fn, new RegExp(`const ${arg} = [^;]*windAt\\(`), `plumeStart(trailOf(${m[1]}), ${arg}) takes a wind windAt did not give`);
+  }
 });
 
 t('batch 1 follow-ups the checkers asked for', () => {

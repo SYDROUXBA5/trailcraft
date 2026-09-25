@@ -91,6 +91,7 @@ function app() {
   const els = new Map();
   const history = fakeHistory();
   const air = [];
+  const airAt = [];
   const sessions = new Map();
   const sb = {
     $: (id) => { if (!els.has(id)) els.set(id, fakeEl()); return els.get(id); },
@@ -106,7 +107,7 @@ function app() {
     renderHome() {}, renderSessions() {}, renderSettings() {}, renderResult() {}, paintPick() {},
     handlerCardId: null, dogCardId: null, paintHandlerCard() {}, paintDogCard() {},
     map: { resize() {}, off() {}, getCanvas: () => ({ style: {} }) },
-    weatherPanelFor: (s) => air.push(s),
+    weatherPanelFor: (s, at) => { air.push(s); airAt.push(at); },
     mapChromeShow() {}, stepsRun() {}, airStop() {}, hideWeather() {},
     db: { kv: { get: () => true, set() {} }, sessions: () => [...sessions.values()] },
     mapTut: { open: false }, openMapTut() {},
@@ -133,7 +134,7 @@ function app() {
   ].join('\n');
   vm.runInContext(src, sb);
   const click = (id, e) => sb[`on_${id}`](e);
-  return { sb, air, sessions, click, where: () => sb.where().screen, go: sb.go, arrow: sb.goBack };
+  return { sb, air, airAt, sessions, click, where: () => sb.where().screen, go: sb.go, arrow: sb.goBack };
 }
 
 /** Home → Settings → Sessions → one run's result: the usual way to an old run. */
@@ -270,6 +271,36 @@ await t('each other map screen shows the air of the trail it is about', () => {
   assert.equal(shown('scrBench'), undefined, 'the bench brings its own weather from the dials');
 });
 
+await t('each map screen about a run shows the wind at the moment it is about, not the laid-time wind', () => {
+  /* The plume, the band and the coach on these screens are drawn in the wind
+     of their own moment. The panel, the arrow and the streaks were handed
+     the session alone, so they showed the wind the trail was laid in. */
+  const a = app();
+  const T = Date.UTC(2026, 8, 25, 9, 30);
+  const wx = { wind_speed: 2, time: '2026-09-25T08:00' };
+  const ran = { id: 'ran', data: { weather: wx, trackStarted: T } };
+  const laid = { id: 'laid', data: { weather: wx } };
+  const moment = (id) => { a.go('scrHome'); a.air.length = 0; a.airAt.length = 0; a.go(id); return a.airAt[0]; };
+
+  a.sb.replay.s = ran;
+  a.sb.replay.at = T + 7 * 60e3;
+  assert.equal(moment('scrReplay'), T + 7 * 60e3, 'the replay: its own clock');
+
+  a.sb.run.session = ran;
+  assert.equal(moment('scrShowMap'), T, 'show on map, for a run: the moment the dog set off');
+  a.sb.run.session = null;
+  a.sb.pendingSession = laid;
+  assert.equal(moment('scrShowMap'), null, 'show on map, for a trail not run yet: the air it was laid in');
+
+  Object.assign(a.sb.run, { session: ran, startedAt: T, airAt: T });
+  assert.equal(moment('scrRun'), T, 'the run screen: the start of the run');
+  a.sb.run.airAt = T + 12 * 60e3;
+  assert.equal(moment('scrRun'), T + 12 * 60e3, 'and once Reveal has drawn the scent, the moment it was drawn');
+  a.sb.run.session = null;
+  assert.equal(moment('scrRun'), null, 'a trail waiting on the run screen with no run yet: its laid-time air');
+  assert.equal(moment('scrLay'), null);
+});
+
 await t('a new lay forgets the last lay’s forecast', () => {
   assert.match(decl('function startLay('), /rec\.wx = null;/);
 });
@@ -284,7 +315,8 @@ await t('a forecast from another day carries its date; one from today only its t
     `10 m forecast, ${before.toLocaleDateString([], { day: 'numeric', month: 'short' })} ${hm(before)}`);
   assert.equal(forecastNote(undefined, now), '10 m forecast');
   assert.equal(forecastNote('not a time', now), '10 m forecast');
-  assert.match(js, /\$\('wxNote'\)\.textContent = forecastNote\(wx\.time\);/, 'the panel uses it');
+  assert.equal(forecastNote(today.getTime(), now), `10 m forecast, ${hm(today)}`, 'a moment read off the series');
+  assert.match(js, /\$\('wxNote'\)\.textContent = forecastNote\(wx\.t \?\? wx\.time\);/, 'the panel uses it');
 });
 
 await t('an emptied map stops the footprints’ timer, and the next map screen does not restart it', () => {
