@@ -949,4 +949,17 @@ t('the result card never calls a run blind when the trail was on screen', () => 
     'the handler card says how many were neither');
 });
 
+/* A search with no indication was timed against the wall clock, so a run kept
+   after a crash read "searched 187:30"; and the distance to the hide was
+   always in metres, whatever the handler's units. */
+t('a search is timed by its own track, and its distance to the hide is in the handler’s units', () => {
+  const search = bodyOf('searchResult');
+  assert.doesNotMatch(search, /Date\.now\(\)/, 'nothing in grading a search reads the wall clock');
+  assert.match(search, /const first = track\[0\]\?\.t, last = track\[track\.length - 1\]\?\.t;/);
+  assert.match(search, /searched \$\{fmtDur\(dur\)\} — no indication marked\./);
+  assert.match(search, /\$\{fmtM\(catchM\)\} from the hide/);
+  assert.doesNotMatch(js, /\$\{catchM\} m\b|\$\{r\.catchM\} m\b/, 'no distance to a hide is written in bare metres');
+  assert.match(js, /cell\(r\.catchM != null \? `\$\{r\.catchApprox \? '~' : ''\}\$\{fmtM\(r\.catchM\)\}` : '—', 'from the hide'\)/);
+});
+
 console.log(`\n${pass} passed total\n`);
