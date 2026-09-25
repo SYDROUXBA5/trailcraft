@@ -1012,6 +1012,15 @@ t('the coach line on the result card is blind only when nobody knew, and prints 
   assert.equal(sb.coachWords({ assisted: true, scent: true }, {}), 'Assisted run — the coach was on with the experimental scent corridor.');
 });
 
+/* A live run on a kept trail went out under the sender's handler and dog:
+   the session carries no ids of this phone's until Stop writes them. */
+t('going live sends this phone’s picked dog and handler, as Stop will file the run', () => {
+  const live = js.slice(js.indexOf('\nasync function goLive('), js.indexOf('\n}\n', js.indexOf('\nasync function goLive(')));
+  assert.match(live, /const who = \{ \.\.\.run\.session, dogId: S\.dog\?\.id \?\? run\.session\.dogId \?\? null,\s*handlerId: S\.handler\?\.id \?\? run\.session\.handlerId \?\? null \};/);
+  assert.match(live, /startLive\(liveMeta\(modelOf\(who\), from\)\)/);
+  assert.doesNotMatch(live, /modelOf\(run\.session\)/);
+});
+
 /* The result screen stopped showing a drawn plan's made-up age, but the run's
    HUD and the replay caption still counted it from the moment it was drawn. */
 t('the run HUD and the replay caption give a drawn line no age either', () => {

@@ -829,4 +829,26 @@ await t('a coach-off run whose debrief says the handler knew is not sent as blin
   assert.match(rowsOf(detailSections(trailModel(s, people), { when: () => 'x' })), /Run: blind — no prompts/);
 });
 
+/* A kept trail has no ids of this phone's, and the run's start is only
+   written at Stop, so while it was being run live it read as someone else's:
+   the live link went out under the sender's handler and dog. */
+await t('a kept trail nobody has run yet is this phone’s to run', () => {
+  const laid = { id: 'k3', startedAt: T0, targetId: 'person', dogId: null, handlerId: null, layerId: null,
+    data: { trail: walk(20), contamination: [],
+      imported: { from: 'Alice', at: T0, handler: 'Alice', dog: { name: 'Bo' }, layer: 'Sophie' } } };
+  const p = peopleOf(laid, bobs);
+  assert.equal(p.handler.name, 'Bob', 'whoever runs it is on this phone');
+  assert.equal(p.dog, null, 'and the sender’s dog is not running it');
+  assert.equal(p.layer.name, 'Sophie', 'the layer keeps the name it came with');
+  /* As going live passes it: this phone's picked dog and handler. */
+  const live = liveMeta(trailModel({ ...laid, dogId: 'd9', handlerId: 'h9' },
+    peopleOf({ ...laid, dogId: 'd9', handlerId: 'h9' }, bobs)), T0 + 60e3);
+  assert.equal(live.handler, 'Bob');
+  assert.equal(live.dog.name, 'Nell');
+  assert.equal(live.layer, 'Sophie');
+  /* Once a track is on it and it is someone else's run, it is theirs again. */
+  const theirs = { ...laid, data: { ...laid.data, track: walk(5), trackStarted: T0 - 60e3 } };
+  assert.equal(peopleOf(theirs, bobs).handler.name, 'Alice');
+});
+
 console.log(`\n${pass} passed total`);
