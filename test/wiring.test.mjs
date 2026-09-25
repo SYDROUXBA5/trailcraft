@@ -828,7 +828,7 @@ t('record ids from the cloud are escaped wherever they go into markup', () => {
 });
 
 t('Save GPX and Save PDF say when a file cannot be made, rather than doing nothing', () => {
-  assert.match(fnSrc('async function saveGpx('), /try \{[\s\S]*toGpx\(m\)[\s\S]*\} *\n? *catch \{ toast\('Could not make the file'\); \}/);
+  assert.match(fnSrc('async function saveGpx('), /try \{[\s\S]*toGpx\(m[,)][\s\S]*\} *\n? *catch \{ toast\('Could not make the file'\); \}/);
   assert.match(fnSrc('async function savePdf('), /try \{[\s\S]*buildPdf\([\s\S]*\} catch \{\n\s*toast\('Could not make the report'\);/);
 });
 

@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import {
   trailModel, encodeShared, decodeShared, sharedUrl, sharedFromText,
   toGpx, fileBase, detailSections, headline, notes, liveMeta, liveModel,
-  sessionFromModel, keptSession, peopleOf,
+  resultSentence, sessionFromModel, keptSession, peopleOf,
 } from '../public/share.js';
 import { through, b64url } from '../public/card.js';
 import { dist } from '../public/geo.js';
@@ -203,7 +203,10 @@ await t('details follow the reader’s units and never print a hole', () => {
   assert.match(imperial, /Air: 58 °F/);
   assert.match(imperial, /Start: 51°12'/);
   for (const text of [metric, imperial]) assert.doesNotMatch(text, /undefined|NaN|null|: $/m);
-  assert.equal(headline(m), m.result.sentence);
+  /* An older result's saved sentence claimed too much. It is said again in
+     today's words, and in the units the rows under it are in. */
+  assert.equal(headline(m), 'Bo’s track sat mainly to the right of the line — about 4 m from it on average.');
+  assert.equal(headline(m, { imperial: true }), 'Bo’s track sat mainly to the right of the line — about 14 ft from it on average.');
 });
 
 await t('a newer result shows the median, the time per side, and whether the run was coached', async () => {
@@ -293,6 +296,42 @@ await t('whose a record is: a run kept by an older build, a run made here on a s
   assert.deepEqual(r.dog, { name: 'Bo' });
 });
 
+await t('the sentence is said from its numbers, in the reader’s units, wherever it is read', async () => {
+  /* Graded in metres, read in feet: the headline said "4 m" above rows in
+     feet, on the shared page, in the report and in the GPX file. */
+  const s = session();
+  s.data.result = { ...s.data.result, sentence: 'Anything the sending phone saved.',
+    medAbs: 3.7, shares: { left: 0.5, on: 0.3, right: 0.2 }, mainSide: 'left', accMed: 4, noisy: false };
+  const m = trailModel(s, people);
+  const us = { imperial: true, when: () => 'x' };
+  assert.equal(headline(m), 'Bo’s track ran mainly to the left of the line — typically 4 m from it.');
+  assert.equal(headline(m, us), 'Bo’s track ran mainly to the left of the line — typically 12 ft from it.');
+  assert.match(rowsOf(detailSections(m, us)), /Typical distance from the line: 12\.1 ft/);
+  assert.match(toGpx(m, us), /<desc>Bo’s track ran mainly to the left of the line — typically 12 ft from it\.<\/desc>/);
+  const back = await decodeShared(await encodeShared(m));
+  assert.equal(headline(back, us), headline(m, us));
+  const noisy = { ...s.data.result, noisy: true, accMed: 8 };
+  assert.equal(resultSentence(noisy, 'Bo', us),
+    'Bo’s track sat about 12 ft from the line, but GPS uncertainty (±26 ft) is too large to read which side.');
+  /* 69.6 % rounds to 0.70 in a link. Judged on the raw share, the phone that
+     ran it said one thing and the phone it was sent to said another. */
+  const close = { ...s.data.result, shares: { left: 0.2, on: 0.696, right: 0.104 } };
+  const sent = trailModel({ ...s, data: { ...s.data, result: close } }, people);
+  const read = await decodeShared(await encodeShared(sent));
+  assert.equal(headline(sent), 'Bo’s track stayed within 3 m of the line for 70 % of the run.');
+  assert.equal(headline(read), headline(sent));
+  /* A search: the distance to the hide in the reader's units; with no
+     indication there are no numbers to say it from, so its own words stay. */
+  const found = { kind: 'search', sentence: 'x', toFirst: 100e3, catchM: 2, catchApprox: true, approach: 'into the wind' };
+  assert.equal(resultSentence(found, 'Bo', us),
+    'Bo indicated in 1:40, roughly 7 ft from the hide (the GPS had dropped out), coming into the wind.');
+  assert.equal(resultSentence({ kind: 'search', sentence: 'Bo searched 4:10 — no indication marked.' }, 'Bo'),
+    'Bo searched 4:10 — no indication marked.');
+  assert.equal(resultSentence({ kind: 'trail' }, ''), 'The dog ran, but the track could not be compared with the line.');
+  assert.equal(resultSentence(null, 'Bo'), null);
+  assert.equal(resultSentence({ kind: '<b>', sentence: 'x' }, 'Bo'), null);
+});
+
 await t('a search lists its hides and how the dog found them', () => {
   const hides = [{ lat: 51.2, lon: -2.6 }];
   const track = walk(50).map(p => ({ ...p, t: p.t + 60e3 }));
@@ -348,7 +387,7 @@ await t('live: the meta holds the trail but not the run, and chunks rebuild the 
   assert.equal(back.runAt, T0 + 25 * 60e3);
   assert.equal(back.ended, true);
   assert.equal(back.wps[0].kind, 'Indication');
-  assert.equal(headline(back), m.result.sentence);
+  assert.equal(headline(back), headline(m));
   const empty = liveModel(meta, []);
   assert.equal(empty.track, null);
   assert.match(headline(empty), /not yet run/);
