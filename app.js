@@ -9,7 +9,7 @@
 import {
   pathLen, cardinal, dist, dwellFold, bearing, project, fmtDist, fmtShort, fmtSpeed, fmtTemp, unitShort, fmtWeight, kgToShown, shownToKg, fmtCoord, scentField, plumePolygon, densify, timestamps, signedOffsets, meanSigned, sideOfDrift, sideAgreement, lineCorrect, departure, timestampsEndingAt, progressAlong, splitLine, smoothBearing, medianAbs, sideShares, approachToWind,
 } from './geo.js';
-import { stepPoints, contamTimed, trailFrom, walkedOfTrail, gpsTrouble } from './geo.js';
+import { stepPoints, contamTimed, trailFrom, walkedOfTrail, gpsTrouble, forecastNote } from './geo.js';
 import { packDraft, unpackDraft, draftAlive, draftStats } from './draft.js';
 import { handlerStats } from './store.js';
 import { plumePalette, stepPalette, windPalette, trackPalette, COLOUR_PRESETS, isHex, mix } from './colours.js';
@@ -156,10 +156,15 @@ const MAP_SCREENS = ['scrLay', 'scrConfirm', 'scrContam', 'scrRun', 'scrShowMap'
    means "the page I came from". Screens that are moments rather than
    places — a recording, a scan, the map behind a card — are never gone
    back TO; the arrow skips over them to the last real page, or home.
+   A replay is one of them: it is closed the moment its Debrief button is
+   tapped, so going back to it found an empty replay whose Play did nothing.
    Each forward step is also a browser history entry, so the phone's
-   edge-swipe and the browser's back button do exactly what the arrow does. */
+   edge-swipe and the browser's back button do exactly what the arrow does.
+   A screen's own Done, Save or Back therefore leaves by going back
+   (leaveForm), never forward: forward put the closed screen on the stack,
+   and the arrow on the next page led straight back into it. */
 const TRANSIENT = new Set(['scrLay', 'scrConfirm', 'scrContam', 'scrRun', 'scrWalk', 'scrDraw', 'scrScan',
-  'scrLive', 'scrShowMap', 'scrOnboardHandler', 'scrOnboardDog', 'scrTutorial', 'scrSignIn']);
+  'scrLive', 'scrShowMap', 'scrOnboardHandler', 'scrOnboardDog', 'scrTutorial', 'scrSignIn', 'scrReplay']);
 const BACKABLE = ['scrShare', 'scrPick', 'scrScan', 'scrResult', 'scrSessions', 'scrSettings', 'scrDog',
   'scrShareOut', 'scrShared', 'scrCountdown', 'scrWait', 'scrOnboardHandler', 'scrOnboardDog', 'scrHandler'];
 let currentScreen = null;
@@ -215,8 +220,31 @@ window.addEventListener('popstate', () => {
   if (currentScreen && currentScreen !== 'scrHome') goBackNow();
 });
 
+/* Whose air the wind panel shows on each map screen. It used to be whatever
+   run.session still held, and nothing clears that after a run or after
+   opening one from the list, so laying or drawing a new trail showed that
+   old trail's wind as if it were today's, streaks and all. Laying, drawing
+   and walking are about the air here now; the others about the trail on
+   the screen. */
+function airSessionFor(id) {
+  switch (id) {
+    case 'scrRun': case 'scrShowMap': return run.session ?? pendingSession;
+    case 'scrContam': return sessionById(contam.forSession) ?? pendingSession;
+    case 'scrReplay': return replay.s;
+    case 'scrFix': return fixer.s;
+    case 'scrLive': return pendingSession;
+    // The forecast this lay fetched at its first fix, which its plume is drawn in.
+    case 'scrConfirm': return rec.kind === 'lay' && rec.wx ? { data: { weather: rec.wx } } : null;
+    default: return null;
+  }
+}
+
 function go(id, { back = false } = {}) {
   stopScan();
+  /* A scan for one run's walked card ends when its screen does, however it
+     is left. Left set by the top arrow, it refused every later Trail Card
+     and could file a walked card under the wrong plan. */
+  if (id !== 'scrScan') scanWalkedFor = null;
   if (id === 'scrHome') navStack.length = 0;
   else if (!back && currentScreen && currentScreen !== id && !TRANSIENT.has(currentScreen)) {
     navStack.push(currentScreen);
@@ -236,7 +264,7 @@ function go(id, { back = false } = {}) {
     /* The bench supplies its own weather from the dials. Letting the screen
        go looking for a forecast means that answer lands a second later and
        overwrites what the dials are asking about. */
-    if (id !== 'scrBench') weatherPanelFor(run.session ?? pendingSession);
+    if (id !== 'scrBench') weatherPanelFor(airSessionFor(id));
     mapChromeShow(true);
     stepsRun(true);
     if (!db.kv.get('mapTutDone') && !mapTut.open) openMapTut();
@@ -911,7 +939,14 @@ function setSrc(id, data) {
   srcData[id] = data;
   if (mapReady && map.getSource(id)) map.getSource(id).setData(data);
 }
-const clearMap = () => { for (const id of Object.keys(srcData)) setSrc(id, EMPTY); };
+/* The footprints' count goes with them. Left behind, the breathing timer
+   kept repainting the map about eleven times a second for footprints that
+   were gone, all through a blind run, which a phone in the field pays for. */
+const clearMap = () => {
+  for (const id of Object.keys(srcData)) setSrc(id, EMPTY);
+  steps.n = 0;
+  stepsRun(false);
+};
 
 function fitTo(...groups) {
   const pts = groups.flat().filter(Boolean);
@@ -1072,9 +1107,11 @@ function saveHandlerForm(layOnly = false) {
   leaveForm(obMode.returnTo);
 }
 
-/* A saved form leaves the way it was entered when that is where it is headed,
-   so the history and the stack stay honest: one press of the arrow on
-   Settings afterwards, not two. The arrow itself is plain goBack. */
+/* A saved form, or any screen closed by its own Done, Save or Back, leaves
+   the way it was entered when that is where it is headed, so the history
+   and the stack stay honest: one press of the arrow on Settings afterwards,
+   not two, and never back into the screen just closed. The arrow itself is
+   plain goBack. */
 function leaveForm(to = 'scrHome') {
   if (navStack[navStack.length - 1] === to) return goBack();
   go(to);
@@ -1417,6 +1454,7 @@ function startLay() {
   pendingSession = null;
   rec.kind = t.kind === 'person' ? 'lay' : 'hide';
   rec.pts = []; rec.wps = []; rec.hides = []; rec.dropped = 0;
+  rec.wx = null;                // this lay's own forecast arrives with its first fix
   $('hideTools').hidden = t.kind !== 'hide';
   $('btnLayStart').hidden = t.kind === 'hide';
   $('btnLayStop').hidden = true;
@@ -1872,9 +1910,7 @@ function showWeather(wx) {
   // The arrow points where the air is GOING, in the real world once the compass is live.
   compass.wind = Number.isFinite(wx.wind_direction) ? (wx.wind_direction + 180) % 360 : null;
   paintRose();
-  $('wxNote').textContent = wx.time
-    ? `10 m forecast, ${new Date(wx.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
-    : '10 m forecast';
+  $('wxNote').textContent = forecastNote(wx.time);
   wxGap();
   /* The wind moves on every map screen once it is known, not only when a
      plume runs: laying a trail is exactly when you want to see it. */
@@ -2465,7 +2501,7 @@ function closeFix() {
 function backToResult(s) {
   const s2 = s ? (sessionById(s.id) ?? s) : null;
   if (s2) renderResult(s2);
-  go('scrResult');
+  leaveForm('scrResult');
 }
 
 function saveFix() {
@@ -2645,7 +2681,7 @@ function saveDebrief() {
   dbFor = null; dbDraft = null;
   toast('Saved with the run');
   renderResult(s2);
-  go('scrResult');
+  leaveForm('scrResult');
 }
 
 /** The Judged block on the result card. Kept apart from the measured
@@ -3191,7 +3227,9 @@ function unsavedWork() {
 async function startWatch(hudId) {
   headingStart({ gesture: true });   // still inside the tap that started this, which is when an iPhone browser allows the ask
   /* Inside the iOS app the shell records in the background: the phone can
-     go in a pocket with the screen dark and every fix still arrives. */
+     go in a pocket with the screen dark and every fix still arrives. The
+     coach's calls do not: iOS plays no sound, speech or buzz for an app
+     with a dark screen, so a coached run says so instead of "pocket". */
   if (isNative()) {
     locateStop();
     rec.on = true; rec.pts = []; rec.dropped = 0; rec.droppedAt = 0; rec.blocked = false; rec.started = Date.now();
@@ -3202,9 +3240,10 @@ async function startWatch(hudId) {
           if (e?.code === 'NOT_AUTHORIZED') rec.blocked = true;
           toast(e?.code === 'NOT_AUTHORIZED' ? 'Location is off for Trailcraft — allow it in Settings' : 'GPS error');
         },
-        { message: 'Recording — the phone can go in your pocket' });
+        { message: coach.on ? 'Recording. Coach calls need the screen on' : 'Recording — the phone can go in your pocket' });
     } catch { rec.bg = null; }
     if (!rec.bg) { rec.on = false; toast('Could not start GPS'); return false; }
+    holdScreen();               // only while the coach is on (holdScreen)
     clearInterval(rec.tick);
     rec.tick = setInterval(() => { const el = $(hudId); const txt = hudText(); if (el) el.textContent = txt; }, 1000);
     return true;
@@ -3238,9 +3277,11 @@ async function startWatch(hudId) {
    browser stops getting fixes. The browser lets go of that hold whenever the
    page is hidden (the camera, a call, another app) and never takes it back by
    itself, so it is asked for again each time the page comes back. Inside the
-   iOS app the shell records with the screen dark, so it is not needed there. */
+   iOS app the shell records with the screen dark, so there it is held only
+   while the coach is on, whose calls cannot play in the dark. Where the app's
+   web view has no such hold, the coach's own note says to keep it awake. */
 async function holdScreen() {
-  if (isNative() || !rec.on || rec.lock || document.visibilityState !== 'visible') return;
+  if ((isNative() && !coach.on) || !rec.on || rec.lock || document.visibilityState !== 'visible') return;
   try {
     const lock = await navigator.wakeLock?.request('screen');
     if (!lock) return;
@@ -3249,8 +3290,21 @@ async function holdScreen() {
     lock.addEventListener?.('release', () => { if (rec.lock === lock) rec.lock = null; });
   } catch { /* not fatal */ }
 }
+async function letScreenGo() {
+  const lock = rec.lock;
+  rec.lock = null;
+  try { await lock?.release(); } catch { /* already gone */ }
+}
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible') holdScreen();
+  if (document.visibilityState !== 'visible') return;
+  holdScreen();
+  /* Said when the handler can hear it, so a silent coach is never taken
+     for a dog that stayed on the line. */
+  if (coach.missed) {
+    const n = coach.missed;
+    coach.missed = 0;
+    toast(`The screen was dark, so ${n} coach call${n === 1 ? '' : 's'} could not play`);
+  }
 });
 
 let hudText = gpsHudText;
@@ -3260,8 +3314,7 @@ async function stopWatch() {
   if (rec.bg) { try { await rec.bg.stop(); } catch { /* already gone */ } rec.bg = null; }
   navigator.geolocation?.clearWatch(rec.watch);
   clearInterval(rec.tick);
-  try { await rec.lock?.release(); } catch { /* already gone */ }
-  rec.lock = null;
+  await letScreenGo();
 }
 
 async function layStart() {
@@ -3953,6 +4006,10 @@ async function applyWalked(sessionId, card) {
 
 /* ── Pick what to run ─────────────────────────────────────────────── */
 function openPick() {
+  paintPick();
+  go('scrPick');
+}
+function paintPick() {
   const t = S.target;
   const v = verbs(t);
   $('pickTitle').textContent = v.run;
@@ -3970,7 +4027,6 @@ function openPick() {
       <div class="story">${esc(targetText(s))} · ${age} old</div>
     </div>`;
   }).join('') : `<div class="card"><p class="body muted">Nothing waiting. ${t.kind === 'hide' ? 'Set a hide first.' : 'Lay a trail first, or scan a card.'}</p></div>`;
-  go('scrPick');
 }
 
 const ageWord = (ms) => {
@@ -4052,7 +4108,8 @@ async function startRun(s) {
   showWeather(s.data.weather);
   terrainFor(s.data.trail || s.data.hides || []).then(T => { air.T = T; }).catch(() => {});
   $('runHudText').textContent = hudText();
-  toast(t.kind === 'person' ? 'Running blind — the trail is hidden' : 'Searching');
+  toast(isNative() && coach.on ? 'Coach on. Its calls only play while the screen is on'
+    : t.kind === 'person' ? 'Running blind — the trail is hidden' : 'Searching');
 }
 
 function toggleReveal() {
@@ -4967,7 +5024,7 @@ function closeLive() {
    run's trail and scent field, the sounds, the voice, the pill and the HUD. */
 const coach = { on: false, trail: null, field: [], plan: false, state: null, reading: null,
                 status: 'on', line: '', tick: 0, sounds: null, unlocked: false,
-                everOn: false, used: null, shadow: null };
+                everOn: false, used: null, shadow: null, missed: 0 };
 
 /* Two silent coaches run on EVERY trail run, blind or assisted: a plain
    corridor and the experimental scent corridor. They never speak; they only
@@ -5090,6 +5147,9 @@ function coachSpeak(text) {
 }
 
 function coachDeliver(alert) {
+  /* In the iOS app fixes keep coming with the screen dark, but nothing here
+     can be heard or felt then. Counted, and said once the screen is back. */
+  if (isNative() && document.visibilityState === 'hidden') coach.missed = (coach.missed || 0) + 1;
   const kind = alert.kind === 'still' ? 'off' : alert.kind;
   if (settings.coachSound && coach.sounds?.[kind]) {
     const a = coach.sounds[kind];
@@ -5143,6 +5203,7 @@ function coachSync() {
     coach.state ??= initialCoach();
     clearInterval(coach.tick);
     coach.tick = setInterval(() => { if (rec.on) coachApply(coachStep(coach.state, coachInput(null))); }, 1000);
+    holdScreen();                 // the app's calls need the screen on (holdScreen)
   }
   if (want && coach.on) {
     coach.used = { tolM: Number(settings.coachTol) || 20, scent: !!settings.coachScent || !!coach.used?.scent };
@@ -5150,6 +5211,7 @@ function coachSync() {
     coach.on = false;
     clearInterval(coach.tick); coach.tick = 0;
     coach.status = 'on'; coach.line = '';
+    if (isNative()) letScreenGo();   // the app records in the dark once nothing needs to be heard
   }
   paintCoachHud();
 }
@@ -5174,7 +5236,7 @@ function coachApply(r) {
 function coachStop() {
   clearInterval(coach.tick); coach.tick = 0; clearInterval(coach.shadowTick); coach.shadowTick = 0;
   coach.on = false; coach.trail = null; coach.field = []; coach.state = null; coach.shadow = null;
-  coach.reading = null; coach.status = 'on'; coach.line = '';
+  coach.reading = null; coach.status = 'on'; coach.line = ''; coach.missed = 0;
   try { speechSynthesis?.cancel(); } catch { /* fine */ }
   // The run screen stays up while the result is worked out: leave it calm.
   $('runHud').classList.remove('off');
@@ -5221,9 +5283,12 @@ function paintCoachControls() {
   $('coachWhen').classList.toggle('off', !on);
   const canBuzz = typeof navigator.vibrate === 'function' || canHaptic();
   $('coachVibrateRow').hidden = !canBuzz;
-  $('coachNote').textContent = canBuzz
+  /* The app records with the screen dark, and says everywhere that the phone
+     can go in a pocket. The coach cannot: iOS plays nothing for a dark app. */
+  const dark = isNative() ? ' Calls only play while the screen is on, so keep it awake during a coached run.' : '';
+  $('coachNote').textContent = (canBuzz
     ? 'Turn the volume up. Calls come at most every ten seconds, not for a single stray GPS fix, and twice at most while you stand still.'
-    : 'iPhones do not let a web app vibrate, so the coach uses sound and voice. Turn the volume up — the tones play even with the ring/silent switch on silent. Calls come at most every ten seconds, not for a single stray GPS fix, and twice at most while you stand still.';
+    : 'iPhones do not let a web app vibrate, so the coach uses sound and voice. Turn the volume up — the tones play even with the ring/silent switch on silent. Calls come at most every ten seconds, not for a single stray GPS fix, and twice at most while you stand still.') + dark;
 }
 
 /* The in-run sheet shows the very same controls: the node moves. */
@@ -5377,9 +5442,12 @@ function stopScan() {
 
 let scanCameFrom = 'scrPick';
 
-async function openScan(from = 'scrPick') {
+/* What the scan is for is set by every opening, so no scan inherits the
+   last one's purpose. */
+async function openScan(from = 'scrPick', { walkedFor = null } = {}) {
   scanCameFrom = from;
   go('scrScan');
+  scanWalkedFor = walkedFor;
   const gen = ++scan.gen;
   $('scanState').textContent = 'Point the camera at a Trail Card.';
   if (!window.jsQR) {
@@ -5945,7 +6013,7 @@ async function submitDelete() {
     if (!r.ok) return err(r.error);
     $('delPassword').value = '';
     renderSettings();
-    go('scrSettings');
+    leaveForm('scrSettings');
     toast('Account deleted. Your trails are still on this phone.');
   } finally {
     btn.disabled = false;
@@ -6023,14 +6091,14 @@ onSync((st) => {
     if (st.status === 'other' || st.status === 'ask') {
       /* Straight to the account card, which is where the question is asked. */
       renderSettings();
-      go('scrSettings');
+      leaveForm('scrSettings');
       return toast(st.status === 'ask'
         ? 'Signed in. Say in Settings whether the records already on this phone are yours'
         : 'Signed in. This phone’s records belong to another account, so nothing was backed up');
     }
     if (signInFirstLaunch) return boot();
     renderSettings();
-    go('scrSettings');
+    leaveForm('scrSettings');
   }
 });
 
@@ -6329,16 +6397,16 @@ function wire() {
   $('btnScan').addEventListener('click', () => openScan('scrPick'));
   $('btnScanWalked').addEventListener('click', () => {
     if (!run.session) return;
-    scanWalkedFor = run.session.id;
-    openScan('scrResult');
+    openScan('scrResult', { walkedFor: run.session.id });
   });
   $('btnPickBack').addEventListener('click', () => go('scrHome'));
   $('btnScanHome').addEventListener('click', () => openScan('scrHome'));
   $('btnScanBack').addEventListener('click', () => {
     stopScan();
-    if (scanWalkedFor) { scanWalkedFor = null; return go('scrResult'); }
     if (scanCameFrom === 'scrHome') return go('scrHome');
-    openPick();
+    if (scanCameFrom === 'scrResult') return leaveForm('scrResult');
+    paintPick();
+    leaveForm('scrPick');
   });
   $('scanFromPhoto').addEventListener('click', () => $('scanFile').click());
   $('scanFile').addEventListener('change', (e) => {
@@ -6416,7 +6484,7 @@ function wire() {
   // Sharing beyond this phone
   $('btnShareOut').addEventListener('click', () => run.session && openShareOut(run.session, 'scrResult'));
   $('btnShareMore').addEventListener('click', () => pendingSession && openShareOut(pendingSession, 'scrShare'));
-  $('btnShareOutBack').addEventListener('click', () => go(shareOutFrom));
+  $('btnShareOutBack').addEventListener('click', () => leaveForm(shareOutFrom));
   $('btnSendLink').addEventListener('click', () => shareOutSession && sendLink(modelOf(shareOutSession)));
   $('btnSaveGpx').addEventListener('click', () => shareOutSession && saveGpx(modelOf(shareOutSession)));
   $('btnSavePdf').addEventListener('click', () => shareOutSession && savePdf(modelOf(shareOutSession)));
@@ -6503,7 +6571,7 @@ function wire() {
     if (open) openSession(open.dataset.openSession);
   });
 
-  $('btnSessBack').addEventListener('click', () => { renderSettings(); go('scrSettings'); });
+  $('btnSessBack').addEventListener('click', () => { renderSettings(); leaveForm('scrSettings'); });
   $('btnSessDelete').addEventListener('click', () => { sessDeleting = !sessDeleting; renderSessions(); });
   $('sessionList').addEventListener('click', (e) => {
     /* The Delete button sits inside the card, so it is looked for first:
@@ -6531,8 +6599,9 @@ function wire() {
   $('btnDebrief').addEventListener('click', () => openDebrief(run.session ?? pendingSession));
   $('repDebrief').addEventListener('click', () => { const s = replay.s; closeReplay(); openDebrief(s); });
   $('dbSave').addEventListener('click', saveDebrief);
-  $('dbCancel').addEventListener('click', () => { dbFor = null; dbDraft = null; go('scrResult'); });
+  $('dbCancel').addEventListener('click', () => { dbFor = null; dbDraft = null; leaveForm('scrResult'); });
   $('scrDebrief').addEventListener('click', (e) => {
+    if (!dbDraft) return;      // a closed debrief still on screen: nothing to write into
     const pick = e.target.closest('[data-pick]');
     if (pick) {
       dbDraft[pick.dataset.pick] = pick.dataset.v;
@@ -6558,7 +6627,7 @@ function wire() {
       return paintDebrief();
     }
   });
-  $('repBack').addEventListener('click', () => { closeReplay(); go('scrResult'); });
+  $('repBack').addEventListener('click', () => { closeReplay(); leaveForm('scrResult'); });
   $('repPlay').addEventListener('click', () => (replay.playing ? replayPause() : replayPlay()));
   $('repSpeed').addEventListener('click', () => {
     const i = (REPLAY_SPEEDS.indexOf(replay.speed) + 1) % REPLAY_SPEEDS.length;
@@ -6576,7 +6645,7 @@ function wire() {
   });
 
   $('btnBench').addEventListener('click', openBench);
-  $('benchDone').addEventListener('click', () => { closeBench(); go('scrSettings'); });
+  $('benchDone').addEventListener('click', () => { closeBench(); leaveForm('scrSettings'); });
   $('benchGrab').addEventListener('click', () => {
     bench.open = !bench.open;
     $('benchSheet').classList.toggle('open', bench.open);
@@ -6651,7 +6720,7 @@ function wire() {
   $('btnRecoverKeep').addEventListener('click', recoverKeep);
   $('btnRecoverDrop').addEventListener('click', recoverDrop);
   $('btnDeleteGo').addEventListener('click', submitDelete);
-  $('btnDeleteCancel').addEventListener('click', () => { $('delPassword').value = ''; go('scrSettings'); });
+  $('btnDeleteCancel').addEventListener('click', () => { $('delPassword').value = ''; leaveForm('scrSettings'); });
   $('delPassword').addEventListener('keydown', (e) => { if (e.key === 'Enter') submitDelete(); });
   $('tabSignUp').addEventListener('click', () => setAuthMode('up'));
   $('tabSignIn').addEventListener('click', () => setAuthMode('in'));
@@ -6675,7 +6744,7 @@ function wire() {
   $('btnSkipSignIn').addEventListener('click', () => {
     db.kv.set('signInAnswered', true);
     if (signInFirstLaunch) return boot();
-    go('scrSettings');
+    leaveForm('scrSettings');
   });
   $('accountCard').addEventListener('click', async (e) => {
     const b = e.target.closest('[data-account]');
@@ -6994,7 +7063,9 @@ window.addEventListener('resize', styleGap);
 if ('ResizeObserver' in window) {
   for (const id of MAP_SCREENS) { const bar = $(id)?.querySelector('.glass-bottom'); if (bar) new ResizeObserver(styleGap).observe(bar); }
 }
-$('wxNote').addEventListener('click', () => { if (!wxNow.wx) weatherPanelFor(run.session ?? pendingSession); });
+$('wxNote').addEventListener('click', () => {
+  if (!wxNow.wx && currentScreen !== 'scrBench') weatherPanelFor(airSessionFor(currentScreen));
+});
 
 /* The arrow, placed once on every page that can be left. */
 for (const id of BACKABLE) {

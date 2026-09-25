@@ -3,7 +3,9 @@
    The same app runs three ways: in Safari, as a Home Screen web app, and
    inside a real iOS app (Capacitor wraps this exact code). Only the last can
    keep recording with the phone in a pocket and the screen dark, or tap the
-   handler's wrist. This module is the whole of the difference: everything
+   handler's wrist. Not both at once: iOS gives an app with a dark screen no
+   sound, speech or buzz, so the coach's calls need the screen on (app.js
+   holdScreen). This module is the whole of the difference: everything
    else in the app asks it "is there a shell?" and carries on the same way
    when the answer is no.
 
