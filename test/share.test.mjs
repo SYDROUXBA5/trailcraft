@@ -227,6 +227,31 @@ await t('a newer result shows the median, the time per side, and whether the run
   assert.match(notes(m).join(' '), /estimates from a forecast, not measurements/);
 });
 
+/* A coach-off run went out as "blind — no prompts" even when the handler had
+   revealed the trail a minute in and walked the dog along it. The trainer
+   reading the link or the PDF took it as blind evidence. */
+await t('a coach-off run with the trail shown on screen is never sent as blind', async () => {
+  const s = session();
+  const coach = { assisted: false, shadow: { tolM: 20, plain: 0, scent: 0 } };
+  const rows = (m) => detailSections(m, { when: () => 'x' }).flatMap(sec => sec.rows.map(r => r.join(': '))).join('\n');
+  const at = (revealedAt) => trailModel({ ...s, data: { ...s.data, coach, revealedAt } }, people);
+  const shown = at(s.data.trackStarted + 65e3);
+  assert.equal(shown.revealedAt, s.data.trackStarted + 65e3);
+  assert.match(rows(shown), /Run: coach off, but the trail was shown on screen 1:05 into the run/);
+  assert.doesNotMatch(rows(shown), /blind/);
+  const back = await decodeShared(await encodeShared(shown));
+  assert.equal(back.revealedAt, shown.revealedAt, 'the moment travels in the link');
+  assert.match(rows(back), /Run: coach off, but the trail was shown on screen 1:05 into the run/);
+  assert.match(rows(at(s.data.trackStarted - 3600e3)),
+    /Run: coach off, but the trail had been shown on screen on an earlier run/, 'seen on an earlier run of the trail');
+  for (const never of [null, 0, undefined]) {
+    const m = at(never);
+    assert.equal(m.revealedAt, null);
+    assert.match(rows(m), /Run: blind — no prompts/, 'never shown is still blind');
+    assert.equal((await decodeShared(await encodeShared(m))).revealedAt, null);
+  }
+});
+
 await t('a search lists its hides and how the dog found them', () => {
   const hides = [{ lat: 51.2, lon: -2.6 }];
   const track = walk(50).map(p => ({ ...p, t: p.t + 60e3 }));

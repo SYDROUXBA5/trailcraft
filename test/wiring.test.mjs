@@ -938,4 +938,15 @@ t('the backup leaves through the share sheet, and Restore reads it back only aft
   assert.match(js, /They go\. Save a backup file first if you want to keep them\./);
 });
 
+/* "Blind run — no prompts" was said of runs whose trail had been revealed. */
+t('the result card never calls a run blind when the trail was on screen', () => {
+  const words = bodyOf('coachWords');
+  assert.match(words, /function coachWords\(c, d = null\)/);
+  assert.match(words, /if \(trailShown\(d\)\) \{[\s\S]*return `Coach off, but \$\{when\}, so this was not a blind run\.\$\{had\}`;/);
+  assert.ok(words.indexOf('trailShown(d)') < words.indexOf('Blind run'), 'the reveal is checked before anything is called blind');
+  assert.match(js, /\$\('resCoach'\)\.textContent = coachWords\(s\.data\.coach, s\.data\);/);
+  assert.match(js, /`assisted \/ blind runs\$\{st\.shown \? ` \\u00b7 \$\{st\.shown\} with the trail shown` : ''\}`/,
+    'the handler card says how many were neither');
+});
+
 console.log(`\n${pass} passed total\n`);

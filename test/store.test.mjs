@@ -412,6 +412,23 @@ t('handlerStats: runs, laid trails, time, age bands, dogs and the typical offset
   assert.equal(handlerStats('nobody', sessions).runs, 0);
 });
 
+/* The handler card counted every coach-off run as blind, including runs where
+   the trail was revealed on screen. They are neither, and are counted apart. */
+t('handlerStats: a coach-off run with the trail shown is not a blind run', () => {
+  const track = [{ lat: 51.2, lon: -2.64, t: 0 }, { lat: 51.2009, lon: -2.64, t: 60000 }];
+  const run = (id, data) => ({ id, handlerId: 'h1', dogId: 'd1', startedAt: 1, data: { track, trackStarted: 1000, ...data } });
+  const st = handlerStats('h1', [
+    run('a', { coach: { assisted: true }, revealedAt: 2000 }),
+    run('b', { coach: { assisted: false } }),
+    run('c', { coach: { assisted: false }, revealedAt: 5000 }),
+    run('d', { coach: { assisted: false }, revealedAt: 0 }),
+  ]);
+  assert.equal(st.assisted, 1, 'the coach turning on stamps a reveal too, and it is still an assisted run');
+  assert.equal(st.blind, 2, 'never shown, or nought');
+  assert.equal(st.shown, 1);
+  assert.equal(handlerStats('nobody', []).shown, 0);
+});
+
 t('odours: narcotics and explosives name theirs, each target remembers its own, the record says which', () => {
   for (const id of ['narcotics', 'explosives']) {
     const set = ODOURS[id];

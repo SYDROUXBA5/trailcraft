@@ -72,6 +72,9 @@ export function trailModel(s, { dog = null, handler = null, layer = null, k = nu
     runWx: runWxOf(d),
     result: d.result ?? null,
     coach: d.coach ?? null,
+    /* When the trail was first put on screen. Without it every coach-off run
+       went out as "blind", including one revealed a minute in. */
+    revealedAt: fin(d.revealedAt) && d.revealedAt > 0 ? d.revealedAt : null,
     debrief: d.debrief ?? null,
     seen: d.seen ?? null,
     k: fin(k) ? k : null,
@@ -296,6 +299,7 @@ function pack(m) {
     wx: packWx(m.wx), runWx: packWx(m.runWx), result: m.result ? roundDeep(m.result) : undefined,
     coach: m.coach ? { assisted: !!m.coach.assisted, tolM: m.coach.tolM, scent: !!m.coach.scent, calls: m.coach.calls,
       shadow: m.coach.shadow ? pick(m.coach.shadow, ['tolM', 'plain', 'scent']) : undefined } : undefined,
+    revealedAt: m.revealedAt ?? undefined,
     debrief: packDebrief(m.debrief),
     seen: m.seen ? { wet: m.seen.wet ?? undefined, sun: m.seen.sun ?? undefined } : undefined,
     k: m.k, thinnedM: m.thinnedM || undefined,
@@ -350,6 +354,7 @@ function unpack(o) {
         scent: fin(o.coach.shadow.scent) ? o.coach.shadow.scent : null,
       } : null,
     } : null,
+    revealedAt: era(o.revealedAt),
     debrief: unpackDebrief(o.debrief),
     seen: cleanSeen(o.seen),
     k: fin(o.k) ? o.k : null,
@@ -688,7 +693,14 @@ export function detailSections(m, u = {}) {
   const c = m.coach;
   if (c && typeof c === 'object') {
     const rows = [];
-    rows.push(['Run', c.assisted ? 'assisted — the coach was on' : 'blind — no prompts']);
+    /* Blind is about what the handler knew. A coach-off run with the trail
+       revealed on screen is not one, and the reader is told when. */
+    const into = !fin(m.revealedAt) ? null : fin(m.runAt) ? m.revealedAt - m.runAt : NaN;
+    rows.push(['Run', c.assisted ? 'assisted — the coach was on'
+      : into == null ? 'blind — no prompts'
+      : !fin(into) ? 'coach off, but the trail was shown on screen'
+      : into < 0 ? 'coach off, but the trail had been shown on screen on an earlier run'
+      : `coach off, but the trail was shown on screen ${clock(into)} into the run`]);
     if (c.assisted) {
       rows.push(['Corridor', `${fmtShort(c.tolM ?? 20, imp)}${c.scent ? ' · experimental scent corridor' : ''}`]);
       if (fin(c.calls)) rows.push(['Coach calls', String(c.calls)]);

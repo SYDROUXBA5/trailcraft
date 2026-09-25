@@ -599,7 +599,7 @@ export function handlerStats(handlerId, sessions) {
     metres: 0, laidMetres: 0, seconds: 0, longest: 0,
     firstAt: null, lastAt: null,
     bands: { hot: 0, warm: 0, cold: 0 }, unknownAge: 0,
-    dogs: {}, assisted: 0, blind: 0, medOff: null,
+    dogs: {}, assisted: 0, blind: 0, shown: 0, medOff: null,
   };
   for (const s of laid) out.laidMetres += pathLenOf(s.data.trail);
   const offs = [];
@@ -617,7 +617,13 @@ export function handlerStats(handlerId, sessions) {
     const band = ageBand(s.data.result?.ageMin);
     if (band) out.bands[band.key]++; else out.unknownAge++;
     if (s.dogId) out.dogs[s.dogId] = (out.dogs[s.dogId] || 0) + 1;
-    if (s.data.coach) { if (s.data.coach.assisted) out.assisted++; else out.blind++; }
+    /* Blind means the handler did not know, not merely that the coach was
+       off: a run with the trail on screen is neither, and is counted apart. */
+    if (s.data.coach) {
+      if (s.data.coach.assisted) out.assisted++;
+      else if (trailShown(s.data)) out.shown++;
+      else out.blind++;
+    }
     const r = s.data.result;
     if (r && Number.isFinite(r.medAbs)) offs.push(r.medAbs);
   }
