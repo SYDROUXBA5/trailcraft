@@ -318,7 +318,10 @@ t('on a trail the find is at the end the layer walked to, not the end of a drawn
   assert.equal(scorable(run(150, { plan: true })).right, true,
     'a drawn line\u2019s end is only where a finger stopped, so the marks decide');
   assert.equal(scorable(atEnd({ plan: true })), null, 'and a second mark leaves it unscored');
-  assert.equal(scorable(run(150)), null, 'the only mark of a found run is never called wrong');
+  /* This used to be null: the only mark of a find was never scored wrong.
+     But a laid trail's end is where the layer's phone stopped, a fix and not
+     a tap, and a call half the trail short of it was not the find. */
+  assert.equal(scorable(run(150)).right, false, 'the only mark, plainly short of a laid trail\u2019s end, was wrong');
 });
 
 /* The review's case: one hide placed with a tap on the map, one Indication
@@ -348,8 +351,12 @@ t('the only call of a found run is never scored wrong', () => {
 });
 
 /* A drawn trail that arrived as a Trail Card carries `drawn`, not `plan`, and
-   was scored against the end of its drawn line as if a layer had walked it. */
-t('a drawn card\u2019s end is not where the find was', () => {
+   was scored against the end of its drawn line as if a layer had walked it.
+   Then, with no target at all, its only call was taken as the find wherever
+   it was made, and a "Certain" 500 m short was banked as right for good: no
+   walked card ever comes for a drawn card to put it straight. Its end is
+   now what a hide tapped onto the map is, a place a finger put. */
+t('a drawn card\u2019s end is where a finger put it, as a tapped hide is', () => {
   const START = { lat: 51, lon: -2.6 };
   const end = project(START, 0, 300);
   const at = project(end, 180, 150);
@@ -365,9 +372,63 @@ t('a drawn card\u2019s end is not where the find was', () => {
       debrief: { outcome: 'found', target: 'real', blind: 'handler' },
     },
   };
-  assert.equal(firstCallWasFind(s), null, 'the marks decide, and two leave it open');
+  /* Both of these were read from the marks alone: two left it open, and one
+     was the find, however far off. */
+  assert.equal(firstCallWasFind(s), false, 'a later mark at the drawn end shows the find was there');
   s.data.trackWaypoints.pop();
-  assert.equal(firstCallWasFind(s), true, 'one mark on a found run is the find');
+  assert.equal(firstCallWasFind(s), null, 'the only mark, far from the drawn end: not scored, not right');
+  const far = { ...s, data: { ...s.data, trackWaypoints: s.data.trackWaypoints.map(w => ({ ...w, ...project(end, 180, 500) })) } };
+  assert.equal(callVerdict(far).why, 'later-find', 'a "Certain" 500 m short is not banked as a right call');
+  const close = { ...s, data: { ...s.data, trackWaypoints: s.data.trackWaypoints.map(w => ({ ...w, ...project(end, 180, 6) })) } };
+  assert.equal(firstCallWasFind(close), true, 'at the drawn end it is the find');
+  assert.equal(firstCallWasFind({ ...s, data: { ...s.data, walked: true } }), false,
+    'once walked, the end is a fix, and a far call is wrong');
+});
+
+/* The review's case, on a trail saved as confirmLay saves it: ten found runs,
+   one "Certain" each, six at the end and four 170 m short. Scoring only the
+   runs with a second mark at the end read "about right" (6 of 6), where the
+   handler was right 6 times in 10. The second mark is optional, so this
+   hid the very over-confidence the call is there to catch. */
+t('against a GPS-placed target, the only call of a find is wrong when it was plainly elsewhere', () => {
+  const START = { lat: 51, lon: -2.6 };
+  const end = { ...project(START, 0, 400), t: 5000, acc: 6 };
+  const trail = [{ ...START, t: 1000, acc: 5 }, { ...project(START, 0, 200), t: 3000, acc: 5 }, end];
+  const run = (short) => {
+    const at = project(end, 180, short);
+    return {
+      data: {
+        trail, track: [{ ...at, t: 9000, acc: 5 }],
+        trackWaypoints: [{ kind: 'Indication', lat: at.lat, lon: at.lon, t: 9000,
+          call: { v: CALL_V, conf: 'sure', seen: false, at: 9000 } }],
+        debrief: { outcome: 'found', target: 'real', blind: 'handler' },
+      },
+    };
+  };
+  const runs = [...Array(6)].map(() => run(3)).concat([...Array(4)].map(() => run(170)));
+  const sure = calibration(runs).bands.find(b => b.v === 'sure');
+  assert.deepEqual([sure.n, sure.right, sure.verdict], [10, 6, 'running hot']);
+  assert.equal(calibrationLosses(runs).laterFind, 0);
+  assert.equal(firstCallWasFind(run(40)), null, 'within both fixes\u2019 uncertainty of thirty metres: not scored');
+  assert.equal(firstCallWasFind(run(45)), false, 'past it: wrong');
+
+  /* A hide dropped at the layer's feet is a fix too; one tapped onto the map
+     is not, and keeps the rule for a finger. */
+  const HIDE = { lat: 51, lon: -2.6 };
+  const search = (hide) => {
+    const at = project(HIDE, 90, 80);
+    return {
+      data: {
+        hides: [hide], track: [{ ...at, t: 1000, acc: 4 }],
+        trackWaypoints: [{ kind: 'Indication', lat: at.lat, lon: at.lon, t: 1000,
+          call: { v: CALL_V, conf: 'sure', seen: false, at: 1000 } }],
+        debrief: { outcome: 'found', target: 'real', blind: 'handler' },
+      },
+    };
+  };
+  assert.equal(firstCallWasFind(search({ ...HIDE, t: 1, gps: true, acc: 8 })), false, 'dropped at the feet, 80 m off');
+  assert.equal(firstCallWasFind(search({ ...HIDE, t: 1, gps: true, acc: 60 })), null, 'unless its own fix was that poor');
+  assert.equal(firstCallWasFind(search({ ...HIDE, t: 1 })), null, 'tapped onto the map');
 });
 
 console.log(`\n${pass} passed total\n`);

@@ -75,22 +75,28 @@ export function firstCall(session) {
 /** How near where the target was a first call has to be to count as the
     find, and how far from it before it plainly was not. The mark is where the
     handler's phone was, not the dog's nose, and the hide or the end of the
-    trail was placed by another fix, or more often by a tap on the map:
-    fifteen metres covers both on a fair day. Past thirty, and a later
-    Indication at the target, the call was somewhere else, and that distance
-    grows with the phone's own stated uncertainty, because a poor fix should
-    make the app less sure a call was wrong, never more sure it was right. In
-    between, the map cannot say, and nothing is scored. */
+    trail was placed by another fix or by a tap on the map: fifteen metres
+    covers both on a fair day. Past thirty the call was somewhere else, and
+    that distance grows with the phones' own stated uncertainty, because a
+    poor fix should make the app less sure a call was wrong, never more sure
+    it was right. In between, the map cannot say, and nothing is scored. */
 export const AT_FIND_M = 15;
 export const OFF_FIND_M = 30;
 
-/* Where the target actually was: the hides of a search, or the end of a laid
-   or walked trail. Not a drawn line's end (unwalkedPlan), a plan's or a drawn
-   card's, which is only where a finger stopped. */
+/* Where the target actually was, and whether a GPS fix put it there: the
+   hides of a search, or the end of a trail. A laid or walked trail ends where
+   the layer's phone stopped, a fix; so does a hide dropped at the layer's
+   feet, which says so (`gps`). A hide tapped onto the map, and the end of a
+   drawn card's line, are only where a finger stopped. A plan still waiting
+   for its walk has none yet: its walked card will bring the real end. */
 function targetsOf(d) {
-  const pts = d?.hides?.length ? d.hides
-    : d?.trail?.length > 1 && !unwalkedPlan(d) ? [d.trail[d.trail.length - 1]] : [];
-  return pts.filter(p => Number.isFinite(p?.lat) && Number.isFinite(p?.lon));
+  const at = (p, gps) => ({ lat: p?.lat, lon: p?.lon, gps,
+    acc: gps && Number.isFinite(p?.acc) && p.acc > 0 ? p.acc : 0 });
+  const end = d?.trail?.length > 1 ? d.trail[d.trail.length - 1] : null;
+  const pts = d?.hides?.length ? d.hides.map(h => at(h, h?.gps === true))
+    : !end || (d.plan && !d.walked) ? []
+    : [at(end, !unwalkedPlan(d))];
+  return pts.filter(p => Number.isFinite(p.lat) && Number.isFinite(p.lon));
 }
 
 /* A mark with a place the phone stood behind: not one made after the GPS
@@ -114,15 +120,18 @@ function accAt(track, t) {
     dog well — the opposite of what this is for.
 
     true when the call was made where the target was; false when it plainly
-    was not; null when nothing shows which. A call is only wrong when a later
-    Indication, made at the target, shows the find was that one. A run's only
-    Indication on a found run is never scored wrong, however far it sat from
-    a hide placed with a tap on the map: nothing else shows where the find
-    was. Near the target it is right; further off it is not scored. With no
-    map to measure against — a drawn line, a mark made after the GPS dropped
-    out — the only Indication of a run is taken as the find, as it always
-    was. With more than one, the find may have been a later one, and the call
-    is not scored. */
+    was not; null when nothing shows which. Against a target a GPS fix put
+    there — a laid trail's end, a hide dropped at the layer's feet — a call
+    plainly elsewhere was wrong, whether or not a second mark was made at the
+    find: that mark is optional, and a rule that waited for it let a
+    handler's over-confidence only ever count in their favour. Against a
+    target placed with a finger, which can be tens of metres out, a far call
+    is only wrong when a later Indication, made at the target, shows the find
+    was that one; the only call of a find is not scored. With no map to
+    measure against — a plan not walked yet, a mark made after the GPS
+    dropped out — the only Indication of a run is taken as the find, as it
+    always was. With more than one, the find may have been a later one, and
+    the call is not scored. */
 export function firstCallWasFind(session) {
   const c = firstCall(session);
   if (!c) return null;
@@ -133,8 +142,11 @@ export function firstCallWasFind(session) {
     const gapOf = (w) => Math.min(...targets.map(p => dist(w, p)));
     const gap = gapOf(c);
     if (gap <= AT_FIND_M) return true;
+    const near = targets.reduce((a, p) => (dist(c, p) < dist(c, a) ? p : a));
+    const far = gap > OFF_FIND_M + accAt(d.track, c.t) + near.acc;
+    if (far && near.gps) return false;
     const foundLater = marks.some(w => w !== c && Number.isFinite(w.t) && w.t > c.t && placed(w) && gapOf(w) <= AT_FIND_M);
-    if (foundLater && gap > OFF_FIND_M + accAt(d.track, c.t)) return false;
+    if (foundLater && far) return false;
     return null;
   }
   return marks.length <= 1 ? true : null;
