@@ -141,6 +141,13 @@ const avaHtml = (ent, cls = '') => {
   return `<span class="ava ${cls}${photo ? ' has-photo' : ''}"${style}>${init}</span>`;
 };
 
+/* A chosen chip is lit for the eye and pressed for a screen reader, in one
+   step, so the two can never disagree about which dog the run is for. */
+const pressed = (b, on, cls = 'selected') => {
+  b.classList.toggle(cls, on);
+  b.setAttribute('aria-pressed', String(on));
+};
+
 /* ── Screens ──────────────────────────────────────────────────────── */
 const SCREENS = ['scrOnboardHandler', 'scrOnboardDog', 'scrTutorial', 'scrHome', 'scrHandler', 'scrLay',
   'scrConfirm', 'scrShare', 'scrContam', 'scrPick', 'scrScan', 'scrRun', 'scrResult',
@@ -340,8 +347,7 @@ function styleGap() {
   document.documentElement.style.setProperty('--bar-gap', `${gap}px`);
 }
 function paintStylePick() {
-  $('stylePick').querySelectorAll('[data-style]').forEach(b =>
-    b.classList.toggle('selected', b.dataset.style === settings.mapStyle));
+  $('stylePick').querySelectorAll('[data-style]').forEach(b => pressed(b, b.dataset.style === settings.mapStyle));
 }
 function closeStylePick() {
   $('stylePick').hidden = true;
@@ -920,7 +926,7 @@ function paintColourRows() {
     const cur = String(settings[key]).toUpperCase();
     const custom = !presets.some(c => c.hex === cur);
     $(id).innerHTML = presets.map(c =>
-      `<button type="button" class="swatch${c.hex === cur ? ' selected' : ''}" data-colour="${c.hex}" style="--c:${c.hex}" aria-label="${c.name}" title="${c.name}"></button>`).join('')
+      `<button type="button" class="swatch${c.hex === cur ? ' selected' : ''}" data-colour="${c.hex}" aria-pressed="${c.hex === cur}" style="--c:${c.hex}" aria-label="${c.name}" title="${c.name}"></button>`).join('')
       + `<label class="swatch custom${custom ? ' selected' : ''}" title="Any colour" style="--c:${custom ? cur : 'transparent'}"><input type="color" value="${cur}" aria-label="Choose any colour"></label>`;
   };
   row('plumeRow', 'plumeColor', COLOUR_PRESETS);
@@ -930,8 +936,8 @@ function paintColourRows() {
   for (const [dot, key] of [['plumeDot', 'plumeColor'], ['stepDot', 'stepColor'], ['dogDot', 'dogColor'], ['windDot', 'windColor']]) {
     $(dot).style.background = settings[key];
   }
-  $('trailStyleSeg').querySelectorAll('[data-trail-style]').forEach(b => b.classList.toggle('on', b.dataset.trailStyle === settings.trailStyle));
-  $('dogStyleSeg').querySelectorAll('[data-dog-style]').forEach(b => b.classList.toggle('on', b.dataset.dogStyle === settings.dogStyle));
+  $('trailStyleSeg').querySelectorAll('[data-trail-style]').forEach(b => pressed(b, b.dataset.trailStyle === settings.trailStyle, 'on'));
+  $('dogStyleSeg').querySelectorAll('[data-dog-style]').forEach(b => pressed(b, b.dataset.dogStyle === settings.dogStyle, 'on'));
 }
 function setColour(key, hex) {
   if (!isHex(hex)) return;
@@ -1179,7 +1185,7 @@ const lineShown = (m) => imp() ? Math.round(m / 0.3048 * 2) / 2 : m;
 function paintDogUnits() {
   const im = imp();
   $('obDogUnits').querySelectorAll('[data-units]').forEach(b =>
-    b.classList.toggle('on', (b.dataset.units === 'imperial') === im));
+    pressed(b, (b.dataset.units === 'imperial') === im, 'on'));
   $('obDogWeightUnit').textContent = im ? 'lb' : 'kg';
   const ll = document.querySelector('label[for="obDogLine"]');
   if (ll) ll.textContent = `Line length, ${im ? 'feet' : 'metres'}`;
@@ -1197,12 +1203,14 @@ function setDogUnits(units) {
 }
 
 function paintDogSex() {
-  $('obDogSex').querySelectorAll('[data-sex]').forEach(b =>
-    b.classList.toggle('selected', b.dataset.sex === obDogSex));
+  $('obDogSex').querySelectorAll('[data-sex]').forEach(b => pressed(b, b.dataset.sex === obDogSex));
 }
 function paintDogLevel() {
-  $('obDogLevel').querySelectorAll('.radio-card').forEach(b =>
-    b.classList.toggle('selected', b.dataset.level === obDogLevel));
+  $('obDogLevel').querySelectorAll('.radio-card').forEach(b => {
+    const on = b.dataset.level === obDogLevel;
+    b.classList.toggle('selected', on);
+    b.setAttribute('aria-checked', String(on));
+  });
 }
 function paintObAva(id, name) {
   const a = $(id);
@@ -1320,8 +1328,8 @@ function paintOdours() {
   if (set) {
     $('lblOdour').textContent = set.ask;
     $('rowOdours').innerHTML = set.list.map(o =>
-      `<button class="chip odour${!custom && o === odour ? ' selected' : ''}" data-odour="${esc(o)}">${esc(o)}</button>`).join('')
-      + `<button class="chip odour${custom ? ' selected' : ' ghost'}" data-odour-other>${custom ? 'Other' : '+ Other'}</button>`;
+      `<button class="chip odour${!custom && o === odour ? ' selected' : ''}" data-odour="${esc(o)}" aria-pressed="${!custom && o === odour}">${esc(o)}</button>`).join('')
+      + `<button class="chip odour${custom ? ' selected' : ' ghost'}" data-odour-other aria-pressed="${custom}">${custom ? 'Other' : '+ Other'}</button>`;
     /* One row, two lists: coming from the far end of the other list, a list
        with nothing chosen yet should open at its beginning. */
     if (odoursFor !== target.id) $('rowOdours').scrollLeft = 0;
@@ -1346,16 +1354,16 @@ function renderHome() {
   $('homeSettings').innerHTML = avaHtml(handler);
 
   $('rowHandlers').innerHTML = handlers.map(h =>
-    `<button class="chip${h.id === handler.id ? ' selected' : ''}" data-handler="${esc(h.id)}">${avaHtml(h)}${esc(h.name)}</button>`).join('')
+    `<button class="chip${h.id === handler.id ? ' selected' : ''}" data-handler="${esc(h.id)}" aria-pressed="${h.id === handler.id}">${avaHtml(h)}${esc(h.name)}</button>`).join('')
     + `<button class="chip ghost" data-add-handler>+ Add handler</button>`;
 
   $('lblDogs').textContent = `${handler.name}'s dogs`;
   $('rowDogs').innerHTML = team.map(d =>
-    `<button class="chip${d.id === dog?.id ? ' selected' : ''}" data-dog="${esc(d.id)}">${avaHtml(d)}<span class="who">${esc(d.name)}<i class="sub">${esc(d.level)}</i></span></button>`).join('')
+    `<button class="chip${d.id === dog?.id ? ' selected' : ''}" data-dog="${esc(d.id)}" aria-pressed="${d.id === dog?.id}">${avaHtml(d)}<span class="who">${esc(d.name)}<i class="sub">${esc(d.level)}</i></span></button>`).join('')
     + `<button class="chip ghost" data-add-dog>+ Add dog</button>`;
 
   $('rowTargets').innerHTML = TARGETS.map(t =>
-    `<button class="chip plain${t.id === target.id ? ' selected' : ''}" data-target="${t.id}" aria-label="${esc(t.label)}: ${esc(t.sub)}"><b>${esc(t.label)}</b></button>`).join('');
+    `<button class="chip plain${t.id === target.id ? ' selected' : ''}" data-target="${t.id}" aria-pressed="${t.id === target.id}" aria-label="${esc(t.label)}: ${esc(t.sub)}"><b>${esc(t.label)}</b></button>`).join('');
   paintOdours();
 
   /* Trail age belongs to a person and only to a person: a hide has no walk
@@ -1365,7 +1373,7 @@ function renderHome() {
   $('rowLevels').hidden = !isPerson;
   if (isPerson) {
     $('rowLevels').innerHTML = LEVELS.map(l =>
-      `<button class="chip lvl lvl-${l.id}${l.id === S.level.id ? ' selected' : ''}" data-trail-level="${l.id}" aria-label="${esc(l.label)}: ${esc(l.sub)}">
+      `<button class="chip lvl lvl-${l.id}${l.id === S.level.id ? ' selected' : ''}" data-trail-level="${l.id}" aria-pressed="${l.id === S.level.id}" aria-label="${esc(l.label)}: ${esc(l.sub)}">
         <span class="lvl-mark">${LEVEL_ICON[l.id]}</span>
         <span class="who"><b>${esc(l.label)}</b></span>
       </button>`).join('');
@@ -1376,9 +1384,9 @@ function renderHome() {
      searched for at the same time — somebody else has to walk away and be
      found. A hide is different: you can place that yourself. */
   $('rowLayers').innerHTML =
-    (isPerson ? '' : `<button class="chip${!layer ? ' selected' : ''}" data-layer=""><span class="who"><b>Just me</b><i class="sub">single phone</i></span></button>`)
+    (isPerson ? '' : `<button class="chip${!layer ? ' selected' : ''}" data-layer="" aria-pressed="${!layer}"><span class="who"><b>Just me</b><i class="sub">single phone</i></span></button>`)
     + layers.map(l =>
-      `<button class="chip${l.id === layer?.id ? ' selected' : ''}" data-layer="${esc(l.id)}">${avaHtml(l)}<span class="who"><b>${esc(l.name)}</b></span></button>`).join('')
+      `<button class="chip${l.id === layer?.id ? ' selected' : ''}" data-layer="${esc(l.id)}" aria-pressed="${l.id === layer?.id}">${avaHtml(l)}<span class="who"><b>${esc(l.name)}</b></span></button>`).join('')
     + `<button class="chip ghost" data-add-layer>+ Add person</button>`;
 
   const setter = layer ? layer.name : handler.name;
@@ -2698,18 +2706,18 @@ function paintDebrief() {
       <span class="label">${esc(f.label)}${f.required ? '' : ' <i class="opt">optional</i>'}</span>
       <p class="why">${esc(f.why)}</p>
       <div class="db-opts">${f.options.map(o =>
-        `<button type="button" class="db-opt${d[f.id] === o.v ? ' on' : ''}" data-pick="${f.id}" data-v="${o.v}">${esc(o.label)}</button>`).join('')}</div>
+        `<button type="button" class="db-opt${d[f.id] === o.v ? ' on' : ''}" data-pick="${f.id}" data-v="${o.v}" aria-pressed="${d[f.id] === o.v}">${esc(o.label)}</button>`).join('')}</div>
     </div>`).join('');
   $('dbFlags').innerHTML = FLAGS.map(f =>
-    `<button type="button" class="chip${d.flags.includes(f.v) ? ' selected' : ''}" data-flag="${f.v}">${esc(f.label)}</button>`).join('');
+    `<button type="button" class="chip${d.flags.includes(f.v) ? ' selected' : ''}" data-flag="${f.v}" aria-pressed="${d.flags.includes(f.v)}">${esc(f.label)}</button>`).join('');
   $('dbSeen').innerHTML = CONDITIONS.map(f => `
     <div class="db-field">
       <span class="label">${esc(f.label)}</span>
       <div class="db-opts">${f.options.map(o =>
-        `<button type="button" class="db-opt${dbSeen?.[f.id] === o.v ? ' on' : ''}" data-seen="${f.id}" data-v="${o.v}">${esc(o.label)}</button>`).join('')}</div>
+        `<button type="button" class="db-opt${dbSeen?.[f.id] === o.v ? ' on' : ''}" data-seen="${f.id}" data-v="${o.v}" aria-pressed="${dbSeen?.[f.id] === o.v}">${esc(o.label)}</button>`).join('')}</div>
     </div>`).join('');
   $('dbNoteTags').innerHTML = NOTE_TAGS.map(t =>
-    `<button type="button" class="chip${d.noteTag === t.v ? ' selected' : ''}" data-notetag="${t.v}">${esc(t.label)}</button>`).join('');
+    `<button type="button" class="chip${d.noteTag === t.v ? ' selected' : ''}" data-notetag="${t.v}" aria-pressed="${d.noteTag === t.v}">${esc(t.label)}</button>`).join('');
   $('dbSave').textContent = debriefDone(d) ? 'Save' : 'Two taps to go';
 }
 
@@ -3736,7 +3744,7 @@ function paintAge() {
     const mine = custom
       ? ![0, 5, 10].includes(draw.ageMin)
       : Number(b.dataset.age) === draw.ageMin;
-    b.classList.toggle('selected', mine);
+    pressed(b, mine);
     if (custom) b.textContent = mine ? `${draw.ageMin} min` : 'Custom';
   });
   $('drawConfirmSub').textContent = draw.ageMin
@@ -5382,7 +5390,7 @@ function paintCoachControls() {
   }
   $('coachControls').querySelectorAll('[data-tol]').forEach((chip, i) => {
     chip.textContent = imp() ? `${[30, 60, 100, 150][i]} ft` : `${opts[i]} m`;
-    chip.classList.toggle('selected', opts[i] === settings.coachTol);
+    pressed(chip, opts[i] === settings.coachTol);
   });
   const on = settings.coachOn !== false;
   $('coachControls').querySelectorAll('[data-coach]').forEach(b => {
