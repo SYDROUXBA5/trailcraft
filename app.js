@@ -1589,9 +1589,13 @@ function paintHides() {
   $('layHudText').textContent = n ? `${n} hide${n === 1 ? '' : 's'} placed` : 'Place each hide';
   $('btnLayStop').hidden = n === 0;
 }
+/* A hide dropped here is where a fix put it, not a finger, and says so: a
+   first call plainly far from it is scored wrong (call.js, firstCallWasFind),
+   with the fix's own uncertainty allowed for. */
 function dropHideAtFeet() {
   navigator.geolocation?.getCurrentPosition(p => {
-    rec.hides.push({ lat: p.coords.latitude, lon: p.coords.longitude, t: Date.now() });
+    const acc = Number.isFinite(p.coords.accuracy) && p.coords.accuracy > 0 ? p.coords.accuracy : null;
+    rec.hides.push({ lat: p.coords.latitude, lon: p.coords.longitude, t: Date.now(), gps: true, ...(acc ? { acc } : {}) });
     navigator.vibrate?.(20);
     paintHides();
     map.easeTo({ center: [p.coords.longitude, p.coords.latitude] });
