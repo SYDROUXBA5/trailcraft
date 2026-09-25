@@ -673,10 +673,19 @@ function mirror(uid, table, rec) {
    then receives a minute's worth of points when it changes, not the whole
    run every ten seconds. The id is 120 random bits: the link is the key.
    A run stays readable for 24 hours after it ends (the rules check
-   expiresAt), and a TTL policy in Firestore deletes it after that. */
+   expiresAt), and a TTL policy in Firestore deletes it after that.
+
+   That clean-up reads deleteAt, not expiresAt. A TTL policy only acts on a
+   Timestamp, and expiresAt is a number, which the rules and the viewers
+   read; live runs written with only the number were never deleted. So the
+   run and every chunk carry the same moment twice (expiry). */
 
 const LIVE_TTL = 24 * 3600e3;
 const CHUNK_MS = 60e3;
+/* Offline, Firestore keeps a write for later and does not answer until the
+   server has it, which with no signal is never. Share live waits this long
+   for the run to be taken, then says so rather than doing nothing. */
+const LIVE_WAIT = 15e3;
 let live = null;   // { id, startedAt, chunks: Map<n, signature>, expiresAt, wpsN }
 
 const liveId = () => {
@@ -686,8 +695,12 @@ const liveId = () => {
   return Array.from(bytes, b => alphabet[b % 64]).join('');   // 256 = 4 × 64: no bias
 };
 
-/** Publish a run. `meta` is share.js's liveMeta(): the trail, not the run. */
-export async function startLive(meta) {
+const expiry = (ms) => ({ expiresAt: ms, deleteAt: fb.Timestamp.fromMillis(ms) });
+
+/** Publish a run. `meta` is share.js's liveMeta(): the trail, not the run.
+    Refuses, rather than waiting for ever, when the cloud does not take the
+    run within `waitMs`. */
+export async function startLive(meta, { waitMs = LIVE_WAIT } = {}) {
   if (!fs || !sync.user) throw new Error('Sign in to share live');
   /* The records on this phone are not this account's until that is settled,
      and a live link would publish them under it. */
@@ -696,12 +709,31 @@ export async function startLive(meta) {
   }
   const f = await loadFirebase();
   const id = liveId();
-  const expiresAt = Date.now() + LIVE_TTL;
-  await f.setDoc(f.doc(fs, 'live', id), {
-    ...toCloud(meta), uid: sync.user.uid, expiresAt, ended: false, createdAt: Date.now(), at: Date.now(),
+  const at = Date.now();
+  const expiresAt = at + LIVE_TTL;
+  const wrote = f.setDoc(f.doc(fs, 'live', id), {
+    ...toCloud(meta), uid: sync.user.uid, ...expiry(expiresAt), ended: false, createdAt: at, at,
   });
+  let timer;
+  const late = new Promise(r => { timer = setTimeout(r, waitMs, 'late'); });
+  const took = await Promise.race([wrote, late]).finally(() => clearTimeout(timer));
+  if (took === 'late') {
+    wrote.catch(() => {});
+    dropLive(id);
+    throw new Error('No signal, so the run is not live. Try again when you have some.');
+  }
   live = { id, startedAt: meta.startedAt, chunks: new Map(), expiresAt, wpsN: -1 };
   return id;
+}
+
+/** Take back a live run whose link nobody was given: its start came too late
+    to be any use, or the run it was for had ended by then. Firestore still
+    holds the start and sends it when there is signal, and it sends this
+    delete straight after it, so what reaches the cloud is nothing at all. */
+export function dropLive(id) {
+  if (!fs || !id) return;
+  if (live?.id === id) live = null;
+  fb.deleteDoc(fb.doc(fs, 'live', id)).catch(() => {});
 }
 
 export const liveNow = () => live?.id ?? null;
@@ -732,7 +764,7 @@ export function pushLive(pts, wps = []) {
     live.chunks.set(n, sig);
     const clean = g.map(p => ({ lat: p.lat, lon: p.lon, t: p.t, alt: p.alt ?? null, dwellS: p.dwellS || 0 }));
     fb.setDoc(fb.doc(fs, 'live', live.id, 'chunks', String(n)),
-      { n, expiresAt: live.startedAt + 36 * 3600e3, ...packPoints(clean) }).catch(() => {});
+      { n, ...expiry(live.startedAt + 36 * 3600e3), ...packPoints(clean) }).catch(() => {});
   }
   if (wps.length !== live.wpsN) {
     live.wpsN = wps.length;
@@ -747,7 +779,7 @@ export async function endLive({ result = null, track = [], wps = [] } = {}) {
   const id = live.id;
   live = null;
   await fb.setDoc(fb.doc(fs, 'live', id), {
-    ended: true, endedAt: Date.now(), expiresAt: Date.now() + LIVE_TTL, at: Date.now(),
+    ended: true, endedAt: Date.now(), ...expiry(Date.now() + LIVE_TTL), at: Date.now(),
     result: result ? toCloud(result) : null,
   }, { merge: true });
 }
