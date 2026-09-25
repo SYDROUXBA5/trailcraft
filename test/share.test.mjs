@@ -309,6 +309,17 @@ await t('a kept run goes on under its own handler, with its dog, its coach and w
   assert.equal(sessionFromModel(got).data.seen.wet, 'damp');
 });
 
+await t('a kept run remembers that its trail was shown, so it is not called blind here', async () => {
+  const s = session();
+  s.data.coach = { assisted: false, shadow: { tolM: 20, plain: 0, scent: 0 } };
+  s.data.revealedAt = s.data.trackStarted + 65e3;
+  const got = await decodeShared(await encodeShared(trailModel(s, people)));
+  const kept = keptSession(got, { id: 'k2', at: T0 + 60 * 60e3 });
+  assert.equal(kept.data.revealedAt, s.data.revealedAt);
+  const text = rowsOf(detailSections(trailModel(kept, peopleOf(kept, bobs)), { when: () => 'x' }));
+  assert.doesNotMatch(text, /blind — no prompts/);
+});
+
 await t('whose a record is: a run kept by an older build, a run made here on a sent trail, a Trail Card', () => {
   const at = T0 + 60 * 60e3;
   /* Kept before the names were stored: only `from`, which was the handler. */
