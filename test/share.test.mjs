@@ -851,4 +851,42 @@ await t('a kept trail nobody has run yet is this phone’s to run', () => {
   assert.equal(peopleOf(theirs, bobs).handler.name, 'Alice');
 });
 
+/* A run kept by an older build, or one whose dog was deleted, has no name to
+   say the sentence with. Rebuilt, it read "The dog’s track…" and the one
+   place the name survived, the saved sentence, was thrown away. */
+await t('with no dog’s name to hand, the saved sentence is said rather than rebuilt nameless', async () => {
+  const r = { kind: 'trail', sentence: 'Bo’s track ran mainly to the left of the line — typically 4 m from it.',
+    medAbs: 3.7, shares: { left: 0.5, on: 0.3, right: 0.2 }, mainSide: 'left', accMed: 4, noisy: false };
+  assert.equal(resultSentence(r, null, { imperial: true }), r.sentence);
+  assert.equal(resultSentence(r, '  ', {}), r.sentence, 'a blank name is no name');
+  assert.equal(resultSentence(r, 'Bo', { imperial: true }), 'Bo’s track ran mainly to the left of the line — typically 12 ft from it.',
+    'with a name it is still said in the reader’s units');
+  const bare = { ...r, sentence: undefined };
+  assert.equal(resultSentence(bare, null, {}, 'Bo, saved with the record.'), 'Bo, saved with the record.', 'the summary next');
+  assert.match(resultSentence(bare, null), /^The dog’s track ran mainly to the left/, 'and rebuilt only when nothing was saved');
+  /* The saved text on a kept record is a stranger's: it comes through
+     cleanResult, which keeps only a trimmed string of bounded length. */
+  assert.equal(resultSentence({ ...r, sentence: { toString: () => '<b>' } }, null, {}, 'Saved.'), 'Saved.');
+  assert.equal(resultSentence({ ...r, sentence: 'x'.repeat(900) }, null).length, 300);
+  assert.equal(resultSentence(bare, null, {}, { html: '<b>' }), resultSentence(bare, null), 'a summary that is not text is not said');
+  /* A result from before the median was kept claimed too much: still rebuilt. */
+  assert.match(resultSentence({ kind: 'trail', sentence: 'Bo worked about 4 m to the right of the line.', mean: 4.2, side: 'right' }, null),
+    /^The dog’s track sat mainly to the right of the line/);
+  /* An older build's link carries no dog, and heads its page with the saved words. */
+  const s = session();
+  s.data.result = { ...r };
+  const m = trailModel(s, { ...people, dog: null });
+  assert.equal(headline(m), r.sentence);
+  assert.equal(headline(await decodeShared(await encodeShared(m))), r.sentence);
+  assert.match(toGpx(m), /<desc>Bo’s track ran mainly to the left/);
+});
+
+/* "(±—)": a noisy result from a link that carried no accuracy figure. */
+await t('a noisy result with no accuracy figure leaves the figure out', () => {
+  const r = { kind: 'trail', medAbs: 3.7, shares: { left: 0.5, on: 0.3, right: 0.2 }, noisy: true };
+  assert.equal(resultSentence(r, 'Bo'), 'Bo’s track sat about 4 m from the line, but GPS uncertainty is too large to read which side.');
+  assert.equal(resultSentence({ ...r, accMed: 'x' }, 'Bo'), resultSentence(r, 'Bo'));
+  assert.match(resultSentence({ ...r, accMed: 8 }, 'Bo'), /\(±8 m\)/);
+});
+
 console.log(`\n${pass} passed total`);

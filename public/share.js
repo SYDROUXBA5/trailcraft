@@ -621,11 +621,27 @@ const minutes = (min) => (min < 60 ? `${min} min` : `${Math.floor(min / 60)} h${
     a sentence that claimed too much. Grading, the result screen, the lists,
     the link and the report all say it from here, so they cannot disagree.
     A search with no indication has no numbers to say it from, and keeps its
-    own; null when there is no result to read. */
-export function resultSentence(r, dogName, u = {}) {
+    own; null when there is no result to read.
+
+    With no dog's name to say it with — a run kept by a build that did not
+    keep the name, or one whose dog has since been deleted — the sentence
+    saved with the result is said instead, or `saved` (the record's summary)
+    when it has none. Rebuilt, it came out as "The dog's track…" and threw
+    away the one place the name survived; the saved words, in the units they
+    were saved in, are the lesser loss. A result from before the median was
+    kept is still rebuilt, because its saved sentence claimed too much. The
+    saved text is a stranger's on a kept record: it comes through
+    cleanResult, and every caller escapes what this returns. */
+export function resultSentence(r, dogName, u = {}, saved = null) {
   const c = cleanResult(r);
   if (!c) return null;
-  const dog = typeof dogName === 'string' && dogName.trim() ? dogName : 'The dog';
+  const named = typeof dogName === 'string' && dogName.trim() !== '';
+  const legacy = c.kind === 'trail' && c.medAbs == null && c.mean != null;
+  if (!named && !legacy) {
+    const kept = c.sentence || (typeof saved === 'string' && saved.trim() ? saved : null);
+    if (kept) return kept;
+  }
+  const dog = named ? dogName : 'The dog';
   const len = (x) => fmtShort(x, !!u.imperial);
   if (c.kind === 'search') {
     if (c.toFirst == null) return c.sentence ?? null;
@@ -645,7 +661,10 @@ export function resultSentence(r, dogName, u = {}) {
       : `${dog}’s track sat mainly to the ${c.side ?? (c.mean > 0 ? 'right' : 'left')} of the line — about ${len(a)} from it on average.`;
   }
   if (!c.shares) return unread;
-  if (c.noisy) return `${dog}’s track sat about ${len(c.medAbs)} from the line, but GPS uncertainty (±${len(c.accMed)}) is too large to read which side.`;
+  /* The uncertainty is said only when there is a figure for it: "(±—)" is a
+     placeholder, not a number. */
+  if (c.noisy) return `${dog}’s track sat about ${len(c.medAbs)} from the line, but GPS uncertainty`
+    + `${c.accMed != null ? ` (±${len(c.accMed)})` : ''} is too large to read which side.`;
   /* Judged on the share it prints. A link rounds the share to two places, so
      judging on the raw one let a run at 69.6 % read one way on the phone that
      ran it and "70 %" on the phone it was sent to. */
