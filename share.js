@@ -623,6 +623,12 @@ export function fileBase(m) {
 const clock = fmtDur;
 const minutes = (min) => (min < 60 ? `${min} min` : `${Math.floor(min / 60)} h${min % 60 ? ` ${min % 60} min` : ''}`);
 
+/* The dog's name as a sentence from resultSentence says it: every one
+   begins with the name and then "’s track", " indicated in" or " ran, but".
+   Null for words it did not make. */
+const savedName = (said) => (typeof said === 'string'
+  ? said.match(/^(\S.{0,79}?)(?:’s track | indicated in | ran, but )/)?.[1] ?? null : null);
+
 /** A result's one sentence, built from its numbers in the reader's units.
     The sentence saved with a result was fixed when it was graded, in the
     units in force then, so a shared page or report headed by it said "4 m"
@@ -633,24 +639,26 @@ const minutes = (min) => (min < 60 ? `${min} min` : `${Math.floor(min / 60)} h${
     own; null when there is no result to read.
 
     With no dog's name to say it with — a run kept by a build that did not
-    keep the name, or one whose dog has since been deleted — the sentence
-    saved with the result is said instead, or `saved` (the record's summary)
-    when it has none. Rebuilt, it came out as "The dog's track…" and threw
-    away the one place the name survived; the saved words, in the units they
-    were saved in, are the lesser loss. A result from before the median was
-    kept is still rebuilt, because its saved sentence claimed too much. The
-    saved text is a stranger's on a kept record: it comes through
-    cleanResult, and every caller escapes what this returns. */
+    keep the name, or one whose dog has since been deleted — the name is
+    read from the sentence saved with the result, or from `saved` (the
+    record's summary) when it has none, and the sentence is built with it in
+    the reader's units. Rebuilt with no name, it came out as "The dog's
+    track…" and threw away the one place the name survived; said as saved,
+    it kept the units it was graded in, and a run graded as "The dog" in
+    metres read "12 m" to a reader in feet. Saved words this function did
+    not make are said as they are. A result from before the median was kept
+    is still rebuilt, because its saved sentence claimed too much. The saved
+    text is a stranger's on a kept record: it comes through cleanResult, and
+    every caller escapes what this returns. */
 export function resultSentence(r, dogName, u = {}, saved = null) {
   const c = cleanResult(r);
   if (!c) return null;
   const named = typeof dogName === 'string' && dogName.trim() !== '';
   const legacy = c.kind === 'trail' && c.medAbs == null && c.mean != null;
-  if (!named && !legacy) {
-    const kept = c.sentence || (typeof saved === 'string' && saved.trim() ? saved : null);
-    if (kept) return kept;
-  }
-  const dog = named ? dogName : 'The dog';
+  const kept = named ? null : c.sentence || (typeof saved === 'string' && saved.trim() ? saved.trim() : null);
+  const keptName = savedName(kept);
+  if (kept && !keptName && !legacy) return kept;
+  const dog = named ? dogName : keptName ?? 'The dog';
   const len = (x) => fmtShort(x, !!u.imperial);
   if (c.kind === 'search') {
     if (c.toFirst == null) return c.sentence ?? null;
