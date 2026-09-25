@@ -462,6 +462,9 @@ export function sessionFromModel(m) {
       weather: m.wx ?? null, runWeather: m.runWx ?? undefined, track: m.track ?? undefined, trackWaypoints: m.wps ?? [],
       trackStarted: m.runAt ?? undefined, result: m.result ?? undefined, plan: m.plan, walked: m.walked, k: m.k,
       debrief: m.debrief ?? undefined, coach: m.coach ?? undefined, seen: m.seen ?? undefined,
+      /* Kept with the run, or a run the sender revealed would be called blind
+         once it is on this phone. */
+      revealedAt: m.revealedAt ?? undefined,
     },
   };
 }
