@@ -101,13 +101,21 @@ const fmtWhen = (t) => new Date(t).toLocaleString([], { weekday: 'short', day: '
    already knows it is there when the words arrive, and says them. It is
    faded out and emptied rather than hidden: a hidden region is a new one
    each time, and a new one is not listened to. It stays up long enough to
-   be read — a glance for "Saved", longer for a sentence about an account. */
+   be read — a glance for "Saved", longer for a sentence about an account.
+   It is shown a frame later, so the fade runs, and a frame never comes while
+   the page is hidden, which it often is with the screen dark on a recording.
+   The late frame then lit a pill the hide had already emptied, and the empty
+   pill stayed until the next message. So the hide cancels the frame, and the
+   frame only shows the message it was asked to if it is still the one there. */
 const toastMs = (msg) => Math.max(3000, 1500 + 60 * String(msg).length);
 const toast = (msg) => {
   const t = $('toast'); t.textContent = msg;
-  requestAnimationFrame(() => t.classList.add('show'));
+  const said = t.textContent;
+  cancelAnimationFrame(toast._raf);
+  toast._raf = requestAnimationFrame(() => { if (said && t.textContent === said) t.classList.add('show'); });
   clearTimeout(toast._t);
   toast._t = setTimeout(() => {
+    cancelAnimationFrame(toast._raf);
     t.classList.remove('show');
     toast._gone = setTimeout(() => { t.textContent = ''; }, 300);
   }, toastMs(msg));
@@ -154,6 +162,22 @@ const pressed = (b, on, cls = 'selected') => {
   b.classList.toggle(cls, on);
   b.setAttribute('aria-pressed', String(on));
 };
+
+/* Most rows of chips are drawn again whole when one is tapped, and the chip
+   that was tapped goes with them. Focus went too: VoiceOver was left standing
+   on nothing and never said what the tap had changed. So when focus was on
+   the chip that was tapped, it moves to the one drawn in its place, the chip
+   carrying the same data, which is then read out as chosen. Focus that was
+   anywhere else, or on a chip that survived the repaint, is left alone. */
+function repaintFrom(chip, paint) {
+  const had = chip === document.activeElement;
+  const root = chip.closest('.screen') ?? document;
+  paint();
+  if (!had || chip.isConnected) return;
+  const same = [...chip.attributes].filter(a => a.name.startsWith('data-'))
+    .map(a => `[${a.name}="${CSS.escape(a.value)}"]`).join('');
+  if (same) root.querySelector(`${chip.localName}${same}`)?.focus({ preventScroll: true });
+}
 
 /* ── Screens ──────────────────────────────────────────────────────── */
 const SCREENS = ['scrOnboardHandler', 'scrOnboardDog', 'scrTutorial', 'scrHome', 'scrHandler', 'scrLay',
@@ -287,6 +311,23 @@ function focusScreen(id) {
   head.focus({ preventScroll: true });
 }
 
+/* Pinch zoom is for reading the paper screens. On a map screen a pinch that
+   began on the pill, the air panel or the buttons zoomed the whole page
+   instead of the map: the controls slid off the edge, and the map, which
+   takes every touch that lands on it, could never pinch back out. So while a
+   map screen is up the viewport says maximum-scale=1 as well. The iPhone's
+   web view honours it, and setting it also snaps a page that is already
+   zoomed back to its own size. A paper screen gets back the viewport
+   index.html gave it, so the two can never drift apart. */
+let pageViewport = null;
+function viewportFor(id) {
+  const meta = document.querySelector('meta[name="viewport"]');
+  if (!meta) return;
+  pageViewport ??= meta.content;
+  const want = MAP_SCREENS.includes(id) ? `${pageViewport},maximum-scale=1` : pageViewport;
+  if (meta.content !== want) meta.content = want;
+}
+
 function go(id, { back = false } = {}) {
   const from = currentScreen;
   stopScan();
@@ -302,6 +343,7 @@ function go(id, { back = false } = {}) {
   }
   currentScreen = id;
   for (const s of SCREENS) $(s).hidden = s !== id;
+  viewportFor(id);
   if (id === 'scrHome') renderHome();
   if (id === 'scrHandler' && handlerCardId) paintHandlerCard(handlerCardId);   // fresh after an edit
   /* And after a delete: going back to a list must not show what just went. */
@@ -340,10 +382,15 @@ const MAP_TUT = [
   { g: 'turn', title: 'Turn the map', body: 'Twist with two fingers. The GPS button at the top right brings you back onto yourself.' },
 ];
 const mapTut = { i: 0, open: false };
+/* go() leaves focus alone while this card is open, so the card has to take
+   it: its title, the way a screen's heading does, or a screen reader stands
+   nowhere and never hears the card. Closed, focus goes to the screen that
+   was waiting underneath. */
 function openMapTut() {
   mapTut.i = 0; mapTut.open = true;
   paintMapTut();
   $('mapTut').hidden = false;
+  $('mapTutTitle').focus({ preventScroll: true });
 }
 function paintMapTut() {
   const c = MAP_TUT[mapTut.i], last = mapTut.i === MAP_TUT.length - 1;
@@ -358,6 +405,7 @@ function closeMapTut() {
   $('mapTut').hidden = true;
   mapTut.open = false;
   db.kv.set('mapTutDone', true);
+  if (currentScreen) focusScreen(currentScreen);
 }
 
 /* ── The map style ────────────────────────────────────────────────────
@@ -1376,12 +1424,12 @@ function renderHome() {
   $('homeSettings').innerHTML = avaHtml(handler);
 
   $('rowHandlers').innerHTML = handlers.map(h =>
-    `<button class="chip${h.id === handler.id ? ' selected' : ''}" data-handler="${esc(h.id)}" aria-pressed="${h.id === handler.id}">${avaHtml(h)}${esc(h.name)}</button>`).join('')
+    `<button class="chip${h.id === handler.id ? ' selected' : ''}" data-handler="${esc(h.id)}" aria-pressed="${h.id === handler.id}"${h.id === handler.id ? ' aria-describedby="handlerOpensHint"' : ''}>${avaHtml(h)}${esc(h.name)}</button>`).join('')
     + `<button class="chip ghost" data-add-handler>+ Add handler</button>`;
 
   $('lblDogs').textContent = `${handler.name}'s dogs`;
   $('rowDogs').innerHTML = team.map(d =>
-    `<button class="chip${d.id === dog?.id ? ' selected' : ''}" data-dog="${esc(d.id)}" aria-pressed="${d.id === dog?.id}">${avaHtml(d)}<span class="who">${esc(d.name)}<i class="sub">${esc(d.level)}</i></span></button>`).join('')
+    `<button class="chip${d.id === dog?.id ? ' selected' : ''}" data-dog="${esc(d.id)}" aria-pressed="${d.id === dog?.id}"${d.id === dog?.id ? ' aria-describedby="dogOpensHint"' : ''}>${avaHtml(d)}<span class="who">${esc(d.name)}<i class="sub">${esc(d.level)}</i></span></button>`).join('')
     + `<button class="chip ghost" data-add-dog>+ Add dog</button>`;
 
   $('rowTargets').innerHTML = TARGETS.map(t =>
@@ -6350,7 +6398,7 @@ function wire() {
     const h = e.target.closest('[data-handler]');
     if (h) {
       if (h.classList.contains('selected')) return openHandlerCard(h.dataset.handler);   // the chosen one again: their card
-      db.kv.set('lastHandlerId', h.dataset.handler); return renderHome();
+      db.kv.set('lastHandlerId', h.dataset.handler); return repaintFrom(h, renderHome);
     }
     if (e.target.closest('[data-add-handler]')) return openHandlerForm({ returnTo: 'scrHome' });
     const d = e.target.closest('[data-dog]');
@@ -6364,7 +6412,7 @@ function wire() {
          should be: the handler is answering the screen in front of them. */
       if (d.classList.contains('selected')) return openDogCard(d.dataset.dog);
       db.kv.set('lastDogId', d.dataset.dog);
-      return renderHome();
+      return repaintFrom(d, renderHome);
     }
     if (e.target.closest('[data-add-dog]')) return openDogForm({ returnTo: 'scrHome' });
     const t = e.target.closest('[data-target]');
@@ -6372,13 +6420,13 @@ function wire() {
       db.kv.set('lastTargetId', t.dataset.target);
       odourTyping = false;
       $('otherTarget').blur();      // let go first, or it keeps the last target's word
-      renderHome();
+      repaintFrom(t, renderHome);
       /* Inside the tap, or an iPhone will not raise the keyboard. */
       if (t.dataset.target === 'other') $('otherTarget').focus();
       return;
     }
     const od = e.target.closest('[data-odour]');
-    if (od) { odourTyping = false; db.kv.set(`odour.${S.target.id}`, od.dataset.odour); return renderHome(); }
+    if (od) { odourTyping = false; db.kv.set(`odour.${S.target.id}`, od.dataset.odour); return repaintFrom(od, renderHome); }
     if (e.target.closest('[data-odour-other]')) {
       odourTyping = true;
       if (ODOURS[S.target.id]?.list.includes(S.odour)) db.kv.set(`odour.${S.target.id}`, '');
@@ -6386,9 +6434,9 @@ function wire() {
       return $('otherTarget').focus();
     }
     const lv = e.target.closest('[data-trail-level]');
-    if (lv) { db.kv.set('lastLevel', lv.dataset.trailLevel); return renderHome(); }
+    if (lv) { db.kv.set('lastLevel', lv.dataset.trailLevel); return repaintFrom(lv, renderHome); }
     const l = e.target.closest('[data-layer]');
-    if (l) { db.kv.set('lastLayerId', l.dataset.layer || null); return renderHome(); }
+    if (l) { db.kv.set('lastLayerId', l.dataset.layer || null); return repaintFrom(l, renderHome); }
     if (e.target.closest('[data-add-layer]')) return openLayerForm({ returnTo: 'scrHome' });
     const open = e.target.closest('[data-open-session]');
     if (open) return openSession(open.dataset.openSession);
@@ -6768,25 +6816,25 @@ function wire() {
     if (pick) {
       dbDraft[pick.dataset.pick] = pick.dataset.v;
       $('dbFields').querySelector(`[data-field="${pick.dataset.pick}"]`)?.classList.remove('todo');
-      return paintDebrief();
+      return repaintFrom(pick, paintDebrief);
     }
     const seenBtn = e.target.closest('[data-seen]');
     if (seenBtn) {
       /* A second tap clears it: "I did not notice" is an honest answer. */
       const id = seenBtn.dataset.seen;
       dbSeen[id] = dbSeen[id] === seenBtn.dataset.v ? null : seenBtn.dataset.v;
-      return paintDebrief();
+      return repaintFrom(seenBtn, paintDebrief);
     }
     const flag = e.target.closest('[data-flag]');
     if (flag) {
       const v = flag.dataset.flag;
       dbDraft.flags = dbDraft.flags.includes(v) ? dbDraft.flags.filter(x => x !== v) : [...dbDraft.flags, v];
-      return paintDebrief();
+      return repaintFrom(flag, paintDebrief);
     }
     const tag = e.target.closest('[data-notetag]');
     if (tag) {
       dbDraft.noteTag = dbDraft.noteTag === tag.dataset.notetag ? null : tag.dataset.notetag;
-      return paintDebrief();
+      return repaintFrom(tag, paintDebrief);
     }
   });
   $('repBack').addEventListener('click', () => { closeReplay(); leaveForm('scrResult'); });
