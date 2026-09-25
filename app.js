@@ -4595,7 +4595,7 @@ function renderResult(s) {
   $('resWho').textContent = `${d?.name ?? ''} · ${fmtWhen(s.startedAt)}`;
   /* Said from the numbers in today's units and words: a result saved before
      the wording changed carried a sentence that claimed too much. */
-  $('resSentence').textContent = resultSentence(r, d?.name, unitsForText()) ?? r.sentence ?? '';
+  $('resSentence').textContent = resultSentence(r, d?.name, unitsForText(), s.summary) ?? r.sentence ?? '';
 
   /* Every value is escaped here, not just trusted to be a number: a run kept
      from someone else's link, or saved before links were checked, carries
@@ -4869,9 +4869,10 @@ function peopleFor(s) {
   return peopleOf(s, { dogs: S.dogs, handlers: S.handlers, layers: S.layers, me: S.handler });
 }
 /** The line a record reads as in a list: its result said in this reader's
-    units, or the summary it was saved with when it has no result to say. */
+    units, or the summary it was saved with when it has no result to say.
+    With no dog's name to hand, the saved words are kept (resultSentence). */
 function storyOf(s) {
-  return (s.data?.result && resultSentence(s.data.result, peopleFor(s).dog?.name, unitsForText())) || s.summary || '';
+  return (s.data?.result && resultSentence(s.data.result, peopleFor(s).dog?.name, unitsForText(), s.summary)) || s.summary || '';
 }
 const unitsForText = () => ({ imperial: imp(), fahrenheit: fahr(), coord: settings.coordFormat, when: fmtWhen });
 const metaLine = (m) => [m.dog?.name, fmtWhen(m.runAt ?? m.laidAt ?? Date.now()),
