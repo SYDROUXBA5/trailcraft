@@ -524,6 +524,35 @@ t('ScentSim.prune: an hour of laying does not grow without bound', () => {
   assert.equal(fresh.parts.length, n, 'nothing old, nothing dropped');
 });
 
+t('ScentSim.prune: a long live lay keeps the plume at the start of its trail', () => {
+  /* Laying live, the plume is pruned every frame while new ground keeps
+     arriving. Thinning every nth parcel on each of those frames took the same
+     share from old ground and new, over and over, so survival fell away with
+     age: forty minutes in, only the last few minutes of the trail still had
+     any plume. The budget has to sample every stretch of trail alike. */
+  const t0 = Date.parse('2026-08-24T07:00:00Z');
+  const wx = { wind_speed: 3, wind_direction: 270, temp: 12, soil_temp: 11, humidity: 70 };
+  const st = stability(11, 12);
+  const sim = new ScentSim().seed([]);
+  for (let i = 0; i < 1200; i++) {                   // 40 minutes, a fix every 2 s, 2.6 m apart
+    const at = t0 + i * 2000;
+    sim.append([{ lat: WELLS.lat, lon: WELLS.lon + i * 3.7e-5, t: at }]);
+    for (let k = 0; k < 5; k++) {                    // a frame every 400 ms
+      assert.ok(sim.prune(at + k * 400, wx, st, { max: 1000 }) <= 1000, 'the budget holds every frame');
+    }
+  }
+  assert.equal(sim.parts.length, 1000, 'and is used in full');
+  // The parcels by the age of the ground they came from, five minutes at a time.
+  const stretch = Array(8).fill(0);
+  for (const p of sim.parts) stretch[Math.min(7, Math.floor((p.born - t0) / 300000))]++;
+  for (const [k, n] of stretch.entries()) {
+    assert.ok(n > 125 * 0.7 && n < 125 * 1.3, `minutes ${k * 5}-${k * 5 + 5} of the trail kept ${n} of about 125`);
+  }
+  // A new lay starts at full density again.
+  sim.seed([{ lat: WELLS.lat, lon: WELLS.lon, t: t0 }]);
+  assert.equal(sim.parts.length, 7, 'a fresh seed is not held to the last lay\'s budget');
+});
+
 t('ScentSim.prune: a replay dragged back to the start of the run still has its air', () => {
   /* A replay opens at the end of the run and can be scrubbed back to its
      start. On a hot dry day scent lives eight minutes, so an hour-long run

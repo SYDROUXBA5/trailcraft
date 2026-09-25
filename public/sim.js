@@ -156,15 +156,30 @@ export function driftFrom(T, origin, secs, wx, st, steps = 5, walls = null, out 
 
 const _home = { lat: 0, lon: 0 }, _drift = { lat: 0, lon: 0 }, _sway = { lat: 0, lon: 0 };
 
+/* A parcel's place in the render budget: a fixed number in [0, 1) mixed from
+   the order it was laid in (murmur3's finaliser). It has nothing to do with
+   the parcel's seed, phase or life, so keeping only the low ones keeps a fair
+   sample of the air rather than, say, only the parcels that sway one way. */
+function keepRank(id) {
+  let h = id | 0;
+  h ^= h >>> 16; h = Math.imul(h, 0x85ebca6b);
+  h ^= h >>> 13; h = Math.imul(h, 0xc2b2ae35);
+  h ^= h >>> 16;
+  return (h >>> 0) / 4294967296;
+}
+
 export class ScentSim {
-  /* `walls` is set by whoever draws this cloud; null means open ground. */
-  constructor() { this.parts = []; this.trail = []; this.pool = []; this.walls = null; }
+  /* `walls` is set by whoever draws this cloud; null means open ground.
+     `keep` is the share of laid parcels the render budget lets this cloud
+     carry (see prune), and `laid` counts every parcel ever offered to it. */
+  constructor() { this.parts = []; this.trail = []; this.pool = []; this.walls = null; this.keep = 1; this.laid = 0; }
 
   /** Seed one particle set from a laid trail. Each keeps the point it came from
       and the moment that point was walked — its ground source never moves. */
   seed(trail) {
     this.trail = [];
     this.parts = [];
+    this.keep = 1; this.laid = 0;
     return this.append(trail || []);
   }
 
@@ -177,6 +192,11 @@ export class ScentSim {
     for (const p of points || []) {
       const per = PER_POINT();
       for (let k = 0; k < per; k++) {
+        /* Laid at the density the budget has already settled on, or new
+           ground would arrive thicker than old and the next prune would have
+           to take the difference out of everything, old ground included. */
+        const rank = keepRank(this.laid++);
+        if (rank >= this.keep) continue;
         this.parts.push({
           lat: p.lat, lon: p.lon,          // current position
           hlat: p.lat, hlon: p.lon,        // ground source, fixed
@@ -199,6 +219,7 @@ export class ScentSim {
              all 1 by default, so tarmac changes nothing until tried. */
           hard: !!p.hard,
           str: 0,
+          rank,
         });
       }
       /* A mid-trail PAUSE is a deposit, not a footstep: the longer the stand,
@@ -208,11 +229,13 @@ export class ScentSim {
       if ((p.dwellS ?? 0) >= PV.dwellThresh) {
         const R = poolRadius(p.dwellS) * (p.hard ? PV.hardWiden : 1);
         for (let k = 0; k < 10; k++) {
+          const rank = keepRank(this.laid++);
+          if (rank >= this.keep) continue;
           const g = project(p, Math.random() * 360, Math.sqrt(Math.random()) * R);
           this.parts.push({
             lat: g.lat, lon: g.lon, hlat: g.lat, hlon: g.lon, born: p.t,
             phase: (k + Math.random()) / 10, seed: Math.random() * 6.28318,
-            life: RESIDENCE(), dwellS: p.dwellS, hard: !!p.hard, str: 0,
+            life: RESIDENCE(), dwellS: p.dwellS, hard: !!p.hard, str: 0, rank,
           });
         }
       }
@@ -227,6 +250,7 @@ export class ScentSim {
   seedHides(hides) {
     this.trail = [];
     this.parts = [];
+    this.keep = 1; this.laid = 0;
     this.hides = (hides || []).slice();
     this.reseedPool();
     return this;
@@ -433,15 +457,22 @@ export class ScentSim {
        Thin EVENLY rather than dropping the oldest. Cutting the head off would
        erase the plume from the start of a long trail — and how faint that end
        has become is a thing the physics already says, through each parcel's
-       strength. A render budget must not get a vote on it. Taking every nth
-       parcel leaves the whole line represented, just sampled less finely. */
+       strength. A render budget must not get a vote on it.
+
+       Evenly means one sampling rate for the whole line, whatever its age.
+       Taking every nth parcel was even once, but a live lay prunes every
+       frame while it appends: each cut took the same share from old and new
+       alike, again and again, so survival fell away with age and a 40-minute
+       trail kept only its last few minutes of plume. So the budget is a rate
+       instead. Each parcel has a fixed rank; the cloud keeps those below
+       `keep`, lowers `keep` just far enough to fit, and lays new ground at
+       the same rate (append). Every stretch of trail is then sampled alike.
+       The rate only ever falls: ground aged out by the cut above does not
+       buy a finer sample back, which would leave the newest stretch denser. */
     if (this.parts.length > max) {
-      const stride = this.parts.length / max;
-      const kept = [];
-      for (let i = 0; kept.length < max && i < this.parts.length; i++) {
-        if (Math.floor(i / stride) === kept.length) kept.push(this.parts[i]);
-      }
-      this.parts = kept;
+      const ranks = Float64Array.from(this.parts, s => s.rank).sort();
+      this.keep = ranks[max];                 // ranks are distinct, so exactly `max` sit below it
+      this.parts = this.parts.filter(s => s.rank < this.keep);
     }
     return this.parts.length;
   }
