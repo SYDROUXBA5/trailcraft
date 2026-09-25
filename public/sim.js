@@ -171,8 +171,16 @@ function keepRank(id) {
 export class ScentSim {
   /* `walls` is set by whoever draws this cloud; null means open ground.
      `keep` is the share of laid parcels the render budget lets this cloud
-     carry (see prune), and `laid` counts every parcel ever offered to it. */
-  constructor() { this.parts = []; this.trail = []; this.pool = []; this.walls = null; this.keep = 1; this.laid = 0; }
+     carry (see prune), and `laid` counts every parcel ever offered to it.
+
+     `pool: false` is for a cloud whose trail has nobody at the end of it.
+     Contamination is someone who walked THROUGH: nobody stood at the end of
+     a cross-track waiting to be found, and the pool drawn there was the
+     hottest thing on the map, telling a handler they had. */
+  constructor({ pool = true } = {}) {
+    this.parts = []; this.trail = []; this.pool = []; this.walls = null; this.keep = 1; this.laid = 0;
+    this.endPool = pool;
+  }
 
   /** Seed one particle set from a laid trail. Each keeps the point it came from
       and the moment that point was walked — its ground source never moves. */
@@ -262,7 +270,7 @@ export class ScentSim {
   /** Continuous sources: the trail's end (someone standing, waiting to be
       found) and every hide. Both feed the air the whole time. */
   poolSources() {
-    const end = this.trail[this.trail.length - 1];
+    const end = this.endPool ? this.trail[this.trail.length - 1] : null;
     return [...(end ? [end] : []), ...(this.hides || [])];
   }
 

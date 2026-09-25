@@ -642,6 +642,8 @@ t('a replay shows the air as it was, and a search can be replayed', () => {
   const frame = bodyOf('plumeFrame');
   assert.match(frame, /plume\.sim\.prune\(now, plume\.wx, plume\.st, \{ max: 9000, since: plume\.since \}\)/);
   assert.match(frame, /plume\.contam\.prune\(now, plume\.wx, plume\.st, \{ max: 5000, since: plume\.since \}\)/);
+  assert.match(bodyOf('contamSim'), /new ScentSim\(\{ pool: false \}\)/,
+    'contamination is walked through: nobody stands at the end of it');
   const open = bodyOf('openReplay');
   assert.match(open, /plumeStart\(trailOf\(s\), w0, plume\.T, s\.data\.contamination,\s*\{ at: replay\.at, since: replay\.from \}\)/,
     'on the replay’s clock, pruned by the start of the run, in the wind of that moment');

@@ -476,6 +476,32 @@ t('ScentSim: the runner standing at the end builds a wide, hot pool', () => {
   assert.ok(sim.pool.every(p => p.str === 0), 'no pool before the walk');
 });
 
+t('ScentSim: a contamination cloud has no one standing at its end', () => {
+  /* The end pool is a person waiting to be found. A contamination walker
+     walked through, so their cloud must not grow one: a dense disc at the far
+     end of a cross-track, the hottest thing on the map, told the handler
+     someone stood there. */
+  const t0 = Date.parse('2026-08-24T07:00:00Z');
+  const line = Array.from({ length: 40 }, (_, i) => ({ lat: WELLS.lat + i * 2e-5, lon: WELLS.lon, t: t0 + i * 2000 }));
+  const wx = { wind_speed: 3, wind_direction: 270 };
+  const later = t0 + 50 * 60000;
+  const contam = new ScentSim({ pool: false }).seed(line);
+  contam.advance(FLAT, wx, NEUTRAL, later);
+  assert.equal(contam.pool.length, 0, 'no pool parcels');
+  assert.equal(contam.drawable().length, contam.parts.length, 'only the line itself is drawn');
+  contam.append([{ lat: WELLS.lat + 1e-3, lon: WELLS.lon, t: t0 + 90000 }]);
+  assert.equal(contam.pool.length, 0, 'and none grows as more of it is added');
+  // Its own line is untouched: the same parcels a trail's cloud would have.
+  assert.ok(contam.parts.some(p => p.str > 0.1), 'the line still carries scent');
+  // A trail's cloud still has its runner standing at the end.
+  const trail = new ScentSim().seed(line);
+  trail.advance(FLAT, wx, NEUTRAL, later);
+  assert.ok(trail.pool.length > 0 && trail.pool.some(p => p.str > 0.5), 'a trail keeps its end pool');
+  // Hides are sources in their own right, pool or no pool at the end.
+  const hides = new ScentSim({ pool: false }).seedHides([{ lat: WELLS.lat, lon: WELLS.lon, t: t0 }]);
+  assert.ok(hides.pool.length > 0, 'a placed hide still emits');
+});
+
 t('ScentSim.prune: an hour of laying does not grow without bound', () => {
   /* A live lay appends the whole way. Scent stays workable for hours, so age
      alone retires particles far slower than walking creates them — the budget
