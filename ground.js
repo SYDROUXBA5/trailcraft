@@ -109,7 +109,11 @@ export function buildGround(tiles) {
       if (f.type !== 3) continue;
       const cls = f.props.class;
       const as = GREEN[cls] ?? (SEALED_USE.has(cls) ? 'h' : null);
-      if (as) areas.push({ rank: GREEN[cls] ? 3 : 4, as, rings: f.geom, box: bboxOf(f.geom) });
+      /* A car park ranks ahead of green landuse. The map draws the park, the
+         wood or the cemetery round the car park that serves it, so the car
+         park sits INSIDE the green; ranked behind it, the country-park car
+         park where most trails start read as Grass or Woods, never tarmac. */
+      if (as) areas.push({ rank: GREEN[cls] ? 3 : 2, as, rings: f.geom, box: bboxOf(f.geom) });
       if (ZONES.has(cls)) zones.push({ rings: f.geom, box: bboxOf(f.geom) });
     }
     /* A building is something the trail went past, not ground it was laid on.
