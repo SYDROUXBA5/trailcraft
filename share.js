@@ -69,6 +69,7 @@ export function trailModel(s, { dog = null, handler = null, layer = null, k = nu
     track: d.track?.length > 1 ? d.track : null,
     wps: d.track?.length > 1 ? (d.trackWaypoints ?? []) : [],
     wx: d.weather ?? null,
+    runWx: runWxOf(d),
     result: d.result ?? null,
     coach: d.coach ?? null,
     debrief: d.debrief ?? null,
@@ -76,6 +77,22 @@ export function trailModel(s, { dog = null, handler = null, layer = null, k = nu
     k: fin(k) ? k : null,
     thinnedM: 0,
   };
+}
+
+/* The run's own weather, fetched when the laid series did not reach the run.
+   A link without it replayed the run in the laid-time wind while its result
+   quoted the run's. Only the stretch the dog ran is needed, and a sample
+   either side, so the link carries a handful of samples, not twelve hours. */
+function runWxOf(d) {
+  const w = d.runWeather;
+  if (!w || typeof w !== 'object') return null;
+  const track = Array.isArray(d.track) ? d.track : [];
+  const from = fin(d.trackStarted) ? d.trackStarted : track[0]?.t;
+  if (!Array.isArray(w.series) || !fin(from)) return w;
+  const last = track[track.length - 1]?.t;
+  const to = fin(last) && last > from ? last : from;
+  const pad = 30 * 60e3;
+  return { ...w, series: w.series.filter(e => fin(e?.t) && e.t >= from - pad && e.t <= to + pad) };
 }
 
 /* ── Packing: deltas of small integers, which deflate squeezes hard ───── */
@@ -276,7 +293,7 @@ function pack(m) {
     plan: m.plan ? 1 : undefined, walked: m.walked ? 1 : undefined,
     trail: packPts(m.trail), hides: packPts(m.hides), track: packPts(m.track), wps: packPts(m.wps),
     contam: m.contamination?.length ? m.contamination.map(c => packPts(c.points)) : undefined,
-    wx: packWx(m.wx), result: m.result ? roundDeep(m.result) : undefined,
+    wx: packWx(m.wx), runWx: packWx(m.runWx), result: m.result ? roundDeep(m.result) : undefined,
     coach: m.coach ? { assisted: !!m.coach.assisted, tolM: m.coach.tolM, scent: !!m.coach.scent, calls: m.coach.calls,
       shadow: m.coach.shadow ? pick(m.coach.shadow, ['tolM', 'plain', 'scent']) : undefined } : undefined,
     debrief: packDebrief(m.debrief),
@@ -320,6 +337,8 @@ function unpack(o) {
     wps: unpackPts(o.wps) ?? [],
     contamination: contam.map(unpackPts).filter(p => p?.length > 1).map(points => ({ points })),
     wx: cleanWx(o.wx),
+    /* Held to exactly what the laid weather is: a stranger's numbers either way. */
+    runWx: cleanWx(o.runWx),
     /* A link sent before the approach was put right still says it back to front. */
     result: healApproach(cleanResult(o.result)),
     coach: o.coach && typeof o.coach === 'object' ? {
