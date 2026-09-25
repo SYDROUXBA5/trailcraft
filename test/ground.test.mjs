@@ -102,6 +102,21 @@ t('ground: sealed roads first, then what the map drew, most specific first, then
   assert.equal(surfaceAt(g, at(1200, 700)), 'u', 'blank on both maps is Not mapped — never tarmac by default');
 });
 
+t('ground: a car park inside a park or a wood is hard surface', () => {
+  /* The map draws the green area round the car park that serves it, so the
+     car park sits inside it. Ranked behind green landuse, the car park at a
+     country park, where most trails start, read as Grass or Woods. */
+  for (const green of ['park', 'wood', 'cemetery']) {
+    for (const order of ['green first', 'car park first']) {
+      const use = [poly(green, 0, 0, 400, 400), poly('parking', 20, 20, 80, 60)];
+      if (order === 'car park first') use.reverse();
+      const g = buildGround([{ kind: 'streets', box: everywhere, landuse: use }]);
+      assert.equal(surfaceAt(g, at(50, 40)), 'h', `a car park in a ${green} is tarmac (${order})`);
+      assert.equal(surfaceAt(g, at(200, 200)), green === 'wood' ? 'w' : 'g', `and the ${green} round it is still the ${green}`);
+    }
+  }
+});
+
 t('surroundings are measured apart from the ground', () => {
   const g = parish();
   assert.equal(aroundAt(g, at(300, 300)), true, 'inside a housing area');

@@ -13,6 +13,8 @@ import {
 import { driftFrom, predictedOffsets, ScentSim, NOSE, AIRBORNE, RESIDENCE,
          stepByFlow, flowBearing } from '../public/sim.js';
 import { dist, scentOffset, bearing } from '../public/geo.js';
+import { readFileSync } from 'node:fs';
+import { scenes } from './plume-scenes.mjs';
 
 let pass = 0;
 const t = (name, fn) => { fn(); pass++; console.log(`  ok  ${name}`); };
@@ -474,6 +476,32 @@ t('ScentSim: the runner standing at the end builds a wide, hot pool', () => {
   assert.ok(sim.pool.every(p => p.str === 0), 'no pool before the walk');
 });
 
+t('ScentSim: a contamination cloud has no one standing at its end', () => {
+  /* The end pool is a person waiting to be found. A contamination walker
+     walked through, so their cloud must not grow one: a dense disc at the far
+     end of a cross-track, the hottest thing on the map, told the handler
+     someone stood there. */
+  const t0 = Date.parse('2026-08-24T07:00:00Z');
+  const line = Array.from({ length: 40 }, (_, i) => ({ lat: WELLS.lat + i * 2e-5, lon: WELLS.lon, t: t0 + i * 2000 }));
+  const wx = { wind_speed: 3, wind_direction: 270 };
+  const later = t0 + 50 * 60000;
+  const contam = new ScentSim({ pool: false }).seed(line);
+  contam.advance(FLAT, wx, NEUTRAL, later);
+  assert.equal(contam.pool.length, 0, 'no pool parcels');
+  assert.equal(contam.drawable().length, contam.parts.length, 'only the line itself is drawn');
+  contam.append([{ lat: WELLS.lat + 1e-3, lon: WELLS.lon, t: t0 + 90000 }]);
+  assert.equal(contam.pool.length, 0, 'and none grows as more of it is added');
+  // Its own line is untouched: the same parcels a trail's cloud would have.
+  assert.ok(contam.parts.some(p => p.str > 0.1), 'the line still carries scent');
+  // A trail's cloud still has its runner standing at the end.
+  const trail = new ScentSim().seed(line);
+  trail.advance(FLAT, wx, NEUTRAL, later);
+  assert.ok(trail.pool.length > 0 && trail.pool.some(p => p.str > 0.5), 'a trail keeps its end pool');
+  // Hides are sources in their own right, pool or no pool at the end.
+  const hides = new ScentSim({ pool: false }).seedHides([{ lat: WELLS.lat, lon: WELLS.lon, t: t0 }]);
+  assert.ok(hides.pool.length > 0, 'a placed hide still emits');
+});
+
 t('ScentSim.prune: an hour of laying does not grow without bound', () => {
   /* A live lay appends the whole way. Scent stays workable for hours, so age
      alone retires particles far slower than walking creates them — the budget
@@ -520,6 +548,35 @@ t('ScentSim.prune: an hour of laying does not grow without bound', () => {
   const n = fresh.parts.length;
   fresh.prune(t0 + 5000, wx, st);
   assert.equal(fresh.parts.length, n, 'nothing old, nothing dropped');
+});
+
+t('ScentSim.prune: a long live lay keeps the plume at the start of its trail', () => {
+  /* Laying live, the plume is pruned every frame while new ground keeps
+     arriving. Thinning every nth parcel on each of those frames took the same
+     share from old ground and new, over and over, so survival fell away with
+     age: forty minutes in, only the last few minutes of the trail still had
+     any plume. The budget has to sample every stretch of trail alike. */
+  const t0 = Date.parse('2026-08-24T07:00:00Z');
+  const wx = { wind_speed: 3, wind_direction: 270, temp: 12, soil_temp: 11, humidity: 70 };
+  const st = stability(11, 12);
+  const sim = new ScentSim().seed([]);
+  for (let i = 0; i < 1200; i++) {                   // 40 minutes, a fix every 2 s, 2.6 m apart
+    const at = t0 + i * 2000;
+    sim.append([{ lat: WELLS.lat, lon: WELLS.lon + i * 3.7e-5, t: at }]);
+    for (let k = 0; k < 5; k++) {                    // a frame every 400 ms
+      assert.ok(sim.prune(at + k * 400, wx, st, { max: 1000 }) <= 1000, 'the budget holds every frame');
+    }
+  }
+  assert.equal(sim.parts.length, 1000, 'and is used in full');
+  // The parcels by the age of the ground they came from, five minutes at a time.
+  const stretch = Array(8).fill(0);
+  for (const p of sim.parts) stretch[Math.min(7, Math.floor((p.born - t0) / 300000))]++;
+  for (const [k, n] of stretch.entries()) {
+    assert.ok(n > 125 * 0.7 && n < 125 * 1.3, `minutes ${k * 5}-${k * 5 + 5} of the trail kept ${n} of about 125`);
+  }
+  // A new lay starts at full density again.
+  sim.seed([{ lat: WELLS.lat, lon: WELLS.lon, t: t0 }]);
+  assert.equal(sim.parts.length, 7, 'a fresh seed is not held to the last lay\'s budget');
 });
 
 t('ScentSim.prune: a replay dragged back to the start of the run still has its air', () => {
@@ -727,6 +784,28 @@ t('windAt: the wind at a moment of a run, and whether it really is that moment\'
   assert.equal(seriesCovers(laid, T0 - 3600e3), false);
   assert.equal(seriesCovers({ temp: 3 }, T0), false, 'no series, no claim');
   assert.deepEqual(windAt(null, T0), { wx: null, exact: false });
+});
+
+t('the plume draws what it drew before the hot loop stopped allocating', () => {
+  /* driftFrom, flowAt and advance were made to reuse scratch objects, skip
+     the five steps on level open ground, and stop building a stabilityStops()
+     per sample. None of that may move a parcel. plume-golden.json is what the
+     allocating code drew for the same seeded scenes: open ground, a hill in
+     stable air, and a street of houses with wakes and the tarmac rule. A
+     millimetre or so of floating point is allowed; anything more is a change
+     to the scent, and belongs in a commit that says so. */
+  const golden = JSON.parse(readFileSync(new URL('./plume-golden.json', import.meta.url), 'utf8'));
+  const now = scenes();
+  for (const [scene, parts] of Object.entries(golden)) {
+    for (const [name, want] of Object.entries(parts)) {
+      const got = now[scene][name];
+      assert.equal(got.length, want.length, `${scene}.${name}: same number of values`);
+      let worst = 0;
+      for (let i = 0; i < want.length; i++) worst = Math.max(worst, Math.abs(got[i] - want[i]));
+      assert.ok(worst <= 3, `${scene}.${name}: off by ${worst} units (1e-8° or 1e-6 strength)`);
+    }
+  }
+  assert.ok(golden.street.late.length > 500 && golden.hill.offsets.length > 40, 'the scenes are not empty');
 });
 
 console.log(`\n${pass} passed total`);

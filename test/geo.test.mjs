@@ -130,6 +130,7 @@ console.log(`\n${pass} passed\n`);
 import {
   bearing, windRegime, scentOffset, plumeWidth, scentField, plumePolygon, legSummary, approachToWind,
 } from '../public/geo.js';
+import { setParam, resetParams } from '../public/params.js';
 
 t('bearing: cardinal directions', () => {
   near(bearing({ lat: 51, lon: 0 }, { lat: 52, lon: 0 }), 0, 0.1, 'north');
@@ -189,6 +190,28 @@ t('scentField: crosswind pushes the workable line to the correct side', () => {
   assert.equal(mid.regime.label, 'crosswind');
   assert.ok(mid.centre.lon > trail[6].lon, 'displaced east');
   assert.ok(mid.halfWidth > 0);
+});
+
+t('scentField: the Drift per wind dial moves the band', () => {
+  /* The bench says this dial sets how far off the line the band sits, and
+     an instructor moves it to try their own field numbers. scentField passed
+     the shipped 2.0 on to scentOffset whatever the dial said, so the band
+     stood still, while the bench still counted the dial as changed. */
+  const now = Date.now();
+  const trail = Array.from({ length: 12 }, (_, i) => ({
+    ...project({ lat: 51.2, lon: -2.65 }, 0, i * 20), t: now - (12 - i) * 600000,
+  }));
+  const wx = { wind_speed: 4, wind_direction: 270 };
+  const off = () => dist(trail[0], scentField(trail, wx, now)[0].centre);
+  try {
+    const shipped = off();
+    near(shipped, scentOffset(4, 7200), 0.05, 'at the shipped value the band sits where scentOffset says');
+    setParam('driftPerMs', 6);
+    near(off(), shipped * 3, 0.1, 'three times the drift per wind, three times as far off the line');
+    near(off(), scentOffset(4, 7200), 0.05, 'and still where scentOffset says');
+  } finally {
+    resetParams();
+  }
 });
 
 t('scentField: headwind pushes scent back down the trail', () => {
