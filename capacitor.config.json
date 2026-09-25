@@ -5,7 +5,8 @@
   "ios": {
     "contentInset": "never",
     "backgroundColor": "#F6F7FA",
-    "preferredContentMode": "mobile"
+    "preferredContentMode": "mobile",
+    "zoomEnabled": true
   },
   "plugins": {
     "SplashScreen": {

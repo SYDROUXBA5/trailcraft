@@ -167,4 +167,108 @@ t('a new screen puts focus on its heading, without scrolling or a ring', () => {
   assert.deepEqual(b.focused, []);
 });
 
+/* ── Larger text, and zoom ─────────────────────────────────────────── */
+
+/** Every font size the stylesheet sets: the innermost selector, and the size as written. */
+function fontSizes() {
+  const bare = css.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '));
+  const found = [], stack = [];
+  let from = 0;
+  for (let i = 0; i < bare.length; i++) {
+    const c = bare[i];
+    if (c === '{') { stack.push(bare.slice(from, i).trim().replace(/\s+/g, ' ')); from = i + 1; }
+    else if (c === '}') { stack.pop(); from = i + 1; }
+    else if (c === ';') {
+      const d = bare.slice(from, i).trim();
+      const m = d.match(/^font(-size)?\s*:\s*(.*)$/);
+      if (m) {
+        // The size in a shorthand is the part before the family: a length, a calc() or a max().
+        const size = m[1] ? m[2] : (m[2].match(/(max\([^;]*?\)\)|calc\([^)]*\)|\d+(\.\d+)?px)/)?.[0] ?? null);
+        if (size) found.push({ sel: stack.at(-1) ?? '', size: size.trim(), at: stack.slice(0, -1).join(' ') });
+      }
+      from = i + 1;
+    }
+  }
+  return found;
+}
+const sizes = fontSizes();
+
+t('pinch zoom is allowed, in Safari and in the iPhone app', () => {
+  const vp = html.match(/<meta name="viewport" content="([^"]+)">/)?.[1];
+  assert.ok(vp, 'index.html has a viewport');
+  assert.ok(!/maximum-scale|user-scalable/.test(vp), `the viewport does not stop zooming: ${vp}`);
+  assert.match(vp, /width=device-width/);
+  const cap = JSON.parse(readFileSync(new URL('../capacitor.config.json', import.meta.url), 'utf8'));
+  assert.equal(cap.ios?.zoomEnabled, true, 'Capacitor blocks zooming in the app unless ios.zoomEnabled says otherwise');
+  assert.match(css, /button, \[role="button"\], summary \{ touch-action: manipulation; \}/, 'a double tap on a button is two presses, not a zoom');
+});
+
+t('no field is small enough for the iPhone to zoom into it', () => {
+  /* Safari on an iPhone zooms the page when a field under 16px takes focus,
+     and now that zoom is allowed it would. At a smaller-than-usual text size
+     a scaled field would drop under 16px, so every one has a floor. */
+  const fields = sizes.filter(f => /\b(input|select|textarea)\b/.test(f.sel) && !/range|checkbox|color|file/.test(f.sel));
+  assert.ok(fields.length >= 3, `expected the field rules, found ${fields.map(f => f.sel).join(' | ')}`);
+  for (const f of fields) {
+    const px = f.size.match(/^(\d+(\.\d+)?)px$/)?.[1];
+    assert.ok(px ? +px >= 16 : /^max\(16px, /.test(f.size), `${f.sel} is at least 16px (${f.size})`);
+  }
+  const base = fields.find(f => f.sel.startsWith('input[type="text"]'));
+  for (const type of ['text', 'email', 'password', 'number', 'date']) assert.ok(base.sel.includes(`input[type="${type}"]`), `${type} fields share the base rule`);
+  assert.ok(base.sel.includes('select'));
+  // Every text field in the page is one of those types.
+  for (const [, type] of html.matchAll(/<input[^>]*type="([a-z-]+)"/g)) {
+    assert.ok(['text', 'email', 'password', 'number', 'date', 'range', 'checkbox', 'file'].includes(type), `an <input type="${type}"> has no 16px rule`);
+  }
+  assert.ok(!/<textarea/.test(html + js), 'a textarea would need its own 16px rule');
+});
+
+t('the paper screens grow with the iPhone’s Larger Text; the map screens do not', () => {
+  assert.match(css, /@supports \(font: -apple-system-body\) and \(-webkit-touch-callout: none\) \{\s*html \{ font: -apple-system-body; \}\s*:root \{ --px: min\(calc\(1rem \/ 17\), calc\(28px \/ 17\)\); \}\s*body \{ font-family: var\(--body\); \}/,
+    'the root takes the system body size on an iPhone only, and the app keeps its own typeface');
+  assert.match(css, /--px: min\(calc\(1rem \/ 16\), calc\(28px \/ 17\)\);/, 'elsewhere a pixel of type is a pixel');
+  assert.match(css, /html \{ font: 16px\/1\.5 var\(--body\); \}\nbody \{ font: calc\(16 \* var\(--px\)\)\/1\.5 var\(--body\); \}/);
+  assert.match(css, /\n\.screen\.glass \{ --px: 1px; font-size: 16px; \}/);
+  assert.match(css, /\nbody:has\(> \.screen\.glass:not\(\[hidden\]\)\) \{ --px: 1px; font-size: 16px; \}/,
+    'on its own line: a selector list with :has in it is dropped whole where :has is unknown');
+
+  /* A size in plain pixels is only for what floats over the live map, or is
+     drawn to fit a fixed shape. Anything else is in pixels of type, so a new
+     rule on a paper screen that forgets cannot slip past. */
+  const PLAIN = new Set([
+    'html', '.hud-pill', '.glass-caption', '.wp-pill', '.rep-play, .rep-speed', '.rep-play',
+    '.bench-head b', '.bench-head i', '.bench-read', '.fix-range label', '.fix-nudge', '.fix-label', '.fix-row b', '.fix-row i',
+    '.bench-grp > summary::after', '.bench-grp b', '.bench-grp .cnt', '.bench-grp .why', '.dial .nm', '.dial .val', '.dial .note', '.badge',
+    '.nav-dist b', '.nav-dist i', '.nav-say > span', '.nav-say .nav-sub',
+    '.wx-main b', '.wx-main i', '.wx-sub b', '.wx-sub i', '.wx-note i',
+    '.map-tut-card > b', '.map-tut-card > p', '.style-pick button', '.btn.live-btn', '.call-q', '.call-opt b', '.call-opt i',
+    '.tut-title.huge', '.ring-big', '.ring-small', '.ava', '.ava.big', '.auth-btn',
+    '.screen.glass', 'body:has(> .screen.glass:not([hidden]))',
+  ]);
+  const plain = sizes.filter(f => /^\d+(\.\d+)?px$/.test(f.size));
+  const stray = plain.filter(f => !PLAIN.has(f.sel)).map(f => `${f.sel} (${f.size})`);
+  assert.deepEqual(stray, [], 'these paper-screen sizes are in plain pixels and will not grow');
+  const scaled = sizes.filter(f => /var\(--px\)/.test(f.size));
+  assert.ok(scaled.length > 70, `most sizes grow; found ${scaled.length}`);
+  for (const f of scaled.filter(f => PLAIN.has(f.sel))) assert.fail(`${f.sel} sits over the map and must stay in pixels`);
+});
+
+t('the forecast note on the air panel can be read', () => {
+  const r = rule('.wx-note i');
+  const px = +r.match(/font-size: (\d+(\.\d+)?)px/)[1];
+  assert.ok(px >= 12, `at least 12px, not ${px}`);
+  assert.ok(!/opacity/.test(r), 'at full strength over the imagery');
+});
+
+t('a large text size cannot push a screen sideways', () => {
+  // The rows that used to hold their width whatever the type size.
+  assert.match(css, /\.home-head \{ display: flex; flex-wrap: wrap;/);
+  assert.match(css, /\.home-head > :last-child \{ margin-left: auto; \}/);
+  assert.match(rule('.grid2'), /grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/);
+  assert.match(rule('.grid2 > div'), /overflow-wrap: anywhere/);
+  assert.match(css, /\.mode-cards \{ display: flex; flex-wrap: wrap;/);
+  assert.match(css, /\.mode-cards > \.radio-card \{ flex: 1 1 7em; \}/);
+  assert.match(css, /\.dog-head > div \{ min-width: 0; \}/);
+});
+
 console.log(`\n${pass} passed total\n`);
