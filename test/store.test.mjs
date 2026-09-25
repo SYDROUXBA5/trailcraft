@@ -150,7 +150,7 @@ t('export and wipe: everything out, then everything gone', () => {
   db.handlers.upsert({ id: 'h', name: 'Rémi', photo: null });
   db.addSession({ id: 's', startedAt: 1, summary: 'x', data: {} });
   const out = JSON.parse(db.exportAll());
-  assert.equal(out.version, 2);
+  assert.equal(out.version, 3, 'a backup Restore can read (backup.test.mjs)');
   assert.equal(out.handlers.length, 1);
   assert.equal(out.sessions.length, 1);
   db.wipeAll();

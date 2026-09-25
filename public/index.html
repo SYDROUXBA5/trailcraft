@@ -146,6 +146,7 @@
     <div class="page-bottom">
       <button class="btn moss" id="obHandlerNext">Next: your dog</button>
       <button class="btn ghost" id="obHandlerLayOnly" hidden>I only lay trails — no dog</button>
+      <button class="btn ghost" id="obRestore" hidden>Restore from a backup file</button>
     </div>
   </div>
 </section>
@@ -971,7 +972,9 @@
     <span class="label">Your data</span>
     <p class="body small muted" id="dataWhere">Everything lives on this phone. Nothing is uploaded.</p>
     <a class="privacy-link" href="https://sydrouxba5.github.io/trailcraft/privacy.html" target="_blank" rel="noopener">How your data is handled</a>
-    <button class="btn card-btn" id="btnExportAll">Export everything as JSON</button>
+    <button class="btn card-btn" id="btnExportAll">Save a backup file</button>
+    <button class="btn card-btn" id="btnRestore">Restore from a backup file</button>
+    <input id="restoreFile" type="file" accept="application/json,.json" hidden>
     <button class="btn danger" id="btnWipe">Wipe this phone</button>
     <p class="body small muted center" id="buildNote"></p>
   </div>

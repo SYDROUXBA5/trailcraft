@@ -820,4 +820,44 @@ t('a live run holds only what the app writes, within limits, and cannot outlive 
   assert.match(piece, /d\.get\('__pts', -1\) >= 1 && d\.get\('__pts', -1\) <= 3000/);
 });
 
+/* "Export everything" was a bare download link, which in the iPhone app does
+   nothing and says nothing, into a file nothing could read back, while Wipe
+   told handlers to export first. The pure parts are in backup.test.mjs and
+   native.test.mjs; this is the glue. */
+t('the backup leaves through the share sheet, and Restore reads it back only after asking', () => {
+  const at = js.indexOf("$('btnExportAll').addEventListener");
+  const exp = js.slice(at, at + 400);
+  assert.match(exp, /deliverFile\(db\.exportAll\(\), `trailcraft-backup-[^`]*\.json`, 'application\/json'\)/,
+    'the same way out as every other file');
+  assert.ok(!/createObjectURL|\.download = /.test(exp), 'no bare download link of its own');
+  const deliver = fnSrc('async function deliverFile(');
+  assert.match(deliver, /if \(isNative\(\)\) \{\s*const how = await shareFile\(bytes, name\);[\s\S]{0,160}return;\s*\}\s*const a = document\.createElement\('a'\)/,
+    'inside the app the plugins take the file; the download link is only for a browser');
+  assert.ok(deliver.indexOf('navigator.canShare') < deliver.indexOf('isNative()'), 'the web view’s own share sheet first, where it has one');
+
+  assert.match(html, /<input id="restoreFile" type="file" accept="application\/json,\.json" hidden>/);
+  assert.match(html, /id="btnRestore">Restore from a backup file</);
+  assert.match(html, /id="obRestore" hidden>Restore from a backup file</, 'on the first screen too, so nobody makes up a profile to reach it');
+  assert.match(bodyOf('openHandlerForm'), /\$\('obRestore'\)\.hidden = !firstLaunch;/);
+  assert.match(bodyOf('openLayerForm'), /\$\('obRestore'\)\.hidden = true;/);
+  assert.match(js, /\$\('restoreFile'\)\.addEventListener\('change', \(e\) => \{\s*const f = e\.target\.files\?\.\[0\];\s*e\.target\.value = '';\s*restoreBackup\(f\);/,
+    'the same file can be chosen twice');
+
+  const restore = fnSrc('async function restoreBackup(');
+  const steps = ['file.size > BACKUP_MAX_BYTES', 'readBackup(await file.text())', 'db.previewRestore(backup)',
+    'restoreChanges(plan)', 'confirm(restoreQuestion(plan, when))', 'db.restore(backup)'];
+  let last = -1;
+  for (const step of steps) {
+    const i = restore.indexOf(step);
+    assert.ok(i > last, `restoreBackup does "${step}" in order`);
+    last = i;
+  }
+  assert.match(restore, /catch \(e\) \{ return toast\(e\?\.plain \? e\.message : 'Could not read that file'\); \}/, 'a refused file is said in words');
+  assert.match(restore, /if \(e\?\.name !== 'SaveError'\) throw e;/, 'a full phone is said, anything else is not swallowed');
+
+  assert.ok(!/Export (everything )?first/.test(js), 'no confirm still promises that exporting keeps anything');
+  assert.match(js, /all profiles\. Save a backup file first if you want them back later\./);
+  assert.match(js, /They go\. Save a backup file first if you want to keep them\./);
+});
+
 console.log(`\n${pass} passed total\n`);

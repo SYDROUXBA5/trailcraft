@@ -23,7 +23,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const pub = (f) => readFileSync(join(root, 'public', f), 'utf8');
 
 /* Dependency order: roots first, then their dependents, app last. */
-const MODULES = ['native', 'params', 'geo', 'colours', 'mvt', 'ground', 'debrief', 'call', 'coach', 'field', 'walls', 'sim', 'card', 'sync-core', 'firebase-config', 'sync', 'store', 'draft', 'share', 'pdf'];
+const MODULES = ['native', 'params', 'geo', 'colours', 'mvt', 'ground', 'debrief', 'call', 'coach', 'field', 'walls', 'sim', 'card', 'sync-core', 'backup', 'firebase-config', 'sync', 'store', 'draft', 'share', 'pdf'];
 
 /** Inline-script safety: a literal "</script>" inside JS would end the tag.
     The escape is invisible at runtime (identical string value). */

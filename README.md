@@ -146,7 +146,7 @@ No build step, no dependencies, no bundler.
 - Mapbox GL JS 3.14.0 — Standard Satellite and Outdoors
 - Mapbox Terrain DEM v1 for 3D terrain and for the flow field's elevation grid
 - Open-Meteo for weather at 15-minute resolution (free; $29/mo once commercial)
-- Data lives in `localStorage` on the device. Export JSON from Settings to back up.
+- Data lives in `localStorage` on the device. Settings → Save a backup file writes everything, calibration included, and Restore from a backup file reads it back (public/backup.js).
 
 A Mapbox token ships in Settings. Restrict it to your own URLs — public tokens
 ship inside the page.
