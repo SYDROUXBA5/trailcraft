@@ -87,15 +87,17 @@ export const OFF_FIND_M = 30;
    hides of a search, or the end of a trail. A laid or walked trail ends where
    the layer's phone stopped, a fix; so does a hide dropped at the layer's
    feet, which says so (`gps`). A hide tapped onto the map, and the end of a
-   drawn card's line, are only where a finger stopped. A plan still waiting
-   for its walk has none yet: its walked card will bring the real end. */
+   drawn card's line, are only where a finger stopped, and so is the end of
+   a walked card that came back carrying the drawn line because the layer's
+   phone had no GPS of the walk (walkedDrawn). A plan still waiting for its
+   walk has none yet: its walked card will bring the real end. */
 function targetsOf(d) {
   const at = (p, gps) => ({ lat: p?.lat, lon: p?.lon, gps,
     acc: gps && Number.isFinite(p?.acc) && p.acc > 0 ? p.acc : 0 });
   const end = d?.trail?.length > 1 ? d.trail[d.trail.length - 1] : null;
   const pts = d?.hides?.length ? d.hides.map(h => at(h, h?.gps === true))
     : !end || (d.plan && !d.walked) ? []
-    : [at(end, !unwalkedPlan(d))];
+    : [at(end, !unwalkedPlan(d) && !d.walkedDrawn)];
   return pts.filter(p => Number.isFinite(p.lat) && Number.isFinite(p.lon));
 }
 

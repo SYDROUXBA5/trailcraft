@@ -215,6 +215,11 @@ await t('relay cards: a plan carries its countdown, a walked card comes back, ol
   const gotWalked = await decodeTrail(walked);
   assert.equal(gotWalked.kind, 2);
   assert.equal(gotWalked.ageMin, null, 'no countdown on a walked card');
+  assert.equal(gotWalked.drawn, false, 'a walk with GPS is not drawn');
+  // With no GPS of the walk it carries the drawn line back, and says so.
+  const gotDrawnWalk = await decodeTrail(await encodeTrail({ points: pts, waypoints: [], from: 'Sophie', kind: 2, drawn: true }));
+  assert.equal(gotDrawnWalk.kind, 2);
+  assert.equal(gotDrawnWalk.drawn, true, 'a walked card carrying the drawn line says so');
 
   // A pre-relay card (no kind, no age) reads exactly as before.
   const plain = await encodeTrail({ points: pts, waypoints: [], from: 'Rémi' });

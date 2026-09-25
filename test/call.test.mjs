@@ -388,6 +388,31 @@ t('a drawn card\u2019s end is where a finger put it, as a tapped hide is', () =>
     'once walked, the end is a fix, and a far call is wrong');
 });
 
+/* With no GPS of the walk, the layer's phone sends the drawn line back as the
+   walked card. The run is then `walked`, and its end was taken for a fix: the
+   layer hid 45 m from where the finger stopped, the dog found them, and the
+   handler's "Certain" right at the person was banked as wrong. The card says
+   it carried the drawn line (walkedDrawn), and its end is a finger's again.
+   An old walked card has no flag and reads as a fix, as it did. */
+t('a walked card that came back carrying the drawn line ends where a finger stopped', () => {
+  const START = { lat: 51, lon: -2.6 };
+  const drawnEnd = project(START, 0, 400);
+  const trail = [{ ...START, t: 1000 }, { ...project(START, 0, 200), t: 2000 }, { ...drawnEnd, t: 3000 }];
+  const hide = project(drawnEnd, 90, 45);
+  const run = (extra) => ({ data: { plan: true, walked: true, walkedFrom: 'Sam', trail, planTrail: trail,
+    track: [{ ...hide, t: 9000, acc: 5 }],
+    trackWaypoints: [{ kind: 'Indication', ...hide, t: 9000, call: { v: CALL_V, conf: 'sure', seen: false, at: 9000 } }],
+    debrief: { outcome: 'found', target: 'real', blind: 'handler' }, ...extra } });
+  const drawnWalk = run({ walkedDrawn: true });
+  assert.equal(firstCallWasFind(drawnWalk), null, 'the only call, 45 m from a finger\u2019s end: not scored');
+  assert.equal(callVerdict(drawnWalk).why, 'later-find', 'and not banked as a wrong "Certain"');
+  const atEnd = run({ walkedDrawn: true, trackWaypoints: [{ kind: 'Indication', ...project(drawnEnd, 90, 5), t: 9000,
+    call: { v: CALL_V, conf: 'sure', seen: false, at: 9000 } }] });
+  assert.equal(firstCallWasFind(atEnd), true, 'at the drawn end it is still the find');
+  assert.equal(firstCallWasFind(run({ walkedDrawn: false })), false, 'a walk with GPS ends at a fix, and a far call is wrong');
+  assert.equal(firstCallWasFind(run({})), false, 'an old walked card, with no flag, reads as it did');
+});
+
 /* The review's case, on a trail saved as confirmLay saves it: ten found runs,
    one "Certain" each, six at the end and four 170 m short. Scoring only the
    runs with a second mark at the end read "about right" (6 of 6), where the

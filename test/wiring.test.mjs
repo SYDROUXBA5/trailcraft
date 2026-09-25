@@ -723,6 +723,19 @@ t('the layer’s guided walk is written down, and comes back after a crash', () 
   assert.match(cancel, /dropDraft\(\);/, 'a walk cancelled on purpose is never offered back');
 });
 
+/* With no GPS of the walk, the walked card carries the drawn line. Nothing
+   said so, the handler's phone stored it as walked, and its end was taken
+   for a fix: a right call at a hide 45 m from where the finger stopped was
+   banked as wrong. The card says so now, and the run keeps it. */
+t('a walked card that carries the drawn line says so, and the run keeps it', () => {
+  const keep = fnSrc('async function keepWalk()');
+  assert.match(keep, /const walked = trail\.length >= 2 \? trail : walk\.card\.points;/);
+  assert.match(keep, /drawn: trail\.length < 2/, 'drawn exactly when the drawn line is sent');
+  assert.match(fnSrc('async function applyWalked(sessionId, card)'),
+    /data: \{ planTrail: plan, trail: card\.points, walked: true, walkedFrom: card\.from, walkedDrawn: !!card\.drawn \}/,
+    'a real walk after a drawn one clears it');
+});
+
 t('the walk to the start neither starts the clock nor goes on the trail', () => {
   const hud = fnSrc('function walkHud()');
   assert.match(hud, /departure\(walk, \{ d: dA, t: last\.t, \.\.\.walkedOfTrail\(rec\.pts, walk\.card\.points\) \}\)/,
@@ -736,7 +749,7 @@ t('the walk to the start neither starts the clock nor goes on the trail', () => 
 t('a walked card names its plan, and one that does not is asked about', () => {
   assert.match(fnSrc('async function renderShareQr(s)'), /kind: 1, ageMin: s\.data\.ageMin \?\? 10, planId: s\.data\.planOf \?\? s\.id/,
     'the plan card says which plan it is');
-  assert.match(fnSrc('async function keepWalk()'), /kind: 2,\s*\n\s*planId: walk\.card\.planId \?\? null/, 'the walked card says it back');
+  assert.match(fnSrc('async function keepWalk()'), /kind: 2,\s*\n\s*drawn: trail\.length < 2, planId: walk\.card\.planId \?\? null/, 'the walked card says it back');
   const take = fnSrc('function takeWalked(card, asked)');
   assert.match(take, /walkedPlanFor\(card, plans, asked\)/);
   assert.match(take, /pick\.ask \? askWhichPlan\(pick\.ask\) : pick\.id/, 'with several plans and no name, the handler picks');

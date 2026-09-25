@@ -4083,8 +4083,10 @@ async function keepWalk() {
 
   // The card the handler scans after the find: the trail as it was REALLY walked.
   try {
+    /* With no GPS of the walk it carries the drawn line, and says so: its
+       end is where a finger stopped, not a fix (targetsOf, call.js). */
     const cardStr = await encodeTrail({ points: walked, waypoints: [], from: S.handler?.name ?? '', kind: 2,
-      planId: walk.card.planId ?? null }, {});
+      drawn: trail.length < 2, planId: walk.card.planId ?? null }, {});
     const qr = window.qrcode?.(0, 'M');
     qr.addData(cardUrl(cardStr, SHARE_BASE), 'Byte');
     qr.make();
@@ -4149,7 +4151,7 @@ async function applyWalked(sessionId, card) {
 
   const walkedPatch = {
     startedAt: card.started,
-    data: { planTrail: plan, trail: card.points, walked: true, walkedFrom: card.from },
+    data: { planTrail: plan, trail: card.points, walked: true, walkedFrom: card.from, walkedDrawn: !!card.drawn },
   };
   const savedWalk = guardSave(patchSession(s, walkedPatch), () => saveSession(s, walkedPatch));
   snap();
