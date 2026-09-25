@@ -3,6 +3,8 @@ import { CONFIDENCE, CALL_V, MIN_PER_BAND, stampCall, confidenceOf, labelOf,
          callsIn, firstCall, scorable, calibration, calibrationLosses,
          calibrationLine, callVerdict, runsOf, firstCallWasFind, AT_FIND_M, OFF_FIND_M } from '../public/call.js';
 import { project } from '../public/geo.js';
+import { labelOf as outcomeLabel } from '../public/debrief.js';
+import { readFileSync } from 'node:fs';
 
 let pass = 0;
 const t = (name, fn) => { fn(); pass++; console.log(`  ok  ${name}`); };
@@ -157,7 +159,8 @@ t('discarded runs are counted, so a thin curve is explained not hidden', () => {
   assert.equal(l.seen, 1);
   assert.equal(l.notBlind, 1);
   assert.equal(l.noDebrief, 1);
-  assert.deepEqual(calibrationLosses([]), { total: 0, seen: 0, helped: 0, notBlind: 0, noDebrief: 0, laterFind: 0 });
+  assert.deepEqual(calibrationLosses([]),
+    { total: 0, seen: 0, helped: 0, notBlind: 0, blindUnasked: 0, noDebrief: 0, laterFind: 0 });
 });
 
 t('a run kept from someone else’s link never counts as your call', () => {
@@ -429,6 +432,40 @@ t('against a GPS-placed target, the only call of a find is wrong when it was pla
   assert.equal(firstCallWasFind(search({ ...HIDE, t: 1, gps: true, acc: 8 })), false, 'dropped at the feet, 80 m off');
   assert.equal(firstCallWasFind(search({ ...HIDE, t: 1, gps: true, acc: 60 })), null, 'unless its own fix was that poor');
   assert.equal(firstCallWasFind(search({ ...HIDE, t: 1 })), null, 'tapped onto the map');
+});
+
+/* "Who knew the answer" is not required, and a handler's first debrief has
+   nothing sticky to fill it from, so it can be saved blank. The result card
+   then said "Blind run — no prompts" (ranBlind) and, in the call block on
+   the same card, "because you knew the answer", which nobody had said. */
+t('a debrief that does not say who knew is not read as "you knew"', () => {
+  const blank = sess({ blind: null });
+  assert.equal(callVerdict(blank).why, 'blind-unasked');
+  assert.equal(scorable(blank), null, 'still not counted: nothing says the call was blind');
+  const unset = sess();
+  delete unset.data.debrief.blind;
+  assert.equal(callVerdict(unset).why, 'blind-unasked', 'a debrief saved before the field existed');
+  assert.equal(callVerdict(sess({ blind: 'open' })).why, 'notblind', 'only "I knew" is "you knew"');
+  const l = calibrationLosses([blank, sess({ blind: 'open' })]);
+  assert.deepEqual([l.blindUnasked, l.notBlind, l.total], [1, 1, 2]);
+
+  /* The call block itself, lifted from app.js and run against the real maths. */
+  const js = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8');
+  const i = js.indexOf('\nfunction paintCallBlock(s) {');
+  assert.ok(i >= 0, 'app.js still has paintCallBlock');
+  const src = js.slice(i, js.indexOf('\n}', i + 1) + 2);
+  const said = (s) => {
+    const els = {};
+    const $ = (id) => (els[id] ??= { hidden: false, textContent: '' });
+    new Function('$', 'firstCall', 'confidenceOf', 'labelOf', 'firstCallWasFind', 'callVerdict',
+      'calibrationLine', 'calibration', 'runsOf', 'db', 'S', `${src}\npaintCallBlock(arguments[11]);`)(
+      $, firstCall, confidenceOf, outcomeLabel, firstCallWasFind, callVerdict,
+      calibrationLine, calibration, runsOf, { sessions: () => [] }, { handler: null }, s);
+    return els.callSummary.textContent;
+  };
+  assert.match(said(blank), /the debrief doesn’t say who knew the answer/);
+  assert.doesNotMatch(said(blank), /because you knew/);
+  assert.match(said(sess({ blind: 'open' })), /because you knew the answer/);
 });
 
 console.log(`\n${pass} passed total\n`);

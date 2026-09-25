@@ -2739,6 +2739,7 @@ function paintCallBlock(s) {
      Straight from the same verdict the maths uses, so the two never differ. */
   const why = callVerdict(s).why;
   if (why === 'notblind') tail += ' This one doesn’t count towards your record, because you knew the answer.';
+  else if (why === 'blind-unasked') tail += ' This one doesn’t count towards your record: the debrief doesn’t say who knew the answer.';
   else if (why === 'helped') tail += ' This one doesn’t count, because the coach was on.';
   else if (why === 'seen') tail += ' This one doesn’t count, because the answer was already on screen.';
   else if (why === 'someone-elses') tail += ' This one doesn’t count towards your record: it is someone else’s run.';
