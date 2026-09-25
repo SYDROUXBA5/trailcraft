@@ -94,50 +94,100 @@ export function flowBearing(f) {
 
 /** Move a point along a flow vector for `secs`.
     `carry` is the share of the flow that actually moves the thing: air moves
-    at the full rate, scent at nose height is held back by ground friction. */
-export function stepByFlow(p, f, secs, carry = 1) {
-  const sp = Math.hypot(f.u, f.v);
-  if (!(secs > 0) || sp < 1e-6) return { lat: p.lat, lon: p.lon };
-  return project(p, flowBearing(f), sp * secs * carry);
+    at the full rate, scent at nose height is held back by ground friction.
+    `out` may be `p` itself, to step a point in place. */
+export function stepByFlow(p, f, secs, carry = 1, out = { lat: 0, lon: 0 }) {
+  const sp = Math.sqrt(f.u * f.u + f.v * f.v);        // not Math.hypot, which V8 boxes: see flowAt
+  if (!(secs > 0) || sp < 1e-6) { out.lat = p.lat; out.lon = p.lon; return out; }
+  return project(p, flowBearing(f), sp * secs * carry, out);
 }
+
+/* Scratch for the hot loop. driftFrom runs five steps for every parcel on
+   every frame, some fifty thousand calls a tick on a long lay, and a fresh
+   object per step made several young-generation collections a tick on a
+   phone that has panning to do. Nothing outlives the call that fills it:
+   whatever driftFrom hands back is copied into the caller's `out`. */
+const _n = { x: 0, y: 0 }, _f = { u: 0, v: 0 };
+const _step = [{ lat: 0, lon: 0 }, { lat: 0, lon: 0 }];
 
 /* `walls` (walls.js) are buildings the scent cannot pass through. Only the
    drawn cloud, tracers and arrows pass them; the grading (predictedOffsets)
    never does, so a building on the map moves what you see and never a score. */
-export function driftFrom(T, origin, secs, wx, st, steps = 5, walls = null) {
+/* `out` is where the answer is written; pass one to reuse it frame after
+   frame, or leave it and get a fresh point as before. */
+export function driftFrom(T, origin, secs, wx, st, steps = 5, walls = null, out = { lat: 0, lon: 0 }) {
   /* A trail point inside a footprint starts from just outside its nearest
      wall (walls.js), and from there every wall applies. Before the first
      step too: a parcel just leaving the ground is the brightest one drawn. */
-  let pt = walls ? outside(walls, origin) : { lat: origin.lat, lon: origin.lon };
-  if (!(secs > 0)) return { lat: pt.lat, lon: pt.lon };
+  const from = walls ? outside(walls, origin) : origin;
+  if (!(secs > 0)) { out.lat = from.lat; out.lon = from.lon; return out; }
+  /* Level ground with nothing in the way: the air is the same everywhere, so
+     five steps along one unchanging vector are one step five times as long.
+     Five great-circle hops on one bearing part from a single hop by under two
+     millimetres even 150 m out, which nothing drawn or graded can see. */
+  if ((!T || T.flat) && !walls) {
+    flowAt(T, 0.5, 0.5, wx, st, _f);
+    return stepByFlow(from, _f, secs, PV.nose, out);
+  }
   const dt = secs / steps;
-  const f = { u: 0, v: 0 };
   const wake = walls && PV.wakeSlow < 1;
   const going = ((wx?.wind_direction ?? 0) + 180) % 360;
 
+  /* In open air the point steps in place in `out`. Among walls it cannot:
+     blockStep weighs where a step started against where it ends, so the two
+     must be different objects, and the step lands in whichever of the two
+     scratch points the last one did not use. */
+  let pt = from, flip = 0;
+  if (!walls) { out.lat = from.lat; out.lon = from.lon; pt = out; }
   for (let i = 0; i < steps; i++) {
-    const n = normOf(T, pt.lat, pt.lon);
-    flowAt(T, n.x, n.y, wx, st, f);
-    if (Math.hypot(f.u, f.v) < 1e-6) break;
+    normOf(T, pt.lat, pt.lon, _n);
+    flowAt(T, _n.x, _n.y, wx, st, _f);
+    if (_f.u * _f.u + _f.v * _f.v < 1e-12) break;     // still air (1e-6 m/s, squared)
     if (wake) {
       const k = leeFactor(walls, pt, going, PV.wakeLen, PV.wakeSlow, PV.wakeH);
-      f.u *= k; f.v *= k;
+      _f.u *= k; _f.v *= k;
     }
-    const next = stepByFlow(pt, f, dt, PV.nose);
-    pt = walls ? blockStep(walls, pt, next, -1, PV.wallSlide) : next;
+    if (walls) pt = blockStep(walls, pt, stepByFlow(pt, _f, dt, PV.nose, _step[flip ^= 1]), -1, PV.wallSlide);
+    else stepByFlow(pt, _f, dt, PV.nose, pt);
   }
-  return pt;
+  if (pt !== out) { out.lat = pt.lat; out.lon = pt.lon; }
+  return out;
+}
+
+const _home = { lat: 0, lon: 0 }, _drift = { lat: 0, lon: 0 }, _sway = { lat: 0, lon: 0 };
+
+/* A parcel's place in the render budget: a fixed number in [0, 1) mixed from
+   the order it was laid in (murmur3's finaliser). It has nothing to do with
+   the parcel's seed, phase or life, so keeping only the low ones keeps a fair
+   sample of the air rather than, say, only the parcels that sway one way. */
+function keepRank(id) {
+  let h = id | 0;
+  h ^= h >>> 16; h = Math.imul(h, 0x85ebca6b);
+  h ^= h >>> 13; h = Math.imul(h, 0xc2b2ae35);
+  h ^= h >>> 16;
+  return (h >>> 0) / 4294967296;
 }
 
 export class ScentSim {
-  /* `walls` is set by whoever draws this cloud; null means open ground. */
-  constructor() { this.parts = []; this.trail = []; this.pool = []; this.walls = null; }
+  /* `walls` is set by whoever draws this cloud; null means open ground.
+     `keep` is the share of laid parcels the render budget lets this cloud
+     carry (see prune), and `laid` counts every parcel ever offered to it.
+
+     `pool: false` is for a cloud whose trail has nobody at the end of it.
+     Contamination is someone who walked THROUGH: nobody stood at the end of
+     a cross-track waiting to be found, and the pool drawn there was the
+     hottest thing on the map, telling a handler they had. */
+  constructor({ pool = true } = {}) {
+    this.parts = []; this.trail = []; this.pool = []; this.walls = null; this.keep = 1; this.laid = 0;
+    this.endPool = pool;
+  }
 
   /** Seed one particle set from a laid trail. Each keeps the point it came from
       and the moment that point was walked — its ground source never moves. */
   seed(trail) {
     this.trail = [];
     this.parts = [];
+    this.keep = 1; this.laid = 0;
     return this.append(trail || []);
   }
 
@@ -150,6 +200,11 @@ export class ScentSim {
     for (const p of points || []) {
       const per = PER_POINT();
       for (let k = 0; k < per; k++) {
+        /* Laid at the density the budget has already settled on, or new
+           ground would arrive thicker than old and the next prune would have
+           to take the difference out of everything, old ground included. */
+        const rank = keepRank(this.laid++);
+        if (rank >= this.keep) continue;
         this.parts.push({
           lat: p.lat, lon: p.lon,          // current position
           hlat: p.lat, hlon: p.lon,        // ground source, fixed
@@ -172,6 +227,7 @@ export class ScentSim {
              all 1 by default, so tarmac changes nothing until tried. */
           hard: !!p.hard,
           str: 0,
+          rank,
         });
       }
       /* A mid-trail PAUSE is a deposit, not a footstep: the longer the stand,
@@ -181,11 +237,13 @@ export class ScentSim {
       if ((p.dwellS ?? 0) >= PV.dwellThresh) {
         const R = poolRadius(p.dwellS) * (p.hard ? PV.hardWiden : 1);
         for (let k = 0; k < 10; k++) {
+          const rank = keepRank(this.laid++);
+          if (rank >= this.keep) continue;
           const g = project(p, Math.random() * 360, Math.sqrt(Math.random()) * R);
           this.parts.push({
             lat: g.lat, lon: g.lon, hlat: g.lat, hlon: g.lon, born: p.t,
             phase: (k + Math.random()) / 10, seed: Math.random() * 6.28318,
-            life: RESIDENCE(), dwellS: p.dwellS, hard: !!p.hard, str: 0,
+            life: RESIDENCE(), dwellS: p.dwellS, hard: !!p.hard, str: 0, rank,
           });
         }
       }
@@ -200,6 +258,7 @@ export class ScentSim {
   seedHides(hides) {
     this.trail = [];
     this.parts = [];
+    this.keep = 1; this.laid = 0;
     this.hides = (hides || []).slice();
     this.reseedPool();
     return this;
@@ -211,7 +270,7 @@ export class ScentSim {
   /** Continuous sources: the trail's end (someone standing, waiting to be
       found) and every hide. Both feed the air the whole time. */
   poolSources() {
-    const end = this.trail[this.trail.length - 1];
+    const end = this.endPool ? this.trail[this.trail.length - 1] : null;
     return [...(end ? [end] : []), ...(this.hides || [])];
   }
 
@@ -274,6 +333,8 @@ export class ScentSim {
     const wind = wx?.wind_speed ?? 0;
     const gustiness = Math.max(0, ((wx?.wind_gusts ?? wind) - wind) / Math.max(0.5, wind));
     const breathe = now / BREATHE;
+    // Reused for every parcel: see driftFrom's scratch.
+    const home0 = _home, d = _drift, p2 = _sway;
 
     for (const s of this.parts) {
       const age = now - s.born;
@@ -288,12 +349,15 @@ export class ScentSim {
       /* Where this parcel's scent really starts: moved out of a building its
          trail point falls inside (walls.js). Worked out once per set of walls,
          not every frame; the ground source never moves. */
-      let home = { lat: s.hlat, lon: s.hlon };
+      /* The moved point is KEPT on the parcel, and `outside` hands back the
+         very object it was given when nothing needs moving, so that one gets
+         an object of its own rather than the shared scratch. */
+      let home = home0;
       if (WALLS) {
-        if (s.hw !== WALLS) { s.hw = WALLS; s.ho = outside(WALLS, home); }
+        if (s.hw !== WALLS) { s.hw = WALLS; s.ho = outside(WALLS, { lat: s.hlat, lon: s.hlon }); }
         home = s.ho;
-      }
-      const d = driftFrom(T, home, secs, wx, st, 5, WALLS);
+      } else { home0.lat = s.hlat; home0.lon = s.hlon; }
+      driftFrom(T, home, secs, wx, st, 5, WALLS, d);
       s.lat = d.lat; s.lon = d.lon;
 
       const dispM = dist(home, d);
@@ -305,10 +369,10 @@ export class ScentSim {
         const amp = Math.min(MCAP, dispM * gustiness * MAMP) * (h ? WIDEN : 1);
         const sway = amp * Math.sin(breathe + s.seed * 3.1 + s.phase * 6.28318);
         const brg = bearing(home, d);
-        const p2 = project({ lat: s.lat, lon: s.lon }, (brg + 90) % 360, sway);
+        project(d, (brg + 90) % 360, sway, p2);           // d is where the parcel now is
         /* The sway is a move like any other: a wall stops it too. Left
            unchecked it pushed gusty scent into houses. */
-        const p3 = WALLS ? blockStep(WALLS, { lat: s.lat, lon: s.lon }, p2, -1, PV.wallSlide) : p2;
+        const p3 = WALLS ? blockStep(WALLS, d, p2, -1, PV.wallSlide) : p2;
         s.lat = p3.lat; s.lon = p3.lon;
       }
 
@@ -361,9 +425,9 @@ export class ScentSim {
          and forgotten in a third. */
       const hp = !!src.hard;
       const poolR = poolRadius(dwellS) * (hp ? WIDEN : 1);
-      const g = project({ lat: src.lat, lon: src.lon }, s.ang, s.rad * poolR);
+      const g = project(src, s.ang, s.rad * poolR, home0);
       s.hlat = g.lat; s.hlon = g.lon;
-      const d = driftFrom(T, g, s.phase * AIR * (s.life ?? 1) / mix * (hp ? CARRY : 1), wx, st, 5, WALLS);
+      driftFrom(T, g, s.phase * AIR * (s.life ?? 1) / mix * (hp ? CARRY : 1), wx, st, 5, WALLS, d);
       s.lat = d.lat; s.lon = d.lon;
       // Up to ~1.5× a fresh trail particle — the hottest thing on the map.
       s.str = (PSB + PSR * build) * (1 - s.phase * PFADE) * (hp ? GIVE : 1);
@@ -401,15 +465,22 @@ export class ScentSim {
        Thin EVENLY rather than dropping the oldest. Cutting the head off would
        erase the plume from the start of a long trail — and how faint that end
        has become is a thing the physics already says, through each parcel's
-       strength. A render budget must not get a vote on it. Taking every nth
-       parcel leaves the whole line represented, just sampled less finely. */
+       strength. A render budget must not get a vote on it.
+
+       Evenly means one sampling rate for the whole line, whatever its age.
+       Taking every nth parcel was even once, but a live lay prunes every
+       frame while it appends: each cut took the same share from old and new
+       alike, again and again, so survival fell away with age and a 40-minute
+       trail kept only its last few minutes of plume. So the budget is a rate
+       instead. Each parcel has a fixed rank; the cloud keeps those below
+       `keep`, lowers `keep` just far enough to fit, and lays new ground at
+       the same rate (append). Every stretch of trail is then sampled alike.
+       The rate only ever falls: ground aged out by the cut above does not
+       buy a finer sample back, which would leave the newest stretch denser. */
     if (this.parts.length > max) {
-      const stride = this.parts.length / max;
-      const kept = [];
-      for (let i = 0; kept.length < max && i < this.parts.length; i++) {
-        if (Math.floor(i / stride) === kept.length) kept.push(this.parts[i]);
-      }
-      this.parts = kept;
+      const ranks = Float64Array.from(this.parts, s => s.rank).sort();
+      this.keep = ranks[max];                 // ranks are distinct, so exactly `max` sit below it
+      this.parts = this.parts.filter(s => s.rank < this.keep);
     }
     return this.parts.length;
   }
