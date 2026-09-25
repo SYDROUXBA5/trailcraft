@@ -10,7 +10,7 @@
 import { simplify, pathLen, cardinal, fmtDist, fmtShort, fmtSpeed, fmtTemp, fmtWeight, fmtCoord } from './geo.js';
 import { through, inflate, b64url, unb64url, needStreams } from './card.js';
 import { targetById, ageBand, dogAge, healApproach } from './store.js';
-import { DEBRIEF, FLAGS, NOTE_TAGS, toldField, toldOf } from './debrief.js';
+import { DEBRIEF, FLAGS, NOTE_TAGS, ownRun, toldField, toldOf } from './debrief.js';
 import { CONFIDENCE, labelOf as callLabel } from './call.js';
 import { cleanSeen, seenLine } from './ground.js';
 import { rainRate } from './field.js';
@@ -439,6 +439,60 @@ export const sharedUrl = (code, base) => `${String(base).replace(/#.*$/, '')}#t=
 export function sharedFromText(text) {
   const m = String(text ?? '').match(/(TS\d+\.[A-Za-z0-9_-]+)/);
   return m ? m[1] : null;
+}
+
+/* ── A run someone sent, kept on this phone ───────────────────────── */
+
+/** The model dressed as a session, so the map screen can show it exactly
+    as it shows this phone's own. The coach and what was seen on the ground
+    come with it: the shared page lists both as part of the run, and a kept
+    copy that dropped them passed on less than it was given. */
+export function sessionFromModel(m) {
+  return {
+    id: 'shared', targetId: m.kind === 'search' ? 'article' : 'person',
+    startedAt: m.laidAt ?? Date.now(), dogId: null, handlerId: null, layerId: null, summary: headline(m),
+    name: m.name ?? null,
+    data: {
+      trail: m.trail ?? undefined, hides: m.hides ?? undefined, contamination: m.contamination ?? [],
+      weather: m.wx ?? null, runWeather: m.runWx ?? undefined, track: m.track ?? undefined, trackWaypoints: m.wps ?? [],
+      trackStarted: m.runAt ?? undefined, result: m.result ?? undefined, plan: m.plan, walked: m.walked, k: m.k,
+      debrief: m.debrief ?? undefined, coach: m.coach ?? undefined, seen: m.seen ?? undefined,
+    },
+  };
+}
+
+/** A shared run saved among this phone's records. None of its people are on
+    this phone, so there are no ids to point at: the dog, the handler and the
+    layer are kept as the names they came with. `from` stays for the builds
+    that read only that. */
+export function keptSession(m, { id, at }) {
+  const s = sessionFromModel(m);
+  return { ...s, id, data: { ...s.data, imported: {
+    from: m.handler ?? null, at, dog: m.dog ?? null, handler: m.handler ?? null, layer: m.layer ?? null } } };
+}
+
+/** The dog, handler and layer behind a record, as trailModel wants them.
+    This phone's own are looked up by id. A run kept from someone else's link
+    has no ids here, and used to fall back to this phone's handler: a kept run
+    passed on again went out under the name of someone who never ran it, with
+    no dog at all. It now goes out under the names it came with. A run this
+    phone made on a trail someone sent is this phone's, and only the layer is
+    theirs. */
+export function peopleOf(s, { dogs = [], handlers = [], layers = [], me = null } = {}) {
+  const byId = (list, id) => (id == null ? null : list.find(x => x?.id === id) ?? null);
+  const named = (v) => (str(v) ? { name: str(v) } : null);
+  const own = { dog: byId(dogs, s?.dogId), handler: byId(handlers, s?.handlerId), layer: byId(layers, s?.layerId) };
+  const imp = s?.data?.imported;
+  if (!imp || typeof imp !== 'object') return { ...own, handler: own.handler ?? me };
+  if (ownRun(s)) return { ...own, handler: own.handler ?? me, layer: own.layer ?? named(imp.layer) };
+  /* A run kept before the names were stored has only `from`, which on a kept
+     run was always the sender's handler. A Trail Card's trail is filed under
+     this phone's handler, so its `from`, whoever sent the card, is not read. */
+  return {
+    dog: own.dog ?? cleanDog(imp.dog),
+    handler: s.handlerId == null ? named('handler' in imp ? imp.handler : imp.from) : own.handler,
+    layer: own.layer ?? named(imp.layer),
+  };
 }
 
 /* ── GPX ──────────────────────────────────────────────────────────── */
