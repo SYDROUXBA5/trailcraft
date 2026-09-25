@@ -11,7 +11,7 @@ import {
 } from './geo.js';
 import { stepPoints, contamTimed, trailFrom, walkedOfTrail, gpsTrouble, forecastNote } from './geo.js';
 import { packDraft, unpackDraft, draftAlive, draftStats } from './draft.js';
-import { handlerStats, teachesDrift } from './store.js';
+import { handlerStats, teachesDrift, trailShown } from './store.js';
 import { plumePalette, stepPalette, windPalette, trackPalette, COLOUR_PRESETS, isHex, mix } from './colours.js';
 import { FLAT, buildTerrain, stability, regime, flowAt, normOf, rainRate, RAIN_SUMS_PER_HOUR, windAt } from './field.js';
 import { predictedOffsets, ScentSim, driftFrom, stepByFlow } from './sim.js';
@@ -4574,7 +4574,7 @@ function renderResult(s) {
   $('resModel').textContent = (modelled + mover).trim();
   $('resModelLabel').hidden = !$('resModel').textContent && !r.stabilityPlain;
   $('resStability').textContent = r.stabilityPlain ?? '';
-  $('resCoach').textContent = coachWords(s.data.coach);
+  $('resCoach').textContent = coachWords(s.data.coach, s.data);
 
   /* A plan-graded run says so. Grading a dog against a line drawn with a
      finger is a sketch of a verdict, and it is not allowed to look like the
@@ -5211,16 +5211,27 @@ function coachSummary() {
   };
 }
 
-/** The coach line on the result card. */
-function coachWords(c) {
+/** The coach line on the result card. "Blind" is a claim about what the
+    handler knew, not only about the coach: a run where Reveal was pressed
+    had the answer on screen, and calling it blind hands a trainer evidence
+    that is not there. `d` is the run's data, for when the trail was shown. */
+function coachWords(c, d = null) {
   if (!c) return '';
   const n = (k) => `${k} call${k === 1 ? '' : 's'}`;
   if (c.assisted) {
     return `Assisted run — the coach was on with a ${fmtM(c.tolM)} corridor${c.scent ? ' and the experimental scent corridor' : ''}, and made ${n(c.calls ?? 0)}.`;
   }
   const sh = c.shadow;
-  if (!sh) return 'Blind run — no prompts.';
-  return `Blind run — no prompts. Had the coach been on: ${n(sh.plain)} with a ${fmtM(sh.tolM)} corridor, ${n(sh.scent)} with the scent corridor.`;
+  const had = sh ? ` Had the coach been on: ${n(sh.plain)} with a ${fmtM(sh.tolM)} corridor, ${n(sh.scent)} with the scent corridor.` : '';
+  if (trailShown(d)) {
+    /* Before the run began means an earlier run of the same trail showed it. */
+    const into = Number.isFinite(d.trackStarted) ? d.revealedAt - d.trackStarted : NaN;
+    const when = !Number.isFinite(into) ? 'the trail was shown on screen'
+      : into < 0 ? 'the trail had been shown on screen on an earlier run'
+      : `the trail was shown on screen ${fmtDur(into)} into the run`;
+    return `Coach off, but ${when}, so this was not a blind run.${had}`;
+  }
+  return `Blind run — no prompts.${had}`;
 }
 
 /** Tones as WAV files played through <audio>, not the Web Audio API: on an
@@ -5768,7 +5779,8 @@ function paintHandlerCard(id) {
     + cell(st.laid, st.laid === 1 ? 'trail laid' : 'trails laid')
     + cell(st.runs ? fmtKm(st.longest) : '\u2014', 'longest run')
     + cell(st.medOff != null ? fmtM(st.medOff) : '\u2014', 'typical distance from the line')
-    + (st.assisted + st.blind ? cell(`${st.assisted}\u2009/\u2009${st.blind}`, 'assisted / blind runs') : '');
+    + (st.assisted + st.blind + st.shown
+      ? cell(`${st.assisted}\u2009/\u2009${st.blind}`, `assisted / blind runs${st.shown ? ` \u00b7 ${st.shown} with the trail shown` : ''}`) : '');
   $('hRing').innerHTML = ringHtml(st);
   $('hDogsLabel').textContent = dogs.length ? `Dogs \u00b7 ${dogs.length}` : 'Dogs';
   $('hDogs').innerHTML = dogs.length ? dogs.map(d => {
