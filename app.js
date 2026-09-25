@@ -41,7 +41,7 @@ import { createStore, migrateV1, TARGETS, ODOURS, targetById, targetText, verbs,
          askDelete, storageWords, APPROACH_V } from './store.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-24a';
+const BUILD = '2026-09-25a';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true,
