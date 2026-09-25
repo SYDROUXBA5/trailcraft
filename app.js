@@ -2940,7 +2940,8 @@ function paintReplay() {
     ? signedOffsets(s.data.trail, [here]).filter(Number.isFinite)[0] : null;
   $('repHudText').textContent = fmtDur(at - replay.from);
   const laid = targetById(s.targetId).kind === 'hide' ? 'Hides' : 'Trail';
-  $('repCaption').textContent = `${laid} ${ageMin} min old here`
+  /* A drawn line's clock is made up, so the replay does not age it either. */
+  $('repCaption').textContent = (unwalkedPlan(s.data) ? `${laid} age ${ageUnknown(s.data)}` : `${laid} ${ageMin} min old here`)
     + (off == null ? '' : ` · dog ${fmtM(Math.abs(off))} ${off >= 0 ? 'right' : 'left'} of the line`)
     + (plume.bandWalls ? '.' + bandWallNote() : '');
   const f = replay.to > replay.from ? (at - replay.from) / (replay.to - replay.from) : 1;
@@ -4186,6 +4187,13 @@ const ageWord = (ms) => {
   const m = Math.round(ms / 60000);
   return m < 60 ? `${m} min` : m < 60 * 24 ? `${(m / 60).toFixed(1)} h` : `${Math.round(m / 1440)} d`;
 };
+/** A trail age that cannot be known yet, in words to fit where it is shown.
+    A drawn plan's laid time is the moment it was drawn, less a guessed walk,
+    so any age worked from it is made up (unwalkedPlan) until the layer's
+    walked card is scanned. A drawn Trail Card has no walked card coming. */
+const ageUnknown = (d, short = false) => (d?.plan
+  ? (short ? 'not known yet' : 'known once the walk is scanned')
+  : (short ? 'not known' : 'not known — drawn, not walked'));
 
 /* ── Run / Search ─────────────────────────────────────────────────── */
 /* airAt: the moment whose wind the run screen shows. The start of the run,
@@ -4250,8 +4258,9 @@ async function startRun(s) {
       droppedAt: rec.droppedAt, blocked: rec.blocked });
     if (trouble) return gpsTroubleText(trouble);
     const dogName = S.dog?.name ?? 'Dog';
-    const age = ageWord(Date.now() - s.startedAt);
-    const base = `${dogName} · ${fmtDur(Date.now() - rec.started)} · ${t.kind === 'person' ? 'trail' : 'hide'} ${age} old`;
+    /* The same made-up clock the result screen refuses to show. */
+    const age = unwalkedPlan(s.data) ? `age ${ageUnknown(s.data, true)}` : `${ageWord(Date.now() - s.startedAt)} old`;
+    const base = `${dogName} · ${fmtDur(Date.now() - rec.started)} · ${t.kind === 'person' ? 'trail' : 'hide'} ${age}`;
     return coach.line ? `${base} · ${coach.line}` : base;
   };
   $('btnReveal').textContent = t.kind === 'person' ? 'Reveal trail' : 'Reveal hides';
@@ -4619,7 +4628,7 @@ function renderResult(s) {
       cell(typical != null ? fmtM(typical, 1) : '—', 'typical distance from the line',
         r.noisy && Number.isFinite(r.accMed) ? `GPS ±${fmtM(r.accMed)}` : '') +
       sideCell +
-      cell(age, 'trail age at start', drawnOnly ? 'known once the walk is scanned' : '') +
+      cell(age, 'trail age at start', drawnOnly ? ageUnknown(s.data) : '') +
       cell(dur != null ? fmtDur(dur) : '—', 'run', tr.length > 1 ? fmtKm(pathLen(tr)) : '');
   }
   const modelled = r.modelled
