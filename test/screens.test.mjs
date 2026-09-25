@@ -93,11 +93,12 @@ function app() {
   const air = [];
   const airAt = [];
   const sessions = new Map();
+  const viewport = { content: 'width=device-width,initial-scale=1,viewport-fit=cover' };
   const sb = {
     $: (id) => { if (!els.has(id)) els.set(id, fakeEl()); return els.get(id); },
     history,
     window: { addEventListener: (type, f) => { if (type === 'popstate') history.onPop = f; } },
-    document: { visibilityState: 'visible' },
+    document: { visibilityState: 'visible', querySelector: (q) => (q === 'meta[name="viewport"]' ? viewport : null) },
     toast() {}, snap() {}, boot() {},
     rec: { on: false, kind: null, hides: [], wx: null },
     run: { session: null }, pendingSession: null,
@@ -135,7 +136,7 @@ function app() {
   ].join('\n');
   vm.runInContext(src, sb);
   const click = (id, e) => sb[`on_${id}`](e);
-  return { sb, air, airAt, sessions, click, where: () => sb.where().screen, go: sb.go, arrow: sb.goBack };
+  return { sb, air, airAt, sessions, viewport, click, where: () => sb.where().screen, go: sb.go, arrow: sb.goBack };
 }
 
 /** Home → Settings → Sessions → one run's result: the usual way to an old run. */
@@ -417,6 +418,31 @@ await t('a coach call made while the app’s screen was dark is counted, and sai
   sb.document.visibilityState = 'hidden';
   sb.coachDeliver({ kind: 'off' });
   assert.equal(sb.coach.missed, 0, 'a web page is not the app: nothing is claimed about it');
+});
+
+await t('a map screen holds the page at its own size, and the way back lets it be pinched again', () => {
+  /* A page pinched on a map screen could not be pinched back: the map takes
+     every touch. So every way onto a map screen caps the scale, and every way
+     off it, the arrow and the phone's back gesture included, lifts the cap. */
+  const a = app();
+  const capped = () => /maximum-scale=1/.test(a.viewport.content);
+  a.go('scrHome');
+  assert.ok(!capped(), 'home can be pinched');
+  a.go('scrReplay');
+  assert.ok(capped(), 'a replay cannot');
+  a.arrow();
+  assert.equal(a.where(), 'scrHome');
+  assert.ok(!capped(), 'back by the arrow, home can be pinched again');
+  a.go('scrSettings'); a.go('scrBench');
+  assert.ok(capped());
+  a.sb.history.back();                         // the phone's own back gesture
+  assert.equal(a.where(), 'scrSettings');
+  assert.ok(!capped(), 'and by the back gesture');
+  a.go('scrWait');
+  assert.ok(!capped(), 'the waiting screen is paper too, whatever its colour');
+  assert.equal(a.viewport.content.match(/maximum-scale/g)?.length ?? 0, 0, 'never stacked up');
+  a.go('scrRun'); a.go('scrShowMap');
+  assert.equal(a.viewport.content.match(/maximum-scale/g).length, 1, 'once, however many map screens in a row');
 });
 
 console.log(`\n${pass} passed total\n`);

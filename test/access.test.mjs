@@ -80,6 +80,55 @@ t('the cards that work as radio buttons are radio buttons', () => {
   assert.match(fnSrc('function paintCoachControls()'), /b\.setAttribute\('aria-checked', String\(sel\)\)/);
 });
 
+t('a chip drawn again keeps the screen reader’s place', () => {
+  /* Run for real against a small fake of a row drawn again whole. */
+  const f = fnSrc('function repaintFrom(chip, paint)');
+  const CSS = { escape: (v) => v.replace(/["\\]/g, '\\$&') };
+  const chip = (attrs) => ({
+    localName: 'button', isConnected: true, focused: [],
+    attributes: Object.entries(attrs).map(([name, value]) => ({ name, value })),
+    focus(o) { this.focused.push(o); },
+  });
+  const row = (old, fresh, focusOn) => {
+    const asked = [];
+    const root = { querySelector: (q) => { asked.push(q); return fresh; } };
+    old.closest = () => root;
+    const document = { activeElement: focusOn };
+    new Function('document', 'CSS', `${f}; return repaintFrom;`)(document, CSS)(old, () => { old.isConnected = false; });
+    return asked;
+  };
+  const a = chip({ class: 'chip', 'data-dog': 'rex' }), a2 = chip({ class: 'chip selected', 'data-dog': 'rex' });
+  assert.deepEqual(row(a, a2, a), ['button[data-dog="rex"]'], 'found by its data, not by its look');
+  assert.deepEqual(a2.focused, [{ preventScroll: true }], 'the chip drawn in its place takes focus');
+  const b = chip({ 'data-pick': 'outcome', 'data-v': 'found' }), b2 = chip({ 'data-pick': 'outcome', 'data-v': 'found' });
+  assert.deepEqual(row(b, b2, b), ['button[data-pick="outcome"][data-v="found"]'], 'a debrief option is named by both');
+  assert.deepEqual(b2.focused, [{ preventScroll: true }]);
+  const c = chip({ 'data-dog': 'rex' }), c2 = chip({ 'data-dog': 'rex' });
+  assert.deepEqual(row(c, c2, { name: 'the field being typed in' }), [], 'focus somewhere else is not moved');
+  assert.deepEqual(c2.focused, []);
+
+  // Every tap on Home or the debrief that draws its row again goes through it.
+  const home = js.slice(js.indexOf("$('scrHome').addEventListener('click'"), js.indexOf("$('btnLay').addEventListener"));
+  for (const v of ['h', 'd', 'od', 'lv', 'l']) assert.match(home, new RegExp(`return repaintFrom\\(${v}, renderHome\\);`), `the ${v} chip`);
+  assert.match(home, /repaintFrom\(t, renderHome\);\n\s*\/\* Inside the tap/, 'the target chip, before Other takes the keyboard');
+  const debrief = js.slice(js.indexOf("$('scrDebrief').addEventListener('click'"), js.indexOf("$('repBack').addEventListener"));
+  for (const v of ['pick', 'seenBtn', 'flag', 'tag']) assert.match(debrief, new RegExp(`return repaintFrom\\(${v}, paintDebrief\\);`), `the ${v} option`);
+  assert.ok(!/return paintDebrief\(\);/.test(debrief), 'no debrief option is drawn again without it');
+});
+
+t('the chosen dog and handler say that tapping again opens their record', () => {
+  /* Pressed, they read as a toggle that is on, and a second press of a
+     toggle turns it off. Here it opens the record instead, so they say so. */
+  assert.match(html, /<span id="dogOpensHint" hidden>Tap again to open this dog’s record\.<\/span>/);
+  assert.match(html, /<span id="handlerOpensHint" hidden>Tap again to open this handler’s card\.<\/span>/);
+  const line = (attr) => js.split('\n').find(l => l.includes(attr) && l.includes('<button'));
+  assert.ok(line('data-dog="${esc(d.id)}"').includes(`\${d.id === dog?.id ? ' aria-describedby="dogOpensHint"' : ''}`), 'only the chosen dog');
+  assert.ok(line('data-handler="${esc(h.id)}"').includes(`\${h.id === handler.id ? ' aria-describedby="handlerOpensHint"' : ''}`), 'only the chosen handler');
+  // And the tap still does what the hint says.
+  assert.match(js, /if \(d\.classList\.contains\('selected'\)\) return openDogCard\(d\.dataset\.dog\);/);
+  assert.match(js, /if \(h\.classList\.contains\('selected'\)\) return openHandlerCard\(h\.dataset\.handler\);/);
+});
+
 t('the two GPS filters are named by their labels', () => {
   assert.match(html, /<label class="field-label" for="accCap">Reject GPS fixes worse than/);
   assert.match(html, /<label class="field-label" for="stillCap">Ignore movement under/);
@@ -131,6 +180,45 @@ t('a toast stays up long enough to read', () => {
   assert.match(js, /\}, toastMs\(msg\)\);/, 'the toast uses it');
 });
 
+t('a toast raised while the page is hidden leaves no empty pill behind', () => {
+  /* Run for real. With the page hidden, as it is with the screen dark on a
+     recording, the timers still fire and the animation frame does not. */
+  const src = js.slice(js.indexOf('const toastMs = '), js.indexOf('\n};', js.indexOf('const toast = (msg) => {')) + 3);
+  const fake = ({ cancels = true } = {}) => {
+    const shown = new Set(), frames = new Map(), timers = new Map();
+    let n = 0;
+    const el = { textContent: '', classList: { add: (c) => shown.add(c), remove: (c) => shown.delete(c) } };
+    const env = {
+      $: () => el,
+      requestAnimationFrame: (fn) => { frames.set(++n, fn); return n; },
+      cancelAnimationFrame: (k) => { if (cancels) frames.delete(k); },
+      setTimeout: (fn) => { timers.set(++n, fn); return n; },
+      clearTimeout: (k) => timers.delete(k),
+    };
+    const toast = new Function(...Object.keys(env), `${src}; return toast;`)(...Object.values(env));
+    const flush = (m) => () => { const due = [...m.values()]; m.clear(); due.forEach(fn => fn()); };
+    return { el, shown, toast, frame: flush(frames), tick: flush(timers) };
+  };
+  const seen = fake();
+  seen.toast('Saved'); seen.frame();
+  assert.ok(seen.shown.has('show'), 'on a page in view it shows as before');
+  seen.tick(); seen.tick();
+  assert.ok(!seen.shown.has('show')); assert.equal(seen.el.textContent, '');
+
+  const dark = fake();
+  dark.toast('Saved'); dark.tick(); dark.tick();      // faded and emptied, the frame still waiting
+  dark.frame();                                        // the screen comes back on
+  assert.ok(!dark.shown.has('show'), 'the fade cancelled the frame');
+
+  const slipped = fake({ cancels: false });            // a frame that comes anyway
+  slipped.toast('Saved'); slipped.tick(); slipped.tick(); slipped.frame();
+  assert.ok(!slipped.shown.has('show'), 'a frame shows only the message it was asked to, and that one is gone');
+  const between = fake({ cancels: false });
+  between.toast('Saved'); between.tick(); between.frame();   // faded, not yet emptied
+  assert.ok(between.shown.has('show') && between.el.textContent === 'Saved', 'still its own words, so it may show');
+  assert.match(js, /toast\._t = setTimeout\(\(\) => \{\n    cancelAnimationFrame\(toast\._raf\);\n    t\.classList\.remove\('show'\);/, 'the fade cancels the frame first');
+});
+
 t('on a narrow phone a toast goes across the screen, under the air panel', () => {
   const narrow = media('@media (max-width: 480px) {\n  .toast');
   const r = rule('.toast', narrow);
@@ -167,6 +255,15 @@ t('a new screen puts focus on its heading, without scrolling or a ring', () => {
   assert.deepEqual(b.focused, []);
 });
 
+t('the map gestures card takes focus when it opens, and gives it back when it closes', () => {
+  /* go() leaves focus alone while the card is open, so the card has to take it. */
+  assert.match(html, /<b id="mapTutTitle" tabindex="-1"><\/b>/);
+  assert.match(fnSrc('function openMapTut()'), /\$\('mapTut'\)\.hidden = false;\n  \$\('mapTutTitle'\)\.focus\(\{ preventScroll: true \}\);\n\}$/,
+    'once the card is showing: a hidden element cannot take focus');
+  assert.match(fnSrc('function closeMapTut()'), /\n  if \(currentScreen\) focusScreen\(currentScreen\);\n\}$/, 'back to the screen underneath');
+  assert.match(css, /\n\.map-tut \[tabindex="-1"\]:focus \{ outline: none; \}/, 'no ring on the card either');
+});
+
 /* ── Larger text, and zoom ─────────────────────────────────────────── */
 
 /** Every font size the stylesheet sets: the innermost selector, and the size as written. */
@@ -201,6 +298,43 @@ t('pinch zoom is allowed, in Safari and in the iPhone app', () => {
   const cap = JSON.parse(readFileSync(new URL('../capacitor.config.json', import.meta.url), 'utf8'));
   assert.equal(cap.ios?.zoomEnabled, true, 'Capacitor blocks zooming in the app unless ios.zoomEnabled says otherwise');
   assert.match(css, /button, \[role="button"\], summary \{ touch-action: manipulation; \}/, 'a double tap on a button is two presses, not a zoom');
+});
+
+t('a map screen cannot be pinched; a paper screen can', () => {
+  /* A pinch that began on a map screen's chrome zoomed the page, the controls
+     slid away, and the map, which eats every touch, could not zoom back. Run
+     for real against a fake of the viewport tag. */
+  const page = html.match(/<meta name="viewport" content="([^"]+)">/)[1];
+  const meta = { content: page };
+  const document = { querySelector: (q) => (q === 'meta[name="viewport"]' ? meta : null) };
+  const maps = js.match(/^const MAP_SCREENS = (\[.*\]);$/m)?.[1];
+  assert.ok(maps, 'app.js still lists MAP_SCREENS');
+  const viewportFor = new Function('document', `const MAP_SCREENS = ${maps}; let pageViewport = null;
+    ${fnSrc('function viewportFor(id)')}; return viewportFor;`)(document);
+  viewportFor('scrHome');
+  assert.equal(meta.content, page, 'a paper screen keeps the page’s own viewport');
+  for (const id of ['scrLay', 'scrRun', 'scrWalk', 'scrReplay', 'scrDraw', 'scrLive', 'scrBench', 'scrFix']) {
+    viewportFor(id);
+    assert.equal(meta.content, `${page},maximum-scale=1`, `${id} is held at its own size`);
+  }
+  for (const id of ['scrResult', 'scrWait', 'scrSettings']) {
+    viewportFor(id);
+    assert.equal(meta.content, page, `${id} can be pinched again`);
+  }
+  // Every screen drawn over the map is one of the map screens.
+  for (const [, id] of html.matchAll(/<section id="(\w+)" class="screen glass"/g)) assert.ok(maps.includes(`'${id}'`), `${id} is a map screen`);
+  // Every screen change sets it, forward or back: goBackNow and the back gesture both end in go().
+  assert.match(fnSrc('function go(id, { back = false } = {})'), /for \(const s of SCREENS\) \$\(s\)\.hidden = s !== id;\n  viewportFor\(id\);\n/);
+  // The second guard: the chrome itself allows panning and nothing else.
+  assert.match(css, /\n\.screen\.glass > \* \{ touch-action: pan-x pan-y; \}/);
+  assert.match(css, /\nbody:has\(> \.screen\.glass:not\(\[hidden\]\)\) \{ touch-action: pan-x pan-y; \}/,
+    'on its own line, like the type rule: the chrome outside the screen, the air panel and the rest');
+});
+
+t('a countdown or tutorial screen scrolls when large text pushes it past the bottom', () => {
+  /* At 1.65 times the usual text, Done on the waiting screen ended 31px under a 375×667 phone. */
+  assert.match(rule('.screen.tutorial'), /overflow-y: auto; -webkit-overflow-scrolling: touch;/);
+  assert.ok(!/position/.test(rule('.tut-bottom')), 'the buttons scroll with the rest, not pinned where they were cut off');
 });
 
 t('no field is small enough for the iPhone to zoom into it', () => {
@@ -242,7 +376,7 @@ t('the paper screens grow with the iPhone’s Larger Text; the map screens do no
     '.nav-dist b', '.nav-dist i', '.nav-say > span', '.nav-say .nav-sub',
     '.wx-main b', '.wx-main i', '.wx-sub b', '.wx-sub i', '.wx-note i',
     '.map-tut-card > b', '.map-tut-card > p', '.style-pick button', '.btn.live-btn', '.call-q', '.call-opt b', '.call-opt i',
-    '.tut-title.huge', '.ring-big', '.ring-small', '.ava', '.ava.big', '.auth-btn',
+    '.tut-title.huge', '.ring-big', '.ring-small', '.ava', '.ava.big',
     '.screen.glass', 'body:has(> .screen.glass:not([hidden]))',
   ]);
   const plain = sizes.filter(f => /^\d+(\.\d+)?px$/.test(f.size));

@@ -114,7 +114,7 @@
       <div class="stage" data-g="tilt"><div class="ground"></div><span class="finger f1"></span><span class="finger f2"></span></div>
       <div class="stage" data-g="turn"><div class="ground"></div><span class="finger f1"></span><span class="finger f2"></span></div>
     </div>
-    <b id="mapTutTitle"></b>
+    <b id="mapTutTitle" tabindex="-1"></b>
     <p id="mapTutBody"></p>
     <div class="tut-dots" id="mapTutDots"></div>
     <div class="row-gap">
@@ -231,6 +231,10 @@
 
     <span class="label" id="lblDogs">Dogs</span>
     <div class="chip-row" id="rowDogs"></div>
+    <!-- What the chosen chip does when it is tapped again, which its look does
+         not say: read by a screen reader after its name, never shown. -->
+    <span id="handlerOpensHint" hidden>Tap again to open this handler’s card.</span>
+    <span id="dogOpensHint" hidden>Tap again to open this dog’s record.</span>
 
     <span class="label">Looking for</span>
     <div class="chip-row" id="rowTargets"></div>
