@@ -5812,11 +5812,18 @@ const fmtHours = (sec) => {
   const m = Math.round(sec / 60);
   return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')}`;
 };
-/** Runs graded against a drawn plan sit outside the age bands until the walk
-    is scanned, and the cards say so rather than leave them unaccounted for. */
-const unwalkedNote = (st) => (st.unwalked
-  ? `<p class="body small muted">${st.unwalked} run${st.unwalked === 1 ? '' : 's'} graded against a drawn plan — no age until the layer’s walked card is scanned.</p>`
-  : '');
+/** Runs graded against a drawn line sit outside the age bands, and the cards
+    say so rather than leave them unaccounted for. A plan's runs get their
+    age when the layer's walked card is scanned. A drawn Trail Card has no
+    walked card coming, and its runs were told to wait for one all the same. */
+function unwalkedNote(st) {
+  const cards = st.drawnCards || 0, plans = (st.unwalked || 0) - cards;
+  const runs = (n) => `${n} run${n === 1 ? '' : 's'}`;
+  return [
+    plans > 0 ? `${runs(plans)} graded against a drawn plan — no age until the layer’s walked card is scanned.` : '',
+    cards > 0 ? `${runs(cards)} on a Trail Card drawn on the map — nobody walked it, so ${cards === 1 ? 'it has' : 'they have'} no age.` : '',
+  ].filter(Boolean).map(line => `<p class="body small muted">${line}</p>`).join('');
+}
 function ringHtml(st) {
   const total = AGE_BANDS.reduce((n, b) => n + st.bands[b.key], 0);
   if (!total) return `<p class="body small muted">No graded runs yet. The ring fills in as trails are run.</p>${unwalkedNote(st)}`;
