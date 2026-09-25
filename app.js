@@ -1824,7 +1824,7 @@ function plumeSamples(trail) {
 function contamSim(list) {
   const lines = (list || []).filter(c => c?.points?.length > 1 && c.points.every(p => Number.isFinite(p.t)));
   if (!lines.length) return null;
-  const c = new ScentSim();
+  const c = new ScentSim({ pool: false });           // walked through: nobody stood at the end
   c.seed(lines.flatMap(l => plumeSamples(l.points)));
   return c;
 }
