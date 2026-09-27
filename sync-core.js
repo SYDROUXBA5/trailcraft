@@ -56,8 +56,10 @@ const plainObject = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
 /* What belongs to one run of a trail rather than to the trail. These move
    together: a second run starts without them (store.js runAgain), and when two
    copies of a session meet, the copy that holds the run gives all of them —
-   which dog ran it, who handled it and what it said, as well as the track. */
-export const RUN_FIELDS = ['track', 'trackStarted', 'trackWaypoints', 'result', 'coach', 'debrief', 'seen', 'runWeather'];
+   which dog ran it, who handled it and what it said, as well as the track.
+   The wind the handler felt on the ground (windFelt) is one of them: it was
+   felt on the day of that run, and the next dog's day may blow another way. */
+export const RUN_FIELDS = ['track', 'trackStarted', 'trackWaypoints', 'result', 'coach', 'debrief', 'seen', 'runWeather', 'windFelt'];
 const RUN_TOP = ['dogId', 'handlerId', 'summary'];
 const hasRun = (r) => (Array.isArray(r?.data?.track) && r.data.track.length > 0) || !!r?.data?.result;
 const empty = (v) => v == null || v === '' || (Array.isArray(v) && v.length === 0);
