@@ -316,7 +316,7 @@ function app() {
   const drawn = { plume: [], coach: [], panel: [], followed: [], field: [] };
   const sb = {
     db, S: { dogs: [{ id: 'bo', name: 'Bo', lineM: 0 }] }, BUILD: 'test',
-    rec: { kind: null, on: false, started: RUN }, run: { session: null, stopping: false, revealed: false, startedAt: RUN, airAt: 0 },
+    rec: { kind: null, on: false, started: RUN }, run: { session: null, stopping: false, revealed: false, startedAt: RUN },
     currentScreen: 'scrResult', coach: { trail: null, field: [] },
     targetById, unwalkedPlan, ownRun, windAt, cleanWindFelt, windTrusted, feltOf, anchorFelt, stability, regime, FLAT, predictedOffsets, changed,
     lineCorrect, signedOffsets, meanSigned, medianAbs, sideShares, sideOfDrift, sideAgreement, approachToWind, bearing, dist,
@@ -1016,14 +1016,14 @@ await t('Reveal draws the air panel again in the words of the wind felt on the g
   const panels = [];
   const s = trailRun({ track: undefined, trackStarted: undefined, windFelt: felt('calm') });
   const sb = {
-    run: { session: s, revealed: false, revealedAt: 0, airAt: 0 }, targetById, trailOf: (x) => x.data.trail, windAt,
+    run: { session: s, revealed: false, revealedAt: 0, startedAt: RUN }, targetById, trailOf: (x) => x.data.trail, windAt,
     setTrail() {}, plumeStart() {}, plumeStop() {}, setSrc() {}, lineOf: () => ({ features: [] }), pointsOf: () => ({}), EMPTY: {},
     weatherPanelFor: (x, at) => panels.push([x, at]), $: () => ({ textContent: '' }), Date,
   };
   vm.createContext(sb);
   vm.runInContext(decl('function toggleReveal('), sb);
   sb.toggleReveal();
-  assert.deepEqual(panels, [[s, sb.run.airAt]], 'the panel, at the moment the scent is drawn in');
+  assert.deepEqual(panels, [[s, RUN]], 'the panel, at the run’s start, which the scent is drawn in');
 });
 
 await t('an open picker drawn again keeps focus on the button a screen reader was on', () => {
@@ -1047,6 +1047,61 @@ await t('an open picker drawn again keeps focus on the button a screen reader wa
   sb.document.activeElement = { dataset: {}, isConnected: true, closest: () => null };
   sb.paintFeltSheet();
   assert.equal(drawn.focused, 1, 'focus anywhere else is left alone');
+});
+
+await t('a wind picked with the trail revealed blows from where it was picked, on the plume, the panel and the coach', async () => {
+  /* From the north as the dog sets off, swung round to the west by an hour
+     and a half in, when the handler, with the trail revealed, taps south. */
+  const START = Date.now() - 90 * 60e3;
+  const swung = seriesWx(START - 3600e3, START + 3 * 3600e3, (at) => (at < START + 45 * 60e3 ? 0 : 270), 0);
+  const { sb: pk, asked } = picker();
+  const live = { id: 'r', targetId: 'person', data: { trail, weather: swung } };
+  Object.assign(pk.run, { session: live, startedAt: START, revealed: true });
+  await pk.pickFeltOnRun({ dataset: { feltFrom: '180' } });
+  assert.equal(asked.at(-1)[1].from, 180);
+
+  const { sb, drawn } = app();
+  Object.assign(sb.run, { session: live, revealed: true, startedAt: START });
+  sb.coach.trail = trail;
+  sb.currentScreen = 'scrRun';
+  sb.runAirChanged(live);
+  assert.deepEqual([drawn.plume, drawn.panel, drawn.field], [[180], [180], [180]],
+    'drawn in the forecast of now, turned by the start’s, the scent came from the east');
+
+  /* Picked with the trail hidden, then revealed: the same. */
+  const plumes = [], panels = [];
+  const rv = {
+    run: { session: live, revealed: false, revealedAt: 0, startedAt: START }, targetById, trailOf: (x) => x.data.trail, windAt,
+    setTrail() {}, plumeStart: (tr, w) => plumes.push(w.wind_direction), plumeStop() {}, setSrc() {},
+    lineOf: () => ({ features: [] }), pointsOf: () => ({}), EMPTY: {},
+    weatherPanelFor: (x, at) => panels.push(windAt(x, at).wx.wind_direction), $: () => ({ textContent: '' }), Date,
+  };
+  vm.createContext(rv);
+  vm.runInContext(decl('function toggleReveal('), rv);
+  rv.toggleReveal();
+  assert.deepEqual([plumes, panels], [[180], [180]], 'Reveal draws the scent from where the handler said');
+});
+
+await t('a run graded where only air here stood in asks for its own forecast, and learns nothing from the stand-in', async () => {
+  /* The last reading the phone had, from wherever and whenever it last had
+     signal, taken for the run screen (adoptHere): its series reaches the
+     run's start, but it is not the forecast for that place and time. */
+  const standIn = { ...northerly({ wind_direction: 180 }), standIn: 1,
+    series: northerly().series.map(e => ({ ...e, wind_direction: 180 })) };
+  const run = () => trailRun({ weather: null, runWeather: standIn });
+  const { sb, db } = app();
+  const offline = await sb.computeResult(run(), runTrack, [], RUN, { bank: true });
+  assert.equal(db.calibration('bo').length, 0, 'offline at Stop: nothing learned from the stand-in');
+  assert.equal(offline.runWeather, null, 'and nothing fetched to keep in its place');
+  assert.equal(offline.wind.from, 180, 'the run is still explained in the air its screen showed');
+
+  let asked = 0;
+  sb.fetchWeather = () => { asked++; return Promise.resolve(northerly()); };
+  const online = await sb.computeResult(run(), runTrack, [], RUN, { bank: true });
+  assert.equal(asked, 1, 'the run’s own forecast asked for, though the stand-in reached the start');
+  assert.equal(online.runWeather.standIn, undefined);
+  assert.equal(online.wind.from, 0, 'graded in it');
+  assert.deepEqual(db.calibration('bo').map(r => [r.t, r.predSide]), [[RUN, 1]], 'and the dog’s row learned from it');
 });
 
 console.log(`\n${pass} passed total\n`);

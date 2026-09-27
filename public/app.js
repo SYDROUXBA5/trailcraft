@@ -278,9 +278,9 @@ function airSessionFor(id) {
 }
 
 /* And which moment of that trail's air. A screen about a run shows the wind
-   its plume, band and coach are drawn in: the replay's own clock, the moment
-   the dog set off, or on the run screen once Reveal has drawn the scent, the
-   moment it was drawn. Anything else, a trail not run yet among them, shows
+   its plume, band and coach are drawn in: the replay's own clock, or the
+   moment the dog set off, on the run screen before and after Reveal alike.
+   Anything else, a trail not run yet among them, shows
    the air it was laid in (null). The panel, the arrow and the streaks used to
    show the laid-time wind on all of these, beside a plume blowing another way. */
 function airMomentFor(id, s) {
@@ -288,7 +288,7 @@ function airMomentFor(id, s) {
   switch (id) {
     case 'scrReplay': return replay.at;
     case 'scrShowMap': return s.data?.trackStarted ?? null;
-    case 'scrRun': return s === run.session ? (run.airAt || run.startedAt || null) : null;
+    case 'scrRun': return s === run.session ? (run.startedAt || null) : null;
     default: return null;
   }
 }
@@ -2229,12 +2229,19 @@ function weatherPanelFor(session, at = null) {
     once, a trail laid offline) takes the air here as its run's forecast,
     once that reaches the run's start. The picker then has a direction to
     turn, rather than refusing every one beside a panel that shows one, and
-    the panel, the plume, the coach and the grade read one record, which
-    Stop keeps with the run. Says whether it did. */
+    the panel, the plume and the coach read one record, which Stop keeps
+    with the run. Says whether it did.
+
+    It is marked as only standing in (standIn). Offline, the air here is the
+    last reading the phone had, taken wherever it last had signal and up to
+    hours before, so the screen may go by it but a dog's drift is never
+    learned from it: the grade asks for the run's own forecast all the same
+    (computeResult), and the trail's laid weather comes first once it lands
+    (field.js forecastAt). */
 function adoptHere(session, wx) {
   if (!wx || session !== run.session || !rec.on || rec.kind !== 'run' || !run.startedAt) return false;
   if (forecastAt(session, run.startedAt).wx || !seriesCovers(wx, run.startedAt)) return false;
-  session.data.runWeather = wx;
+  session.data.runWeather = { ...wx, standIn: 1 };
   runAirChanged(session);
   return true;
 }
@@ -4323,10 +4330,10 @@ const feltChangeable = (s) => !!s && ownRun(s) && !!s.data?.result && s.data?.tr
 
 /** A session as its felt wind is read and set: the run screen's, before
     Stop has given it a start of its own, set against the run's start, as
-    the coach, the panel and the grade read its wind. Set against the moment
-    of the tap instead, a forecast that has moved since the start (or a laid
-    series that has run out) put a different forecast under the picker from
-    the one those views turn. */
+    the coach, the panel, the revealed plume and the grade read its wind.
+    Set against the moment of the tap instead, a forecast that has moved
+    since the start (or a laid series that has run out) put a different
+    forecast under the picker from the one those views turn. */
 const feltSubject = (s) => (s && s === run.session && !Number.isFinite(s.data?.trackStarted) && Number.isFinite(run.startedAt) && run.startedAt > 0
   ? { ...s, data: { ...s.data, trackStarted: run.startedAt } } : s);
 
@@ -4471,9 +4478,12 @@ const ageUnknown = (d, short = false) => (d?.plan
   : (short ? 'not known' : 'not known — drawn, not walked'));
 
 /* ── Run / Search ─────────────────────────────────────────────────── */
-/* airAt: the moment whose wind the run screen shows. The start of the run,
-   until Reveal draws the scent in the air of the moment it is revealed. */
-const run = { session: null, revealed: false, startedAt: 0, airAt: 0, copy: false, stopping: false };
+/* The run screen shows the wind at the run's start, the moment the dog set
+   off, before and after Reveal alike. It is the moment the coach and the
+   grade read, and the one a wind picked on the ground is measured against
+   (feltSubject). Drawn at the moment of Reveal instead, a forecast that had
+   swung since the start put the scent on another side from the one picked. */
+const run = { session: null, revealed: false, startedAt: 0, copy: false, stopping: false };
 
 async function startRun(s) {
   if (rec.on) return toast('A run is already going — stop that one first');
@@ -4506,7 +4516,6 @@ async function startRun(s) {
   closeCall();
   closeFeltSheet();
   run.startedAt = Date.now();
-  run.airAt = run.startedAt;
   rec.kind = 'run';
   rec.wps = [];
   clearMap();
@@ -4554,7 +4563,7 @@ async function startRun(s) {
      it is the first thing you want before deciding where to cast. The wind
      as the dog set off, which is the one the coach reasons with, not the
      one the trail was laid in hours before. */
-  weatherPanelFor(s, run.airAt);
+  weatherPanelFor(s, run.startedAt);
   terrainFor(s.data.trail || s.data.hides || []).then(T => { air.T = T; }).catch(() => {});
   $('runHudText').textContent = hudText();
   toast(isNative() && coach.on ? 'Coach on. Its calls only play while the screen is on'
@@ -4573,11 +4582,11 @@ function toggleReveal() {
     /* The plume is the trail, drawn in air. Showing it before Reveal would
        hand the handler the answer, so it waits for the same button. */
     if (run.revealed) {
-      /* In the air of the moment it is shown, and the panel with it, in the
-         words of any wind felt on the ground, which plumeStart does not know. */
-      run.airAt = Date.now();
-      plumeStart(trailOf(s), windAt(s, run.airAt).wx, undefined, s.data.contamination);
-      weatherPanelFor(s, run.airAt);
+      /* In the air the dog set off in, as everything on the run screen is,
+         and the panel with it, in the words of any wind felt on the ground,
+         which plumeStart does not know. */
+      plumeStart(trailOf(s), windAt(s, run.startedAt).wx, undefined, s.data.contamination);
+      weatherPanelFor(s, run.startedAt);
     } else plumeStop();
     setSrc('contam', run.revealed
       ? { type: 'FeatureCollection',
@@ -4680,7 +4689,8 @@ async function finishRun() {
   const dogId = S.dog?.id ?? null;          // the run being recorded now is the picked dog's
   const { runWeather: fetched, windFelt, ...result } = await computeResult({ ...s, dogId }, rec.pts, rec.wps, run.startedAt, { bank });
   /* The run's own forecast: fetched by the grade, or taken on the run screen
-     from the air here when the trail had none (adoptHere). */
+     from the air here when the trail had none (adoptHere), still marked as
+     only standing in. */
   const runWeather = fetched ?? s.data.runWeather ?? null;
   liveEnd(result);
   const patch = {
@@ -4741,15 +4751,18 @@ async function computeResult(s, track, wps, startedAt, { bank = true, rebank = f
   let felt = anchorFelt(feltOf(s.data), s, startedAt);
   let { wx, exact } = windAt({ ...s, data: { ...s.data, trackStarted: startedAt, windFelt: felt } }, startedAt);
   let runWeather = null;
-  if (!exact) {
+  /* Air here that stood in on the run screen (adoptHere) may be hours old
+     and from miles away, however exactly its series reaches the start, so it
+     is asked for again here as if there were none. */
+  if (!exact || wx?.standIn) {
     try {
       runWeather = await fetchWeather(track[0].lat, track[0].lon, startedAt, { within: WX_WAIT });
       /* In the wind the handler felt, as the session's own would be. */
       felt = anchorFelt(feltOf(s.data), { data: { runWeather } }, startedAt);
       ({ wx, exact } = windAt({ data: { runWeather, trackStarted: startedAt, windFelt: felt } }, startedAt));
-    } catch { /* keep the laid-time weather, unbanked */ }
+    } catch { /* keep the laid-time weather, or the stand-in, unbanked */ }
   }
-  if (!exact) bank = false;
+  if (!exact || wx?.standIn) bank = false;
   const st = stability(wx?.soil_temp, wx?.temp);
   const trusted = windTrusted(felt);
 
@@ -5102,7 +5115,10 @@ function keepWeather(id, wx) {
   if (live) live.data.weather = wx;
   const kept = db.updateSession(id, { data: { weather: wx } });
   snap();
-  if (live && rec.on && rec.kind === 'run') runAirChanged(live);
+  if (live && rec.on && rec.kind === 'run') {
+    feltHeld(live);
+    runAirChanged(live);
+  }
   if (kept && pendingSession?.id === id) {
     pendingSession = kept;
     if (!$('scrShare').hidden) renderShare(kept);
@@ -5110,22 +5126,36 @@ function keepWeather(id, wx) {
   return kept;
 }
 
+/** A direction picked on the ground is where the handler said the wind came
+    from, whatever forecast lies under it. Laid weather landing during the
+    run comes before air here that stood in (adoptHere), so a direction
+    picked against that is measured again, as a pick is (windFeltFor), and
+    the plume and the panel still blow from where they said. */
+function feltHeld(live) {
+  const f = feltOf(live.data);
+  /* Not while Stop grades it in the wind it had, as setWindFelt. */
+  if (run.stopping || f?.mode !== 'from') return;
+  const held = windFeltFor(feltSubject(live), f.from, f.at);
+  if (!held || held.ref === f.ref) return;
+  live.data.windFelt = held;
+  keepDraft(true);
+}
+
 /** A run going on, drawn again in its air once that air changes: the laid
     weather arriving late (keepWeather), or a wind felt on the ground put in
     its place (setWindFelt). Everything reads windAt, so all of it moves
     together. */
 function runAirChanged(live) {
-  /* At the run's own moment, as everything else on the run screen is. The
-     raw laid-time record drew a revealed scent in the air of hours before,
+  /* At the run's start, as everything else on the run screen is. The raw
+     laid-time record drew a revealed scent in the air of hours before,
      beside a coach and a grade working from the run's. */
   if (run.revealed && targetById(live.targetId).kind === 'person') {
-    run.airAt = Date.now();
-    plumeStart(trailOf(live), windAt(live, run.airAt).wx, undefined, live.data.contamination);
+    plumeStart(trailOf(live), windAt(live, run.startedAt).wx, undefined, live.data.contamination);
   }
   /* The panel follows whatever the screen is showing. It is refreshed on its
      own, because with the plume switched off in Settings nothing else would
      carry the new wind to it. */
-  if (currentScreen === 'scrRun') weatherPanelFor(live, run.airAt || run.startedAt);
+  if (currentScreen === 'scrRun') weatherPanelFor(live, run.startedAt);
   /* An open picker shows the forecast it is correcting, which may just have arrived. */
   if (!$('feltSheet').hidden) paintFeltSheet();
   /* A coach that set off with no weather had no scent to reason about.

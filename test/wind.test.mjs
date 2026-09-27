@@ -12,12 +12,14 @@
    - a slow forecast for the air here lands only on the screen that asked;
    - the laid-time weather arriving late during a run is drawn at the run's
      moment, and gives the coach its scent;
-   - a shared run carries the run's own weather to whoever opens it. */
+   - a shared run carries the run's own weather to whoever opens it;
+   - air here taken for a run with none of its own only stands in, and the
+     trail's own forecast comes first once it lands. */
 
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
-import { windAt, laidWind, feltPanel, feltWeather, feltOf, forecastAt, seriesCovers, WIND_FELT_V } from '../public/field.js';
+import { windAt, laidWind, feltPanel, feltWeather, feltOf, forecastAt, seriesCovers, windFeltFor, WIND_FELT_V } from '../public/field.js';
 import { cardinal, fmtSpeed, fmtTemp, forecastNote, fmtDur } from '../public/geo.js';
 import { unwalkedPlan } from '../public/debrief.js';
 import { trailModel, encodeShared, decodeShared, sessionFromModel } from '../public/share.js';
@@ -157,7 +159,6 @@ await t('two screens that want the air here share one ask, and the answer reache
 });
 
 await t('laid weather arriving during a run is drawn at the run’s moment, and gives the coach its scent', () => {
-  /* Real clock here: keepWeather reads Date.now() for a revealed plume. */
   const now = Date.now();
   const start = now - 20 * 60e3, laidAt = now - 110 * 60e3;
   const wx = { time: 'laid', wind_speed: 3, wind_direction: 270, temp: 11,
@@ -172,25 +173,25 @@ await t('laid weather arriving during a run is drawn at the run’s moment, and 
     weatherPanelFor: (s, at) => calls.panel.push(at),
     scentField: (trail, w, at) => { calls.field.push([w.wind_direction, at]); return ['scent']; },
     coach: { trail: [{ lat: 51, lon: -2 }, { lat: 51.001, lon: -2 }], field: [] },
-    $: () => fakeEl(), renderShare() {}, paintFeltSheet() {},
+    $: () => fakeEl(), renderShare() {}, paintFeltSheet() {}, feltOf, windFeltFor, keepDraft() {},
   };
   vm.createContext(sb);
-  vm.runInContext([decl('function keepWeather('), decl('function runAirChanged(')].join('\n'), sb);
+  vm.runInContext([decl('function keepWeather('), decl('function feltHeld('), decl('function runAirChanged('),
+    between('const feltSubject = ', '\n\n')].join('\n'), sb);
   const live = () => ({ id: 'r1', targetId: 'person', data: { trail: sb.coach.trail } });
 
-  sb.run = { session: live(), revealed: true, startedAt: start, airAt: start };
+  sb.run = { session: live(), revealed: true, startedAt: start };
   sb.keepWeather('r1', wx);
   assert.equal(calls.plume.length, 1);
   assert.equal(calls.plume[0].wind_direction, 90, 'the revealed scent was drawn in the laid-time snapshot');
-  assert.ok(sb.run.airAt >= now, 'and the panel on the run screen is for the moment it was drawn');
   assert.deepEqual(calls.field.at(-1), [90, start], 'the coach reasons in the wind the dog set off in');
   assert.deepEqual(sb.coach.field, ['scent'], 'a coach that began with no weather was left with no scent');
-  /* The panel is refreshed on its own, at the moment the scent was drawn:
+  /* The panel is refreshed on its own, at the run's start as the scent is:
      with the plume switched off in Settings nothing else would carry the new
      wind to it. */
-  assert.deepEqual(calls.panel, [sb.run.airAt], 'the panel follows the drawn moment even if no plume draws');
+  assert.deepEqual(calls.panel, [start], 'the panel follows the drawn moment even if no plume draws');
 
-  sb.run = { session: live(), revealed: false, startedAt: start, airAt: start };
+  sb.run = { session: live(), revealed: false, startedAt: start };
   calls.plume.length = 0;
   calls.panel.length = 0;
   sb.keepWeather('r1', wx);
@@ -225,10 +226,10 @@ await t('the replay’s clock moves the panel with the plume', () => {
 
 await t('the run screen shows the wind the dog set off in from the first frame', () => {
   const start = decl('async function startRun(');
-  assert.ok(start.indexOf('run.airAt = run.startedAt;') > 0
-    && start.indexOf('run.airAt = run.startedAt;') < start.indexOf("go('scrRun');"),
+  assert.ok(start.indexOf('run.startedAt = Date.now();') > 0
+    && start.indexOf('run.startedAt = Date.now();') < start.indexOf("go('scrRun');"),
     'the moment is set before the screen goes up and asks for its wind');
-  assert.match(start, /weatherPanelFor\(s, run\.airAt\);/);
+  assert.match(start, /weatherPanelFor\(s, run\.startedAt\);/);
   assert.ok(!/showWeather\(s\.data\.weather\)|airStart\(s\.data\.weather\)/.test(start),
     'the laid-time snapshot is not put back over it once the GPS is on');
   assert.ok(!/showWeather\(wx\);/.test(decl('function showOnMap(')),
@@ -274,7 +275,7 @@ await t('a run with no forecast of its own takes the air here, and the panel say
   const wx = here(START - 15 * 60e3);
   p.asks[0](wx);
   await p.settle();
-  assert.equal(live.data.runWeather, wx, 'the run’s own forecast now');
+  assert.deepEqual({ ...live.data.runWeather }, { ...wx, standIn: 1 }, 'the run’s forecast now, marked as only standing in');
   assert.equal(p.sb.changed, 1, 'and everything on the run screen drawn again in it');
   assert.equal(windAt(live, START).wx.wind_speed, 0, 'in the calm the handler felt');
   assert.deepEqual([p.shown().dir, p.sb.compass.wind], ['calm', null], 'a calm says so, with no arrow');
@@ -292,6 +293,67 @@ await t('a run with no forecast of its own takes the air here, and the panel say
   await q.settle();
   assert.equal(other.data.runWeather, undefined);
   assert.deepEqual([q.shown().dir, q.sb.compass.wind, q.sb.$('wxSpeed').textContent], ['calm', null, fmtSpeed(0)]);
+});
+
+await t('air here from before the phone lost signal only stands in for a run, and the trail’s own forecast comes first', async () => {
+  /* The forecast for here, fetched at home five hours before a trail laid
+     offline is run in a field with no signal. The phone hands back that last
+     reading, and its twelve hours of series still reach the run's start. */
+  const HOME = Date.UTC(2026, 8, 27, 9, 0), START = HOME + 5 * 3600e3;
+  const home = { time: '2026-09-27T09:00', wind_speed: 4, wind_direction: 200, temp: 14,
+    series: Array.from({ length: 49 }, (_, i) => ({ t: HOME + (i - 24) * 15 * 60e3, wind_speed: 4, wind_direction: 200, temp: 14 })) };
+  const p = panel();
+  let online = true;
+  p.sb.fetchWeather = () => (online ? Promise.resolve(home) : Promise.reject(new Error('offline')));
+  p.sb.currentScreen = 'scrLay';
+  p.sb.weatherPanelFor(null);
+  await p.settle();
+  vm.runInContext('wxNow.at -= 5 * 3600e3', p.sb);
+  online = false;
+  const live = { id: 'r1', targetId: 'person', startedAt: START - 20 * 60e3,
+    data: { trail: [{ lat: 51.3, lon: -2.9 }, { lat: 51.301, lon: -2.9 }], weather: null } };
+  Object.assign(p.sb, { currentScreen: 'scrRun' });
+  Object.assign(p.sb.run, { session: live, startedAt: START });
+  Object.assign(p.sb.rec, { on: true, kind: 'run' });
+  p.sb.weatherPanelFor(live, START);
+  await p.settle();
+  assert.equal(live.data.runWeather?.standIn, 1, 'taken for the screen, and marked as only standing in');
+  assert.equal(windAt(live, START).wx.wind_direction, 200);
+  assert.equal('standIn' in home, false, 'the reading kept for here is left as it was');
+
+  /* The handler says the wind comes from the south, against the stand-in. */
+  live.data.windFelt = windFeltFor({ ...live, data: { ...live.data, trackStarted: START } }, 180, START + 10 * 60e3);
+  assert.equal(windAt(live, START).wx.wind_direction, 180);
+
+  /* Signal comes back and the laid weather lands: an easterly for that
+     place and time. It is read before the stand-in, and the direction the
+     handler picked still blows from where they said. */
+  const laid = { time: 'laid', wind_speed: 3, wind_direction: 90, temp: 11,
+    series: Array.from({ length: 13 }, (_, i) => ({ t: START - 90 * 60e3 + i * 15 * 60e3, wind_speed: 3, wind_direction: 90, temp: 11 })) };
+  const calls = { plume: [], panel: [] };
+  const sb = {
+    run: { session: live, revealed: true, startedAt: START }, rec: { on: true, kind: 'run' }, currentScreen: 'scrRun',
+    pendingSession: null, db: { updateSession: () => null }, snap() {}, windAt, targetById: () => ({ kind: 'person' }),
+    trailOf: (s) => s.data.trail, plumeStart: (tr, w) => calls.plume.push(w.wind_direction),
+    weatherPanelFor: (s, at) => calls.panel.push(windAt(s, at).wx.wind_direction),
+    scentField: () => [], coach: { trail: null, field: [] }, $: () => fakeEl(), renderShare() {}, paintFeltSheet() {},
+    feltOf, windFeltFor, keepDraft() { calls.kept = (calls.kept ?? 0) + 1; },
+  };
+  vm.createContext(sb);
+  vm.runInContext([decl('function keepWeather('), decl('function feltHeld('), decl('function runAirChanged('),
+    between('const feltSubject = ', '\n\n')].join('\n'), sb);
+  sb.keepWeather('r1', laid);
+  assert.deepEqual(forecastAt(live, START), { wx: forecastAt({ data: { weather: laid } }, START).wx, exact: true },
+    'the laid forecast, not the reading from home');
+  assert.deepEqual([calls.plume, calls.panel], [[180], [180]], 'the plume and the panel from the south, as picked');
+  assert.equal(live.data.windFelt.ref, 90, 'measured again against the laid forecast');
+  assert.equal(calls.kept, 1, 'and kept in the crash copy');
+
+  /* A link to the run says the same to whoever opens it. */
+  const ran = { ...live, data: { ...live.data, weather: null, track: [{ lat: 51.3, lon: -2.9, t: START }, { lat: 51.301, lon: -2.9, t: START + 60e3 }],
+    trackStarted: START, trackWaypoints: [], contamination: [] } };
+  const theirs = sessionFromModel(await decodeShared(await encodeShared(trailModel(ran, {}))));
+  assert.equal(theirs.data.runWeather.standIn, 1, 'still only standing in');
 });
 
 console.log(`\n${pass} passed total\n`);

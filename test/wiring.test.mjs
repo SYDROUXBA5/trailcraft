@@ -553,10 +553,10 @@ t('the session list deletes from a card without opening it, only once Delete ses
 t('every view of a run takes its wind from windAt, and the grade only banks the run\'s own wind', () => {
   const grade = js.slice(js.indexOf('async function computeResult('), js.indexOf('async function computeResult(') + 2800);
   assert.match(grade, /let \{ wx, exact \} = windAt\(\{ \.\.\.s, data: \{ \.\.\.s\.data, trackStarted: startedAt, windFelt: felt \} \}, startedAt\);/, 'the grade reads the same wind the coach and replay show');
-  assert.match(grade, /if \(!exact\) bank = false;/, 'and banks nothing from a wind that was not the run\'s');
+  assert.match(grade, /if \(!exact \|\| wx\?\.standIn\) bank = false;/, 'and banks nothing from a wind that was not the run\'s, nor from air here that only stood in');
   assert.match(js, /coach\.field = wx && coach\.trail \? scentField\(trailOf\(s\), wx, run\.startedAt\) : \[\];/);
   assert.match(js, /const wx = windAt\(s, run\.startedAt\)\.wx;/, 'the coach');
-  assert.match(js, /run\.airAt = Date\.now\(\);\s*\n\s*plumeStart\(trailOf\(s\), windAt\(s, run\.airAt\)\.wx/, 'the reveal');
+  assert.match(js, /plumeStart\(trailOf\(s\), windAt\(s, run\.startedAt\)\.wx/, 'the reveal, at the run’s start');
   assert.match(js, /const w0 = windAt\(s, replay\.at\)\.wx;/, 'the replay as it opens');
   assert.match(js, /const w = windAt\(s, at\)\.wx;\s*\n\s*if \(w && plume\.sim\) \{ plume\.wx = w;/, 'and as its clock moves');
   assert.match(js, /if \(bestGap > WX_MAX_GAP\) throw new Error/, 'weather days away from the moment is refused');

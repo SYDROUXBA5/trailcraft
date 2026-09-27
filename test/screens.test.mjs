@@ -308,10 +308,10 @@ await t('each map screen about a run shows the wind at the moment it is about, n
   a.sb.pendingSession = laid;
   assert.equal(moment('scrShowMap'), null, 'show on map, for a trail not run yet: the air it was laid in');
 
-  Object.assign(a.sb.run, { session: ran, startedAt: T, airAt: T });
+  Object.assign(a.sb.run, { session: ran, startedAt: T });
   assert.equal(moment('scrRun'), T, 'the run screen: the start of the run');
-  a.sb.run.airAt = T + 12 * 60e3;
-  assert.equal(moment('scrRun'), T + 12 * 60e3, 'and once Reveal has drawn the scent, the moment it was drawn');
+  a.sb.run.revealed = true;
+  assert.equal(moment('scrRun'), T, 'and once Reveal has drawn the scent, still the start, which a wind picked is set against');
   a.sb.run.session = null;
   assert.equal(moment('scrRun'), null, 'a trail waiting on the run screen with no run yet: its laid-time air');
   assert.equal(moment('scrLay'), null);
