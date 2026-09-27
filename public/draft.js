@@ -12,6 +12,7 @@
 
 import { pathLen } from './geo.js';
 import { packPoints, unpackPoints } from './sync-core.js';
+import { cleanWindFelt } from './field.js';
 
 export const DRAFT_V = 1;
 
@@ -31,13 +32,17 @@ const str = (v) => (typeof v === 'string' && v ? v : null);
 export function packDraft({
   kind, startedAt, sessionId = null, targetId = null, layerId = null, dogId = null,
   odour = null, liveId = null, liveUrl = null, revealedAt = 0, pts = [], wps = [], hides = [],
-  plan = null, offAt = 0,
+  plan = null, offAt = 0, windFelt = null,
 } = {}, now = Date.now()) {
   if (!KINDS.has(kind)) return null;
   /* A walk is finished against the plan it followed: the plan's end, its
      countdown, whose it was and which plan it answers. Without the plan there
      is no walked card to send back, so there is nothing worth writing. */
   if (kind === 'walk' && !(plan?.points?.length >= 2)) return null;
+  /* The wind the handler felt on the ground during a run is kept with the
+     run only when Stop saves it, so until then this is its one copy: a run
+     recovered without it would be graded in the forecast they corrected. */
+  const felt = kind === 'run' ? cleanWindFelt(windFelt) : null;
   return {
     v: DRAFT_V,
     kind,
@@ -65,6 +70,7 @@ export function packDraft({
       /* When she left the start: the countdown on both phones runs from it. */
       offAt: fin(offAt) && offAt > 0 ? offAt : null,
     } : {}),
+    ...(felt ? { windFelt: felt } : {}),
   };
 }
 
@@ -91,6 +97,7 @@ export function unpackDraft(o) {
     revealedAt: fin(o.revealedAt) ? o.revealedAt : 0,
     pts, wps, hides,
     plan, offAt: fin(o.offAt) ? o.offAt : 0,
+    windFelt: o.kind === 'run' ? cleanWindFelt(o.windFelt) : null,
   };
 }
 

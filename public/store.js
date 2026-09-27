@@ -9,6 +9,7 @@ import { pathLen } from './geo.js';
 import { visible, tombstone, pruneTombstones, RUN_FIELDS } from './sync-core.js';
 import { makeBackup, planRestore, BACKUP_FLAGS } from './backup.js';
 import { unwalkedPlan, trailShown, ranBlind } from './debrief.js';
+import { windTrusted } from './field.js';
 
 export const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 
@@ -287,12 +288,7 @@ export function createStore(backend) {
   function settleDrift(s) {
     const t = s?.data?.trackStarted;
     if (!s?.dogId || !Number.isFinite(t) || banksDrift(s)) return;
-    const key = `cal:${s.dogId}`;
-    const rows = kv.get(key, []);
-    if (!rows.some(r => r?.t === t && r.skip !== true)) return;
-    const next = rows.map(r => (r?.t === t ? { ...r, skip: true } : r));
-    kv.set(key, next);
-    notify('calibration', { id: s.dogId, rows: next, updatedAt: Date.now() });
+    store.setAsideDrift(s.dogId, t);
   }
 
   /* The recording in progress (draft.js). Its own key, because it is rewritten
@@ -387,15 +383,28 @@ export function createStore(backend) {
        wind, stability, and the drift constant that run implies. Nothing is
        fitted until a dog has FIVE — one gusty afternoon must not rewrite the
        model — and then the median replaces the literature default. */
-    addCalibration(dogId, row) {
+    /* `replace` is for a run graded again (rebankRows): its row takes the
+       place of the one it banked before, rather than counting it twice. */
+    addCalibration(dogId, row, { replace = false } = {}) {
       if (!dogId) return;
       const key = `cal:${dogId}`;
-      const rows = kv.get(key, []);
-      rows.push(row);
+      const had = kv.get(key, []);
+      const rows = replace ? rebankRows(had, row?.t, row) : [...had, row];
       kv.set(key, rows.slice(-50));
       /* What a dog has taught the model is the one thing here that took
          months of real trails to earn, so it is announced like any row. */
       notify('calibration', { id: dogId, rows: rows.slice(-50), updatedAt: Date.now() });
+    },
+    /** Set aside what one run banked (rebankRows with no row): it was graded
+        again and banks nothing now. Nothing is written when it banked nothing. */
+    setAsideDrift(dogId, t) {
+      if (!dogId) return;
+      const key = `cal:${dogId}`;
+      const had = kv.get(key, []);
+      if (!had.some(r => r?.t === t && r.skip !== true)) return;
+      const rows = rebankRows(had, t, null);
+      kv.set(key, rows);
+      notify('calibration', { id: dogId, rows, updatedAt: Date.now() });
     },
     calibration(dogId) { return kv.get(`cal:${dogId}`, []); },
     /** Every dog's calibration, for the cloud mirror. Device preferences in kv
@@ -601,9 +610,31 @@ export const runAgeMin = (s) => (unwalkedPlan(s?.data) ? null : s?.data?.result?
     and so was one the handler says they knew. Each would teach the dog's
     record a drift the dog never chose, and always a smaller one than its
     own. It is the same "blind" the result card and the handler card use
-    (ranBlind), so no run is blind on one screen and steered on another. */
+    (ranBlind), so no run is blind on one screen and steered on another.
+    Nor a run whose wind the handler felt swirling or calm on the ground
+    (windFelt, field.js): the row pairs the dog's side with a wind's
+    direction, and there was no direction to pair it with. */
 export function teachesDrift(data) {
-  return !!data && !unwalkedPlan(data) && ranBlind(data);
+  return !!data && !unwalkedPlan(data) && ranBlind(data) && windTrusted(data.windFelt);
+}
+
+/** A dog's drift rows once one run has been graded again, in a wind felt on
+    the ground: `row` takes the place of whatever that run banked (the rows
+    whose `t` is its start), where the first of them stood, so the rows stay
+    in the order they were run. With no row, because the run no longer
+    banks, its rows are set aside (`skip`), as a deleted run's are, and a
+    later grade that banks again puts a fresh row in their place. */
+export function rebankRows(rows, t, row = null) {
+  const list = Array.isArray(rows) ? rows : [];
+  if (!row) return list.map(r => (r?.t === t && r.skip !== true ? { ...r, skip: true } : r));
+  const out = [];
+  let put = false;
+  for (const r of list) {
+    if (r?.t !== t) out.push(r);
+    else if (!put) { out.push(row); put = true; }
+  }
+  if (!put) out.push(row);
+  return out;
 }
 
 /* Whether a run's drift row may be read, by today's rules. */

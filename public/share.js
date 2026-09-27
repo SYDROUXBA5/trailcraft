@@ -13,7 +13,7 @@ import { targetById, ageBand, dogAge, healApproach } from './store.js';
 import { DEBRIEF, FLAGS, NOTE_TAGS, ownRun, toldField, toldOf, trailShown, ranBlind, unwalkedPlan } from './debrief.js';
 import { CONFIDENCE, labelOf as callLabel } from './call.js';
 import { cleanSeen, seenLine } from './ground.js';
-import { rainRate } from './field.js';
+import { rainRate, cleanWindFelt, feltWeather } from './field.js';
 
 const MAGIC = 'TS1.';
 const fin = Number.isFinite;
@@ -74,6 +74,10 @@ export function trailModel(s, { dog = null, handler = null, layer = null, k = nu
     wps: d.track?.length > 1 ? (d.trackWaypoints ?? []) : [],
     wx: d.weather ?? null,
     runWx: runWxOf(d),
+    /* The wind the handler felt on the ground. The weather above goes as the
+       forecast gave it and this goes beside it, so whoever opens the link
+       reads the run in the same corrected wind (field.js windAt). */
+    windFelt: cleanWindFelt(d.windFelt),
     result: d.result ?? null,
     coach: d.coach ?? null,
     /* When the trail was first put on screen. Without it every coach-off run
@@ -300,7 +304,8 @@ function pack(m) {
     plan: m.plan ? 1 : undefined, walked: m.walked ? 1 : undefined, drawn: m.drawn ? 1 : undefined,
     trail: packPts(m.trail), hides: packPts(m.hides), track: packPts(m.track), wps: packPts(m.wps),
     contam: m.contamination?.length ? m.contamination.map(c => packPts(c.points)) : undefined,
-    wx: packWx(m.wx), runWx: packWx(m.runWx), result: m.result ? roundDeep(m.result) : undefined,
+    wx: packWx(m.wx), runWx: packWx(m.runWx), windFelt: cleanWindFelt(m.windFelt) ?? undefined,
+    result: m.result ? roundDeep(m.result) : undefined,
     coach: m.coach ? { assisted: !!m.coach.assisted, tolM: m.coach.tolM, scent: !!m.coach.scent, calls: m.coach.calls,
       shadow: m.coach.shadow ? pick(m.coach.shadow, ['tolM', 'plain', 'scent']) : undefined } : undefined,
     revealedAt: m.revealedAt ?? undefined,
@@ -349,6 +354,8 @@ function unpack(o) {
     wx: cleanWx(o.wx),
     /* Held to exactly what the laid weather is: a stranger's numbers either way. */
     runWx: cleanWx(o.runWx),
+    /* A stranger's too, and absent from any link made before it was carried. */
+    windFelt: cleanWindFelt(o.windFelt),
     /* A link sent before the approach was put right still says it back to front. */
     result: healApproach(cleanResult(o.result)),
     coach: o.coach && typeof o.coach === 'object' ? {
@@ -466,6 +473,7 @@ export function sessionFromModel(m) {
     data: {
       trail: m.trail ?? undefined, hides: m.hides ?? undefined, contamination: m.contamination ?? [],
       weather: m.wx ?? null, runWeather: m.runWx ?? undefined, track: m.track ?? undefined, trackWaypoints: m.wps ?? [],
+      windFelt: cleanWindFelt(m.windFelt) ?? undefined,
       trackStarted: m.runAt ?? undefined, result: m.result ?? undefined, plan: m.plan, walked: m.walked,
       drawn: !!m.drawn, k: m.k,
       debrief: m.debrief ?? undefined, coach: m.coach ?? undefined, seen: m.seen ?? undefined,
@@ -817,13 +825,16 @@ export function detailSections(m, u = {}) {
       note: 'What the handler saw on the day, written down by hand.' });
   }
 
-  const wx = m.wx, wind = r?.wind ?? (wx ? { speed: wx.wind_speed, from: wx.wind_direction } : null);
+  /* A trail with no graded run shows its laid weather, as felt on the ground
+     when the handler said how it felt. */
+  const wx = m.wx, felt = feltWeather(wx, m.windFelt);
+  const wind = r?.wind ?? (felt ? { speed: felt.wind_speed, from: felt.wind_direction } : null);
   const weather = [];
   if (fin(wx?.temp)) weather.push(['Air', fmtTemp(wx.temp, fahr)]);
   if (fin(wx?.soil_temp)) weather.push(['Ground', fmtTemp(wx.soil_temp, fahr)]);
   if (fin(wind?.speed)) weather.push([r?.wind ? 'Wind during the run' : 'Wind',
     `${fmtSpeed(wind.speed, imp)}${fin(wind.from) ? ` from ${cardinal(wind.from)}` : ''}`]);
-  if (fin(wx?.wind_gusts)) weather.push(['Gusts', fmtSpeed(wx.wind_gusts, imp)]);
+  if (fin(felt?.wind_gusts)) weather.push(['Gusts', fmtSpeed(felt.wind_gusts, imp)]);
   if (fin(wx?.humidity)) weather.push(['Humidity', `${Math.round(wx.humidity)} %`]);
   /* As a rate: the record holds a 15-minute total, and "0.5 mm" with no
      time attached reads as a drizzle when it is 2 mm an hour. */
@@ -878,6 +889,9 @@ export function notes(m) {
     The viewer sees the laid trail from the start — that was the choice made
     for this feature, so an instructor elsewhere can judge the dog against it. */
 export function liveMeta(m, startedAt = Date.now()) {
+  /* Not the wind felt on the ground (windFelt): the cloud takes a live
+     document only with exactly the fields its rules list, and a live viewer
+     sees the forecast. The finished run carries it in its link. */
   return {
     v: 1, kind: m.kind, target: m.target,
     dog: m.dog ? pick(m.dog, DOG_KEYS) : null,

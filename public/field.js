@@ -21,6 +21,7 @@
    eyeballed on a phone in a field. */
 
 import { PV, stabilityStops, creepOf } from './params.js';
+import { cardinal, fmtSpeed } from './geo.js';
 
 /* ── Terrain ──────────────────────────────────────────────────────── */
 
@@ -147,13 +148,203 @@ export function seriesCovers(weather, when, slackMs = 20 * 60e3) {
     while it happens, the plume on Reveal, the replay as its clock moves, and
     the grade — so none of them can put the scent on a different side from
     the others. The run's own weather (fetched when the laid series did not
-    reach the run) comes first, then the laid series. */
+    reach the run) comes first, then the laid series. The wind the handler
+    felt on the ground (windFelt, below) is laid over it here, and only
+    here, so every one of those views is put right by the one correction. */
 export function windAt(session, when) {
+  const d = session?.data ?? {};
+  const { wx, exact } = forecastAt(session, when);
+  return { wx: feltWeather(wx, d.windFelt), exact };
+}
+
+/** The same moment as the forecast alone had it, before anything the
+    handler felt: what "the forecast said" beside their correction, and the
+    direction a correction is measured from. Nothing that draws or grades a
+    run reads this; windAt is for that. */
+export function forecastAt(session, when) {
   const d = session?.data ?? {};
   for (const w of [d.runWeather, d.weather]) {
     if (seriesCovers(w, when)) return { wx: wxAt(w, when), exact: true };
   }
   return { wx: d.runWeather ?? d.weather ?? null, exact: false };
+}
+
+/** The air a trail was laid in, as it blew on the ground: the laid-time
+    record, with the session's felt wind over it. For a trail that has no
+    run's moment to show. */
+export function laidWind(session) {
+  const d = session?.data ?? {};
+  return feltWeather(d.weather ?? null, d.windFelt);
+}
+
+/* ── The wind on the ground ───────────────────────────────────────── */
+
+/* The forecast is one 28 km cell's wind at 10 m. On the day, a handler can
+   stand at the start and feel it coming from the opposite side, and then the
+   plume, the coach, the replay, the grade and what the dog's record learns
+   are all built on a wind that was not blowing. The handler's word is kept on
+   the session as `windFelt`:
+
+     { v: 1, mode, from, ref, at }
+
+     mode  'forecast'  they felt what the forecast said
+           'from'      it came from `from`, a point of the compass (45° steps)
+           'swirl'     no steady direction on the ground to trust
+           'calm'      no wind to speak of on the ground
+     ref   the forecast's own direction at the moment it was set
+     at    when it was set
+
+   'from' turns the WHOLE forecast by from − ref rather than pinning one
+   direction: over an hour's run the forecast's own swing is kept, and only
+   its bias is put right. The speed is the forecast's either way. A swirl
+   keeps the forecast's direction to draw with, and everything that needs a
+   direction it can trust (the approach, the side the grade expects, what
+   the dog's drift record learns) says it has none. */
+
+export const WIND_FELT_V = 1;
+export const FELT_MODES = ['forecast', 'from', 'swirl', 'calm'];
+
+/* Calm is read as exactly still. The plume takes it well: sim.js stops a
+   parcel in still air, so the scent stays on its ground; on a slope it
+   still creeps and drains downhill, which is true of a calm; the band sits
+   centred on the line; and nothing is predicted on a side. Any small breeze
+   put in instead would blow along the forecast's direction, which is the
+   one thing a calm says nothing about, and hand the grade a side from it. */
+export const CALM_MS = 0;
+
+const deg360 = (x) => ((x % 360) + 360) % 360;
+const isBearing = (x) => Number.isFinite(x) && x >= 0 && x < 360;
+
+/** The nearest of the eight points of the compass to a bearing, in degrees. */
+export const nearestPoint = (d) => deg360(Math.round(deg360(d) / 45) * 45);
+
+/** A windFelt as the app writes it, or null. Everything that stores one or
+    reads one from a link or a crash copy comes through here: the mode from
+    the four, `from` a point of the compass, `ref` a bearing, `at` a time.
+    A correction with nothing to correct (a 'from' with no forecast
+    direction) is no correction. A ref that is not a bearing is only lost
+    from a mode that does not turn anything by it. */
+export function cleanWindFelt(o) {
+  if (!o || typeof o !== 'object' || Array.isArray(o)) return null;
+  if (o.v !== WIND_FELT_V || !FELT_MODES.includes(o.mode) || !Number.isFinite(o.at)) return null;
+  const ref = isBearing(o.ref) ? o.ref : null;
+  const out = { v: WIND_FELT_V, mode: o.mode };
+  if (o.mode === 'from') {
+    if (!isBearing(o.from) || o.from % 45 !== 0 || ref == null) return null;
+    out.from = o.from;
+  }
+  if (ref != null) out.ref = ref;
+  out.at = o.at;
+  return out;
+}
+
+/** A windFelt from what the handler chose: 'forecast', 'opposite', 'swirl',
+    'calm', or the bearing it comes FROM (the compass). `ref` is the
+    forecast's direction at the time. 'Opposite' is kept as the point it
+    names, so it reads plainly later. Null when it cannot be made: an
+    opposite or a direction with no forecast direction to correct. */
+export function makeWindFelt(choice, ref, at = Date.now()) {
+  const r = Number.isFinite(ref) ? deg360(ref) : null;
+  if (choice === 'opposite') {
+    return r == null ? null : cleanWindFelt({ v: WIND_FELT_V, mode: 'from', from: nearestPoint(r + 180), ref: r, at });
+  }
+  if (Number.isFinite(choice)) {
+    return cleanWindFelt({ v: WIND_FELT_V, mode: 'from', from: nearestPoint(choice), ref: r, at });
+  }
+  return cleanWindFelt({ v: WIND_FELT_V, mode: choice, ref: r, at });
+}
+
+/** The moment a session's felt wind is set against: the run's start once
+    there is a run, otherwise now (before Start, or while running). */
+export function feltMoment(session, now = Date.now()) {
+  const t = session?.data?.trackStarted;
+  return Number.isFinite(t) ? t : now;
+}
+
+/** makeWindFelt for a session: `ref` is the forecast at feltMoment. */
+export function windFeltFor(session, choice, now = Date.now()) {
+  return makeWindFelt(choice, forecastAt(session, feltMoment(session, now)).wx?.wind_direction, now);
+}
+
+/** How far a felt wind turns the forecast, degrees clockwise. */
+export function feltTurn(felt) {
+  const f = cleanWindFelt(felt);
+  return f?.mode === 'from' ? f.from - f.ref : 0;
+}
+
+/** Whether the wind's direction can be trusted to name a side or an
+    approach. A swirl has no steady one and a calm has none. */
+export function windTrusted(felt) {
+  const m = cleanWindFelt(felt)?.mode;
+  return m !== 'swirl' && m !== 'calm';
+}
+
+/** A weather record as it blew on the ground: turned by a 'from', stilled by
+    a 'calm', the series with it. Given back as the very same record when
+    nothing changes it, as for a run with no felt wind. */
+export function feltWeather(wx, felt) {
+  const f = cleanWindFelt(felt);
+  if (!wx || typeof wx !== 'object' || !f || f.mode === 'forecast' || f.mode === 'swirl') return wx;
+  const turn = feltTurn(f);
+  const one = f.mode === 'calm'
+    ? (e) => (e && typeof e === 'object' ? { ...e, wind_speed: CALM_MS, wind_gusts: CALM_MS } : e)
+    : (e) => (e && typeof e === 'object' && Number.isFinite(e.wind_direction)
+      ? { ...e, wind_direction: deg360(e.wind_direction + turn) } : e);
+  const out = one(wx);
+  if (Array.isArray(wx.series)) out.series = wx.series.map(one);
+  return out;
+}
+
+/* A plain source for the words below: a session, or a shared model (share.js
+   trailModel), which carries the same records under other names. */
+const feltSource = (src) => (src?.data ?? {
+  weather: src?.wx ?? null, runWeather: src?.runWx ?? null,
+  trackStarted: src?.runAt ?? null, windFelt: src?.windFelt ?? null,
+});
+
+/** What the forecast said at the felt wind's moment: "from N, 12 km/h", or
+    null with nothing to say. `u.imperial` for mph. For the picker's
+    "Forecast said:" line. */
+export function forecastSaid(src, u = {}, now = Date.now()) {
+  const d = feltSource(src);
+  const s = { data: d };
+  const wx = forecastAt(s, feltMoment(s, now)).wx;
+  return saidOf(wx?.wind_direction, wx?.wind_speed, !!u.imperial);
+}
+function saidOf(dir, speed, imp) {
+  const parts = [];
+  if (Number.isFinite(dir)) parts.push(`from ${cardinal(dir)}`);
+  if (Number.isFinite(speed)) parts.push(fmtSpeed(speed, imp));
+  return parts.length ? parts.join(', ') : null;
+}
+
+/** The wind of a session or shared model in words, as felt on the ground
+    against what the forecast said, or null when the handler said nothing
+    about it (every place then shows the forecast as it always has).
+    `u.imperial` for mph, `u.short` for small captions. Built only from
+    the app's own words, a compass point and a number, so nothing a link
+    carried reaches it as text; callers still escape, as for any line. */
+export function windWords(src, u = {}) {
+  const d = feltSource(src);
+  const f = cleanWindFelt(d.windFelt);
+  if (!f) return null;
+  const imp = !!u.imperial, short = !!u.short;
+  /* The forecast as it was when the handler spoke, or at the run's start. */
+  const fc = forecastAt({ data: d }, Number.isFinite(d.trackStarted) ? d.trackStarted : f.at).wx;
+  const refDir = Number.isFinite(f.ref) ? f.ref : fc?.wind_direction;
+  const ref = Number.isFinite(refDir) ? cardinal(refDir) : null;
+  if (f.mode === 'from') {
+    return short ? `From ${cardinal(f.from)}, felt${ref ? ` (forecast ${ref})` : ''}`
+      : `Wind from ${cardinal(f.from)} — felt on the ground${ref ? ` (forecast: from ${ref})` : ''}`;
+  }
+  if (f.mode === 'forecast') {
+    if (short) return ref ? `From ${ref}, as forecast` : 'As forecast';
+    return ref ? `Wind from ${ref}, as forecast` : 'Wind as forecast';
+  }
+  const word = f.mode === 'swirl' ? 'Swirling' : 'Calm';
+  if (short) return `${word}, felt${ref ? ` (forecast ${ref})` : ''}`;
+  const said = saidOf(refDir, fc?.wind_speed, imp);
+  return `${f.mode === 'swirl' ? 'Wind swirling' : 'Calm'} on the ground${said ? ` (forecast: ${said})` : ''}`;
 }
 
 /* ── Stability ────────────────────────────────────────────────────── */
