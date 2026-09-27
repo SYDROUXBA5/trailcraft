@@ -26,7 +26,7 @@ import { trailModel, encodeShared, decodeShared, sessionFromModel, keptSession, 
 import { mergeOne, RUN_FIELDS } from '../public/sync-core.js';
 import { unwalkedPlan } from '../public/debrief.js';
 import { predictedOffsets } from '../public/sim.js';
-import { changed } from '../public/params.js';
+import { changed, applyPreset, resetParams } from '../public/params.js';
 import {
   lineCorrect, signedOffsets, meanSigned, medianAbs, sideShares, sideOfDrift, sideAgreement,
   approachToWind, bearing, dist, fmtDur, fmtShort,
@@ -437,9 +437,9 @@ await t('set after the run, it is saved, the run graded again in it, and the dog
   await sb.setWindFelt(kept, felt('swirl', { at: RUN + 3700e3 }));
   const swirled = db.sessions().find(x => x.id === 'run1');
   assert.equal(swirled.data.result.predSide, 0);
-  assert.deepEqual(db.calibration('bo').map(r => r.skip), [true], 'a swirl sets the row aside');
+  assert.deepEqual(db.calibration('bo').map(r => [r.predSide, r.skip]), [[-1, undefined]], 'a swirl leaves the row as it was');
   assert.equal(db.dogDrift('bo'), null);
-  assert.equal(driftRows(db.calibration('bo'), db.sessions()).length, 0);
+  assert.equal(driftRows(db.calibration('bo'), db.sessions()).length, 0, 'and it is not read while the run says swirl');
 
   /* Two quick changes end on the second, whichever grade is quicker. */
   const a = sb.setWindFelt(swirled, felt('calm', { at: RUN + 3800e3 }));
@@ -448,7 +448,7 @@ await t('set after the run, it is saved, the run graded again in it, and the dog
   const last = db.sessions().find(x => x.id === 'run1');
   assert.equal(last.data.windFelt.mode, 'forecast');
   assert.equal(last.data.result.predSide, 1);
-  assert.deepEqual(db.calibration('bo').map(r => [r.predSide, r.skip]), [[1, undefined]], 'banked again, in place of the set-aside row');
+  assert.deepEqual(db.calibration('bo').map(r => [r.predSide, r.skip]), [[1, undefined]], 'banked again, in place of the row it had');
 
   await sb.setWindFelt(last, null);
   assert.equal(db.sessions().find(x => x.id === 'run1').data.windFelt, null, 'back to the forecast, unconfirmed');
@@ -919,6 +919,27 @@ await t('two copies of a run merge its felt wind with the grade made in it, not 
   assert.equal(renamed.data.result.predSide, 1);
   assert.equal('windFelt' in renamed.data, false);
   assert.equal(windAt(renamed, RUN).wx.wind_direction, 0, 'read in the forecast it was graded in');
+});
+
+await t('a run graded again with a dial moved, or felt swirling, keeps its drift row, never set aside for good', async () => {
+  const { sb, db } = app();
+  db.addSession(trailRun());
+  const first = await sb.computeResult(trailRun(), runTrack, [], RUN, { bank: true });
+  db.updateSession('run1', { summary: first.sentence, data: { result: first } });
+  const row = db.calibration('bo')[0];
+  applyPreset('tarmacRule');
+  try {
+    assert.ok(Object.keys(changed()).length > 0, 'a dial is off where it shipped');
+    await sb.setWindFelt(db.sessions()[0], felt('forecast', { at: RUN + 3600e3 }));
+    assert.deepEqual(db.calibration('bo'), [row], 'the row the run banked stands');
+    assert.equal(driftRows(db.calibration('bo'), db.sessions()).length, 1, 'and is still read');
+  } finally { resetParams(); }
+
+  /* A swirl, then a direction: never a skip, which a sync would keep for good. */
+  await sb.setWindFelt(db.sessions()[0], felt('swirl', { at: RUN + 3700e3 }));
+  assert.ok(db.calibration('bo').every(r => r.skip !== true));
+  await sb.setWindFelt(db.sessions()[0], makeWindFelt('opposite', 0, RUN + 3800e3));
+  assert.deepEqual(driftRows(db.calibration('bo'), db.sessions()).map(r => [r.t, r.predSide]), [[RUN, -1]]);
 });
 
 console.log(`\n${pass} passed total\n`);
