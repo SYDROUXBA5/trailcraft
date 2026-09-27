@@ -15,7 +15,8 @@ import { handlerStats, teachesDrift, runAgeMin } from './store.js';
 import { plumePalette, stepPalette, windPalette, trackPalette, COLOUR_PRESETS, isHex, mix } from './colours.js';
 import { FLAT, buildTerrain, stability, regime, flowAt, normOf, rainRate, RAIN_SUMS_PER_HOUR, windAt,
          laidWind, cleanWindFelt, windTrusted, forecastAt, feltMoment, nearestPoint, windFeltFor, forecastSaid,
-         windWords, feltPanel, FELT_POINTS, feltPicked, feltSame, sameFelt, feltOf, anchorFelt } from './field.js';
+         windWords, feltPanel, FELT_POINTS, feltPicked, feltSame, sameFelt, feltOf, anchorFelt, feltWeather,
+         seriesCovers } from './field.js';
 import { predictedOffsets, ScentSim, driftFrom, stepByFlow } from './sim.js';
 import { PARAMS, DIALS, PV, setParam, resetParams, changed, isDefault, tally, dialById, PRESETS, applyPreset } from './params.js';
 import { encodeTrail, decodeTrail, cardUrl, cardFromText, walkedPlanFor } from './card.js';
@@ -2211,13 +2212,31 @@ function weatherPanelFor(session, at = null) {
   if (own) return showWeather(own, feltPanel(session));
   const t = d?.trail?.[0] ?? d?.plan?.[0] ?? d?.track?.[0];
   const asked = weatherHere(t ? { lat: t.lat, lon: t.lon } : null);   // marks itself as asking at once
-  showWeather(wxNow.wx);                     // the panel now; the numbers follow
+  /* The air here stands in, as the wind felt on the ground on this run has
+     it: a calm is still and says so, a swirl says it swirls. */
+  const felt = feltPanel(session);
+  const here = (wx) => showWeather(feltWeather(wx, feltOf(d)), felt);
+  here(wxNow.wx);                     // the panel now; the numbers follow
   /* ...onto the screen that asked, and only while nothing newer is on it. A
      fix and a fetch on one bar can take twenty seconds, and the answer used
      to land on whatever map screen was up by then: today's wind here, over
      the replay of a run from last week. */
   const screen = currentScreen, gen = wxShown.gen;
-  asked.then(wx => { if (currentScreen === screen && wxShown.gen === gen) showWeather(wx); });
+  asked.then(wx => { if (currentScreen === screen && wxShown.gen === gen && !adoptHere(session, wx)) here(wx); });
+}
+
+/** A run going with no forecast of its own (a Trail Card scanned and run at
+    once, a trail laid offline) takes the air here as its run's forecast,
+    once that reaches the run's start. The picker then has a direction to
+    turn, rather than refusing every one beside a panel that shows one, and
+    the panel, the plume, the coach and the grade read one record, which
+    Stop keeps with the run. Says whether it did. */
+function adoptHere(session, wx) {
+  if (!wx || session !== run.session || !rec.on || rec.kind !== 'run' || !run.startedAt) return false;
+  if (forecastAt(session, run.startedAt).wx || !seriesCovers(wx, run.startedAt)) return false;
+  session.data.runWeather = wx;
+  runAirChanged(session);
+  return true;
 }
 
 function airStop() {
@@ -2833,17 +2852,30 @@ function paintDebrief() {
   $('dbSave').textContent = debriefDone(d) ? 'Save' : 'Two taps to go';
 }
 
+/** The wind on the ground, put on the run when the debrief is left, and the
+    run graded again in it when it changed. Whether or not the two questions
+    are answered, and by Not now as well as Save: it was set on purpose, and
+    the result card sends the handler here for it alone. Says whether it
+    changed anything. */
+function debriefWind(s) {
+  const kept = s && (db.sessions().find(x => x.id === s.id) ?? s);
+  if (!feltChangeable(kept) || sameFelt(dbWind, kept.data.windFelt)) return false;
+  regradeShown(kept, dbWind);
+  return true;
+}
+
 function saveDebrief() {
   const d = dbDraft, s = dbFor;
   if (!d || !s) return;
   if (!debriefDone(d)) {
+    const wind = debriefWind(s);
     /* Point at what is missing rather than refusing silently. */
     for (const f of DEBRIEF) {
       if (f.required && !d[f.id]) {
         const el = $('dbFields').querySelector(`[data-field="${f.id}"]`);
         el?.classList.add('todo');
         el?.scrollIntoView({ block: 'center', behavior: 'smooth' });
-        return toast(`${f.label}?`);
+        return toast(wind ? `Wind saved, and the run graded again in it. ${f.label}?` : `${f.label}?`);
       }
     }
     return;
@@ -4257,7 +4289,7 @@ function setWindFelt(session, felt) {
     grades one again (applyWalked), and saved with it. */
 async function regradeInWind(id, wf) {
   const s = db.sessions().find(x => x.id === id);
-  if (!s || s.data.imported || !(s.data.track?.length > 1) || !s.data.result) return null;
+  if (!s || !ownRun(s) || !(s.data.track?.length > 1) || !s.data.result) return null;
   const s2 = patchSession(s, { data: { windFelt: wf } });
   /* A search is timed from when its recording began, which only its first
      grade knew. That time is kept; only the wind is new. */
@@ -4283,9 +4315,11 @@ async function regradeInWind(id, wf) {
    right. What it lights comes from field.js feltPicked, and what a tap
    means from feltSame, so the two places cannot read one choice two ways. */
 
-/** Whether a wind felt on the ground can be put on a kept run: one this
-    phone graded. A run kept from someone else's link stays as they sent it. */
-const feltChangeable = (s) => !!s && !s.data?.imported && !!s.data?.result && s.data?.track?.length > 1;
+/** Whether a wind felt on the ground can be put on a kept run: one made
+    here (debrief.js ownRun), including a run on a trail that came as a Trail
+    Card or a link. A whole run kept from someone else's link stays as they
+    sent it. */
+const feltChangeable = (s) => !!s && ownRun(s) && !!s.data?.result && s.data?.track?.length > 1;
 
 /** A session as its felt wind is read and set: the run screen's, before
     Stop has given it a start of its own, set against the run's start, as
@@ -4631,7 +4665,10 @@ async function finishRun() {
      session yet, so it is read from here. */
   const bank = teachesDrift({ ...s.data, coach: coachRecord, revealedAt: run.revealedAt || s.data.revealedAt || null });
   const dogId = S.dog?.id ?? null;          // the run being recorded now is the picked dog's
-  const { runWeather, windFelt, ...result } = await computeResult({ ...s, dogId }, rec.pts, rec.wps, run.startedAt, { bank });
+  const { runWeather: fetched, windFelt, ...result } = await computeResult({ ...s, dogId }, rec.pts, rec.wps, run.startedAt, { bank });
+  /* The run's own forecast: fetched by the grade, or taken on the run screen
+     from the air here when the trail had none (adoptHere). */
+  const runWeather = fetched ?? s.data.runWeather ?? null;
   liveEnd(result);
   const patch = {
     dogId,
@@ -7154,7 +7191,10 @@ function wire() {
   $('btnDebrief').addEventListener('click', () => openDebrief(run.session ?? pendingSession));
   $('repDebrief').addEventListener('click', () => { const s = replay.s; closeReplay(); openDebrief(s); });
   $('dbSave').addEventListener('click', saveDebrief);
-  $('dbCancel').addEventListener('click', () => { dbFor = null; dbDraft = null; dbWind = null; leaveForm('scrResult'); });
+  $('dbCancel').addEventListener('click', () => {
+    if (dbDraft && debriefWind(dbFor)) toast('Grading it again in the wind you felt…');
+    dbFor = null; dbDraft = null; dbWind = null; leaveForm('scrResult');
+  });
   $('scrDebrief').addEventListener('click', (e) => {
     if (!dbDraft) return;      // a closed debrief still on screen: nothing to write into
     const pick = e.target.closest('[data-pick]');
