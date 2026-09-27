@@ -17,7 +17,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
-import { windAt } from '../public/field.js';
+import { windAt, laidWind } from '../public/field.js';
 import { cardinal, fmtSpeed, fmtTemp, forecastNote, fmtDur } from '../public/geo.js';
 import { unwalkedPlan } from '../public/debrief.js';
 import { trailModel, encodeShared, decodeShared, sessionFromModel } from '../public/share.js';
@@ -72,7 +72,7 @@ function panel() {
     fmtWind: (ms) => fmtSpeed(ms), cardinal, fahr: () => false, fmtTemp, forecastNote,
     compass: {}, paintRose() {}, wxGap() {},
     air: { wx: null }, airStart(wx) { sb.air.wx = wx; },
-    windAt, lastFix: null, WX_WAIT: 10000,
+    windAt, laidWind, lastFix: null, WX_WAIT: 10000,
     navigator: { geolocation: { getCurrentPosition: (res) => res({ coords: { latitude: 51.2, longitude: -2.6 } }) } },
     // Each ask for the air here waits until the test answers it.
     fetchWeather: () => new Promise((res) => asks.push(res)),
@@ -172,7 +172,7 @@ await t('laid weather arriving during a run is drawn at the run’s moment, and 
     $: () => fakeEl(), renderShare() {},
   };
   vm.createContext(sb);
-  vm.runInContext(decl('function keepWeather('), sb);
+  vm.runInContext([decl('function keepWeather('), decl('function runAirChanged(')].join('\n'), sb);
   const live = () => ({ id: 'r1', targetId: 'person', data: { trail: sb.coach.trail } });
 
   sb.run = { session: live(), revealed: true, startedAt: start, airAt: start };

@@ -13,7 +13,8 @@ import { stepPoints, contamTimed, trailFrom, walkedOfTrail, gpsTrouble, forecast
 import { packDraft, unpackDraft, draftAlive, draftStats } from './draft.js';
 import { handlerStats, teachesDrift, runAgeMin } from './store.js';
 import { plumePalette, stepPalette, windPalette, trackPalette, COLOUR_PRESETS, isHex, mix } from './colours.js';
-import { FLAT, buildTerrain, stability, regime, flowAt, normOf, rainRate, RAIN_SUMS_PER_HOUR, windAt } from './field.js';
+import { FLAT, buildTerrain, stability, regime, flowAt, normOf, rainRate, RAIN_SUMS_PER_HOUR, windAt,
+         laidWind, cleanWindFelt, windTrusted } from './field.js';
 import { predictedOffsets, ScentSim, driftFrom, stepByFlow } from './sim.js';
 import { PARAMS, DIALS, PV, setParam, resetParams, changed, isDefault, tally, dialById, PRESETS, applyPreset } from './params.js';
 import { encodeTrail, decodeTrail, cardUrl, cardFromText, walkedPlanFor } from './card.js';
@@ -2197,7 +2198,7 @@ async function askWeatherHere(hint) {
     air here now. */
 function weatherPanelFor(session, at = null) {
   const d = session?.data;
-  const own = Number.isFinite(at) ? windAt(session, at).wx : d?.weather;
+  const own = Number.isFinite(at) ? windAt(session, at).wx : laidWind(session);
   if (own) return showWeather(own);
   const t = d?.trail?.[0] ?? d?.plan?.[0] ?? d?.track?.[0];
   const asked = weatherHere(t ? { lat: t.lat, lon: t.lon } : null);   // marks itself as asking at once
@@ -3343,6 +3344,7 @@ function keepDraft(force = false) {
     revealedAt: run.revealedAt || 0,
     pts: rec.pts, wps: rec.wps, hides: rec.hides,
     plan: rec.kind === 'walk' ? walk.card : null, offAt: rec.kind === 'walk' ? walk.offAt : 0,
+    windFelt: rec.kind === 'run' ? run.session?.data?.windFelt ?? null : null,
   }, now);
   /* A full phone must not stop the walk: the recording carries on in memory,
      exactly as it did before there was a draft at all. */
@@ -3668,7 +3670,7 @@ function renderShare(s) {
       ? 'Open the countdown' : `${cap(layerName(s))} is off, start the countdown`;
   }
 
-  const wx = s.data.weather;
+  const wx = laidWind(s);
   const laid = new Date(s.startedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   if (isHide) {
     $('shareMiniImg').hidden = true;
@@ -4173,6 +4175,66 @@ async function applyWalked(sessionId, card) {
   return true;
 }
 
+/* ── The wind on the ground ───────────────────────────────────────────
+   The handler's word on the wind beats the forecast's (field.js, windFelt).
+   While a run is going the choice lives with the run, in memory and in its
+   crash copy, and Stop saves it with the run: a run cut short keeps nothing,
+   so it cannot leave its day's wind on the trail for the next dog. Once the
+   run is kept, a choice is saved at once and the run is graded again in it,
+   with the dog's drift row for that run put right to match. A run kept from
+   someone else's link is theirs, and stays as they sent it. */
+
+/* One re-grade at a time, in the order they were asked for: two quick taps
+   must end on the second choice, not on whichever grade finished last. */
+let feltQueue = Promise.resolve();
+
+/** Put a wind felt on the ground on a session. `felt` is a windFelt
+    (field.js windFeltFor or makeWindFelt), or null for the forecast as it
+    stood. Resolves to the session as it now is, or to null when nothing
+    could be changed: an unknown session, a run being graded at this moment,
+    a run kept from a link, or a trail with no graded run. */
+function setWindFelt(session, felt) {
+  const id = session?.id;
+  const wf = felt == null ? null : cleanWindFelt(felt);
+  if (!id || (felt != null && !wf)) return Promise.resolve(null);
+  const live = rec.kind === 'run' && run.session?.id === id && !run.session.data?.track
+    && (rec.on || currentScreen === 'scrRun');
+  if (live) {
+    /* Stop is grading it in the wind it had, and that grade is the one kept. */
+    if (run.stopping) return Promise.resolve(null);
+    /* In place, as the laid weather arriving late is (keepWeather): the
+       coach and the ground reading hold this very object. */
+    run.session.data.windFelt = wf;
+    keepDraft(true);
+    runAirChanged(run.session);
+    return Promise.resolve(run.session);
+  }
+  const job = feltQueue.then(() => regradeInWind(id, wf));
+  feltQueue = job.catch(() => null);
+  return job;
+}
+
+/** A kept run graded again in a wind felt on the ground, as a walked card
+    grades one again (applyWalked), and saved with it. */
+async function regradeInWind(id, wf) {
+  const s = db.sessions().find(x => x.id === id);
+  if (!s || s.data.imported || !(s.data.track?.length > 1) || !s.data.result) return null;
+  const s2 = patchSession(s, { data: { windFelt: wf } });
+  /* A search is timed from when its recording began, which only its first
+     grade knew. That time is kept; only the wind is new. */
+  const ind = (s.data.trackWaypoints || []).find(w => w.kind === 'Indication');
+  const old = s.data.result;
+  const firstAt = ind && Number.isFinite(old.toFirst) ? ind.t - old.toFirst : s.data.trackStarted;
+  const { runWeather, ...result } = await computeResult(s2, s2.data.track, s2.data.trackWaypoints || [],
+    s2.data.trackStarted, { bank: teachesDrift(s2.data), rebank: true, firstAt });
+  const patch = { summary: result.sentence, data: { windFelt: wf, result, ...(runWeather ? { runWeather } : {}) } };
+  const saved = guardSave(patchSession(s, patch), () => saveSession(s, patch));
+  snap();
+  const now = saved ?? patchSession(s, patch);
+  if (run.session?.id === id) run.session = now;
+  return now;
+}
+
 /* ── Pick what to run ─────────────────────────────────────────────── */
 function openPick() {
   paintPick();
@@ -4237,6 +4299,10 @@ async function startRun(s) {
     guardSave(s, () => db.addSession(s));
     snap();
   }
+  /* The wind felt on the ground is told afresh for each run. A run cut
+     short keeps nothing, its wind included, but the choice may still be on
+     this copy of the trail in memory: whatever was not saved goes. */
+  if (!run.copy && s.data && !had.data?.windFelt) delete s.data.windFelt;
   run.session = s;
   run.revealed = false;
   /* Once the answer has been seen it stays seen — including on a second run
@@ -4397,8 +4463,11 @@ async function finishRun() {
      Both saves carry only what the run adds: `s` was taken when the run
      began, and anything written since (the laid-time weather, most often)
      stays as it is. */
+  /* The wind felt on the ground during the run has lived with the run in
+     memory and in the crash copy until now, and is kept with it here. */
+  const felt = s.data.windFelt !== undefined ? { windFelt: cleanWindFelt(s.data.windFelt) } : {};
   const raw = { data: { track: rec.pts, trackStarted: run.startedAt, trackWaypoints: rec.wps,
-    revealedAt: run.revealedAt || s.data.revealedAt || null } };
+    revealedAt: run.revealedAt || s.data.revealedAt || null, ...felt } };
   guardSave(patchSession(s, raw), () => saveSession(s, raw));
   /* Only a run where nothing was steering banks towards the dog's drift
      (teachesDrift): not a plan-graded one, whose drawn line is a sketch and
@@ -4415,7 +4484,7 @@ async function finishRun() {
     summary: result.sentence,
     data: { track: rec.pts, trackStarted: run.startedAt, trackWaypoints: rec.wps,
       revealedAt: run.revealedAt || s.data.revealedAt || null, result, coach: coachRecord,
-      ...(runWeather ? { runWeather } : {}) },
+      ...(runWeather ? { runWeather } : {}), ...felt },
   };
   /* If the phone refuses the save, the run stays in memory and on screen:
      the result still shows, it can be sent as a link or a file, and the
@@ -4436,7 +4505,11 @@ function travelBrg(trail, i) {
   return dist(a, b) > 0.5 ? bearing(a, b) : null;
 }
 
-async function computeResult(s, track, wps, startedAt, { bank = true } = {}) {
+/* `rebank` is for a run graded again after it was kept (setWindFelt): what
+   it banked before is put right rather than added to (store.js rebankRows).
+   `firstAt` is when the recording began, which a search is timed from; a
+   run graded again gives the one its first grade was timed from. */
+async function computeResult(s, track, wps, startedAt, { bank = true, rebank = false, firstAt = rec.started } = {}) {
   const t = targetById(s.targetId);
   /* The dog the run belongs to, never simply the one picked on Home: a walked
      card can re-grade an old run long after the chip has moved to another
@@ -4460,13 +4533,19 @@ async function computeResult(s, track, wps, startedAt, { bank = true } = {}) {
   if (!exact) {
     try {
       runWeather = await fetchWeather(track[0].lat, track[0].lon, startedAt, { within: WX_WAIT });
-      ({ wx, exact } = windAt({ data: { runWeather } }, startedAt));
+      /* In the wind the handler felt, as the session's own would be. */
+      ({ wx, exact } = windAt({ data: { runWeather, windFelt: s.data.windFelt } }, startedAt));
     } catch { /* keep the laid-time weather, unbanked */ }
   }
   if (!exact) bank = false;
   const st = stability(wx?.soil_temp, wx?.temp);
+  /* What the handler felt on the ground (field.js). A swirl keeps the
+     forecast's direction to draw with and gives it no side to expect; a
+     calm is read as still air, so any side comes from the slope alone. */
+  const felt = cleanWindFelt(s.data.windFelt);
+  const trusted = windTrusted(felt);
 
-  if (t.kind === 'hide') return { ...searchResult(s, track, wps, startedAt, wx, dogName, ageMin), runWeather };
+  if (t.kind === 'hide') return { ...searchResult(s, track, wps, startedAt, wx, dogName, ageMin, firstAt), runWeather };
 
   const trail = s.data.trail;
   /* The phone's track, projected a line-length ahead: an ESTIMATE of where
@@ -4490,14 +4569,21 @@ async function computeResult(s, track, wps, startedAt, { bank = true } = {}) {
   let predSide = 0;
   let reg = null;
   if (wx) {
-    const pred = predictedOffsets(T, trail, wx, st, startedAt);
-    let sum = 0;
-    pred.forEach((p, i) => {
-      const tb = travelBrg(trail, i);
-      if (tb != null && p.bearing != null) sum += sideOfDrift(tb, p.bearing);
-    });
-    predSide = sum > pred.length * 0.15 ? 1 : sum < -pred.length * 0.15 ? -1 : 0;
+    /* A swirl has no side to expect: the grade does not score the track
+       against one, and the dog's record learns nothing from it. */
+    if (felt?.mode !== 'swirl') {
+      const pred = predictedOffsets(T, trail, wx, st, startedAt);
+      let sum = 0;
+      pred.forEach((p, i) => {
+        const tb = travelBrg(trail, i);
+        if (tb != null && p.bearing != null) sum += sideOfDrift(tb, p.bearing);
+      });
+      predSide = sum > pred.length * 0.15 ? 1 : sum < -pred.length * 0.15 ? -1 : 0;
+    }
     try { reg = regime(T, trail, wx, st); } catch { reg = null; }
+    /* Nothing is "downwind" of a swirl or of still air. Cold air draining
+       downhill still is. */
+    if (!trusted && reg?.key === 'wind') reg = null;
   }
   const agree = sideAgreement(offs, predSide);
 
@@ -4514,8 +4600,8 @@ async function computeResult(s, track, wps, startedAt, { bank = true } = {}) {
     db.addCalibration(dogRow?.id, {
       t: startedAt, predSide, mean, wind: wx?.wind_speed ?? null,
       stability: st?.label ?? null, k,
-    });
-  }
+    }, { replace: rebank });
+  } else if (rebank) db.setAsideDrift(dogRow?.id, startedAt);
 
   const sideWord = mean == null ? '' : mean > 0 ? 'right' : 'left';
 
@@ -4526,17 +4612,26 @@ async function computeResult(s, track, wps, startedAt, { bank = true } = {}) {
      numbers, in whatever units it is read in (share.js, resultSentence). */
   const sentence = resultSentence({ kind: 'trail', medAbs, shares, noisy, accMed, mainSide }, dogName, unitsForText());
 
+  /* Whose wind it is, said plainly: the forecast's, or the one the handler
+     felt on the ground and put in its place. */
+  const whose = felt?.mode === 'from' ? 'The wind felt on the ground' : 'The forecast wind';
   let modelled = '';
   if (predSide !== 0) {
     const predWord = predSide > 0 ? 'right' : 'left';
-    modelled = `The forecast wind suggests drift to the ${predWord}.`;
+    modelled = felt?.mode === 'calm'
+      ? `With the air calm on the ground, the slope suggests drift to the ${predWord}.`
+      : `${whose} suggests drift to the ${predWord}.`;
     if (mainSide && !noisy) {
       modelled += mainSide === predWord
         ? ' The track sits on that side.'
         : ' The track sits on the other side — worth reviewing the local conditions and what the dog was doing.';
     }
+  } else if (felt?.mode === 'swirl') {
+    modelled = 'The wind was swirling on the ground, so the model can’t say which side the scent went.';
+  } else if (felt?.mode === 'calm') {
+    modelled = 'The air was calm on the ground, so the model suggests no side.';
   } else if (wx) {
-    modelled = 'The forecast wind ran along the trail, so it suggests no side.';
+    modelled = `${whose} ran along the trail, so it suggests no side.`;
   } else {
     modelled = 'No weather was recorded for this trail, so the model has nothing to suggest.';
   }
@@ -4559,7 +4654,7 @@ async function computeResult(s, track, wps, startedAt, { bank = true } = {}) {
   };
 }
 
-function searchResult(s, track, wps, startedAt, wx, dogName, ageMin) {
+function searchResult(s, track, wps, startedAt, wx, dogName, ageMin, firstAt = rec.started) {
   const hides = s.data.hides || [];
   const ind = wps.find(w => w.kind === 'Indication');
   const st = stability(wx?.soil_temp, wx?.temp);
@@ -4575,7 +4670,7 @@ function searchResult(s, track, wps, startedAt, wx, dogName, ageMin) {
       ? `${dogName} searched ${fmtDur(dur)} — no indication marked.`
       : `${dogName} searched — no indication marked.`;
   } else {
-    toFirst = ind.t - rec.started;
+    toFirst = ind.t - firstAt;
     const nearest = hides.reduce((best, h) => {
       const d = dist(ind, h);
       return !best || d < best.d ? { h, d } : best;
@@ -4586,7 +4681,9 @@ function searchResult(s, track, wps, startedAt, wx, dogName, ageMin) {
     const path = track.slice(0, idx < 0 ? track.length : idx + 1);
     let back = path.length - 1;
     while (back > 0 && dist(path[back], path[path.length - 1]) < 20) back--;
-    if (path.length > 1 && wx?.wind_direction != null) {
+    /* Not in a wind the handler felt swirling or calm: into or with a wind
+       that had no steady direction is a guess, however exact it reads. */
+    if (path.length > 1 && wx?.wind_direction != null && windTrusted(s.data.windFelt)) {
       approach = approachToWind(bearing(path[back], path[path.length - 1]), wx.wind_direction);
     }
     sentence = `${dogName} indicated in ${fmtDur(toFirst)}`
@@ -4714,7 +4811,7 @@ function showOnMap(from = 'scrResult') {
   /* A run is shown in the wind it was run in; a trail not run yet, in the
      wind it was laid in. The panel, the arrow and the streaks take the same
      moment from airMomentFor once go() below puts the screen up. */
-  const wx = Number.isFinite(s.data.trackStarted) ? windAt(s, s.data.trackStarted).wx : s.data.weather;
+  const wx = Number.isFinite(s.data.trackStarted) ? windAt(s, s.data.trackStarted).wx : laidWind(s);
   if (t.kind === 'person') {
     setTrail(s.data.trail);
     setSrc('start', pointsOf([s.data.trail[0]]));
@@ -4781,30 +4878,36 @@ function keepWeather(id, wx) {
   if (live) live.data.weather = wx;
   const kept = db.updateSession(id, { data: { weather: wx } });
   snap();
-  if (live && rec.on && rec.kind === 'run') {
-    /* At the run's own moment, as everything else on the run screen is. The
-       raw laid-time record drew a revealed scent in the air of hours before,
-       beside a coach and a grade working from the run's. */
-    if (run.revealed && targetById(live.targetId).kind === 'person') {
-      run.airAt = Date.now();
-      plumeStart(trailOf(live), windAt(live, run.airAt).wx, undefined, live.data.contamination);
-    }
-    /* The panel follows whatever the screen is showing. It is refreshed on its
-       own, because with the plume switched off in Settings nothing else would
-       carry the new wind to it. */
-    if (currentScreen === 'scrRun') weatherPanelFor(live, run.airAt || run.startedAt);
-    /* A coach that set off with no weather had no scent to reason about.
-       It has now, and in the wind the dog set off in. */
-    if (coach.trail) {
-      const w = windAt(live, run.startedAt).wx;
-      coach.field = w ? scentField(trailOf(live), w, run.startedAt) : [];
-    }
-  }
+  if (live && rec.on && rec.kind === 'run') runAirChanged(live);
   if (kept && pendingSession?.id === id) {
     pendingSession = kept;
     if (!$('scrShare').hidden) renderShare(kept);
   }
   return kept;
+}
+
+/** A run going on, drawn again in its air once that air changes: the laid
+    weather arriving late (keepWeather), or a wind felt on the ground put in
+    its place (setWindFelt). Everything reads windAt, so all of it moves
+    together. */
+function runAirChanged(live) {
+  /* At the run's own moment, as everything else on the run screen is. The
+     raw laid-time record drew a revealed scent in the air of hours before,
+     beside a coach and a grade working from the run's. */
+  if (run.revealed && targetById(live.targetId).kind === 'person') {
+    run.airAt = Date.now();
+    plumeStart(trailOf(live), windAt(live, run.airAt).wx, undefined, live.data.contamination);
+  }
+  /* The panel follows whatever the screen is showing. It is refreshed on its
+     own, because with the plume switched off in Settings nothing else would
+     carry the new wind to it. */
+  if (currentScreen === 'scrRun') weatherPanelFor(live, run.airAt || run.startedAt);
+  /* A coach that set off with no weather had no scent to reason about.
+     It has now, and in the wind the dog set off in. */
+  if (coach.trail) {
+    const w = windAt(live, run.startedAt).wx;
+    coach.field = w ? scentField(trailOf(live), w, run.startedAt) : [];
+  }
 }
 
 function guardSave(session, fn) {
@@ -5429,7 +5532,12 @@ function coachStart(s) {
   const wx = windAt(s, run.startedAt).wx;
   coach.field = wx && coach.trail ? scentField(trailOf(s), wx, run.startedAt) : [];
   if (coach.trail && wx && !surfValid(s)) {
-    fillSurfaces(s).then(f => { if (f && run.session?.id === s.id) coach.field = scentField(trailOf(s), wx, run.startedAt); });
+    /* Read again when the ground arrives: a wind felt on the ground may
+       have been put in since (setWindFelt). */
+    fillSurfaces(s).then(f => {
+      const w = windAt(s, run.startedAt).wx;
+      if (f && w && run.session?.id === s.id) coach.field = scentField(trailOf(s), w, run.startedAt);
+    });
   }
   clearInterval(coach.shadowTick);
   coach.shadowTick = coach.trail ? setInterval(() => { if (rec.on) shadowStep(null); }, 1000) : 0;
@@ -7202,6 +7310,9 @@ async function recoverKeep() {
   if (d.kind === 'run') {
     const s = d.sessionId ? db.sessions().find(x => x.id === d.sessionId) : null;
     if (!s) { dropDraft(); toast('That run’s trail is no longer on this phone'); return boot(); }
+    /* The wind felt on the ground during the run was only ever in memory
+       and in this copy: it is put back, so the run is graded in it. */
+    if (d.windFelt) s.data.windFelt = d.windFelt;
     run.session = s;
     run.startedAt = d.startedAt;
     run.revealedAt = d.revealedAt || 0;

@@ -7,7 +7,8 @@
    and laid over the forecast in field.js windAt, the one place every view
    reads a run's wind. These check the correction itself, where it travels
    (links, kept runs, crash copies, a second run), what it does to the drift
-   record. */
+   record, and, by lifting the grade and the map code out of app.js as
+   wind.test.mjs does, that every reader of a run's wind reads the same one. */
 
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -295,6 +296,224 @@ await t('a second run of the trail starts without it, and a merge keeps it with 
   const { keep } = mergeOne({ ...ran, updatedAt: 5 }, theirs, { union: true });
   assert.equal(keep.name, 'Lane', 'the newer copy’s change stands');
   assert.deepEqual(keep.data.windFelt, felt('calm'), 'and the run keeps the wind it was felt in');
+});
+
+/* ── The app: every reader, and the re-grade ────────────────────────── */
+
+/* An eastward trail laid at 08:00 in a forecast northerly, run at 09:00 with
+   the dog 5 m south of it. The forecast puts the scent south, on the right
+   of the line; felt from the south on the ground, it goes north, left. */
+const trail = Array.from({ length: 20 }, (_, i) => ({ lat: 51.2, lon: -2.65 + i * 1.4e-4, t: T0 + i * 10e3 }));
+const runTrack = Array.from({ length: 20 }, (_, i) => ({ lat: 51.2 - 4.5e-5, lon: -2.65 + i * 1.4e-4, t: RUN + i * 10e3, acc: 3 }));
+/* A search: the dog comes in heading north to the hide. */
+const hide = { lat: 51.201, lon: -2.65 };
+const searchTrack = Array.from({ length: 12 }, (_, i) => ({ lat: 51.2 + i * 1e-4, lon: -2.65, t: RUN + i * 10e3, acc: 3 }));
+
+/** The grade and everything around it, lifted out of app.js onto a real store. */
+function app() {
+  const db = createStore(fakeBackend());
+  const drawn = { plume: [], coach: [], panel: [], followed: [], field: [] };
+  const sb = {
+    db, S: { dogs: [{ id: 'bo', name: 'Bo', lineM: 0 }] }, BUILD: 'test',
+    rec: { kind: null, on: false, started: RUN }, run: { session: null, stopping: false, revealed: false, startedAt: RUN, airAt: 0 },
+    currentScreen: 'scrResult', coach: { trail: null, field: [] },
+    targetById, unwalkedPlan, windAt, cleanWindFelt, windTrusted, stability, regime, FLAT, predictedOffsets, changed,
+    lineCorrect, signedOffsets, meanSigned, medianAbs, sideShares, sideOfDrift, sideAgreement, approachToWind, bearing, dist,
+    fmtDur, fmtM: (m) => fmtShort(m, false), APPROACH_V, resultSentence, teachesDrift, patchSession,
+    unitsForText: () => ({ imperial: false, fahrenheit: false, coord: 'dd', when: String }),
+    terrainFor: () => Promise.resolve(FLAT),
+    fetchWeather: () => Promise.reject(new Error('offline')), WX_WAIT: 10,
+    guardSave: (s, fn) => fn(), snap() {}, keepDraft() { drawn.draft = (drawn.draft ?? 0) + 1; },
+    trailOf: (s) => s.data.trail, contamSim: () => null,
+    plumeStart: (tr, w) => drawn.plume.push(w.wind_direction),
+    weatherPanelFor: (s, at) => drawn.panel.push(windAt(s, at).wx.wind_direction),
+    scentField: (tr, w) => { drawn.field.push(w.wind_direction); return []; },
+    followWeather: (w) => drawn.followed.push(w.wind_direction),
+    Promise, Number, Math, Object, JSON, Error,
+  };
+  vm.createContext(sb);
+  vm.runInContext([
+    decl('function travelBrg('),
+    between('/* `rebank` is for a run graded again', '\nfunction searchResult('),
+    decl('function searchResult('),
+    decl('function saveSession('),
+    decl('function runAirChanged('),
+    between('let feltQueue = ', '\n/* ── Pick what to run'),
+  ].join('\n'), sb);
+  return { sb, db, drawn };
+}
+
+const trailRun = (over = {}) => ({ id: 'run1', handlerId: 'h1', dogId: 'bo', targetId: 'person', startedAt: T0, summary: '',
+  data: { trail, weather: northerly(), track: runTrack, trackStarted: RUN, trackWaypoints: [], ...over } });
+const searchRun = (over = {}) => ({ id: 'find1', handlerId: 'h1', dogId: 'bo', targetId: 'article', startedAt: T0, summary: '',
+  data: { hides: [hide], weather: northerly(), track: searchTrack, trackStarted: RUN,
+    trackWaypoints: [{ kind: 'Indication', lat: hide.lat, lon: hide.lon, t: RUN + 110e3 }], ...over } });
+
+await t('every reader of a run’s wind reads the one the handler felt: plume, coach, panel, replay and grade', async () => {
+  const wf = makeWindFelt('opposite', 0, RUN);
+  const { sb, drawn } = app();
+
+  /* The run screen, revealed, as the wind is corrected during the run. */
+  const live = trailRun({ track: undefined, trackStarted: undefined, windFelt: wf });
+  Object.assign(sb.run, { session: live, revealed: true, startedAt: RUN });
+  sb.coach.trail = trail;
+  sb.currentScreen = 'scrRun';
+  sb.runAirChanged(live);
+  assert.deepEqual([drawn.plume, drawn.panel, drawn.field], [[180], [180], [180]], 'the plume, the panel and the coach’s band');
+
+  /* The replay, at a moment of the run. */
+  const rp = { replay: { s: trailRun({ windFelt: wf }), at: RUN + 60e3, from: RUN, to: RUN + 190e3 },
+    setDogTrack() {}, setSrc() {}, pointsOf: () => ({}), plume: { sim: null, bandWalls: 0 }, stability, windAt,
+    followWeather: (w) => drawn.followed.push(w.wind_direction), scentField: (tr, w) => { drawn.field.push(w.wind_direction); return []; },
+    plumePolygon: () => ({}), paintBandWalls() {}, EMPTY: {}, trailOf: (s) => s.data.trail, signedOffsets: () => [],
+    targetById, fmtM: String, fmtDur, unwalkedPlan, ageUnknown: () => '', bandWallNote: () => '',
+    $: () => ({ textContent: '', style: {}, classList: { toggle() {} }, setAttribute() {} }), document: { activeElement: null } };
+  vm.createContext(rp);
+  vm.runInContext(decl('function paintReplay('), rp);
+  rp.paintReplay();
+  assert.deepEqual([drawn.followed.at(-1), drawn.field.at(-1)], [180, 180], 'the replay’s panel and band');
+
+  /* The grade: the side it expects, and the wind it quotes. */
+  const graded = await sb.computeResult(trailRun({ windFelt: wf }), runTrack, [], RUN, { bank: false });
+  assert.equal(graded.wind.from, 180);
+  assert.equal(graded.predSide, -1, 'felt from the south, the scent went left of an eastward line');
+  assert.match(graded.modelled, /^The wind felt on the ground suggests drift to the left\. The track sits on the other side/);
+  const forecast = await sb.computeResult(trailRun(), runTrack, [], RUN, { bank: false });
+  assert.equal(forecast.predSide, 1, 'the forecast northerly put it right');
+  assert.match(forecast.modelled, /^The forecast wind suggests drift to the right\. The track sits on that side\./);
+
+  /* And a search's approach, off the same corrected wind. */
+  const find = await sb.computeResult(searchRun({ windFelt: wf }), searchTrack, searchRun().data.trackWaypoints, RUN, { bank: false });
+  assert.equal(find.approach, 'with the wind', 'heading north with the wind felt from the south behind it');
+  assert.equal(find.wind.from, 180);
+  const byForecast = await sb.computeResult(searchRun(), searchTrack, searchRun().data.trackWaypoints, RUN, { bank: false });
+  assert.equal(byForecast.approach, 'into the wind');
+
+  /* Every one of them the same direction, and the forecast's own nowhere. */
+  const all = [...drawn.plume, ...drawn.panel, ...drawn.field, ...drawn.followed, graded.wind.from, find.wind.from];
+  assert.ok(all.every(d => d === 180), `one wind on every reader: ${all}`);
+});
+
+await t('a swirl states no approach and scores no side; a calm draws still air', async () => {
+  const { sb } = app();
+  const find = await sb.computeResult(searchRun({ windFelt: felt('swirl') }), searchTrack, searchRun().data.trackWaypoints, RUN, { bank: false });
+  assert.equal(find.approach, null, 'into or with a wind with no steady direction is not said');
+  assert.doesNotMatch(find.sentence, /wind/);
+  assert.match(find.sentence, /^Bo indicated in /, 'the rest of the sentence stands');
+
+  const swirl = await sb.computeResult(trailRun({ windFelt: felt('swirl') }), runTrack, [], RUN, { bank: false });
+  assert.deepEqual([swirl.predSide, swirl.agree, swirl.regimeKey], [0, null, null]);
+  assert.equal(swirl.modelled, 'The wind was swirling on the ground, so the model can’t say which side the scent went.');
+
+  const calm = await sb.computeResult(trailRun({ windFelt: felt('calm') }), runTrack, [], RUN, { bank: false });
+  assert.deepEqual([calm.predSide, calm.wind.speed, calm.regimeKey], [0, CALM_MS, null]);
+  assert.equal(calm.modelled, 'The air was calm on the ground, so the model suggests no side.');
+  const calmFind = await sb.computeResult(searchRun({ windFelt: felt('calm') }), searchTrack, searchRun().data.trackWaypoints, RUN, { bank: false });
+  assert.equal(calmFind.approach, null);
+});
+
+await t('set after the run, it is saved, the run graded again in it, and the dog’s row put right', async () => {
+  const { sb, db } = app();
+  db.addSession(trailRun());
+  /* The first grade, at Stop, in the forecast. */
+  const first = await sb.computeResult(trailRun(), runTrack, [], RUN, { bank: true });
+  db.updateSession('run1', { summary: first.sentence, data: { result: first } });
+  assert.deepEqual(db.calibration('bo').map(r => [r.t, r.predSide]), [[RUN, 1]]);
+  const k = db.calibration('bo')[0].k;
+
+  const s1 = await sb.setWindFelt(db.sessions()[0], makeWindFelt('opposite', 0, RUN + 3600e3));
+  assert.equal(s1.data.windFelt.from, 180);
+  const kept = db.sessions().find(x => x.id === 'run1');
+  assert.deepEqual(kept.data.windFelt, s1.data.windFelt, 'saved with the run');
+  assert.equal(kept.data.result.predSide, -1, 'graded again in the wind felt');
+  assert.equal(kept.data.result.wind.from, 180);
+  assert.equal(kept.summary, kept.data.result.sentence);
+  assert.deepEqual(db.calibration('bo').map(r => [r.t, r.predSide, r.k, r.skip]), [[RUN, -1, k, undefined]],
+    'the same one row for the run, now learned from the wind felt');
+
+  await sb.setWindFelt(kept, felt('swirl', { at: RUN + 3700e3 }));
+  const swirled = db.sessions().find(x => x.id === 'run1');
+  assert.equal(swirled.data.result.predSide, 0);
+  assert.deepEqual(db.calibration('bo').map(r => r.skip), [true], 'a swirl sets the row aside');
+  assert.equal(db.dogDrift('bo'), null);
+  assert.equal(driftRows(db.calibration('bo'), db.sessions()).length, 0);
+
+  /* Two quick changes end on the second, whichever grade is quicker. */
+  const a = sb.setWindFelt(swirled, felt('calm', { at: RUN + 3800e3 }));
+  const b = sb.setWindFelt(swirled, felt('forecast', { at: RUN + 3900e3 }));
+  await Promise.all([a, b]);
+  const last = db.sessions().find(x => x.id === 'run1');
+  assert.equal(last.data.windFelt.mode, 'forecast');
+  assert.equal(last.data.result.predSide, 1);
+  assert.deepEqual(db.calibration('bo').map(r => [r.predSide, r.skip]), [[1, undefined]], 'banked again, in place of the set-aside row');
+
+  await sb.setWindFelt(last, null);
+  assert.equal(db.sessions().find(x => x.id === 'run1').data.windFelt, null, 'back to the forecast, unconfirmed');
+});
+
+await t('a search graded again keeps its time to the find, and only the wind moves', async () => {
+  const { sb, db } = app();
+  db.addSession(searchRun());
+  sb.rec.started = RUN - 4000;           // the recording began a moment before the run's clock
+  const first = await sb.computeResult(searchRun(), searchTrack, searchRun().data.trackWaypoints, RUN, { bank: true });
+  db.updateSession('find1', { summary: first.sentence, data: { result: first } });
+  sb.rec.started = RUN + 9e6;            // a later recording, long after
+  const again = await sb.setWindFelt(db.sessions()[0], makeWindFelt('opposite', 0, RUN + 3600e3));
+  assert.equal(again.data.result.toFirst, first.toFirst, 'timed as its first grade was, not from a later recording');
+  assert.equal(again.data.result.approach, 'with the wind');
+  assert.match(again.summary, /coming with the wind\.$/);
+});
+
+await t('set during a run, it lives with the run until Stop, and nothing is graded twice', async () => {
+  const { sb, db, drawn } = app();
+  const laid = trailRun({ track: undefined, trackStarted: undefined, trackWaypoints: undefined });
+  db.addSession(laid);
+  const live = db.sessions()[0];
+  Object.assign(sb.rec, { kind: 'run', on: true });
+  Object.assign(sb.run, { session: live, revealed: false, startedAt: RUN });
+  sb.currentScreen = 'scrRun';
+  const got = await sb.setWindFelt(live, felt('calm'));
+  assert.equal(got, live, 'the run’s own session, changed in place for everything holding it');
+  assert.deepEqual(live.data.windFelt, felt('calm'));
+  assert.equal(db.sessions()[0].data.windFelt, undefined, 'not saved until Stop keeps the run');
+  assert.equal(drawn.draft, 1, 'written into the crash copy at once');
+  assert.equal(drawn.panel.length, 1, 'the panel follows it');
+  assert.equal(windAt(live, RUN).wx.wind_speed, CALM_MS, 'in still air');
+  sb.run.stopping = true;
+  assert.equal(await sb.setWindFelt(live, felt('swirl')), null, 'not while Stop is grading it');
+  assert.deepEqual(live.data.windFelt, felt('calm'));
+  assert.equal(await sb.setWindFelt({ id: 'nope' }, felt('calm')), null);
+  assert.equal(await sb.setWindFelt(live, { mode: 'calm' }), null, 'nothing that is not a windFelt');
+
+  /* A run kept from someone else's link is theirs. */
+  db.addSession({ ...trailRun({ imported: { from: 'Anna' } }), id: 'theirs', dogId: null });
+  sb.rec.on = false; sb.run.session = null; sb.run.stopping = false;
+  assert.equal(await sb.setWindFelt({ id: 'theirs' }, felt('calm')), null);
+  assert.equal(db.sessions().find(x => x.id === 'theirs').data.windFelt, undefined);
+});
+
+await t('Stop saves it with the run, a recovered run takes it back, and a new run starts clean', () => {
+  const stop = js.slice(js.indexOf('async function finishRun'), js.indexOf('/* ── The result'));
+  assert.match(stop, /const felt = s\.data\.windFelt !== undefined \? \{ windFelt: cleanWindFelt\(s\.data\.windFelt\) \} : \{\};/);
+  assert.match(stop, /revealedAt: run\.revealedAt \|\| s\.data\.revealedAt \|\| null, \.\.\.felt \} \};/, 'with the walk, before the grade');
+  assert.match(stop, /\.\.\.\(runWeather \? \{ runWeather \} : \{\}\), \.\.\.felt \},/, 'and with the result');
+  assert.match(decl('function keepDraft('), /windFelt: rec\.kind === 'run' \? run\.session\?\.data\?\.windFelt \?\? null : null,/);
+  assert.match(decl('async function recoverKeep('), /if \(d\.windFelt\) s\.data\.windFelt = d\.windFelt;\s*\n\s*run\.session = s;/);
+  assert.match(decl('async function startRun('), /if \(!run\.copy && s\.data && !had\.data\?\.windFelt\) delete s\.data\.windFelt;/);
+  /* The run's own weather, fetched when the laid series did not reach it,
+     is read in the felt wind too. */
+  assert.match(js, /windAt\(\{ data: \{ runWeather, windFelt: s\.data\.windFelt \} \}, startedAt\)/);
+});
+
+await t('no screen reads a session’s wind round windAt and laidWind', () => {
+  /* The laid-time record read raw drew a trail in the forecast after the
+     handler had put it right. Only a presence check is left, and the late
+     write that stores the record, which this does not count. */
+  const raw = [...js.matchAll(/(?:\.data|\bd\??)\??\.weather\b(?!\s*=)/g)].map(m => js.slice(m.index - 30, m.index + 30).replace(/\n/g, ' '));
+  const allowed = raw.filter(l => /!s\.data\.weather\b/.test(l));
+  assert.equal(allowed.length, 1, 'the check still finds the one presence check it allows');
+  assert.deepEqual(raw.filter(l => !allowed.includes(l)), [], 'a raw read of the laid weather');
+  assert.doesNotMatch(js, /wxAt\(/, 'the series is only ever read through windAt');
 });
 
 console.log(`\n${pass} passed total\n`);
