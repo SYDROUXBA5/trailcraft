@@ -163,10 +163,15 @@ export function windAt(session, when) {
     run reads this; windAt is for that. */
 export function forecastAt(session, when) {
   const d = session?.data ?? {};
-  for (const w of [d.runWeather, d.weather]) {
+  /* Air here that only stood in for a run with no forecast of its own
+     (standIn, app.js adoptHere) comes after the trail's own: laid weather
+     landing later is the forecast for that place and time, and the stand-in
+     may be neither. */
+  const order = d.runWeather?.standIn ? [d.weather, d.runWeather] : [d.runWeather, d.weather];
+  for (const w of order) {
     if (seriesCovers(w, when)) return { wx: wxAt(w, when), exact: true };
   }
-  return { wx: d.runWeather ?? d.weather ?? null, exact: false };
+  return { wx: order[0] ?? order[1] ?? null, exact: false };
 }
 
 /** The air a trail was laid in, as it blew on the ground: the laid-time

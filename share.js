@@ -204,6 +204,9 @@ function cleanWx(wx) {
   };
   const out = flat(wx);
   if (!out) return null;
+  /* Air here that only stood in for a run's own forecast (app.js adoptHere)
+     says so on every phone that opens it, and is read after the trail's. */
+  if (wx.standIn === 1) out.standIn = 1;
   if (Array.isArray(wx.series)) out.series = wx.series.slice(0, WX_SERIES_MAX).map(flat).filter(Boolean);
   return out;
 }
