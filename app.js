@@ -14,7 +14,8 @@ import { packDraft, unpackDraft, draftAlive, draftStats } from './draft.js';
 import { handlerStats, teachesDrift, runAgeMin } from './store.js';
 import { plumePalette, stepPalette, windPalette, trackPalette, COLOUR_PRESETS, isHex, mix } from './colours.js';
 import { FLAT, buildTerrain, stability, regime, flowAt, normOf, rainRate, RAIN_SUMS_PER_HOUR, windAt,
-         laidWind, cleanWindFelt, windTrusted } from './field.js';
+         laidWind, cleanWindFelt, windTrusted, forecastAt, feltMoment, nearestPoint, windFeltFor, forecastSaid,
+         windWords, feltPanel, FELT_POINTS, feltPicked, feltSame, sameFelt } from './field.js';
 import { predictedOffsets, ScentSim, driftFrom, stepByFlow } from './sim.js';
 import { PARAMS, DIALS, PV, setParam, resetParams, changed, isDefault, tally, dialById, PRESETS, applyPreset } from './params.js';
 import { encodeTrail, decodeTrail, cardUrl, cardFromText, walkedPlanFor } from './card.js';
@@ -1499,10 +1500,12 @@ function renderHome() {
    its own Delete button. Home never has one; it is not where records are kept. */
 function sessionCard(s, { del = false } = {}) {
   const d = S.dogs.find(x => x.id === s.dogId);
+  /* A run graded in a wind felt on the ground says so in its line. */
+  const felt = windWords(s, { imperial: imp(), short: true });
   return `<div class="card" data-open-session="${esc(s.id)}">
     <div class="meta"><span>${fmtWhen(s.startedAt)}</span><span>${esc(d?.name ?? '')}${d ? ' · ' : ''}${esc(targetText(s))}</span></div>
     ${s.name ? `<div class="card-name">${esc(s.name)}</div>` : ''}
-    <div class="story">${esc(storyOf(s))}</div>
+    <div class="story">${esc(storyOf(s))}${felt ? ` · ${esc(felt)}` : ''}</div>
     ${del ? `<button type="button" class="btn ghost small del-link" data-del-session="${esc(s.id)}">Delete</button>` : ''}
   </div>`;
 }
@@ -2007,7 +2010,11 @@ const wxRound = (v, per) => (Number.isFinite(v) ? Math.round(v * per) : '');
 const wxKey = (wx) => (wx?.wind_speed == null ? ''
   : `${wxRound(wx.wind_speed, 10)},${wxRound(wx.wind_direction, 1)},${wxRound(wx.temp, 10)},${wxRound(wx.soil_temp, 10)},`
     + (Number.isFinite(wx.t) ? Math.floor(wx.t / 60000) : wx.time));
-function showWeather(wx) {
+/* `felt` is the wind the handler felt on the ground, in the panel's own
+   short words (field.js feltPanel), for a screen about a run that has one:
+   the direction and the speed above it are already the felt ones (windAt),
+   and the note says so in place of the forecast's time. */
+function showWeather(wx, felt = null) {
   wxShown.gen++;
   wxShown.key = '';
   const p = $('wxPanel');
@@ -2017,6 +2024,7 @@ function showWeather(wx) {
   p.hidden = false;
   $('wxRose').hidden = false;
   if (!wxWatch && 'ResizeObserver' in window) { wxWatch = new ResizeObserver(wxGap); wxWatch.observe(p); }
+  paintWxFelt();
   if (!wx || wx.wind_speed == null) {
     /* The panel stays: the compass works without a forecast, and an empty
        corner says "broken" where "nothing yet" is the truth. */
@@ -2032,15 +2040,16 @@ function showWeather(wx) {
      FROM, which is how every forecast reports it. Both are on screen because
      either alone gets misread — an arrow with a bare "SSW" beside it is a
      handler guessing which of the two they are looking at. */
-  $('wxDir').textContent = `from ${cardinal(wx.wind_direction)}`;
+  $('wxDir').textContent = felt?.dir ?? `from ${cardinal(wx.wind_direction)}`;
   $('wxTemp').textContent = fmtTemp(wx.temp, fahr());
-  // The arrow points where the air is GOING, in the real world once the compass is live.
-  compass.wind = Number.isFinite(wx.wind_direction) ? (wx.wind_direction + 180) % 360 : null;
+  /* The arrow points where the air is GOING, in the real world once the
+     compass is live. Still air goes nowhere, so a calm has no arrow. */
+  compass.wind = Number.isFinite(wx.wind_direction) && felt?.mode !== 'calm' ? (wx.wind_direction + 180) % 360 : null;
   paintRose();
   /* The moment these numbers are for. A wind read off the series for a run's
      moment keeps the laid forecast's own time beside it, which labelled the
      run's wind with the hour the trail was laid. */
-  $('wxNote').textContent = forecastNote(wx.t ?? wx.time);
+  $('wxNote').textContent = felt?.note ?? forecastNote(wx.t ?? wx.time);
   wxShown.key = wxKey(wx);
   wxGap();
   /* The wind moves on every map screen once it is known, not only when a
@@ -2050,8 +2059,8 @@ function showWeather(wx) {
 /** The panel, the arrow and the streaks on a wind that moves with a clock,
     the replay's. Drawn again only when the panel would read differently: the
     clock moves every frame, and the panel measures itself each time. */
-function followWeather(wx) {
-  if (wx && wxKey(wx) !== wxShown.key) showWeather(wx);
+function followWeather(wx, felt = null) {
+  if (wx && wxKey(wx) !== wxShown.key) showWeather(wx, felt);
 }
 const hideWeather = () => { const p = $('wxPanel'); if (p) p.hidden = true; $('wxRose').hidden = true; wxGap(); };
 
@@ -2199,7 +2208,7 @@ async function askWeatherHere(hint) {
 function weatherPanelFor(session, at = null) {
   const d = session?.data;
   const own = Number.isFinite(at) ? windAt(session, at).wx : laidWind(session);
-  if (own) return showWeather(own);
+  if (own) return showWeather(own, feltPanel(session));
   const t = d?.trail?.[0] ?? d?.plan?.[0] ?? d?.track?.[0];
   const asked = weatherHere(t ? { lat: t.lat, lon: t.lon } : null);   // marks itself as asking at once
   showWeather(wxNow.wx);                     // the panel now; the numbers follow
@@ -2773,6 +2782,9 @@ function paintCallBlock(s) {
 let dbFor = null;      // the session being judged
 let dbDraft = null;
 let dbSeen = null;      // what they saw: kept apart from what they judged
+/* The wind they felt on the ground, as the debrief has it so far: a windFelt,
+   or null. Put on the run at Save, which grades it again when it changed. */
+let dbWind = null;
 
 function openDebrief(s) {
   if (!s) return;
@@ -2782,6 +2794,8 @@ function openDebrief(s) {
   const last = stickyDebrief(db.sessions(), s);
   dbDraft = s.data.debrief ? { ...s.data.debrief } : blankDebrief(last);
   dbSeen = s.data.seen ? { ...s.data.seen } : blankSeen();
+  /* Whatever was set before or during the run is where it starts. */
+  dbWind = cleanWindFelt(s.data.windFelt);
   const d = S.dogs.find(x => x.id === s.dogId);
   $('dbWho').textContent = `${d?.name ?? 'This run'} · ${fmtWhen(s.startedAt)}`;
   $('dbNote').value = dbDraft.note || '';
@@ -2805,7 +2819,15 @@ function paintDebrief() {
       <span class="label">${esc(f.label)}</span>
       <div class="db-opts">${f.options.map(o =>
         `<button type="button" class="db-opt${dbSeen?.[f.id] === o.v ? ' on' : ''}" data-seen="${f.id}" data-v="${o.v}" aria-pressed="${dbSeen?.[f.id] === o.v}">${esc(o.label)}</button>`).join('')}</div>
-    </div>`).join('');
+    </div>`).join('')
+    /* The same picker as the run screen's. Changing it here grades the run
+       again at Save, in the wind that was really blowing. */
+    + (feltChangeable(dbFor) ? `
+    <div class="db-field felt-field">
+      <span class="label">Wind on the ground</span>
+      <p class="why">Change it and the run is graded again in the wind you felt.</p>
+      ${feltPickerHtml(dbFor, dbWind)}
+    </div>` : '');
   $('dbNoteTags').innerHTML = NOTE_TAGS.map(t =>
     `<button type="button" class="chip${d.noteTag === t.v ? ' selected' : ''}" data-notetag="${t.v}" aria-pressed="${d.noteTag === t.v}">${esc(t.label)}</button>`).join('');
   $('dbSave').textContent = debriefDone(d) ? 'Save' : 'Two taps to go';
@@ -2836,10 +2858,23 @@ function saveDebrief() {
   const s2 = saved ?? db.sessions().find(x => x.id === s.id) ?? s;
   if (run.session?.id === s.id) run.session = s2;
   if (pendingSession?.id === s.id) pendingSession = s2;
-  dbFor = null; dbDraft = null;
-  toast('Saved with the run');
+  const wind = feltChangeable(s2) && !sameFelt(dbWind, s2.data.windFelt) ? dbWind : undefined;
+  dbFor = null; dbDraft = null; dbWind = null;
+  toast(wind === undefined ? 'Saved with the run' : 'Saved. Grading it again in the wind you felt…');
   renderResult(s2);
   leaveForm('scrResult');
+  if (wind !== undefined) regradeShown(s2, wind);
+}
+
+/** A kept run graded again in a wind felt on the ground (setWindFelt), and
+    its card drawn again when it is the one on screen. */
+async function regradeShown(s, wind) {
+  const now = await setWindFelt(s, wind).catch(() => null);
+  if (!now) return toast('Couldn’t grade it again in that wind');
+  if (pendingSession?.id === now.id) pendingSession = now;
+  if (currentScreen === 'scrResult' && (run.session ?? pendingSession)?.id === now.id) renderResult(now);
+  const felt = windWords(now, { imperial: imp(), short: true });
+  toast(felt ? `Graded again. ${felt}` : 'Graded again in the forecast wind');
 }
 
 /** The Judged block on the result card. Kept apart from the measured
@@ -2940,7 +2975,7 @@ function paintReplay() {
   if (w && plume.sim) { plume.wx = w; plume.st = stability(w.soil_temp, w.temp); }
   /* The panel, the arrow and the streaks in the same air, or they sat on
      the wind the trail was laid in while the scent swung round under them. */
-  followWeather(w);
+  followWeather(w, feltPanel(s));
   if (plume.sim) { plume.clock = at; plumeFrame(); }
   if (w) {
     const field = scentField(trailOf(s), w, at);
@@ -2955,8 +2990,11 @@ function paintReplay() {
   $('repHudText').textContent = fmtDur(at - replay.from);
   const laid = targetById(s.targetId).kind === 'hide' ? 'Hides' : 'Trail';
   /* A drawn line's clock is made up, so the replay does not age it either. */
+  /* The wind the scent is drawn in, when it was felt rather than forecast. */
+  const felt = windWords(s, { imperial: imp(), short: true });
   $('repCaption').textContent = (unwalkedPlan(s.data) ? `${laid} age ${ageUnknown(s.data)}` : `${laid} ${ageMin} min old here`)
     + (off == null ? '' : ` · dog ${fmtM(Math.abs(off))} ${off >= 0 ? 'right' : 'left'} of the line`)
+    + (felt ? ` · ${felt}` : '')
     + (plume.bandWalls ? '.' + bandWallNote() : '');
   const f = replay.to > replay.from ? (at - replay.from) / (replay.to - replay.from) : 1;
   const sc = $('repScrub');
@@ -4235,6 +4273,102 @@ async function regradeInWind(id, wf) {
   return now;
 }
 
+/* ── The wind on the ground: the picker ───────────────────────────────
+   One picker in two places: a sheet over the run screen, opened by tapping
+   the air panel, and the "Wind on the ground" row of the debrief. Four
+   quick answers, then the compass for "it comes from there", with the
+   forecast's own point marked, so the handler can see what they are putting
+   right. What it lights comes from field.js feltPicked, and what a tap
+   means from feltSame, so the two places cannot read one choice two ways. */
+
+/** Whether a wind felt on the ground can be put on a kept run: one this
+    phone graded. A run kept from someone else's link stays as they sent it. */
+const feltChangeable = (s) => !!s && !s.data?.imported && !!s.data?.result && s.data?.track?.length > 1;
+
+/* The compass as a rose, row by row: north at the top as on the dial, and
+   nothing to press in the middle. */
+const FELT_ROSE = [315, 0, 45, 270, null, 90, 225, 180, 135];
+
+/** The picker for a session, with `felt` (a windFelt, or null) shown as
+    chosen. Only the app's own words go into it. */
+function feltPickerHtml(s, felt) {
+  const fc = forecastAt(s, feltMoment(s)).wx?.wind_direction;
+  const has = Number.isFinite(fc);
+  const fcPt = has ? nearestPoint(fc) : null;
+  const opp = has ? FELT_POINTS.find(p => p.deg === nearestPoint(fc + 180)) : null;
+  const on = feltPicked(felt);
+  const said = has ? forecastSaid(s, { imperial: imp() }) : null;
+  /* With no forecast direction there is nothing to agree with, turn round or
+     turn to a point: a swirl or a calm can still be said. */
+  const quick = [['forecast', 'As forecast', !has], ['opposite', 'Opposite', !has], ['swirl', 'Swirling', false], ['calm', 'Calm', false]];
+  return `<p class="felt-said">${said
+      ? `Forecast said: ${esc(said)} <span class="felt-dot" aria-hidden="true"></span>`
+      : 'No forecast wind here yet, so there is no direction to turn. Swirling or calm can still be set.'}</p>
+    <div class="db-opts felt-quick" role="group" aria-label="Wind on the ground">${quick.map(([v, label, off]) =>
+      `<button type="button" class="db-opt${on.quick === v ? ' on' : ''}" data-felt="${v}" aria-pressed="${on.quick === v}"${v === 'opposite' && opp ? ` aria-label="Opposite, from ${opp.name}"` : ''}${off ? ' disabled' : ''}>${label}</button>`).join('')}</div>
+    <p class="felt-ask">Or tap where it comes <b>from</b>:</p>
+    <div class="felt-rose" role="group" aria-label="Where the wind comes from">${FELT_ROSE.map(deg => {
+      const p = FELT_POINTS.find(x => x.deg === deg);
+      if (!p) return '<span class="felt-hub" aria-hidden="true"></span>';
+      return `<button type="button" class="db-opt${on.from === p.deg ? ' on' : ''}${p.deg === fcPt ? ' fc' : ''}" data-felt-from="${p.deg}" aria-pressed="${on.from === p.deg}" aria-label="From ${p.name}${p.deg === fcPt ? ', where the forecast has it' : ''}"${has ? '' : ' disabled'}>${p.abbr}</button>`;
+    }).join('')}</div>`;
+}
+
+/** What a picker button asks for: a quick answer, or the bearing it comes from. */
+const feltChoiceOf = (b) => (b.dataset.feltFrom != null ? Number(b.dataset.feltFrom) : b.dataset.felt);
+
+/* On the run screen. The sheet is opened from the air panel and never
+   touches the recording: it sits over the controls, as the call does, and
+   Done or a choice puts them back. */
+function openFeltSheet() {
+  const s = run.session;
+  if (currentScreen !== 'scrRun' || !s) return;
+  /* A panel with no forecast on it says "tap to retry", and this tap is it. */
+  if (!wxShown.key) airPanel('scrRun');
+  paintFeltSheet();
+  $('feltSheet').hidden = false;
+  $('feltTitle').focus({ preventScroll: true });
+}
+function paintFeltSheet() {
+  const s = run.session;
+  if (s) $('feltRun').innerHTML = feltPickerHtml(s, s.data?.windFelt);
+}
+/** Put away, and focus back on the panel that opened it when it was open. */
+function closeFeltSheet() {
+  const was = !$('feltSheet').hidden;
+  $('feltSheet').hidden = true;
+  if (was && !$('wxFelt').hidden) $('wxFelt').focus({ preventScroll: true });
+}
+/** A choice on the run screen: the plume, the panel and the coach move to it
+    at once (setWindFelt), and the sheet goes so the ground can be seen. A
+    second tap on what is chosen goes back to the forecast. */
+async function pickFeltOnRun(b) {
+  const s = run.session;
+  if (!s || b.disabled) return;
+  const choice = feltChoiceOf(b);
+  const back = feltSame(s.data?.windFelt, choice);
+  const felt = back ? null : windFeltFor(s, choice);
+  if (!back && !felt) return toast('No forecast wind yet to turn');
+  const now = await setWindFelt(s, felt);
+  if (!now) return toast('The run is being graded. Say how the wind felt in the debrief.');
+  navigator.vibrate?.(18);
+  closeFeltSheet();
+  toast(windWords(now, { imperial: imp(), short: true }) ?? 'Back to the forecast wind');
+}
+
+/** The air panel is the way in on the run screen, and only something to
+    read everywhere else. Its name says the wind as it stands. */
+function paintWxFelt() {
+  const s = currentScreen === 'scrRun' ? run.session : null;
+  const b = $('wxFelt');
+  b.hidden = !s;
+  $('wxFeltHint').hidden = !s || !!s.data?.windFelt;
+  if (!s) return;
+  const u = { imperial: imp() };
+  const said = forecastSaid(s, u);
+  b.setAttribute('aria-label', `${windWords(s, u) ?? (said ? `Forecast wind ${said}` : 'Wind not known yet')}. Set the wind you feel on the ground`);
+}
+
 /* ── Pick what to run ─────────────────────────────────────────────── */
 function openPick() {
   paintPick();
@@ -4309,6 +4443,7 @@ async function startRun(s) {
      of the same trail, which is why this is read back off the session. */
   run.revealedAt = s.data.revealedAt || 0;
   closeCall();
+  closeFeltSheet();
   run.startedAt = Date.now();
   run.airAt = run.startedAt;
   rec.kind = 'run';
@@ -4439,6 +4574,7 @@ async function stopRun() {
 
 async function finishRun() {
   closeCall();
+  closeFeltSheet();
   await stopWatch();
   const coachRecord = coachSummary();
   coachStop();
@@ -4751,7 +4887,15 @@ function renderResult(s) {
   // What the model thinks moved the scent: only worth a word when it was not the wind.
   const mover = r.regimeKey === 'drain' ? ' Cold air draining downhill, not the wind, is what the model thinks moved it.' : '';
   $('resModel').textContent = (modelled + mover).trim();
-  $('resModelLabel').hidden = !$('resModel').textContent && !r.stabilityPlain;
+  /* Whose wind all of that is: the one felt on the ground, when the handler
+     said, beside what the forecast had. Otherwise where to say it, on a run
+     this phone graded. */
+  const felt = windWords(s, { imperial: imp() });
+  const wind = felt ? `${felt}.` : feltChangeable(s) ? 'Felt a different wind on the ground? Say so in the debrief and the run is graded again in it.' : '';
+  $('resWind').textContent = wind;
+  $('resWind').hidden = !wind;
+  $('resWind').classList.toggle('muted', !felt);
+  $('resModelLabel').hidden = !$('resModel').textContent && !r.stabilityPlain && !felt;
   $('resStability').textContent = r.stabilityPlain ?? '';
   $('resCoach').textContent = coachWords(s.data.coach, s.data);
 
@@ -4902,6 +5046,8 @@ function runAirChanged(live) {
      own, because with the plume switched off in Settings nothing else would
      carry the new wind to it. */
   if (currentScreen === 'scrRun') weatherPanelFor(live, run.airAt || run.startedAt);
+  /* An open picker shows the forecast it is correcting, which may just have arrived. */
+  if (!$('feltSheet').hidden) paintFeltSheet();
   /* A coach that set off with no weather had no scent to reason about.
      It has now, and in the wind the dog set off in. */
   if (coach.trail) {
@@ -6794,6 +6940,14 @@ function wire() {
   $('btnRunStop').addEventListener('click', stopRun);
   $('btnCoach').addEventListener('click', openCoachSheet);
   $('btnCoachDone').addEventListener('click', closeCoachSheet);
+  /* The wind on the ground, from the air panel on the run screen. */
+  $('wxFelt').addEventListener('click', openFeltSheet);
+  $('btnFeltDone').addEventListener('click', closeFeltSheet);
+  $('feltSheet').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-felt], [data-felt-from]');
+    if (b) pickFeltOnRun(b);
+  });
+  $('feltSheet').addEventListener('keydown', (e) => { if (e.key === 'Escape') closeFeltSheet(); });
   $('saveRetry').addEventListener('click', retrySave);
   $('wxRose').addEventListener('click', () => headingStart({ gesture: true, loud: true }));
   /* An iPhone browser only hands out its compass after being asked inside a
@@ -6970,7 +7124,7 @@ function wire() {
   $('btnDebrief').addEventListener('click', () => openDebrief(run.session ?? pendingSession));
   $('repDebrief').addEventListener('click', () => { const s = replay.s; closeReplay(); openDebrief(s); });
   $('dbSave').addEventListener('click', saveDebrief);
-  $('dbCancel').addEventListener('click', () => { dbFor = null; dbDraft = null; leaveForm('scrResult'); });
+  $('dbCancel').addEventListener('click', () => { dbFor = null; dbDraft = null; dbWind = null; leaveForm('scrResult'); });
   $('scrDebrief').addEventListener('click', (e) => {
     if (!dbDraft) return;      // a closed debrief still on screen: nothing to write into
     const pick = e.target.closest('[data-pick]');
@@ -6978,6 +7132,13 @@ function wire() {
       dbDraft[pick.dataset.pick] = pick.dataset.v;
       $('dbFields').querySelector(`[data-field="${pick.dataset.pick}"]`)?.classList.remove('todo');
       return repaintFrom(pick, paintDebrief);
+    }
+    const felt = e.target.closest('[data-felt], [data-felt-from]');
+    if (felt && dbFor && !felt.disabled) {
+      /* A second tap takes it back, as on the rows above it. */
+      const choice = feltChoiceOf(felt);
+      dbWind = feltSame(dbWind, choice) ? null : (windFeltFor(dbFor, choice) ?? dbWind);
+      return repaintFrom(felt, paintDebrief);
     }
     const seenBtn = e.target.closest('[data-seen]');
     if (seenBtn) {

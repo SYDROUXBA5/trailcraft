@@ -53,6 +53,11 @@
   <div class="wx-row wx-main"><b id="wxSpeed">—</b></div>
   <div class="wx-row wx-sub"><i id="wxDir"></i><b id="wxTemp">—</b></div>
   <div class="wx-row wx-note"><i id="wxNote">10 m forecast</i></div>
+  <!-- On the run screen the whole panel is one button: the wind felt on the
+       ground, when the forecast has it wrong. The hint says so until a
+       wind has been set; the button's own name says it to a screen reader. -->
+  <div class="wx-row wx-hint" id="wxFeltHint" aria-hidden="true" hidden><i>Feels different? Tap</i></div>
+  <button type="button" class="wx-hit" id="wxFelt" hidden></button>
 </div>
 
 <!-- The compass, top right of every map screen. -->
@@ -455,6 +460,15 @@
     <div class="home-head"><span class="label" style="margin-top:0">Coach</span><button class="btn ghost small" id="btnCoachDone">Done</button></div>
     <div id="coachSheetBody"></div>
   </div>
+  <!-- ── The wind on the ground: opened by tapping the air panel ──
+       Before the dog sets off or at any moment of the run. It sits over the
+       run controls as the call does, recording carries on under it, and a
+       choice redraws the scent and the coach at once. Big targets: it is
+       answered with a line in the other hand, often in gloves. -->
+  <div class="felt-sheet" id="feltSheet" role="dialog" aria-labelledby="feltTitle" hidden>
+    <div class="home-head"><span class="label" id="feltTitle" tabindex="-1" style="margin-top:0">Wind on the ground</span><button class="btn ghost small" id="btnFeltDone">Done</button></div>
+    <div id="feltRun"></div>
+  </div>
   <!-- ── The call: asked on the Indication, before anything is revealed ──
        The mark is already stamped by the time this appears, so a slow answer
        never moves it. Big targets, because this is answered one-handed with a
@@ -487,6 +501,7 @@
     <p class="body small muted" id="dbByline" hidden></p>
     <button class="btn card-btn" id="btnDebrief">Write the debrief</button>
     <span class="label" id="resModelLabel">Modelled</span>
+    <p class="body small" id="resWind" hidden></p>
     <p class="body" id="resModel"></p>
     <p class="body small muted" id="resStability"></p>
     <p class="body small muted">The wind side and the scent band are estimates from a forecast, not measurements. They suggest an explanation; they do not judge the dog.</p>

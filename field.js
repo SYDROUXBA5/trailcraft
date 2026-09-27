@@ -329,9 +329,7 @@ export function windWords(src, u = {}) {
   const f = cleanWindFelt(d.windFelt);
   if (!f) return null;
   const imp = !!u.imperial, short = !!u.short;
-  /* The forecast as it was when the handler spoke, or at the run's start. */
-  const fc = forecastAt({ data: d }, Number.isFinite(d.trackStarted) ? d.trackStarted : f.at).wx;
-  const refDir = Number.isFinite(f.ref) ? f.ref : fc?.wind_direction;
+  const { fc, refDir } = feltRef(d, f);
   const ref = Number.isFinite(refDir) ? cardinal(refDir) : null;
   if (f.mode === 'from') {
     return short ? `From ${cardinal(f.from)}, felt${ref ? ` (forecast ${ref})` : ''}`
@@ -345,6 +343,72 @@ export function windWords(src, u = {}) {
   if (short) return `${word}, felt${ref ? ` (forecast ${ref})` : ''}`;
   const said = saidOf(refDir, fc?.wind_speed, imp);
   return `${f.mode === 'swirl' ? 'Wind swirling' : 'Calm'} on the ground${said ? ` (forecast: ${said})` : ''}`;
+}
+
+/* The forecast a felt wind is set against: as it was when the handler
+   spoke, or at the run's start, and its direction, which is the one kept
+   with the felt wind when there is one. */
+function feltRef(d, f) {
+  const fc = forecastAt({ data: d }, Number.isFinite(d.trackStarted) ? d.trackStarted : f.at).wx;
+  return { fc, refDir: Number.isFinite(f.ref) ? f.ref : fc?.wind_direction };
+}
+
+/** The air panel's words for a felt wind, or null when the handler set
+    nothing. The panel is the narrowest place the wind is shown, and the
+    status pill sits beside it, so it says only what its other lines do not:
+    `dir` stands in for "from N" where a direction would mislead ('swirling',
+    'calm'; null keeps the turned "from S"), and `note` takes the place of
+    the forecast's time ("felt · forecast N"). */
+export function feltPanel(src) {
+  const d = feltSource(src);
+  const f = cleanWindFelt(d.windFelt);
+  if (!f) return null;
+  const { refDir } = feltRef(d, f);
+  const said = Number.isFinite(refDir) ? ` · forecast ${cardinal(refDir)}` : '';
+  if (f.mode === 'forecast') return { mode: f.mode, dir: null, note: 'felt as forecast' };
+  return { mode: f.mode, dir: f.mode === 'swirl' ? 'swirling' : f.mode === 'calm' ? 'calm' : null, note: `felt${said}` };
+}
+
+/* ── The picker ───────────────────────────────────────────────────────
+   One picker, on the run screen and in the debrief: four quick answers,
+   then the eight points of the compass for "it comes from there". These say
+   what it shows as chosen and what a tap on it means, so both places read
+   a choice the same way. */
+
+/** The eight points the picker offers, clockwise from north: the letters on
+    the button, and the words a screen reader says for them. */
+export const FELT_POINTS = [
+  [0, 'N', 'north'], [45, 'NE', 'north-east'], [90, 'E', 'east'], [135, 'SE', 'south-east'],
+  [180, 'S', 'south'], [225, 'SW', 'south-west'], [270, 'W', 'west'], [315, 'NW', 'north-west'],
+].map(([deg, abbr, name]) => ({ deg, abbr, name }));
+
+/** What a picker shows as chosen for a windFelt: the quick answer
+    ('forecast', 'opposite', 'swirl', 'calm' or null) and the point of the
+    compass (a bearing, or null). An opposite is kept as the point it names,
+    so it is read back as the one across from the forecast's own, and that
+    point is lit on the compass beside it: both are true of it. */
+export function feltPicked(felt) {
+  const f = cleanWindFelt(felt);
+  if (!f) return { quick: null, from: null };
+  if (f.mode !== 'from') return { quick: f.mode, from: null };
+  return { quick: f.from === nearestPoint(f.ref + 180) ? 'opposite' : null, from: f.from };
+}
+
+/** Whether a tap on `choice` (a quick answer, or the bearing it comes from)
+    is a tap on what is already chosen, which takes it back, as a second tap
+    does on every row of the debrief. */
+export function feltSame(felt, choice) {
+  const p = feltPicked(felt);
+  if (Number.isFinite(choice)) return p.from === nearestPoint(choice);
+  return p.quick != null && p.quick === choice;
+}
+
+/** Two felt winds that say the same, whenever each was said: a debrief
+    only grades a run again when its answer has changed. */
+export function sameFelt(a, b) {
+  const x = cleanWindFelt(a), y = cleanWindFelt(b);
+  if (!x || !y) return !x && !y;
+  return x.mode === y.mode && (x.mode !== 'from' || x.from === y.from);
 }
 
 /* ── Stability ────────────────────────────────────────────────────── */
