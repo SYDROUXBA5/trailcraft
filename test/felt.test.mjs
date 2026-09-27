@@ -589,7 +589,7 @@ function picker(extra = {}) {
     navigator: {}, imp: () => false,
     setWindFelt: async (s, f) => { asked.push(['setWindFelt', f]); s.data.windFelt = f; return s; },
     forecastAt, feltMoment, nearestPoint, windFeltFor, forecastSaid, windWords, FELT_POINTS, feltPicked, feltSame, feltOf,
-    ownRun, Number, Promise,
+    ownRun, Number, Promise, document: { activeElement: null },
   };
   Object.assign(sb, extra);
   vm.createContext(sb);
@@ -999,6 +999,54 @@ await t('a wind put right in the debrief is kept, answered or not, and by Not no
   Object.assign(sb, { dbFor: db.sessions()[0], dbDraft: blankDebrief(), dbWind: db.sessions()[0].data.windFelt });
   sb.notNow();
   assert.equal(graded.length, 2, 'and grades nothing when nothing changed');
+});
+
+await t('the shared page and the PDF name the drift side for the wind the run was graded in', () => {
+  const rowsOf = (windFelt) => detailSections({ kind: 'trail', target: 'Person', wx: northerly(), runAt: RUN, track: runTrack,
+    result: { kind: 'trail', medAbs: 5, predSide: -1, mainSide: 'right' }, windFelt }).find(x => x.title === 'Run').rows;
+  const keys = (rows) => rows.map(([k]) => k).filter(k => /suggests drift|^Track vs/.test(k));
+  assert.deepEqual(keys(rowsOf(makeWindFelt('opposite', 0, RUN))), ['Wind felt on the ground suggests drift', 'Track vs felt wind'],
+    'not credited to a northerly forecast, which put it on the other side');
+  assert.deepEqual(keys(rowsOf(felt('calm'))), ['Slope suggests drift', 'Track vs slope']);
+  assert.deepEqual(keys(rowsOf(felt('forecast'))), ['Forecast wind suggests drift', 'Track vs forecast']);
+  assert.deepEqual(keys(rowsOf(null)), ['Forecast wind suggests drift', 'Track vs forecast']);
+});
+
+await t('Reveal draws the air panel again in the words of the wind felt on the ground', () => {
+  const panels = [];
+  const s = trailRun({ track: undefined, trackStarted: undefined, windFelt: felt('calm') });
+  const sb = {
+    run: { session: s, revealed: false, revealedAt: 0, airAt: 0 }, targetById, trailOf: (x) => x.data.trail, windAt,
+    setTrail() {}, plumeStart() {}, plumeStop() {}, setSrc() {}, lineOf: () => ({ features: [] }), pointsOf: () => ({}), EMPTY: {},
+    weatherPanelFor: (x, at) => panels.push([x, at]), $: () => ({ textContent: '' }), Date,
+  };
+  vm.createContext(sb);
+  vm.runInContext(decl('function toggleReveal('), sb);
+  sb.toggleReveal();
+  assert.deepEqual(panels, [[s, sb.run.airAt]], 'the panel, at the moment the scent is drawn in');
+});
+
+await t('an open picker drawn again keeps focus on the button a screen reader was on', () => {
+  const { sb } = picker();
+  const s = { id: 'r', data: { weather: northerly(), trackStarted: RUN } };
+  sb.run.session = s;
+  sb.openFeltSheet();
+  const drawn = { disabled: false, focused: 0, focus() { this.focused++; } };
+  const asked = [];
+  sb.$('feltRun').querySelector = (q) => { asked.push(q); return drawn; };
+  const on = (data) => ({ dataset: data, isConnected: false, closest: (q) => (q === '#feltRun' ? {} : null) });
+  sb.document.activeElement = on({ feltFrom: '180' });
+  sb.paintFeltSheet();
+  assert.deepEqual(asked, ['button[data-felt-from="180"]']);
+  assert.equal(drawn.focused, 1, 'on the same point, drawn again');
+  sb.document.activeElement = on({ felt: 'opposite' });
+  drawn.disabled = true;
+  const title = sb.$('feltTitle').focused;
+  sb.paintFeltSheet();
+  assert.equal(sb.$('feltTitle').focused, title + 1, 'on the title when that button is greyed now');
+  sb.document.activeElement = { dataset: {}, isConnected: true, closest: () => null };
+  sb.paintFeltSheet();
+  assert.equal(drawn.focused, 1, 'focus anywhere else is left alone');
 });
 
 console.log(`\n${pass} passed total\n`);
