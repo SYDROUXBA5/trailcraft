@@ -395,8 +395,9 @@ export function createStore(backend) {
          months of real trails to earn, so it is announced like any row. */
       notify('calibration', { id: dogId, rows: rows.slice(-50), updatedAt: Date.now() });
     },
-    /** Set aside what one run banked (rebankRows with no row): it was graded
-        again and banks nothing now. Nothing is written when it banked nothing. */
+    /** Set aside what one run banked (rebankRows with no row), for good: the
+        run is being deleted and no longer banks (settleDrift). Nothing is
+        written when it banked nothing. */
     setAsideDrift(dogId, t) {
       if (!dogId) return;
       const key = `cal:${dogId}`;

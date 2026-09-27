@@ -4759,7 +4759,14 @@ async function computeResult(s, track, wps, startedAt, { bank = true, rebank = f
       t: startedAt, predSide, mean, wind: wx?.wind_speed ?? null,
       stability: st?.label ?? null, k,
     }, { replace: rebank });
-  } else if (rebank) db.setAsideDrift(dogRow?.id, startedAt);
+  }
+  /* A run graded again that banks nothing now leaves the row it banked as it
+     was. driftRows reads a row only while its run would still bank (not in
+     a swirl or a calm, not from a track the GPS could not place), and k owes
+     nothing to the dials or to the wind's direction, so a dial moved takes
+     nothing back. A row marked set aside stays so on every phone it reaches
+     (the calibration merge keeps `skip`), and a run felt in a swirl and
+     then in a direction could never count again. */
 
   const sideWord = mean == null ? '' : mean > 0 ? 'right' : 'left';
 
