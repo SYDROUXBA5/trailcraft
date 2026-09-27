@@ -24,7 +24,7 @@ import {
 import { packDraft, unpackDraft } from '../public/draft.js';
 import { trailModel, encodeShared, decodeShared, sessionFromModel, keptSession, resultSentence, liveMeta, detailSections } from '../public/share.js';
 import { mergeOne, RUN_FIELDS } from '../public/sync-core.js';
-import { unwalkedPlan } from '../public/debrief.js';
+import { unwalkedPlan, ownRun, DEBRIEF, blankDebrief, debriefDone } from '../public/debrief.js';
 import { predictedOffsets } from '../public/sim.js';
 import { changed, applyPreset, resetParams } from '../public/params.js';
 import {
@@ -318,7 +318,7 @@ function app() {
     db, S: { dogs: [{ id: 'bo', name: 'Bo', lineM: 0 }] }, BUILD: 'test',
     rec: { kind: null, on: false, started: RUN }, run: { session: null, stopping: false, revealed: false, startedAt: RUN, airAt: 0 },
     currentScreen: 'scrResult', coach: { trail: null, field: [] },
-    targetById, unwalkedPlan, windAt, cleanWindFelt, windTrusted, feltOf, anchorFelt, stability, regime, FLAT, predictedOffsets, changed,
+    targetById, unwalkedPlan, ownRun, windAt, cleanWindFelt, windTrusted, feltOf, anchorFelt, stability, regime, FLAT, predictedOffsets, changed,
     lineCorrect, signedOffsets, meanSigned, medianAbs, sideShares, sideOfDrift, sideAgreement, approachToWind, bearing, dist,
     fmtDur, fmtM: (m) => fmtShort(m, false), APPROACH_V, resultSentence, teachesDrift, patchSession,
     unitsForText: () => ({ imperial: false, fahrenheit: false, coord: 'dd', when: String }),
@@ -499,7 +499,8 @@ await t('Stop saves it with the run, a recovered run takes it back, and a new ru
   const stop = js.slice(js.indexOf('async function finishRun'), js.indexOf('/* ── The result'));
   assert.match(stop, /const had = s\.data\.windFelt !== undefined;\s*const felt = had \? \{ windFelt: feltOf\(s\.data\) \} : \{\};/);
   assert.match(stop, /revealedAt: run\.revealedAt \|\| s\.data\.revealedAt \|\| null, \.\.\.felt \} \};/, 'with the walk, before the grade');
-  assert.match(stop, /const \{ runWeather, windFelt, \.\.\.result \} = await computeResult\(/);
+  assert.match(stop, /const \{ runWeather: fetched, windFelt, \.\.\.result \} = await computeResult\(/);
+  assert.match(stop, /const runWeather = fetched \?\? s\.data\.runWeather \?\? null;/, 'the run’s own forecast, fetched or taken on the run screen');
   assert.match(stop, /\.\.\.\(runWeather \? \{ runWeather \} : \{\}\), \.\.\.\(had \? \{ windFelt \} : \{\}\) \},/, 'and with the result, as the grade measured it');
   assert.match(decl('function keepDraft('), /windFelt: rec\.kind === 'run' \? run\.session\?\.data\?\.windFelt \?\? null : null,/);
   assert.match(decl('async function recoverKeep('), /if \(d\.windFelt\) s\.data\.windFelt = d\.windFelt;\s*\n\s*run\.session = s;/);
@@ -588,7 +589,7 @@ function picker(extra = {}) {
     navigator: {}, imp: () => false,
     setWindFelt: async (s, f) => { asked.push(['setWindFelt', f]); s.data.windFelt = f; return s; },
     forecastAt, feltMoment, nearestPoint, windFeltFor, forecastSaid, windWords, FELT_POINTS, feltPicked, feltSame, feltOf,
-    Number, Promise,
+    ownRun, Number, Promise,
   };
   Object.assign(sb, extra);
   vm.createContext(sb);
@@ -704,7 +705,7 @@ await t('in the debrief it is the “Wind on the ground” row, starts from the 
   const save = decl('function saveDebrief(');
   assert.match(save, /const wind = feltChangeable\(s2\) && !sameFelt\(dbWind, s2\.data\.windFelt\) \? dbWind : undefined;/);
   assert.match(save, /if \(wind !== undefined\) regradeShown\(s2, wind\);/);
-  assert.match(js, /\$\('dbCancel'\)\.addEventListener\('click', \(\) => \{ dbFor = null; dbDraft = null; dbWind = null;/);
+  assert.match(js, /\$\('dbCancel'\)\.addEventListener\('click', \(\) => \{\s*if \(dbDraft && debriefWind\(dbFor\)\) toast\([^)]*\);\s*dbFor = null; dbDraft = null; dbWind = null;/);
 
   /* The card is drawn again once the new grade is in, if it is still the one on screen. */
   const drawn = [];
@@ -940,6 +941,64 @@ await t('a run graded again with a dial moved, or felt swirling, keeps its drift
   assert.ok(db.calibration('bo').every(r => r.skip !== true));
   await sb.setWindFelt(db.sessions()[0], makeWindFelt('opposite', 0, RUN + 3800e3));
   assert.deepEqual(driftRows(db.calibration('bo'), db.sessions()).map(r => [r.t, r.predSide]), [[RUN, -1]]);
+});
+
+await t('a run made here on a trail from a Trail Card or a link can have its wind put right; one kept from a link cannot', async () => {
+  const { sb, db } = app();
+  const changeable = vm.runInContext('feltChangeable', picker().sb);
+  /* Scanned before the run, and run on this phone. */
+  const card = { ...trailRun({ imported: { from: 'Anna', at: T0 + 60e3 }, result: { kind: 'trail', predSide: 1 } }), id: 'card' };
+  db.addSession(card);
+  assert.ok(changeable(card));
+  const now = await sb.setWindFelt(card, makeWindFelt('opposite', 0, RUN + 9e5));
+  assert.equal(now?.data.windFelt.from, 180, 'kept on the run');
+  assert.equal(now.data.result.predSide, -1, 'and graded again in it');
+  /* The whole run, kept from someone else's link after it was run. */
+  const theirs = { ...trailRun({ imported: { from: 'Anna', at: RUN + 9e6 }, result: { kind: 'trail', predSide: 1 } }), id: 'theirs' };
+  db.addSession(theirs);
+  assert.ok(!changeable(theirs));
+  assert.equal(await sb.setWindFelt(theirs, felt('calm')), null);
+});
+
+await t('a wind put right in the debrief is kept, answered or not, and by Not now as well as Save', () => {
+  const db = createStore(fakeBackend());
+  db.addSession(trailRun({ result: { kind: 'trail', predSide: 1 } }));
+  const graded = [], toasts = [];
+  const todo = { classList: { add() {} }, scrollIntoView() {} };
+  const sb = {
+    db, DEBRIEF, debriefDone, sameFelt, ownRun, toast: (m) => toasts.push(m),
+    regradeShown: (s, w) => graded.push([s.id, w]),
+    $: () => ({ querySelector: () => todo }), leaveForm: (id) => { sb.left = id; },
+    dbFor: db.sessions()[0], dbDraft: blankDebrief(), dbWind: makeWindFelt('opposite', 0, RUN + 9e5),
+  };
+  vm.createContext(sb);
+  const head = "$('dbCancel').addEventListener('click', ";
+  const i = js.indexOf(head) + head.length;
+  vm.runInContext([
+    js.slice(js.indexOf('const feltChangeable = '), js.indexOf('\n', js.indexOf('const feltChangeable = '))),
+    decl('function debriefWind('),
+    decl('function saveDebrief('),
+    `var notNow = ${js.slice(i, js.indexOf('\n  });', i) + 4)};`,
+  ].join('\n'), sb);
+
+  /* Save with the two questions not answered yet. */
+  sb.saveDebrief();
+  assert.deepEqual(graded, [['run1', sb.dbWind]], 'the run is graded again in it at once');
+  assert.match(toasts.at(-1), /^Wind saved, and the run graded again in it\. .+\?$/, 'and the handler is told, and asked what is missing');
+  assert.ok(sb.dbDraft, 'the debrief stays open for its answers');
+  db.updateSession('run1', { data: { windFelt: sb.dbWind } });
+  sb.saveDebrief();
+  assert.equal(graded.length, 1, 'not graded twice in the same wind');
+
+  /* Not now, after changing it again. */
+  sb.dbWind = felt('calm', { at: RUN + 99e4 });
+  sb.notNow();
+  assert.deepEqual(graded.at(-1), ['run1', felt('calm', { at: RUN + 99e4 })], 'Not now keeps it too');
+  assert.equal(sb.left, 'scrResult');
+  assert.equal(sb.dbFor, null);
+  Object.assign(sb, { dbFor: db.sessions()[0], dbDraft: blankDebrief(), dbWind: db.sessions()[0].data.windFelt });
+  sb.notNow();
+  assert.equal(graded.length, 2, 'and grades nothing when nothing changed');
 });
 
 console.log(`\n${pass} passed total\n`);

@@ -123,7 +123,7 @@ function app() {
     S: { handler: null }, DEBRIEF: [], debriefDone: () => true, cleanSeen: () => null,
     guardSave: (s, f) => f(), saveSession: (s) => s, paintDebrief() {},
     // The wind felt on the ground: a run with none to change grades nothing again.
-    dbWind: null, feltChangeable: () => false, sameFelt: () => true, regradeShown() {},
+    dbWind: null, feltChangeable: () => false, sameFelt: () => true, regradeShown() {}, debriefWind: () => false,
   };
   vm.createContext(sb);
   const src = [

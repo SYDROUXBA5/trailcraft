@@ -17,7 +17,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
-import { windAt, laidWind, feltPanel } from '../public/field.js';
+import { windAt, laidWind, feltPanel, feltWeather, feltOf, forecastAt, seriesCovers, WIND_FELT_V } from '../public/field.js';
 import { cardinal, fmtSpeed, fmtTemp, forecastNote, fmtDur } from '../public/geo.js';
 import { unwalkedPlan } from '../public/debrief.js';
 import { trailModel, encodeShared, decodeShared, sessionFromModel } from '../public/share.js';
@@ -72,7 +72,9 @@ function panel() {
     fmtWind: (ms) => fmtSpeed(ms), cardinal, fahr: () => false, fmtTemp, forecastNote,
     compass: {}, paintRose() {}, wxGap() {}, paintWxFelt() {}, feltPanel,
     air: { wx: null }, airStart(wx) { sb.air.wx = wx; },
-    windAt, laidWind, lastFix: null, WX_WAIT: 10000,
+    windAt, laidWind, feltWeather, feltOf, forecastAt, seriesCovers, lastFix: null, WX_WAIT: 10000,
+    run: { session: null, startedAt: 0 }, rec: { on: false, kind: null },
+    runAirChanged: (s) => { sb.changed = (sb.changed ?? 0) + 1; sb.weatherPanelFor(s, sb.run.startedAt); },
     navigator: { geolocation: { getCurrentPosition: (res) => res({ coords: { latitude: 51.2, longitude: -2.6 } }) } },
     // Each ask for the air here waits until the test answers it.
     fetchWeather: () => new Promise((res) => asks.push(res)),
@@ -87,6 +89,7 @@ function panel() {
     decl('function weatherHere('),
     decl('async function askWeatherHere('),
     decl('function weatherPanelFor('),
+    decl('function adoptHere('),
   ].join('\n'), sb);
   const shown = () => ({ dir: sb.$('wxDir').textContent, note: sb.$('wxNote').textContent, air: sb.air.wx });
   const gen = () => vm.runInContext('wxShown.gen', sb);
@@ -249,6 +252,46 @@ await t('a shared run carries the run’s own weather, and the one who opens it 
   assert.equal(w.wx.wind_direction, 90);
   assert.deepEqual(windAt(theirs, RUN).wx.wind_direction, windAt(mine, RUN).wx.wind_direction,
     'their replay and show on map in the same wind as the handler’s own');
+});
+
+await t('a run with no forecast of its own takes the air here, and the panel says the wind felt on it', async () => {
+  /* A Trail Card scanned and run at once: no laid weather yet. The handler
+     has said it is calm on the ground. */
+  const START = Date.UTC(2026, 8, 26, 14, 0);
+  const calm = { v: WIND_FELT_V, mode: 'calm', at: START + 60e3 };
+  const here = (from) => ({ time: '2026-09-26T14:00', wind_speed: 6, wind_direction: 200, temp: 15,
+    series: [0, 1, 2, 3].map(i => ({ t: from + i * 15 * 60e3, wind_speed: 6, wind_direction: 200, temp: 15 })) });
+  const card = () => ({ id: 'card', targetId: 'person', startedAt: T0,
+    data: { trail: [{ lat: 51.2, lon: -2.6 }], weather: null, windFelt: calm } });
+
+  const p = panel();
+  const live = card();
+  Object.assign(p.sb, { currentScreen: 'scrRun' });
+  Object.assign(p.sb.run, { session: live, startedAt: START });
+  Object.assign(p.sb.rec, { on: true, kind: 'run' });
+  p.sb.weatherPanelFor(live, START);
+  await p.settle();
+  const wx = here(START - 15 * 60e3);
+  p.asks[0](wx);
+  await p.settle();
+  assert.equal(live.data.runWeather, wx, 'the run’s own forecast now');
+  assert.equal(p.sb.changed, 1, 'and everything on the run screen drawn again in it');
+  assert.equal(windAt(live, START).wx.wind_speed, 0, 'in the calm the handler felt');
+  assert.deepEqual([p.shown().dir, p.sb.compass.wind], ['calm', null], 'a calm says so, with no arrow');
+
+  /* Air here that does not reach the run's start is only shown, never kept,
+     and still in the words of the wind felt on the ground. */
+  const q = panel();
+  const other = card();
+  Object.assign(q.sb, { currentScreen: 'scrRun' });
+  Object.assign(q.sb.run, { session: other, startedAt: START });
+  Object.assign(q.sb.rec, { on: true, kind: 'run' });
+  q.sb.weatherPanelFor(other, START);
+  await q.settle();
+  q.asks[0](here(START + 864e5));
+  await q.settle();
+  assert.equal(other.data.runWeather, undefined);
+  assert.deepEqual([q.shown().dir, q.sb.compass.wind, q.sb.$('wxSpeed').textContent], ['calm', null, fmtSpeed(0)]);
 });
 
 console.log(`\n${pass} passed total\n`);
