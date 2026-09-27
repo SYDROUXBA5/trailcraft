@@ -4378,9 +4378,20 @@ function openFeltSheet() {
   $('feltSheet').hidden = false;
   $('feltTitle').focus({ preventScroll: true });
 }
+/* Drawn again whole, as when the forecast lands while it is open: focus on
+   one of its buttons moves to the one drawn in its place (as repaintFrom
+   does in the debrief), or to the sheet's title when that is now greyed. */
 function paintFeltSheet() {
   const s = feltSubject(run.session);
-  if (s) $('feltRun').innerHTML = feltPickerHtml(s, feltOf(s.data));
+  if (!s) return;
+  const had = document.activeElement;
+  const was = had?.closest?.('#feltRun') ? had : null;
+  $('feltRun').innerHTML = feltPickerHtml(s, feltOf(s.data));
+  if (!was || was.isConnected) return;
+  const key = was.dataset?.feltFrom != null ? `[data-felt-from="${was.dataset.feltFrom}"]`
+    : was.dataset?.felt != null ? `[data-felt="${was.dataset.felt}"]` : null;
+  const same = key ? $('feltRun').querySelector(`button${key}`) : null;
+  (same && !same.disabled ? same : $('feltTitle')).focus({ preventScroll: true });
 }
 /** Put away, and focus back on the panel that opened it when it was open. */
 function closeFeltSheet() {
@@ -4562,9 +4573,11 @@ function toggleReveal() {
     /* The plume is the trail, drawn in air. Showing it before Reveal would
        hand the handler the answer, so it waits for the same button. */
     if (run.revealed) {
-      /* In the air of the moment it is shown, and the panel with it. */
+      /* In the air of the moment it is shown, and the panel with it, in the
+         words of any wind felt on the ground, which plumeStart does not know. */
       run.airAt = Date.now();
       plumeStart(trailOf(s), windAt(s, run.airAt).wx, undefined, s.data.contamination);
+      weatherPanelFor(s, run.airAt);
     } else plumeStop();
     setSrc('contam', run.revealed
       ? { type: 'FeatureCollection',

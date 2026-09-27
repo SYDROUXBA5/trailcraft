@@ -772,8 +772,11 @@ export function detailSections(m, u = {}) {
     if (fin(a.t) && fin(b.t) && b.t > a.t) rows.push(['Duration', clock(b.t - a.t)]);
     rows.push(['Distance', fmtDist(pathLen(tr), imp)]);
     if (r?.kind === 'trail') {
-      /* Recorded first, then the forecast's suggestion — kept apart, because
-         only the first is a measurement. Older results carry only a mean. */
+      /* Recorded first, then the model's suggestion — kept apart, because
+         only the first is a measurement. Older results carry only a mean.
+         The suggestion is named for the wind the run was graded in: the
+         forecast's, the one the handler felt on the ground, or in a calm
+         the slope's alone (computeResult says the same in its sentence). */
       const typical = fin(r.medAbs) ? r.medAbs : fin(r.mean) ? Math.abs(r.mean) : null;
       if (fin(typical)) rows.push(['Typical distance from the line', typical < 0.5 ? 'on the line' : fmtShort(typical, imp, 1)]);
       if (r.shares) {
@@ -783,10 +786,13 @@ export function detailSections(m, u = {}) {
         rows.push(['Mainly', `to the ${r.side}`]);
       }
       if (r.noisy && fin(r.accMed)) rows.push(['GPS uncertainty', `±${fmtShort(r.accMed, imp)} — too large to read the side`]);
-      if (r.predSide) rows.push(['Forecast wind suggests drift', r.predSide > 0 ? 'to the right' : 'to the left']);
+      const [suggests, versus] = mFelt?.mode === 'from' ? ['Wind felt on the ground suggests drift', 'Track vs felt wind']
+        : mFelt?.mode === 'calm' ? ['Slope suggests drift', 'Track vs slope']
+          : ['Forecast wind suggests drift', 'Track vs forecast'];
+      if (r.predSide) rows.push([suggests, r.predSide > 0 ? 'to the right' : 'to the left']);
       const main = r.mainSide ?? (fin(r.mean) && Math.abs(r.mean) >= 0.5 ? r.side : null);
       if (r.predSide && main && !r.noisy) {
-        rows.push(['Track vs forecast', (r.predSide > 0 ? 'right' : 'left') === main ? 'same side' : 'other side']);
+        rows.push([versus, (r.predSide > 0 ? 'right' : 'left') === main ? 'same side' : 'other side']);
       }
       if (r.regimeWord) rows.push(['Wind to the trail', cap(String(r.regimeWord))]);
       if (r.stability) rows.push(['Air at ground level', String(r.stability)]);
