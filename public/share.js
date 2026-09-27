@@ -13,7 +13,7 @@ import { targetById, ageBand, dogAge, healApproach } from './store.js';
 import { DEBRIEF, FLAGS, NOTE_TAGS, ownRun, toldField, toldOf, trailShown, ranBlind, unwalkedPlan } from './debrief.js';
 import { CONFIDENCE, labelOf as callLabel } from './call.js';
 import { cleanSeen, seenLine } from './ground.js';
-import { rainRate, cleanWindFelt, feltWeather, windWords, windTrusted } from './field.js';
+import { rainRate, cleanWindFelt, feltOf, feltWeather, windWords, windTrusted } from './field.js';
 
 const MAGIC = 'TS1.';
 const fin = Number.isFinite;
@@ -76,8 +76,9 @@ export function trailModel(s, { dog = null, handler = null, layer = null, k = nu
     runWx: runWxOf(d),
     /* The wind the handler felt on the ground. The weather above goes as the
        forecast gave it and this goes beside it, so whoever opens the link
-       reads the run in the same corrected wind (field.js windAt). */
-    windFelt: cleanWindFelt(d.windFelt),
+       reads the run in the same corrected wind (field.js windAt). Only
+       this run's: one another run left on the trail stays behind (feltOf). */
+    windFelt: feltOf(d),
     result: d.result ?? null,
     coach: d.coach ?? null,
     /* When the trail was first put on screen. Without it every coach-off run
@@ -720,6 +721,8 @@ export function detailSections(m, u = {}) {
   const r = m.result;
   const out = [];
   const drawn = unwalkedPlan(m);
+  /* The wind felt on the ground on this run, as windWords reads it. */
+  const mFelt = feltOf({ windFelt: m.windFelt, trackStarted: m.runAt });
 
   const team = [];
   if (m.dog?.name) {
@@ -827,11 +830,11 @@ export function detailSections(m, u = {}) {
 
   /* A trail with no graded run shows its laid weather, as felt on the ground
      when the handler said how it felt. */
-  const wx = m.wx, felt = feltWeather(wx, m.windFelt);
+  const wx = m.wx, felt = feltWeather(wx, mFelt);
   const wind = r?.wind ?? (felt ? { speed: felt.wind_speed, from: felt.wind_direction } : null);
   /* A swirl has no steady direction and a calm none at all: the number keeps
      the forecast's direction to draw with, which is not one to print. */
-  const dirOk = windTrusted(m.windFelt);
+  const dirOk = windTrusted(mFelt);
   const weather = [];
   if (fin(wx?.temp)) weather.push(['Air', fmtTemp(wx.temp, fahr)]);
   if (fin(wx?.soil_temp)) weather.push(['Ground', fmtTemp(wx.soil_temp, fahr)]);

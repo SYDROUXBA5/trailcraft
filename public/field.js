@@ -154,7 +154,7 @@ export function seriesCovers(weather, when, slackMs = 20 * 60e3) {
 export function windAt(session, when) {
   const d = session?.data ?? {};
   const { wx, exact } = forecastAt(session, when);
-  return { wx: feltWeather(wx, d.windFelt), exact };
+  return { wx: feltWeather(wx, feltOf(d)), exact };
 }
 
 /** The same moment as the forecast alone had it, before anything the
@@ -174,7 +174,7 @@ export function forecastAt(session, when) {
     run's moment to show. */
 export function laidWind(session) {
   const d = session?.data ?? {};
-  return feltWeather(d.weather ?? null, d.windFelt);
+  return feltWeather(d.weather ?? null, feltOf(d));
 }
 
 /* ── The wind on the ground ───────────────────────────────────────── */
@@ -191,8 +191,9 @@ export function laidWind(session) {
            'from'      it came from `from`, a point of the compass (45° steps)
            'swirl'     no steady direction on the ground to trust
            'calm'      no wind to speak of on the ground
-     ref   the forecast's own direction at the moment it was set
+     ref   the forecast's own direction at the run's start (anchorFelt)
      at    when it was set
+     run   the start of the run it was felt on, once that run is graded
 
    'from' turns the WHOLE forecast by from − ref rather than pinning one
    direction: over an hour's run the forecast's own swing is kept, and only
@@ -220,8 +221,8 @@ export const nearestPoint = (d) => deg360(Math.round(deg360(d) / 45) * 45);
 
 /** A windFelt as the app writes it, or null. Everything that stores one or
     reads one from a link or a crash copy comes through here: the mode from
-    the four, `from` a point of the compass, `ref` a bearing, `at` a time.
-    A correction with nothing to correct (a 'from' with no forecast
+    the four, `from` a point of the compass, `ref` a bearing, `at` and `run`
+    times. A correction with nothing to correct (a 'from' with no forecast
     direction) is no correction. A ref that is not a bearing is only lost
     from a mode that does not turn anything by it. */
 export function cleanWindFelt(o) {
@@ -235,7 +236,40 @@ export function cleanWindFelt(o) {
   }
   if (ref != null) out.ref = ref;
   out.at = o.at;
+  if (Number.isFinite(o.run)) out.run = o.run;
   return out;
+}
+
+/** The felt wind of a session's run, from its data (or anything shaped like
+    it: `windFelt` and `trackStarted`), or null. One that names a run other
+    than this session's, or names one where this session has none, is not
+    this one's: a copy made for the next dog by a build that did not know the
+    field brings the first run's felt wind along with the trail, and the next
+    dog's day may have blown another way. One that names no run is read as
+    it stands: it is on a run still going, or was put there before runs were
+    named. */
+export function feltOf(d) {
+  const f = cleanWindFelt(d?.windFelt);
+  if (!f || !Number.isFinite(f.run)) return f;
+  return f.run === d.trackStarted ? f : null;
+}
+
+/** A felt wind held to the run it was felt on, for the grade to keep: the
+    same answer, with its `ref` measured again against the forecast that run
+    is read from at its start (forecastAt, `when`), and `run` set to that
+    start. A handler says what the wind on the ground was; the turn is only
+    how far that is from the forecast, and it must be measured against the
+    very record and moment windAt reads. A trail laid hours before has its
+    laid series end before the run, so on the run screen the turn is set
+    against the laid-time record, and the grade then fetches the run's own
+    forecast: turned by the old amount, that could be the opposite of what
+    the handler said. Measured again here, the wind at the run's start is
+    exactly the one they picked, whichever record it is read from. */
+export function anchorFelt(felt, session, when) {
+  const f = cleanWindFelt(felt);
+  if (!f || !Number.isFinite(when)) return f;
+  const dir = forecastAt(session, when).wx?.wind_direction;
+  return cleanWindFelt({ ...f, ...(Number.isFinite(dir) ? { ref: deg360(dir) } : {}), run: when });
 }
 
 /** A windFelt from what the handler chose: 'forecast', 'opposite', 'swirl',
@@ -290,7 +324,9 @@ export function feltWeather(wx, felt) {
     ? (e) => (e && typeof e === 'object' ? { ...e, wind_speed: CALM_MS, wind_gusts: CALM_MS } : e)
     : (e) => (e && typeof e === 'object' && Number.isFinite(e.wind_direction)
       ? { ...e, wind_direction: deg360(e.wind_direction + turn) } : e);
-  const out = one(wx);
+  /* A copy, always: `one` hands back a record it has nothing to turn, and
+     the series put on it would then be written into the stored record. */
+  const out = { ...one(wx) };
   if (Array.isArray(wx.series)) out.series = wx.series.map(one);
   return out;
 }
@@ -326,7 +362,7 @@ function saidOf(dir, speed, imp) {
     carried reaches it as text; callers still escape, as for any line. */
 export function windWords(src, u = {}) {
   const d = feltSource(src);
-  const f = cleanWindFelt(d.windFelt);
+  const f = feltOf(d);
   if (!f) return null;
   const imp = !!u.imperial, short = !!u.short;
   const { fc, refDir } = feltRef(d, f);
@@ -361,7 +397,7 @@ function feltRef(d, f) {
     the forecast's time ("felt · forecast N"). */
 export function feltPanel(src) {
   const d = feltSource(src);
-  const f = cleanWindFelt(d.windFelt);
+  const f = feltOf(d);
   if (!f) return null;
   const { refDir } = feltRef(d, f);
   const said = Number.isFinite(refDir) ? ` · forecast ${cardinal(refDir)}` : '';
@@ -404,11 +440,18 @@ export function feltSame(felt, choice) {
 }
 
 /** Two felt winds that say the same, whenever each was said: a debrief
-    only grades a run again when its answer has changed. */
+    only grades a run again when its answer has changed. A 'from' says the
+    same only when it turns the forecast by the same amount: the same point
+    measured against another forecast (a ref kept from the laid-time record,
+    say) grades the run in another wind, and picking it again is how that
+    is put right. */
 export function sameFelt(a, b) {
   const x = cleanWindFelt(a), y = cleanWindFelt(b);
   if (!x || !y) return !x && !y;
-  return x.mode === y.mode && (x.mode !== 'from' || x.from === y.from);
+  if (x.mode !== y.mode) return false;
+  if (x.mode !== 'from') return true;
+  const apart = Math.abs(deg360(x.ref - y.ref + 180) - 180);
+  return x.from === y.from && apart < 0.5;
 }
 
 /* ── Stability ────────────────────────────────────────────────────── */

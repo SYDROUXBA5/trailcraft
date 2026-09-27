@@ -551,8 +551,8 @@ t('the session list deletes from a card without opening it, only once Delete ses
 });
 
 t('every view of a run takes its wind from windAt, and the grade only banks the run\'s own wind', () => {
-  const grade = js.slice(js.indexOf('async function computeResult('), js.indexOf('async function computeResult(') + 2400);
-  assert.match(grade, /let \{ wx, exact \} = windAt\(s, startedAt\);/, 'the grade reads the same wind the coach and replay show');
+  const grade = js.slice(js.indexOf('async function computeResult('), js.indexOf('async function computeResult(') + 2800);
+  assert.match(grade, /let \{ wx, exact \} = windAt\(\{ \.\.\.s, data: \{ \.\.\.s\.data, trackStarted: startedAt, windFelt: felt \} \}, startedAt\);/, 'the grade reads the same wind the coach and replay show');
   assert.match(grade, /if \(!exact\) bank = false;/, 'and banks nothing from a wind that was not the run\'s');
   assert.match(js, /coach\.field = wx && coach\.trail \? scentField\(trailOf\(s\), wx, run\.startedAt\) : \[\];/);
   assert.match(js, /const wx = windAt\(s, run\.startedAt\)\.wx;/, 'the coach');

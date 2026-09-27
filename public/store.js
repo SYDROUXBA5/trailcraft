@@ -9,7 +9,7 @@ import { pathLen } from './geo.js';
 import { visible, tombstone, pruneTombstones, RUN_FIELDS } from './sync-core.js';
 import { makeBackup, planRestore, BACKUP_FLAGS } from './backup.js';
 import { unwalkedPlan, trailShown, ranBlind } from './debrief.js';
-import { windTrusted } from './field.js';
+import { windTrusted, feltOf } from './field.js';
 
 export const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 
@@ -615,7 +615,7 @@ export const runAgeMin = (s) => (unwalkedPlan(s?.data) ? null : s?.data?.result?
     (windFelt, field.js): the row pairs the dog's side with a wind's
     direction, and there was no direction to pair it with. */
 export function teachesDrift(data) {
-  return !!data && !unwalkedPlan(data) && ranBlind(data) && windTrusted(data.windFelt);
+  return !!data && !unwalkedPlan(data) && ranBlind(data) && windTrusted(feltOf(data));
 }
 
 /** A dog's drift rows once one run has been graded again, in a wind felt on

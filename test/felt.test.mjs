@@ -16,7 +16,7 @@ import vm from 'node:vm';
 import {
   windAt, forecastAt, laidWind, feltWeather, cleanWindFelt, makeWindFelt, windFeltFor, feltMoment,
   feltTurn, windTrusted, nearestPoint, windWords, forecastSaid, CALM_MS, WIND_FELT_V, FLAT, stability, regime,
-  feltPanel, FELT_POINTS, feltPicked, feltSame, sameFelt,
+  feltPanel, FELT_POINTS, feltPicked, feltSame, sameFelt, feltOf, anchorFelt,
 } from '../public/field.js';
 import {
   createStore, teachesDrift, driftRows, rebankRows, runAgain, patchSession, targetById, APPROACH_V,
@@ -318,7 +318,7 @@ function app() {
     db, S: { dogs: [{ id: 'bo', name: 'Bo', lineM: 0 }] }, BUILD: 'test',
     rec: { kind: null, on: false, started: RUN }, run: { session: null, stopping: false, revealed: false, startedAt: RUN, airAt: 0 },
     currentScreen: 'scrResult', coach: { trail: null, field: [] },
-    targetById, unwalkedPlan, windAt, cleanWindFelt, windTrusted, stability, regime, FLAT, predictedOffsets, changed,
+    targetById, unwalkedPlan, windAt, cleanWindFelt, windTrusted, feltOf, anchorFelt, stability, regime, FLAT, predictedOffsets, changed,
     lineCorrect, signedOffsets, meanSigned, medianAbs, sideShares, sideOfDrift, sideAgreement, approachToWind, bearing, dist,
     fmtDur, fmtM: (m) => fmtShort(m, false), APPROACH_V, resultSentence, teachesDrift, patchSession,
     unitsForText: () => ({ imperial: false, fahrenheit: false, coord: 'dd', when: String }),
@@ -497,15 +497,16 @@ await t('set during a run, it lives with the run until Stop, and nothing is grad
 
 await t('Stop saves it with the run, a recovered run takes it back, and a new run starts clean', () => {
   const stop = js.slice(js.indexOf('async function finishRun'), js.indexOf('/* ── The result'));
-  assert.match(stop, /const felt = s\.data\.windFelt !== undefined \? \{ windFelt: cleanWindFelt\(s\.data\.windFelt\) \} : \{\};/);
+  assert.match(stop, /const had = s\.data\.windFelt !== undefined;\s*const felt = had \? \{ windFelt: feltOf\(s\.data\) \} : \{\};/);
   assert.match(stop, /revealedAt: run\.revealedAt \|\| s\.data\.revealedAt \|\| null, \.\.\.felt \} \};/, 'with the walk, before the grade');
-  assert.match(stop, /\.\.\.\(runWeather \? \{ runWeather \} : \{\}\), \.\.\.felt \},/, 'and with the result');
+  assert.match(stop, /const \{ runWeather, windFelt, \.\.\.result \} = await computeResult\(/);
+  assert.match(stop, /\.\.\.\(runWeather \? \{ runWeather \} : \{\}\), \.\.\.\(had \? \{ windFelt \} : \{\}\) \},/, 'and with the result, as the grade measured it');
   assert.match(decl('function keepDraft('), /windFelt: rec\.kind === 'run' \? run\.session\?\.data\?\.windFelt \?\? null : null,/);
   assert.match(decl('async function recoverKeep('), /if \(d\.windFelt\) s\.data\.windFelt = d\.windFelt;\s*\n\s*run\.session = s;/);
   assert.match(decl('async function startRun('), /if \(!run\.copy && s\.data && !had\.data\?\.windFelt\) delete s\.data\.windFelt;/);
   /* The run's own weather, fetched when the laid series did not reach it,
      is read in the felt wind too. */
-  assert.match(js, /windAt\(\{ data: \{ runWeather, windFelt: s\.data\.windFelt \} \}, startedAt\)/);
+  assert.match(js, /felt = anchorFelt\(feltOf\(s\.data\), \{ data: \{ runWeather \} \}, startedAt\);\s*\(\{ wx, exact \} = windAt\(\{ data: \{ runWeather, trackStarted: startedAt, windFelt: felt \} \}, startedAt\)\);/);
 });
 
 await t('no screen reads a session’s wind round windAt and laidWind', () => {
@@ -586,7 +587,7 @@ function picker(extra = {}) {
     airPanel: (id) => asked.push(['airPanel', id]), toast: (m) => toasts.push(m),
     navigator: {}, imp: () => false,
     setWindFelt: async (s, f) => { asked.push(['setWindFelt', f]); s.data.windFelt = f; return s; },
-    forecastAt, feltMoment, nearestPoint, windFeltFor, forecastSaid, windWords, FELT_POINTS, feltPicked, feltSame,
+    forecastAt, feltMoment, nearestPoint, windFeltFor, forecastSaid, windWords, FELT_POINTS, feltPicked, feltSame, feltOf,
     Number, Promise,
   };
   Object.assign(sb, extra);
@@ -609,7 +610,7 @@ const buttons = (h) => [...h.matchAll(/<button ([^>]*)>([^<]*)<\/button>/g)].map
 
 await t('the picker: four answers and a rose, the forecast’s point marked, each button named and pressed', () => {
   const { sb } = picker();
-  const s = { id: 'r', data: { weather: northerly() } };
+  const s = { id: 'r', data: { weather: northerly(), trackStarted: RUN } };
   const h = sb.feltPickerHtml(s, makeWindFelt('opposite', 0, RUN));
   assert.match(h, /Forecast said: from N, 14 km\/h <span class="felt-dot" aria-hidden="true"><\/span>/);
   assert.match(h, /Or tap where it comes <b>from<\/b>:/);
@@ -698,7 +699,7 @@ await t('in the debrief it is the “Wind on the ground” row, starts from the 
   assert.match(paint, /<span class="label">Wind on the ground<\/span>/);
   assert.match(paint, /\$\{feltPickerHtml\(dbFor, dbWind\)\}/, 'the same picker as the run screen’s');
   assert.match(paint, /\+ \(feltChangeable\(dbFor\) \?/, 'not on a run kept from someone else’s link');
-  assert.match(decl('function openDebrief('), /dbWind = cleanWindFelt\(s\.data\.windFelt\);/, 'prefilled from before or during the run');
+  assert.match(decl('function openDebrief('), /dbWind = feltOf\(s\.data\);/, 'prefilled from before or during the run');
   assert.match(js, /dbWind = feltSame\(dbWind, choice\) \? null : \(windFeltFor\(dbFor, choice\) \?\? dbWind\);\s*return repaintFrom\(felt, paintDebrief\);/);
   const save = decl('function saveDebrief(');
   assert.match(save, /const wind = feltChangeable\(s2\) && !sameFelt\(dbWind, s2\.data\.windFelt\) \? dbWind : undefined;/);
@@ -760,6 +761,144 @@ await t('the picker’s targets take a gloved thumb, and it cannot push a narrow
   assert.match(rule('.felt-sheet'), /max-height: 80vh; overflow-y: auto;/, 'a short phone scrolls it');
   assert.match(rule('.wx-hit'), /position: absolute; inset: 0;/, 'the whole panel takes the tap');
   assert.match(rule('.wx-hint i'), /white-space: nowrap/);
+});
+
+/* ── One turn, one forecast: what the handler picked is what the run is read in ── */
+
+/* A forecast record around `mid`, its direction at each sample from `dir(t)`,
+   and its top-level (the moment it was fetched for) from `top`. */
+const seriesWx = (from, to, dir, top) => ({
+  ...northerly(), time: null, wind_direction: top,
+  series: Array.from({ length: Math.floor((to - from) / (15 * 60e3)) + 1 }, (_, i) => {
+    const at = from + i * 15 * 60e3;
+    return { t: at, temp: 12, soil_temp: 11, wind_speed: 4, wind_gusts: 7, wind_direction: dir(at) };
+  }),
+});
+
+await t('a trail laid hours before is graded in the wind picked on the run, not the one it was laid in turned', async () => {
+  /* Laid at 08:00 in a northerly; the laid series stops long before a run
+     twelve hours on, when the forecast has gone round to the west. On the
+     ground it came from the south. */
+  const AGED = T0 + 12 * 3600e3;
+  const westerly = seriesWx(AGED - 6 * 3600e3, AGED + 6 * 3600e3, () => 270, 270);
+  const live = trailRun({ track: undefined, trackStarted: undefined });
+  const picked = windFeltFor({ ...live, data: { ...live.data, trackStarted: AGED } }, 180, AGED + 25 * 60e3);
+  assert.equal(picked.ref, 0, 'on the run screen only the laid-time record is there to turn');
+  live.data.windFelt = picked;
+
+  const { sb } = app();
+  sb.fetchWeather = () => Promise.resolve(westerly);
+  const r = await sb.computeResult(live, runTrack, [], AGED, { bank: false });
+  assert.equal(r.windExact, true);
+  near(r.wind.from, 180, 1e-9, 'graded in the wind picked, not the westerly turned by the laid-time turn');
+  assert.deepEqual([r.windFelt.from, r.windFelt.ref, r.windFelt.run], [180, 270, AGED], 'kept measured against the run’s own forecast');
+  const kept = { data: { weather: northerly(), runWeather: westerly, trackStarted: AGED, windFelt: r.windFelt } };
+  near(windAt(kept, AGED).wx.wind_direction, 180, 1e-9, 'the replay reads the same');
+  assert.equal(windWords(kept), 'Wind from S — felt on the ground (forecast: from W)');
+
+  /* The same after the run: a debrief on a run first graded offline sets the
+     turn against the laid-time record, and the grade again fetches the run's. */
+  const { sb: sb2, db } = app();
+  sb2.fetchWeather = () => Promise.resolve(westerly);
+  const offline = trailRun({ trackStarted: AGED, result: { kind: 'trail', predSide: 1 } });
+  db.addSession(offline);
+  const said = windFeltFor(offline, 180);
+  assert.equal(said.ref, 0);
+  const now = await sb2.setWindFelt(offline, said);
+  assert.equal(now.data.result.wind.from, 180);
+  assert.equal(now.data.windFelt.ref, 270);
+  near(windAt(db.sessions()[0], AGED).wx.wind_direction, 180, 1e-9, 'kept as picked');
+});
+
+await t('on the run, a pick is set against the forecast at the run’s start, as the coach and the grade read it', async () => {
+  /* The laid series veers from north to east and ends as the run starts;
+     25 minutes in, "now" is past its end, where only the laid record is. */
+  const START = Date.now() - 25 * 60e3;
+  const veer = seriesWx(START - 6 * 3600e3, START, (at) => 90 * (at - (START - 6 * 3600e3)) / (6 * 3600e3), 0);
+  const { sb, asked } = picker();
+  const live = { id: 'r', data: { weather: veer } };
+  Object.assign(sb.run, { session: live, startedAt: START });
+  sb.openFeltSheet();
+  assert.match(sb.$('feltRun').innerHTML, /Forecast said: from E, 14 km\/h/, 'the forecast the run is read in');
+  await sb.pickFeltOnRun({ dataset: { feltFrom: '180' } });
+  const f = asked.at(-1)[1];
+  near(windAt({ data: { weather: veer, windFelt: f } }, START).wx.wind_direction, 180, 1e-9, 'from the south, as picked');
+
+  /* A trail whose laid series never reaches the run says whose forecast it is. */
+  const aged = { id: 'a', data: { weather: northerly() } };
+  Object.assign(sb.run, { session: aged, startedAt: START });
+  sb.paintFeltSheet();
+  assert.match(sb.$('feltRun').innerHTML, /Forecast when it was laid: from N, 14 km\/h/);
+});
+
+await t('after a pick on the run, the debrief’s Opposite is the one lit, named and pressed', async () => {
+  /* 30° at the start, veering to 85° by forty minutes in, when Opposite is tapped. */
+  const START = Date.now() - 40 * 60e3;
+  const moving = seriesWx(START - 3600e3, START + 2 * 3600e3,
+    (at) => 30 + 55 * Math.max(0, Math.min(1, (at - START) / (40 * 60e3))), 30);
+  const { sb, asked } = picker();
+  const live = { id: 'r', data: { weather: moving } };
+  Object.assign(sb.run, { session: live, startedAt: START });
+  await sb.pickFeltOnRun({ dataset: { felt: 'opposite' } });
+  const f = asked.at(-1)[1];
+  assert.equal(f.from, 225, 'across from the forecast at the start');
+
+  const kept = { id: 'r', data: { weather: moving, trackStarted: START, windFelt: f, track: runTrack, result: {} } };
+  const b = buttons(sb.feltPickerHtml(kept, feltOf(kept.data)));
+  assert.equal(b.find(x => x['data-felt'] === 'opposite')['aria-label'], 'Opposite, from south-west');
+  assert.deepEqual(b.filter(x => x['aria-pressed'] === 'true').map(x => x.text), ['Opposite', 'SW'], 'what is named is what is lit');
+  assert.equal(feltSame(feltOf(kept.data), 'opposite'), true, 'and a tap on it takes it back, as it says');
+});
+
+await t('a pick of the same point against another forecast grades the run again', () => {
+  const stale = felt('from', { from: 180, ref: 0 });
+  assert.equal(sameFelt(stale, felt('from', { from: 180, ref: 270 })), false, 'the same point, another turn');
+  assert.equal(sameFelt(stale, felt('from', { from: 180, ref: 0.2, at: RUN + 9e5 })), true, 'whenever it was said');
+  assert.equal(sameFelt(felt('from', { from: 180, ref: 359.8 }), felt('from', { from: 180, ref: 0.1 })), true, 'across north');
+  assert.equal(sameFelt(felt('swirl', { ref: 10 }), felt('swirl', { ref: 200 })), true, 'a swirl turns nothing');
+});
+
+await t('feltWeather never writes into the record it reads', () => {
+  /* An Open-Meteo slot with no direction at the moment asked for. */
+  const { wind_direction: _, ...bare } = northerly({ series: [{ t: T0, wind_direction: 0, wind_speed: 4 }, { t: T0 + 9e5, wind_direction: 10, wind_speed: 4 }] });
+  const copy = JSON.parse(JSON.stringify(bare));
+  const wf = felt('from', { from: 180, ref: 0 });
+  const a = feltWeather(bare, wf), b = feltWeather(bare, wf);
+  assert.deepEqual(bare, copy, 'the stored series is as it was');
+  assert.deepEqual(a, b, 'and every read turns it once');
+  assert.deepEqual(a.series.map(e => e.wind_direction), [180, 190]);
+  const s = { data: { weather: bare, windFelt: wf } };
+  laidWind(s); laidWind(s);
+  assert.deepEqual(s.data.weather, copy);
+});
+
+await t('a felt wind is held to its run: another run’s, left on a copy of the trail, is not read', async () => {
+  assert.deepEqual(cleanWindFelt(felt('calm', { run: RUN })), { v: 1, mode: 'calm', ref: 0, at: RUN, run: RUN });
+  assert.equal(cleanWindFelt(felt('calm', { run: 'then' })).run, undefined);
+  const mine = felt('swirl', { run: RUN });
+  assert.deepEqual(feltOf({ windFelt: mine, trackStarted: RUN }), mine);
+  assert.equal(feltOf({ windFelt: mine, trackStarted: RUN + 9e6 }), null, 'another run’s');
+  assert.equal(feltOf({ windFelt: mine }), null, 'a trail not run yet');
+  assert.deepEqual(feltOf({ windFelt: felt('swirl') }), felt('swirl'), 'one on a run still going');
+
+  /* A copy for the next dog made by a build that did not know the field,
+     and that dog's run graded there. */
+  const NEXT = RUN + 5 * 3600e3;
+  const copy = trailRun({ trackStarted: NEXT, windFelt: felt('calm', { run: RUN }), result: { kind: 'trail', medAbs: 4 } });
+  assert.equal(windAt(copy, RUN).wx.wind_speed, 4, 'the next dog’s air is not stilled');
+  assert.equal(laidWind(copy).wind_speed, 4);
+  assert.equal(teachesDrift(copy.data), true, 'its drift is learned');
+  assert.equal(windWords(copy), null);
+  assert.equal(trailModel(copy).windFelt, null, 'nor sent on');
+  assert.equal(detailSections(trailModel(copy)).find(x => x.title === 'Weather').rows.some(([k]) => k === 'Wind on the ground'), false);
+
+  /* The grade names the run it measured it for. */
+  const { sb } = app();
+  const r = await sb.computeResult(trailRun({ windFelt: felt('swirl') }), runTrack, [], RUN, { bank: false });
+  assert.equal(r.windFelt.run, RUN);
+  const cleared = await sb.computeResult(copy, runTrack, [], NEXT, { bank: false });
+  assert.equal(cleared.windFelt, null, 'and the other run’s is not graded in, and goes when it is saved');
+  assert.equal(cleared.wind.speed, 4);
 });
 
 console.log(`\n${pass} passed total\n`);
