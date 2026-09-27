@@ -901,4 +901,24 @@ await t('a felt wind is held to its run: another run’s, left on a copy of the 
   assert.equal(cleared.wind.speed, 4);
 });
 
+await t('two copies of a run merge its felt wind with the grade made in it, not apart from it', () => {
+  const base = { id: 'a', dogId: 'bo', targetId: 'person', startedAt: T0 };
+  const run = (extra, at) => ({ ...base, updatedAt: at,
+    data: { trail, weather: northerly(), track: runTrack, trackStarted: RUN, ...extra } });
+  const felt180 = felt('from', { from: 180, ref: 0, run: RUN });
+  /* A phone that still has the felt wind meets the newer copy where it was
+     put back to the forecast and graded again. */
+  const cleared = mergeOne(run({ windFelt: felt180, result: { predSide: -1 } }, 5),
+    run({ windFelt: null, result: { predSide: 1 } }, 9), { union: true }).keep;
+  assert.equal(cleared.data.windFelt, null, 'cleared stays cleared');
+  assert.equal(cleared.data.result.predSide, 1);
+  /* A newer copy of the run that never had one (renamed on another phone)
+     keeps its forecast grade, and no felt wind is put beside it. */
+  const renamed = mergeOne(run({ windFelt: felt180, result: { predSide: -1 } }, 5),
+    { ...run({ result: { predSide: 1 } }, 9), name: 'Lane' }, { union: true }).keep;
+  assert.equal(renamed.data.result.predSide, 1);
+  assert.equal('windFelt' in renamed.data, false);
+  assert.equal(windAt(renamed, RUN).wx.wind_direction, 0, 'read in the forecast it was graded in');
+});
+
 console.log(`\n${pass} passed total\n`);

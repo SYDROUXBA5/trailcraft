@@ -86,7 +86,13 @@ function withMissing(win, lose) {
     }
   };
   fill(out, lose, (k) => cloudless(k) || CLOUD_ONLY.has(k) || k === 'updatedAt' || k === 'data');
-  if (plainObject(lose.data)) fill(data, lose.data, cloudless);
+  /* Except the wind felt on the ground, which goes with the grade made in
+     it. A newer copy that holds a run was graded in its own felt wind, or in
+     the forecast where it has none or cleared it to null; the older copy's,
+     laid beside that result, would draw and replay the run in a wind it was
+     not graded in, and send that to every phone. */
+  const graded = hasRun(win);
+  if (plainObject(lose.data)) fill(data, lose.data, (k) => cloudless(k) || (graded && k === 'windFelt'));
   if (plainObject(win.data) || plainObject(lose.data)) out.data = data;
   return added ? out : null;
 }
