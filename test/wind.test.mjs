@@ -17,7 +17,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
-import { windAt, laidWind } from '../public/field.js';
+import { windAt, laidWind, feltPanel } from '../public/field.js';
 import { cardinal, fmtSpeed, fmtTemp, forecastNote, fmtDur } from '../public/geo.js';
 import { unwalkedPlan } from '../public/debrief.js';
 import { trailModel, encodeShared, decodeShared, sessionFromModel } from '../public/share.js';
@@ -70,7 +70,7 @@ function panel() {
     MAP_SCREENS: ['scrLay', 'scrDraw', 'scrRun', 'scrShowMap', 'scrReplay'],
     currentScreen: 'scrReplay',
     fmtWind: (ms) => fmtSpeed(ms), cardinal, fahr: () => false, fmtTemp, forecastNote,
-    compass: {}, paintRose() {}, wxGap() {},
+    compass: {}, paintRose() {}, wxGap() {}, paintWxFelt() {}, feltPanel,
     air: { wx: null }, airStart(wx) { sb.air.wx = wx; },
     windAt, laidWind, lastFix: null, WX_WAIT: 10000,
     navigator: { geolocation: { getCurrentPosition: (res) => res({ coords: { latitude: 51.2, longitude: -2.6 } }) } },
@@ -169,7 +169,7 @@ await t('laid weather arriving during a run is drawn at the run’s moment, and 
     weatherPanelFor: (s, at) => calls.panel.push(at),
     scentField: (trail, w, at) => { calls.field.push([w.wind_direction, at]); return ['scent']; },
     coach: { trail: [{ lat: 51, lon: -2 }, { lat: 51.001, lon: -2 }], field: [] },
-    $: () => fakeEl(), renderShare() {},
+    $: () => fakeEl(), renderShare() {}, paintFeltSheet() {},
   };
   vm.createContext(sb);
   vm.runInContext([decl('function keepWeather('), decl('function runAirChanged(')].join('\n'), sb);
@@ -211,6 +211,7 @@ await t('the replay’s clock moves the panel with the plume', () => {
     scentField: () => [], plumePolygon: () => ({}), paintBandWalls() {}, EMPTY: {},
     trailOf: () => [], signedOffsets: () => [], targetById: () => ({ kind: 'hide' }),
     fmtM: String, fmtDur, unwalkedPlan, ageUnknown: () => '', bandWallNote: () => '', $: () => fakeEl(), document: { activeElement: null },
+    feltPanel, windWords: () => null, imp: () => false,
   };
   vm.createContext(sb);
   vm.runInContext(decl('function paintReplay('), sb);

@@ -122,6 +122,8 @@ function app() {
     dbFor: null, dbDraft: null, dbSeen: null, shareOutFrom: 'scrResult', signInFirstLaunch: false,
     S: { handler: null }, DEBRIEF: [], debriefDone: () => true, cleanSeen: () => null,
     guardSave: (s, f) => f(), saveSession: (s) => s, paintDebrief() {},
+    // The wind felt on the ground: a run with none to change grades nothing again.
+    dbWind: null, feltChangeable: () => false, sameFelt: () => true, regradeShown() {},
   };
   vm.createContext(sb);
   const src = [
@@ -330,7 +332,8 @@ await t('a forecast from another day carries its date; one from today only its t
   assert.equal(forecastNote(undefined, now), '10 m forecast');
   assert.equal(forecastNote('not a time', now), '10 m forecast');
   assert.equal(forecastNote(today.getTime(), now), `10 m forecast, ${hm(today)}`, 'a moment read off the series');
-  assert.match(js, /\$\('wxNote'\)\.textContent = forecastNote\(wx\.t \?\? wx\.time\);/, 'the panel uses it');
+  assert.match(js, /\$\('wxNote'\)\.textContent = felt\?\.note \?\? forecastNote\(wx\.t \?\? wx\.time\);/,
+    'the panel uses it, unless the wind was felt on the ground');
 });
 
 await t('an emptied map stops the footprints’ timer, and the next map screen does not restart it', () => {

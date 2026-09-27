@@ -813,6 +813,17 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.75; cursor: p
 .wx-sub i { font-style: normal; font-size: 13px; font-weight: 600; opacity: 0.8; }
 .wx-note { pointer-events: auto; cursor: pointer; }   /* tap to ask again */
 .wx-note i { font-style: normal; font-size: 12px; font-weight: 400; white-space: nowrap; }   /* full strength: it is read in sun */
+/* On the run screen the whole panel is the button for the wind felt on the
+   ground: the hit area lies over it, and a line in gold says it can be
+   tapped until a wind has been set. No wider than the note above it, so the
+   status pill beside the panel keeps its room. */
+.wx-hit {
+  position: absolute; inset: 0; width: 100%; margin: 0; padding: 0;
+  border: 0; border-radius: inherit; background: transparent;
+  pointer-events: auto; cursor: pointer;
+}
+.wx-hit:focus-visible { outline: 2px solid #F1D27A; outline-offset: 2px; }
+.wx-hint i { font-style: normal; font-size: 12px; font-weight: 600; white-space: nowrap; color: #F1D27A; }
 
 /* ── The handler card: the ring of trail ages, and the dog rows ───────── */
 .ring-wrap { display: flex; align-items: center; gap: 16px; }
@@ -1340,6 +1351,42 @@ body:has(#scrWalk:not([hidden])) { --top-row: calc(var(--safe-t) + 104px); }
 .call-opt.on { background: var(--moss); border-color: var(--moss); color: #fff; }
 .call-opt.on i { color: rgba(255, 255, 255, 0.82); }
 #callSkip { width: 100%; }
+/* ── The wind on the ground ───────────────────────────────────────────
+   One picker, in a sheet over the run controls (as the call is) and as a
+   row of the debrief: the debrief's own buttons, larger here, because it is
+   answered in a field in gloves. The compass is a rose, north at the top,
+   and the forecast's own point carries a dot, the one beside "Forecast
+   said", so the handler can see what they are putting right. Sizes follow
+   --px, which is 1px on the map, so Larger Text grows the debrief's. */
+.felt-sheet {
+  position: fixed; left: 12px; right: 12px; bottom: calc(var(--safe-b) + 12px);
+  max-width: 536px; margin: 0 auto; max-height: 80vh; overflow-y: auto; z-index: 7;
+  background: var(--card); color: var(--ink); border: 1px solid var(--border); border-radius: var(--r);
+  padding: 14px 16px 16px; box-shadow: 0 18px 44px -10px rgba(15, 31, 61, 0.55);
+}
+.felt-sheet .home-head { margin-bottom: 2px; }
+.felt-said { margin: 2px 0 10px; font-size: calc(13.5 * var(--px)); line-height: 1.4; color: var(--muted); overflow-wrap: anywhere; }
+.felt-dot, .felt-rose .db-opt.fc::after {
+  display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+  background: var(--ember); vertical-align: middle;
+}
+.felt-quick .db-opt { min-height: 56px; }
+.felt-sheet .db-opt { font-size: calc(16 * var(--px)); }
+.felt-ask { margin: 14px 0 8px; font-size: calc(13.5 * var(--px)); font-weight: 600; color: var(--ink); }
+.felt-rose {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px;
+  max-width: calc(300 * var(--px)); margin: 0 auto;
+}
+.felt-rose .db-opt { min-width: 0; min-height: 58px; padding: 8px 4px; }
+.felt-rose .db-opt.fc { position: relative; }   /* holds its dot */
+.felt-rose .db-opt.fc::after { content: ''; position: absolute; top: 7px; right: 7px; }
+.felt-rose .db-opt.on.fc::after { background: #fff; }
+.felt-hub {
+  align-self: center; justify-self: center; width: 14px; height: 14px; border-radius: 50%;
+  border: 2px solid var(--border);
+}
+.felt-quick .db-opt:disabled, .felt-rose .db-opt:disabled { opacity: 0.4; cursor: default; }
+.felt-quick .db-opt:disabled:active, .felt-rose .db-opt:disabled:active { transform: none; }
 @media (prefers-reduced-motion: reduce) { .call-opt { transition: none; } .call-opt:active { transform: none; } }
 .coach-card { padding-top: 4px; padding-bottom: 12px; }
 /* The coach card: an emblem and one line of purpose, the kind of run as two

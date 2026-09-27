@@ -394,7 +394,7 @@ t('the paper screens grow with the iPhone’s Larger Text; the map screens do no
     '.bench-head b', '.bench-head i', '.bench-read', '.fix-range label', '.fix-nudge', '.fix-label', '.fix-row b', '.fix-row i',
     '.bench-grp > summary::after', '.bench-grp b', '.bench-grp .cnt', '.bench-grp .why', '.dial .nm', '.dial .val', '.dial .note', '.badge',
     '.nav-dist b', '.nav-dist i', '.nav-say > span', '.nav-say .nav-sub',
-    '.wx-main b', '.wx-main i', '.wx-sub b', '.wx-sub i', '.wx-note i',
+    '.wx-main b', '.wx-main i', '.wx-sub b', '.wx-sub i', '.wx-note i', '.wx-hint i',
     '.map-tut-card > b', '.map-tut-card > p', '.style-pick button', '.btn.live-btn', '.call-q', '.call-opt b', '.call-opt i',
     '.tut-title.huge', '.ring-big', '.ring-small', '.ava', '.ava.big',
     '.screen.glass', 'body:has(> .screen.glass:not([hidden]))',

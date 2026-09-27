@@ -13,7 +13,7 @@ import { targetById, ageBand, dogAge, healApproach } from './store.js';
 import { DEBRIEF, FLAGS, NOTE_TAGS, ownRun, toldField, toldOf, trailShown, ranBlind, unwalkedPlan } from './debrief.js';
 import { CONFIDENCE, labelOf as callLabel } from './call.js';
 import { cleanSeen, seenLine } from './ground.js';
-import { rainRate, cleanWindFelt, feltWeather } from './field.js';
+import { rainRate, cleanWindFelt, feltWeather, windWords, windTrusted } from './field.js';
 
 const MAGIC = 'TS1.';
 const fin = Number.isFinite;
@@ -829,17 +829,26 @@ export function detailSections(m, u = {}) {
      when the handler said how it felt. */
   const wx = m.wx, felt = feltWeather(wx, m.windFelt);
   const wind = r?.wind ?? (felt ? { speed: felt.wind_speed, from: felt.wind_direction } : null);
+  /* A swirl has no steady direction and a calm none at all: the number keeps
+     the forecast's direction to draw with, which is not one to print. */
+  const dirOk = windTrusted(m.windFelt);
   const weather = [];
   if (fin(wx?.temp)) weather.push(['Air', fmtTemp(wx.temp, fahr)]);
   if (fin(wx?.soil_temp)) weather.push(['Ground', fmtTemp(wx.soil_temp, fahr)]);
   if (fin(wind?.speed)) weather.push([r?.wind ? 'Wind during the run' : 'Wind',
-    `${fmtSpeed(wind.speed, imp)}${fin(wind.from) ? ` from ${cardinal(wind.from)}` : ''}`]);
+    `${fmtSpeed(wind.speed, imp)}${dirOk && fin(wind.from) ? ` from ${cardinal(wind.from)}` : ''}`]);
+  /* What the handler felt, against what the forecast said. */
+  const onGround = windWords(m, { imperial: imp });
+  if (onGround) weather.push(['Wind on the ground', onGround]);
   if (fin(felt?.wind_gusts)) weather.push(['Gusts', fmtSpeed(felt.wind_gusts, imp)]);
   if (fin(wx?.humidity)) weather.push(['Humidity', `${Math.round(wx.humidity)} %`]);
   /* As a rate: the record holds a 15-minute total, and "0.5 mm" with no
      time attached reads as a drizzle when it is 2 mm an hour. */
   if (rainRate(wx) > 0) weather.push(['Rain', `${rainRate(wx).toFixed(1)} mm/h`]);
-  if (weather.length) out.push({ title: 'Weather', rows: weather, note: 'Forecast for open ground, wind at 10 m (Open-Meteo)' });
+  if (weather.length) {
+    out.push({ title: 'Weather', rows: weather, note: 'Forecast for open ground, wind at 10 m (Open-Meteo)'
+      + (onGround ? '. The wind on the ground is as the handler felt it on the day.' : '') });
+  }
 
   if (m.wps?.length && fin(m.track?.[0]?.t)) {
     out.push({ title: 'Marks', rows: m.wps.map(w => [w.kind || 'Mark', fin(w.t) ? clock(w.t - m.track[0].t) : '—']) });

@@ -1050,6 +1050,7 @@ t('the run HUD and the replay caption give a drawn line no age either', () => {
     trailOf: () => [], signedOffsets: () => [], targetById: () => ({ kind: 'person' }),
     fmtM: String, fmtDur, unwalkedPlan, bandWallNote: () => '', document: { activeElement: null },
     $: (id) => (id === 'repCaption' ? cap : { textContent: '', value: '' }),
+    feltPanel: () => null, windWords: () => null, imp: () => false,   // no wind felt on the ground
   };
   vm.createContext(sb);
   vm.runInContext(js.slice(js.indexOf('\nconst ageUnknown = '), js.indexOf(';\n', js.indexOf('\nconst ageUnknown = ')) + 2), sb);

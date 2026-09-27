@@ -16,12 +16,13 @@ import vm from 'node:vm';
 import {
   windAt, forecastAt, laidWind, feltWeather, cleanWindFelt, makeWindFelt, windFeltFor, feltMoment,
   feltTurn, windTrusted, nearestPoint, windWords, forecastSaid, CALM_MS, WIND_FELT_V, FLAT, stability, regime,
+  feltPanel, FELT_POINTS, feltPicked, feltSame, sameFelt,
 } from '../public/field.js';
 import {
   createStore, teachesDrift, driftRows, rebankRows, runAgain, patchSession, targetById, APPROACH_V,
 } from '../public/store.js';
 import { packDraft, unpackDraft } from '../public/draft.js';
-import { trailModel, encodeShared, decodeShared, sessionFromModel, keptSession, resultSentence, liveMeta } from '../public/share.js';
+import { trailModel, encodeShared, decodeShared, sessionFromModel, keptSession, resultSentence, liveMeta, detailSections } from '../public/share.js';
 import { mergeOne, RUN_FIELDS } from '../public/sync-core.js';
 import { unwalkedPlan } from '../public/debrief.js';
 import { predictedOffsets } from '../public/sim.js';
@@ -329,6 +330,7 @@ function app() {
     weatherPanelFor: (s, at) => drawn.panel.push(windAt(s, at).wx.wind_direction),
     scentField: (tr, w) => { drawn.field.push(w.wind_direction); return []; },
     followWeather: (w) => drawn.followed.push(w.wind_direction),
+    $: () => ({ hidden: true }),   // the run screen's wind picker, shut
     Promise, Number, Math, Object, JSON, Error,
   };
   vm.createContext(sb);
@@ -367,6 +369,7 @@ await t('every reader of a run’s wind reads the one the handler felt: plume, c
     followWeather: (w) => drawn.followed.push(w.wind_direction), scentField: (tr, w) => { drawn.field.push(w.wind_direction); return []; },
     plumePolygon: () => ({}), paintBandWalls() {}, EMPTY: {}, trailOf: (s) => s.data.trail, signedOffsets: () => [],
     targetById, fmtM: String, fmtDur, unwalkedPlan, ageUnknown: () => '', bandWallNote: () => '',
+    windWords, feltPanel, imp: () => false,
     $: () => ({ textContent: '', style: {}, classList: { toggle() {} }, setAttribute() {} }), document: { activeElement: null } };
   vm.createContext(rp);
   vm.runInContext(decl('function paintReplay('), rp);
@@ -514,6 +517,249 @@ await t('no screen reads a session’s wind round windAt and laidWind', () => {
   assert.equal(allowed.length, 1, 'the check still finds the one presence check it allows');
   assert.deepEqual(raw.filter(l => !allowed.includes(l)), [], 'a raw read of the laid weather');
   assert.doesNotMatch(js, /wxAt\(/, 'the series is only ever read through windAt');
+});
+
+/* ── The screens: one picker, on the run and in the debrief ─────────── */
+
+const html = readFileSync(new URL('../public/index.html', import.meta.url), 'utf8');
+const css = readFileSync(new URL('../public/app.css', import.meta.url), 'utf8');
+
+await t('the picker lights what was chosen, and a second tap on it takes it back', () => {
+  assert.deepEqual(FELT_POINTS.map(p => p.deg), [0, 45, 90, 135, 180, 225, 270, 315]);
+  assert.deepEqual(FELT_POINTS.map(p => p.abbr), ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']);
+  assert.equal(FELT_POINTS[7].name, 'north-west');
+
+  assert.deepEqual(feltPicked(null), { quick: null, from: null }, 'nothing said, nothing lit');
+  assert.deepEqual(feltPicked(felt('forecast')), { quick: 'forecast', from: null });
+  assert.deepEqual(feltPicked(felt('swirl')), { quick: 'swirl', from: null });
+  assert.deepEqual(feltPicked(felt('calm')), { quick: 'calm', from: null });
+  /* Opposite is kept as the point it names: both are lit, both are true. */
+  assert.deepEqual(feltPicked(makeWindFelt('opposite', 10, RUN)), { quick: 'opposite', from: 180 });
+  assert.deepEqual(feltPicked(makeWindFelt(270, 10, RUN)), { quick: null, from: 270 });
+  assert.deepEqual(feltPicked({ v: 1, mode: 'from', from: 90, at: RUN }), { quick: null, from: null }, 'what cleanWindFelt refuses lights nothing');
+
+  const opp = makeWindFelt('opposite', 0, RUN);
+  assert.ok(feltSame(opp, 'opposite'));
+  assert.ok(feltSame(opp, 180), 'the point it names is the same answer');
+  assert.ok(!feltSame(opp, 'swirl'));
+  assert.ok(!feltSame(opp, 90));
+  assert.ok(feltSame(felt('calm'), 'calm'));
+  assert.ok(!feltSame(null, 'forecast'), 'a first tap is never a second one');
+  assert.ok(!feltSame(makeWindFelt(90, 0, RUN), 'opposite'));
+
+  assert.ok(sameFelt(null, undefined));
+  assert.ok(sameFelt(felt('swirl'), felt('swirl', { at: RUN + 5e3, ref: 90 })), 'when it was said does not matter');
+  assert.ok(sameFelt(makeWindFelt('opposite', 0, RUN), makeWindFelt(180, 0, RUN + 9e3)));
+  assert.ok(!sameFelt(makeWindFelt(180, 0, RUN), makeWindFelt(135, 0, RUN)));
+  assert.ok(!sameFelt(felt('calm'), null));
+});
+
+await t('the air panel says a felt wind in words no wider than the forecast’s time', () => {
+  const s = (wf) => ({ data: { weather: northerly(), trackStarted: RUN, windFelt: wf } });
+  assert.equal(feltPanel(s(undefined)), null, 'the forecast note stands');
+  assert.deepEqual(feltPanel(s(makeWindFelt('opposite', 0, RUN))), { mode: 'from', dir: null, note: 'felt · forecast N' });
+  assert.deepEqual(feltPanel(s(felt('swirl'))), { mode: 'swirl', dir: 'swirling', note: 'felt · forecast N' });
+  assert.deepEqual(feltPanel(s(felt('calm'))), { mode: 'calm', dir: 'calm', note: 'felt · forecast N' });
+  assert.deepEqual(feltPanel(s(felt('forecast'))), { mode: 'forecast', dir: null, note: 'felt as forecast' });
+  /* The status pill sits beside the panel; "10 m forecast, 14:00" is the note it had room for. */
+  for (let d = 0; d < 360; d += 22.5) {
+    const n = feltPanel(s(makeWindFelt('opposite', d, RUN))).note;
+    assert.ok(n.length <= '10 m forecast, 14:00'.length, `${n} is wider than the note it replaces`);
+  }
+  assert.match(js, /\$\('wxDir'\)\.textContent = felt\?\.dir \?\? `from \$\{cardinal\(wx\.wind_direction\)\}`;/);
+  assert.match(js, /felt\?\.mode !== 'calm' \? \(wx\.wind_direction \+ 180\) % 360 : null;/, 'still air has no arrow');
+  assert.match(decl('function weatherPanelFor('), /if \(own\) return showWeather\(own, feltPanel\(session\)\);/);
+  assert.match(decl('function paintReplay('), /followWeather\(w, feltPanel\(s\)\);/);
+});
+
+/** The picker and the run screen's handling of it, lifted out of app.js. */
+function picker(extra = {}) {
+  const els = new Map();
+  const toasts = [], asked = [];
+  const sb = {
+    $: (id) => {
+      if (!els.has(id)) els.set(id, { hidden: true, innerHTML: '', attrs: {}, focused: 0,
+        setAttribute(k, v) { this.attrs[k] = v; }, focus() { this.focused++; } });
+      return els.get(id);
+    },
+    currentScreen: 'scrRun', run: { session: null }, wxShown: { key: 'shown' },
+    airPanel: (id) => asked.push(['airPanel', id]), toast: (m) => toasts.push(m),
+    navigator: {}, imp: () => false,
+    setWindFelt: async (s, f) => { asked.push(['setWindFelt', f]); s.data.windFelt = f; return s; },
+    forecastAt, feltMoment, nearestPoint, windFeltFor, forecastSaid, windWords, FELT_POINTS, feltPicked, feltSame,
+    Number, Promise,
+  };
+  Object.assign(sb, extra);
+  vm.createContext(sb);
+  vm.runInContext([
+    js.slice(js.indexOf('\nconst esc = '), js.indexOf('\n', js.indexOf('\nconst esc = ') + 1)),
+    between('const feltChangeable = ', '\n/* On the run screen.'),
+    decl('function openFeltSheet('),
+    decl('function paintFeltSheet('),
+    decl('function closeFeltSheet('),
+    decl('async function pickFeltOnRun('),
+    decl('function paintWxFelt('),
+  ].join('\n'), sb);
+  return { sb, toasts, asked };
+}
+/** The buttons in some markup: their attributes and their words. */
+const buttons = (h) => [...h.matchAll(/<button ([^>]*)>([^<]*)<\/button>/g)].map(([, a, text]) => ({
+  text, ...Object.fromEntries([...a.matchAll(/([\w-]+)(?:="([^"]*)")?/g)].map(([, k, v]) => [k, v ?? true])),
+}));
+
+await t('the picker: four answers and a rose, the forecast’s point marked, each button named and pressed', () => {
+  const { sb } = picker();
+  const s = { id: 'r', data: { weather: northerly() } };
+  const h = sb.feltPickerHtml(s, makeWindFelt('opposite', 0, RUN));
+  assert.match(h, /Forecast said: from N, 14 km\/h <span class="felt-dot" aria-hidden="true"><\/span>/);
+  assert.match(h, /Or tap where it comes <b>from<\/b>:/);
+  const b = buttons(h);
+  const quick = b.filter(x => x['data-felt']), rose = b.filter(x => x['data-felt-from'] != null);
+  assert.deepEqual(quick.map(x => x.text), ['As forecast', 'Opposite', 'Swirling', 'Calm']);
+  assert.deepEqual(rose.map(x => x.text), ['NW', 'N', 'NE', 'W', 'E', 'SW', 'S', 'SE'], 'north at the top, as a rose');
+  assert.deepEqual(rose.map(x => x['aria-label']), ['From north-west', 'From north, where the forecast has it', 'From north-east',
+    'From west', 'From east', 'From south-west', 'From south', 'From south-east']);
+  assert.equal(quick[1]['aria-label'], 'Opposite, from south', 'Opposite says which way that is');
+  assert.deepEqual(b.filter(x => x['aria-pressed'] === 'true').map(x => x.text), ['Opposite', 'S']);
+  assert.ok(b.every(x => x['aria-pressed'] === 'true' || x['aria-pressed'] === 'false'), 'every choice says whether it is pressed');
+  assert.ok(b.every(x => x.class.split(' ').includes('on') === (x['aria-pressed'] === 'true')), 'lit exactly when pressed');
+  assert.deepEqual(rose.filter(x => x.class.includes(' fc')).map(x => x.text), ['N'], 'the forecast’s own point, marked');
+  assert.ok(b.every(x => !x.disabled));
+  assert.match(h, /<div class="felt-rose" role="group" aria-label="Where the wind comes from">/);
+
+  /* No forecast direction: nothing to agree with or turn; a swirl or a calm still can be said. */
+  const none = buttons(sb.feltPickerHtml({ id: 'r', data: {} }, null));
+  assert.deepEqual(none.filter(x => x.disabled).map(x => x.text), ['As forecast', 'Opposite', 'NW', 'N', 'NE', 'W', 'E', 'SW', 'S', 'SE']);
+  assert.deepEqual(none.filter(x => !x.disabled).map(x => x.text), ['Swirling', 'Calm']);
+  assert.ok(none.every(x => x['aria-pressed'] === 'false'));
+  assert.match(sb.feltPickerHtml({ id: 'r', data: {} }, null), /No forecast wind here yet/);
+});
+
+await t('on the run: the air panel opens it, a choice goes to the run at once, and a second tap goes back', async () => {
+  const { sb, toasts, asked } = picker();
+  const s = { id: 'r', data: { weather: northerly() } };
+  sb.run.session = s;
+  sb.paintWxFelt();
+  assert.equal(sb.$('wxFelt').hidden, false, 'the panel is a button on the run screen');
+  assert.equal(sb.$('wxFeltHint').hidden, false, 'and says so until a wind is set');
+  assert.equal(sb.$('wxFelt').attrs['aria-label'], 'Forecast wind from N, 14 km/h. Set the wind you feel on the ground');
+
+  sb.openFeltSheet();
+  assert.equal(sb.$('feltSheet').hidden, false);
+  assert.match(sb.$('feltRun').innerHTML, /data-felt="opposite"/);
+  assert.equal(sb.$('feltTitle').focused, 1, 'a screen reader lands on the sheet');
+
+  await sb.pickFeltOnRun({ dataset: { felt: 'opposite' } });
+  assert.deepEqual(asked.at(-1), ['setWindFelt', makeWindFelt('opposite', 0, s.data.windFelt.at)]);
+  assert.equal(sb.$('feltSheet').hidden, true, 'put away so the ground can be seen');
+  assert.equal(sb.$('wxFelt').focused, 1, 'focus back on the panel');
+  assert.equal(toasts.at(-1), 'From S, felt (forecast N)');
+  sb.paintWxFelt();
+  assert.equal(sb.$('wxFeltHint').hidden, true);
+  assert.equal(sb.$('wxFelt').attrs['aria-label'], 'Wind from S — felt on the ground (forecast: from N). Set the wind you feel on the ground');
+
+  await sb.pickFeltOnRun({ dataset: { feltFrom: '180' } });
+  assert.deepEqual(asked.at(-1), ['setWindFelt', null], 'the same answer again is the forecast back');
+  assert.equal(toasts.at(-1), 'Back to the forecast wind');
+
+  await sb.pickFeltOnRun({ dataset: { felt: 'swirl' }, disabled: true });
+  assert.deepEqual(asked.at(-1), ['setWindFelt', null], 'a greyed button does nothing');
+
+  /* Stop is grading: nothing changes, and the handler is told where to say it. */
+  const busy = picker({ setWindFelt: async () => null });
+  busy.sb.run.session = { id: 'r', data: { weather: northerly() } };
+  await busy.sb.pickFeltOnRun({ dataset: { felt: 'calm' } });
+  assert.match(busy.toasts.at(-1), /debrief/);
+
+  /* Off the run screen the panel is only something to read. */
+  sb.currentScreen = 'scrReplay';
+  sb.paintWxFelt();
+  assert.equal(sb.$('wxFelt').hidden, true);
+  assert.equal(sb.$('wxFeltHint').hidden, true);
+});
+
+await t('the run screen’s picker never touches the recording or leaves the screen', () => {
+  for (const head of ['function openFeltSheet(', 'function closeFeltSheet(', 'async function pickFeltOnRun(', 'function paintFeltSheet(']) {
+    const body = decl(head);
+    assert.doesNotMatch(body, /\bgo\(|stopWatch|stopRun|finishRun|coachStop|leaveForm/, `${head} leaves the run alone`);
+  }
+  assert.match(html, /<section id="scrRun"[\s\S]*<div class="felt-sheet" id="feltSheet" role="dialog" aria-labelledby="feltTitle" hidden>[\s\S]*<div id="feltRun"><\/div>[\s\S]*<\/section>\s*<!-- ── Result card/);
+  assert.match(html, /<div id="wxPanel" class="wx-panel" hidden>[\s\S]*<button type="button" class="wx-hit" id="wxFelt" hidden><\/button>\s*<\/div>/);
+  assert.match(js, /\$\('wxFelt'\)\.addEventListener\('click', openFeltSheet\);/);
+  assert.match(js, /\$\('btnFeltDone'\)\.addEventListener\('click', closeFeltSheet\);/);
+  assert.match(js, /if \(e\.key === 'Escape'\) closeFeltSheet\(\);/);
+  assert.match(decl('function runAirChanged('), /if \(!\$\('feltSheet'\)\.hidden\) paintFeltSheet\(\);/, 'an open picker follows the forecast arriving');
+  assert.match(decl('async function finishRun('), /closeCall\(\);\s*closeFeltSheet\(\);/);
+  assert.match(js, /closeCall\(\);\s*closeFeltSheet\(\);\s*run\.startedAt = Date\.now\(\);/, 'a new run starts with it put away');
+});
+
+await t('in the debrief it is the “Wind on the ground” row, starts from the run’s, and grades again at Save only when changed', async () => {
+  const paint = decl('function paintDebrief(');
+  assert.match(paint, /<span class="label">Wind on the ground<\/span>/);
+  assert.match(paint, /\$\{feltPickerHtml\(dbFor, dbWind\)\}/, 'the same picker as the run screen’s');
+  assert.match(paint, /\+ \(feltChangeable\(dbFor\) \?/, 'not on a run kept from someone else’s link');
+  assert.match(decl('function openDebrief('), /dbWind = cleanWindFelt\(s\.data\.windFelt\);/, 'prefilled from before or during the run');
+  assert.match(js, /dbWind = feltSame\(dbWind, choice\) \? null : \(windFeltFor\(dbFor, choice\) \?\? dbWind\);\s*return repaintFrom\(felt, paintDebrief\);/);
+  const save = decl('function saveDebrief(');
+  assert.match(save, /const wind = feltChangeable\(s2\) && !sameFelt\(dbWind, s2\.data\.windFelt\) \? dbWind : undefined;/);
+  assert.match(save, /if \(wind !== undefined\) regradeShown\(s2, wind\);/);
+  assert.match(js, /\$\('dbCancel'\)\.addEventListener\('click', \(\) => \{ dbFor = null; dbDraft = null; dbWind = null;/);
+
+  /* The card is drawn again once the new grade is in, if it is still the one on screen. */
+  const drawn = [];
+  const kept = { id: 'r', data: { weather: northerly(), trackStarted: RUN, windFelt: felt('calm') } };
+  const sb = { currentScreen: 'scrResult', run: { session: kept }, pendingSession: null, toast() {}, imp: () => false, windWords,
+    setWindFelt: async () => kept, renderResult: (x) => drawn.push(x) };
+  vm.createContext(sb);
+  vm.runInContext(decl('async function regradeShown('), sb);
+  await sb.regradeShown(kept, felt('calm'));
+  assert.deepEqual(drawn, [kept]);
+  sb.currentScreen = 'scrHome';
+  await sb.regradeShown(kept, felt('calm'));
+  assert.equal(drawn.length, 1, 'not drawn over another screen');
+  const changeable = vm.runInContext('feltChangeable', picker().sb);
+  assert.ok(changeable({ data: { track: runTrack, result: {} } }));
+  assert.ok(!changeable({ data: { track: runTrack, result: {}, imported: true } }), 'someone else’s run stays theirs');
+  assert.ok(!changeable({ data: { trail } }), 'a trail not run yet has no grade to redo');
+});
+
+await t('every place a run’s wind is shown says it was felt, against what the forecast said', () => {
+  assert.match(decl('function renderResult('), /const felt = windWords\(s, \{ imperial: imp\(\) \}\);/);
+  assert.match(html, /<span class="label" id="resModelLabel">Modelled<\/span>\s*<p class="body small" id="resWind" hidden><\/p>/);
+  assert.match(decl('function paintReplay('), /const felt = windWords\(s, \{ imperial: imp\(\), short: true \}\);[\s\S]*\+ \(felt \? ` · \$\{felt\}` : ''\)/);
+  assert.match(decl('function sessionCard('), /\$\{felt \? ` · \$\{esc\(felt\)\}` : ''\}/, 'escaped, as any line in a list');
+
+  /* The shared page and the PDF: their Weather section. */
+  const base = { kind: 'trail', target: 'Person', wx: northerly(), runAt: RUN };
+  const weather = (m) => detailSections(m).find(x => x.title === 'Weather');
+  const plain = weather(base);
+  assert.ok(!plain.rows.some(([k]) => k === 'Wind on the ground'));
+  assert.equal(plain.note, 'Forecast for open ground, wind at 10 m (Open-Meteo)');
+  const opp = weather({ ...base, windFelt: makeWindFelt('opposite', 0, RUN) });
+  assert.deepEqual(opp.rows.find(([k]) => k === 'Wind'), ['Wind', '14 km/h from S']);
+  assert.deepEqual(opp.rows.find(([k]) => k === 'Wind on the ground'), ['Wind on the ground', 'Wind from S — felt on the ground (forecast: from N)']);
+  assert.match(opp.note, /as the handler felt it on the day/);
+  const swirl = weather({ ...base, windFelt: felt('swirl') });
+  assert.deepEqual(swirl.rows.find(([k]) => k === 'Wind'), ['Wind', '14 km/h'], 'no direction printed for a wind with none to trust');
+  assert.deepEqual(swirl.rows.find(([k]) => k === 'Wind on the ground'), ['Wind on the ground', 'Wind swirling on the ground (forecast: from N, 14 km/h)']);
+  const calm = weather({ ...base, windFelt: felt('calm') });
+  assert.deepEqual(calm.rows.find(([k]) => k === 'Wind on the ground'), ['Wind on the ground', 'Calm on the ground (forecast: from N, 14 km/h)']);
+});
+
+await t('the picker’s targets take a gloved thumb, and it cannot push a narrow screen sideways', () => {
+  const rule = (sel) => {
+    const m = css.match(new RegExp(`\\n${sel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} \\{([^}]*)\\}`));
+    assert.ok(m, `app.css still has ${sel}`);
+    return m[1];
+  };
+  assert.match(rule('.felt-quick .db-opt'), /min-height: 56px/);
+  assert.match(rule('.felt-rose .db-opt'), /min-width: 0; min-height: 58px/);
+  assert.match(rule('.felt-rose'), /grid-template-columns: repeat\(3, minmax\(0, 1fr\)\)/);
+  assert.match(rule('.felt-said'), /font-size: calc\(13\.5 \* var\(--px\)\).*overflow-wrap: anywhere/);
+  assert.match(rule('.felt-ask'), /font-size: calc\(13\.5 \* var\(--px\)\)/);
+  assert.match(rule('.felt-sheet'), /max-height: 80vh; overflow-y: auto;/, 'a short phone scrolls it');
+  assert.match(rule('.wx-hit'), /position: absolute; inset: 0;/, 'the whole panel takes the tap');
+  assert.match(rule('.wx-hint i'), /white-space: nowrap/);
 });
 
 console.log(`\n${pass} passed total\n`);
