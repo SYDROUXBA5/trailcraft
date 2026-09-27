@@ -15,7 +15,7 @@ import { handlerStats, teachesDrift, runAgeMin } from './store.js';
 import { plumePalette, stepPalette, windPalette, trackPalette, COLOUR_PRESETS, isHex, mix } from './colours.js';
 import { FLAT, buildTerrain, stability, regime, flowAt, normOf, rainRate, RAIN_SUMS_PER_HOUR, windAt,
          laidWind, cleanWindFelt, windTrusted, forecastAt, feltMoment, nearestPoint, windFeltFor, forecastSaid,
-         windWords, feltPanel, FELT_POINTS, feltPicked, feltSame, sameFelt } from './field.js';
+         windWords, feltPanel, FELT_POINTS, feltPicked, feltSame, sameFelt, feltOf, anchorFelt } from './field.js';
 import { predictedOffsets, ScentSim, driftFrom, stepByFlow } from './sim.js';
 import { PARAMS, DIALS, PV, setParam, resetParams, changed, isDefault, tally, dialById, PRESETS, applyPreset } from './params.js';
 import { encodeTrail, decodeTrail, cardUrl, cardFromText, walkedPlanFor } from './card.js';
@@ -2795,7 +2795,7 @@ function openDebrief(s) {
   dbDraft = s.data.debrief ? { ...s.data.debrief } : blankDebrief(last);
   dbSeen = s.data.seen ? { ...s.data.seen } : blankSeen();
   /* Whatever was set before or during the run is where it starts. */
-  dbWind = cleanWindFelt(s.data.windFelt);
+  dbWind = feltOf(s.data);
   const d = S.dogs.find(x => x.id === s.dogId);
   $('dbWho').textContent = `${d?.name ?? 'This run'} · ${fmtWhen(s.startedAt)}`;
   $('dbNote').value = dbDraft.note || '';
@@ -4201,8 +4201,9 @@ async function applyWalked(sessionId, card) {
     /* Graded for the dog that ran it (s2.dogId), not whichever dog is picked
        on Home today, and banked to that dog. */
     /* The walk makes the line real; it does not undo a coach or a reveal. */
-    const { runWeather, ...result } = await computeResult(s2, s2.data.track, s2.data.trackWaypoints || [], s2.data.trackStarted, { bank: teachesDrift(s2.data) });
-    const graded = { summary: result.sentence, data: { result, ...(runWeather ? { runWeather } : {}) } };
+    const { runWeather, windFelt, ...result } = await computeResult(s2, s2.data.track, s2.data.trackWaypoints || [], s2.data.trackStarted, { bank: teachesDrift(s2.data) });
+    const graded = { summary: result.sentence, data: { result, ...(runWeather ? { runWeather } : {}),
+      ...(s2.data.windFelt !== undefined ? { windFelt } : {}) } };
     guardSave(patchSession(s2, graded), () => saveSession(s2, graded));
     snap();
     s2 = db.sessions().find(x => x.id === s.id);
@@ -4263,9 +4264,10 @@ async function regradeInWind(id, wf) {
   const ind = (s.data.trackWaypoints || []).find(w => w.kind === 'Indication');
   const old = s.data.result;
   const firstAt = ind && Number.isFinite(old.toFirst) ? ind.t - old.toFirst : s.data.trackStarted;
-  const { runWeather, ...result } = await computeResult(s2, s2.data.track, s2.data.trackWaypoints || [],
+  const { runWeather, windFelt, ...result } = await computeResult(s2, s2.data.track, s2.data.trackWaypoints || [],
     s2.data.trackStarted, { bank: teachesDrift(s2.data), rebank: true, firstAt });
-  const patch = { summary: result.sentence, data: { windFelt: wf, result, ...(runWeather ? { runWeather } : {}) } };
+  /* As the grade measured it against the run's own forecast (anchorFelt). */
+  const patch = { summary: result.sentence, data: { windFelt, result, ...(runWeather ? { runWeather } : {}) } };
   const saved = guardSave(patchSession(s, patch), () => saveSession(s, patch));
   snap();
   const now = saved ?? patchSession(s, patch);
@@ -4285,6 +4287,15 @@ async function regradeInWind(id, wf) {
     phone graded. A run kept from someone else's link stays as they sent it. */
 const feltChangeable = (s) => !!s && !s.data?.imported && !!s.data?.result && s.data?.track?.length > 1;
 
+/** A session as its felt wind is read and set: the run screen's, before
+    Stop has given it a start of its own, set against the run's start, as
+    the coach, the panel and the grade read its wind. Set against the moment
+    of the tap instead, a forecast that has moved since the start (or a laid
+    series that has run out) put a different forecast under the picker from
+    the one those views turn. */
+const feltSubject = (s) => (s && s === run.session && !Number.isFinite(s.data?.trackStarted) && Number.isFinite(run.startedAt) && run.startedAt > 0
+  ? { ...s, data: { ...s.data, trackStarted: run.startedAt } } : s);
+
 /* The compass as a rose, row by row: north at the top as on the dial, and
    nothing to press in the middle. */
 const FELT_ROSE = [315, 0, 45, 270, null, 90, 225, 180, 135];
@@ -4292,17 +4303,21 @@ const FELT_ROSE = [315, 0, 45, 270, null, 90, 225, 180, 135];
 /** The picker for a session, with `felt` (a windFelt, or null) shown as
     chosen. Only the app's own words go into it. */
 function feltPickerHtml(s, felt) {
-  const fc = forecastAt(s, feltMoment(s)).wx?.wind_direction;
+  const { wx: fcWx, exact } = forecastAt(s, feltMoment(s));
+  const fc = fcWx?.wind_direction;
   const has = Number.isFinite(fc);
   const fcPt = has ? nearestPoint(fc) : null;
   const opp = has ? FELT_POINTS.find(p => p.deg === nearestPoint(fc + 180)) : null;
   const on = feltPicked(felt);
   const said = has ? forecastSaid(s, { imperial: imp() }) : null;
+  /* A trail laid long before the run has a laid series that stops short of
+     it, and then the only forecast there is is the one it was laid in. */
+  const laid = has && !exact && !s.data?.runWeather;
   /* With no forecast direction there is nothing to agree with, turn round or
      turn to a point: a swirl or a calm can still be said. */
   const quick = [['forecast', 'As forecast', !has], ['opposite', 'Opposite', !has], ['swirl', 'Swirling', false], ['calm', 'Calm', false]];
   return `<p class="felt-said">${said
-      ? `Forecast said: ${esc(said)} <span class="felt-dot" aria-hidden="true"></span>`
+      ? `${laid ? 'Forecast when it was laid' : 'Forecast said'}: ${esc(said)} <span class="felt-dot" aria-hidden="true"></span>`
       : 'No forecast wind here yet, so there is no direction to turn. Swirling or calm can still be set.'}</p>
     <div class="db-opts felt-quick" role="group" aria-label="Wind on the ground">${quick.map(([v, label, off]) =>
       `<button type="button" class="db-opt${on.quick === v ? ' on' : ''}" data-felt="${v}" aria-pressed="${on.quick === v}"${v === 'opposite' && opp ? ` aria-label="Opposite, from ${opp.name}"` : ''}${off ? ' disabled' : ''}>${label}</button>`).join('')}</div>
@@ -4330,8 +4345,8 @@ function openFeltSheet() {
   $('feltTitle').focus({ preventScroll: true });
 }
 function paintFeltSheet() {
-  const s = run.session;
-  if (s) $('feltRun').innerHTML = feltPickerHtml(s, s.data?.windFelt);
+  const s = feltSubject(run.session);
+  if (s) $('feltRun').innerHTML = feltPickerHtml(s, feltOf(s.data));
 }
 /** Put away, and focus back on the panel that opened it when it was open. */
 function closeFeltSheet() {
@@ -4346,8 +4361,9 @@ async function pickFeltOnRun(b) {
   const s = run.session;
   if (!s || b.disabled) return;
   const choice = feltChoiceOf(b);
-  const back = feltSame(s.data?.windFelt, choice);
-  const felt = back ? null : windFeltFor(s, choice);
+  const at = feltSubject(s);
+  const back = feltSame(feltOf(at.data), choice);
+  const felt = back ? null : windFeltFor(at, choice);
   if (!back && !felt) return toast('No forecast wind yet to turn');
   const now = await setWindFelt(s, felt);
   if (!now) return toast('The run is being graded. Say how the wind felt in the debrief.');
@@ -4359,10 +4375,10 @@ async function pickFeltOnRun(b) {
 /** The air panel is the way in on the run screen, and only something to
     read everywhere else. Its name says the wind as it stands. */
 function paintWxFelt() {
-  const s = currentScreen === 'scrRun' ? run.session : null;
+  const s = currentScreen === 'scrRun' ? feltSubject(run.session) : null;
   const b = $('wxFelt');
   b.hidden = !s;
-  $('wxFeltHint').hidden = !s || !!s.data?.windFelt;
+  $('wxFeltHint').hidden = !s || !!feltOf(s.data);
   if (!s) return;
   const u = { imperial: imp() };
   const said = forecastSaid(s, u);
@@ -4600,8 +4616,11 @@ async function finishRun() {
      began, and anything written since (the laid-time weather, most often)
      stays as it is. */
   /* The wind felt on the ground during the run has lived with the run in
-     memory and in the crash copy until now, and is kept with it here. */
-  const felt = s.data.windFelt !== undefined ? { windFelt: cleanWindFelt(s.data.windFelt) } : {};
+     memory and in the crash copy until now, and is kept with it here: with
+     the walk as it was said, then with the grade as the grade measured it
+     (computeResult). Only this run's (feltOf), not one left on the trail. */
+  const had = s.data.windFelt !== undefined;
+  const felt = had ? { windFelt: feltOf(s.data) } : {};
   const raw = { data: { track: rec.pts, trackStarted: run.startedAt, trackWaypoints: rec.wps,
     revealedAt: run.revealedAt || s.data.revealedAt || null, ...felt } };
   guardSave(patchSession(s, raw), () => saveSession(s, raw));
@@ -4612,7 +4631,7 @@ async function finishRun() {
      session yet, so it is read from here. */
   const bank = teachesDrift({ ...s.data, coach: coachRecord, revealedAt: run.revealedAt || s.data.revealedAt || null });
   const dogId = S.dog?.id ?? null;          // the run being recorded now is the picked dog's
-  const { runWeather, ...result } = await computeResult({ ...s, dogId }, rec.pts, rec.wps, run.startedAt, { bank });
+  const { runWeather, windFelt, ...result } = await computeResult({ ...s, dogId }, rec.pts, rec.wps, run.startedAt, { bank });
   liveEnd(result);
   const patch = {
     dogId,
@@ -4620,7 +4639,7 @@ async function finishRun() {
     summary: result.sentence,
     data: { track: rec.pts, trackStarted: run.startedAt, trackWaypoints: rec.wps,
       revealedAt: run.revealedAt || s.data.revealedAt || null, result, coach: coachRecord,
-      ...(runWeather ? { runWeather } : {}), ...felt },
+      ...(runWeather ? { runWeather } : {}), ...(had ? { windFelt } : {}) },
   };
   /* If the phone refuses the save, the run stays in memory and on screen:
      the result still shows, it can be sent as a link or a file, and the
@@ -4664,24 +4683,27 @@ async function computeResult(s, track, wps, startedAt, { bank = true, rebank = f
      the replay can show the same. If neither works, the laid-time weather is
      used to explain the run but nothing is banked from it: a dog's drift
      constant must not be learned from a wind that was not blowing. */
-  let { wx, exact } = windAt(s, startedAt);
+  /* What the handler felt on the ground (field.js), measured against the
+     record the run is read from at its start (anchorFelt) and given back to
+     be kept, so the run's own forecast fetched below is turned to what they
+     picked. A swirl keeps the forecast's direction to draw with and gives
+     it no side to expect; a calm is still air, so any side is the slope's. */
+  let felt = anchorFelt(feltOf(s.data), s, startedAt);
+  let { wx, exact } = windAt({ ...s, data: { ...s.data, trackStarted: startedAt, windFelt: felt } }, startedAt);
   let runWeather = null;
   if (!exact) {
     try {
       runWeather = await fetchWeather(track[0].lat, track[0].lon, startedAt, { within: WX_WAIT });
       /* In the wind the handler felt, as the session's own would be. */
-      ({ wx, exact } = windAt({ data: { runWeather, windFelt: s.data.windFelt } }, startedAt));
+      felt = anchorFelt(feltOf(s.data), { data: { runWeather } }, startedAt);
+      ({ wx, exact } = windAt({ data: { runWeather, trackStarted: startedAt, windFelt: felt } }, startedAt));
     } catch { /* keep the laid-time weather, unbanked */ }
   }
   if (!exact) bank = false;
   const st = stability(wx?.soil_temp, wx?.temp);
-  /* What the handler felt on the ground (field.js). A swirl keeps the
-     forecast's direction to draw with and gives it no side to expect; a
-     calm is read as still air, so any side comes from the slope alone. */
-  const felt = cleanWindFelt(s.data.windFelt);
   const trusted = windTrusted(felt);
 
-  if (t.kind === 'hide') return { ...searchResult(s, track, wps, startedAt, wx, dogName, ageMin, firstAt), runWeather };
+  if (t.kind === 'hide') return { ...searchResult(s, track, wps, startedAt, wx, dogName, ageMin, firstAt), runWeather, windFelt: felt };
 
   const trail = s.data.trail;
   /* The phone's track, projected a line-length ahead: an ESTIMATE of where
@@ -4786,7 +4808,8 @@ async function computeResult(s, track, wps, startedAt, { bank = true, rebank = f
        Without these a result cannot be reproduced, and a picture that cannot
        be reproduced is not a record of anything. */
     mv: BUILD, ...(offBaseline ? { mp: moved } : {}),
-    runWeather,
+    /* Not part of the result: the caller keeps them beside it. */
+    runWeather, windFelt: felt,
   };
 }
 
@@ -4819,7 +4842,7 @@ function searchResult(s, track, wps, startedAt, wx, dogName, ageMin, firstAt = r
     while (back > 0 && dist(path[back], path[path.length - 1]) < 20) back--;
     /* Not in a wind the handler felt swirling or calm: into or with a wind
        that had no steady direction is a guess, however exact it reads. */
-    if (path.length > 1 && wx?.wind_direction != null && windTrusted(s.data.windFelt)) {
+    if (path.length > 1 && wx?.wind_direction != null && windTrusted(feltOf(s.data))) {
       approach = approachToWind(bearing(path[back], path[path.length - 1]), wx.wind_direction);
     }
     sentence = `${dogName} indicated in ${fmtDur(toFirst)}`
