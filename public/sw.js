@@ -11,7 +11,7 @@ const V = 'trailcraft-v115';
    without either deployment breaking the other. */
 const SHELL = [
   './', 'index.html', 'app.css',
-  'app.js', 'geo.js', 'colours.js', 'draft.js', 'mvt.js', 'ground.js', 'params.js', 'debrief.js', 'call.js', 'field.js', 'walls.js', 'sim.js', 'card.js', 'store.js',
+  'app.js', 'geo.js', 'colours.js', 'draft.js', 'mvt.js', 'ground.js', 'params.js', 'debrief.js', 'call.js', 'field.js', 'walls.js', 'sim.js', 'card.js', 'store.js', 'log.js',
   'sync-core.js', 'sync.js', 'firebase-config.js', 'share.js', 'pdf.js', 'coach.js', 'native.js', 'backup.js',
   'vendor/qrcode.js', 'vendor/jsQR.js',
 ];

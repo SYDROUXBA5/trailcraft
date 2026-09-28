@@ -92,7 +92,13 @@ function withMissing(win, lose) {
      laid beside that result, would draw and replay the run in a wind it was
      not graded in, and send that to every phone. */
   const graded = hasRun(win);
-  if (plainObject(lose.data)) fill(data, lose.data, (k) => cloudless(k) || (graded && k === 'windFelt'));
+  /* And except the folders the session is in (log.js). Taking a session out
+     of its last folder leaves an empty list, which is a decision, not a
+     phone that never heard of folders: filled from the older copy, the
+     session went straight back into the folder it was taken out of. A copy
+     with no list at all (an older build) still takes the other's. */
+  const filed = plainObject(win.data) && 'folders' in win.data;
+  if (plainObject(lose.data)) fill(data, lose.data, (k) => cloudless(k) || (graded && k === 'windFelt') || (filed && k === 'folders'));
   if (plainObject(win.data) || plainObject(lose.data)) out.data = data;
   return added ? out : null;
 }
