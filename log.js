@@ -121,6 +121,18 @@ function wordsOf(s, people) {
     handler's own lists already put it under. */
 export const runAt = (s) => (fin(s?.data?.trackStarted) ? s.data.trackStarted : fin(s?.startedAt) ? s.startedAt : null);
 
+const newestRun = (a, b) => (b.t ?? -Infinity) - (a.t ?? -Infinity) || 0;
+
+/** The `n` sessions run most recently, newest first, as the list has them.
+    The store keeps sessions in the order they were laid, and a trail run
+    again keeps the day it was laid; Home's cards print when each was run,
+    so taken in the store's order a trail laid last week and run today was
+    left off, and the times shown were out of order. */
+export function recentRuns(sessions, n) {
+  return (sessions || []).filter(Boolean).map(s => ({ s, t: runAt(s) }))
+    .sort(newestRun).slice(0, n).map(r => r.s);
+}
+
 /** One row per session, newest first, holding everything the list is
     narrowed, searched and grouped by. `peopleOf(s)` gives the dog, handler
     and layer as the app shows them ({ id?, name }). */
@@ -137,7 +149,7 @@ export function logRows(sessions, peopleOf = () => ({}), now = Date.now()) {
     };
   });
   /* Newest first, whatever order the sessions were kept in; undated last. */
-  return rows.sort((a, b) => (b.t ?? -Infinity) - (a.t ?? -Infinity) || 0);
+  return rows.sort(newestRun);
 }
 
 /** The dogs (or handlers) that actually have sessions, by name, each with

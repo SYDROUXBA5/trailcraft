@@ -155,11 +155,13 @@ export function planSession({ id, handlerId, layerId = null, corners, ageMin, no
    tolerance of the line that is kept (simplify in geo.js), so a real corner
    survives and the wobble does not. A long, twisting trail can still leave
    more corners than anyone wants numbered on a map, so the tolerance grows a
-   step at a time, never past the width of a lane. A coarser step is taken
-   only when it brings the corners under the cap: a trail that really turns
-   more than forty times has more than forty corners at every step, and
-   thinning it harder would only drop real ones (a short jog, a double-back)
-   and still leave too many to number. */
+   step at a time, never past the width of a lane, and stops at the first
+   step that brings the corners under the cap. A trail still over the cap at
+   the coarsest step keeps that step, not the finest: on a long trail, or one
+   laid under trees, most of what a 5 m thinning keeps and a 12 m one drops
+   is the GPS wandering, and a plan of hundreds of corners that zig-zag with
+   it is no use to lay. A trail whose real turns are sharper than a lane's
+   width keeps them at every step. */
 export const ROUTE_TOLS_M = [5, 8, 12];
 export const ROUTE_MAX_CORNERS = 40;
 
@@ -168,8 +170,10 @@ const latLon = (p) => ({ lat: p.lat, lon: p.lon });
 
 /* How far out a trail that comes back to where it started must reach to be
    a route: past the coarsest tolerance, plus the metre the ends may be apart,
-   so the fix furthest out is always kept as a corner (see goesSomewhere). */
-const LOOP_M = ROUTE_TOLS_M.at(-1) + 2;
+   so the fix furthest out is always kept as a corner (see goesSomewhere).
+   Indexed, not with Array .at: this runs as the module loads, and WebKit
+   before iOS 15.4 has no Array .at, so the whole app would start blank. */
+const LOOP_M = ROUTE_TOLS_M[ROUTE_TOLS_M.length - 1] + 2;
 
 /* Whether a line goes anywhere, as routeOf will find it. Its ends a metre or
    more apart is a route whatever thinning does, because the first and last
@@ -177,10 +181,12 @@ const LOOP_M = ROUTE_TOLS_M.at(-1) + 2;
    only a route once some fix is far enough out to survive the thinning. Two
    fixes a pace apart, or one real fix and the rest nonsense, are not: the
    button was offered on those and then refused. Nearly always settled by the
-   two ends, so the whole line is read only for a loop. */
+   two ends, so the whole line is read only for a loop. The last fix is
+   found by walking back, as findLast is missing before iOS 15.4 too. */
 function goesSomewhere(trail) {
   const first = trail.find(onEarth);
-  const last = trail.findLast(onEarth);
+  let last;
+  for (let i = trail.length - 1; i >= 0 && !last; i--) if (onEarth(trail[i])) last = trail[i];
   if (!first || last === first) return false;
   if (dist(first, last) >= 1) return true;
   return trail.some(p => onEarth(p) && dist(first, p) > LOOP_M);
@@ -207,12 +213,10 @@ export function routeCorners(s) {
   const line = Array.isArray(d.trail) ? d.trail.filter(onEarth) : [];
   if (line.length < 2) return [];
   const thin = (tol) => simplify(line, tol, { turns: true });
-  const first = thin(ROUTE_TOLS_M[0]);
-  let pts = first;
+  let pts = thin(ROUTE_TOLS_M[0]);
   for (const tol of ROUTE_TOLS_M.slice(1)) {
     if (pts.length <= ROUTE_MAX_CORNERS) break;
-    const coarser = thin(tol);
-    if (coarser.length <= ROUTE_MAX_CORNERS) pts = coarser;
+    pts = thin(tol);
   }
   return pts.map(latLon);
 }

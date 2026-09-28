@@ -47,7 +47,7 @@ import { checkAuthFields, AUTH_MIN_PASSWORD } from './sync-core.js';
 import { createStore, migrateV1, TARGETS, ODOURS, targetById, targetText, verbs, uid,
          dogStats, ageBand, AGE_BANDS, LEVELS, levelById, dogAge, patchSession, runAgain,
          planSession, canLayAgain, routeOf, planLine, askDelete, storageWords, APPROACH_V } from './store.js';
-import { searchWords, logRows, runAt, midnight, facets, filterRows, groupRows, foldersOf, inFolder, folderList, folderNamed,
+import { searchWords, logRows, recentRuns, runAt, midnight, facets, filterRows, groupRows, foldersOf, inFolder, folderList, folderNamed,
          cleanFolderName, putMany, toggleFolder, renameIn, dropFrom, mergeFolders, emptyHeld, folderPatch } from './log.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
@@ -1506,7 +1506,7 @@ function renderHome() {
      no card format yet, so it only shows where it can do something. */
   $('btnScanHome').hidden = target.kind !== 'person';
 
-  const recent = S.sessions.slice(0, 6);
+  const recent = recentRuns(S.sessions, 6);
   $('recentList').innerHTML = recent.length ? recent.map(s => sessionCard(s)).join('')
     : `<div class="card"><p class="body muted">Nothing yet. After each run, one line about what the dog did appears here.</p></div>`;
 }
@@ -3593,16 +3593,21 @@ async function letScreenGo() {
   rec.lock = null;
   try { await lock?.release(); } catch { /* already gone */ }
 }
+/* Why a coach call went unheard when iOS took it: said at once with the app
+   on screen, and with a count once the screen is back. */
+const COACH_UNHEARD = 'The phone would not let the coach speak (a phone call or Siri)';
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible') return;
   holdScreen();
   /* Said when the handler can hear it, so a silent coach is never taken
      for a dog that stayed on the line. */
-  if (coach.missed) {
-    const n = coach.missed;
-    coach.missed = 0;
-    toast(`The screen was dark, so ${n} coach call${n === 1 ? '' : 's'} could not play`);
-  }
+  const calls = (n) => `${n} coach call${n === 1 ? '' : 's'}`;
+  const said = [
+    coach.missed ? `The screen was dark, so ${calls(coach.missed)} could not play` : '',
+    coach.unheard ? `${COACH_UNHEARD}, so ${calls(coach.unheard)} went unheard` : '',
+  ].filter(Boolean);
+  coach.missed = 0; coach.unheard = 0;
+  if (said.length) toast(said.join('. '));
 });
 
 let hudText = gpsHudText;
@@ -5118,13 +5123,15 @@ function renderResult(s) {
     } else {
       /* The walk is the record now. Say how far it drifted from the sketch,
          because a dog that looks wrong against the plan may have been exactly
-         right against the ground — and Show on map draws both lines. */
+         right against the ground — and Show on map draws both lines. Close
+         or not, the route is named: the only one said before it is the
+         walk, so "that route" read as the walk following itself. */
       const w = walkVsPlan(s);
       const who = s.data.walkedFrom || 'the layer';
       note.textContent = `Graded against the trail ${who} actually walked.`
         + (w && w.med >= 3
           ? ` It sat about ${fmtM(w.med)} off ${planLine(s)}, and as much as ${fmtM(w.worst)} ${w.side} of it. Show on map draws both.`
-          : w ? ` It followed ${s.data.fromSession ? 'that route' : 'your line'} closely.` : '');
+          : w ? ` It followed ${planLine(s)} closely.` : '');
     }
   }
 }
@@ -5712,7 +5719,7 @@ function closeLive() {
    run's trail and scent field, the sounds, the voice, the pill and the HUD. */
 const coach = { on: false, trail: null, field: [], plan: false, state: null, reading: null,
                 status: 'on', line: '', tick: 0, sounds: null, unlocked: false,
-                everOn: false, used: null, shadow: null, missed: 0, sayTimer: 0 };
+                everOn: false, used: null, shadow: null, missed: 0, unheard: 0, sayTimer: 0 };
 
 /* Two silent coaches run on EVERY trail run, blind or assisted: a plain
    corridor and the experimental scent corridor. They never speak; they only
@@ -5969,7 +5976,17 @@ function coachDeliver(alert) {
     coach.sayTimer = setTimeout(() => {
       coach.sayTimer = 0;
       if (!coach.on) return;
-      coachSpeak(coachPhrase(alert, { imperial: imp() }), { unheard: () => { if (coach.on) coach.missed = (coach.missed || 0) + 1; } });
+      /* iOS took the call but could not play it: a phone call or Siri had
+         the sound. With the app on screen the handler is told at once, or
+         the coach goes quiet as if the dog were on the line and the count
+         waits for a dark screen that may never come. In the dark it is
+         counted apart from the calls the dark screen swallowed, and told
+         with its own cause once the screen is back. */
+      coachSpeak(coachPhrase(alert, { imperial: imp() }), { unheard: () => {
+        if (!coach.on) return;
+        if (document.visibilityState === 'visible') toast(COACH_UNHEARD);
+        else coach.unheard = (coach.unheard || 0) + 1;
+      } });
     }, settings.coachSound && !dark ? 450 : 0);
   }
 }
@@ -6051,7 +6068,7 @@ function coachStop() {
   clearInterval(coach.tick); coach.tick = 0; clearInterval(coach.shadowTick); coach.shadowTick = 0;
   clearTimeout(coach.sayTimer); coach.sayTimer = 0;
   coach.on = false; coach.trail = null; coach.field = []; coach.state = null; coach.shadow = null;
-  coach.reading = null; coach.status = 'on'; coach.line = ''; coach.missed = 0;
+  coach.reading = null; coach.status = 'on'; coach.line = ''; coach.missed = 0; coach.unheard = 0;
   try { speechSynthesis?.cancel(); } catch { /* fine */ }
   if (voiceCache.native) stopNativeSpeech();
   // The run screen stays up while the result is worked out: leave it calm.
