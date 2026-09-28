@@ -45,6 +45,8 @@ import { checkAuthFields, AUTH_MIN_PASSWORD } from './sync-core.js';
 import { createStore, migrateV1, TARGETS, ODOURS, targetById, targetText, verbs, uid,
          dogStats, ageBand, AGE_BANDS, LEVELS, levelById, dogAge, patchSession, runAgain,
          askDelete, storageWords, APPROACH_V } from './store.js';
+import { searchWords, logRows, facets, filterRows, groupRows, foldersOf, inFolder, folderList, folderNamed,
+         cleanFolderName, putMany, toggleFolder, renameIn, dropFrom, emptyHeld } from './log.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
 const BUILD = '2026-09-27b';
@@ -1499,17 +1501,31 @@ function renderHome() {
 }
 
 /* `del` is the session list with Delete sessions turned on: each card gains
-   its own Delete button. Home never has one; it is not where records are kept. */
-function sessionCard(s, { del = false } = {}) {
+   its own Delete button. Home never has one; it is not where records are kept.
+   While sessions are being chosen for a folder, each has a Select that says
+   whether it is (`pick`).
+   `body` is the card's words, already written: the list builds them once
+   each time the sessions change, not again for every letter of a search. */
+function sessionCard(s, { del = false, pick = null, body = null } = {}) {
+  return `<div class="card${pick ? ' picked' : ''}" data-open-session="${esc(s.id)}">
+    ${body ?? cardBody(s)}
+    ${pick != null ? `<button type="button" class="chip tag pick-chip${pick ? ' selected' : ''}" data-sel-session="${esc(s.id)}" aria-pressed="${pick}">Select</button>` : ''}
+    ${del ? `<button type="button" class="btn ghost small del-link" data-del-session="${esc(s.id)}">Delete</button>` : ''}
+  </div>`;
+}
+
+/* A card's words. `folders` (id → name, from the folder list) adds the
+   folders the session is in, on the session list only: home shows the last
+   few runs and nothing about filing them. */
+function cardBody(s, folders = null) {
   const d = S.dogs.find(x => x.id === s.dogId);
   /* A run graded in a wind felt on the ground says so in its line. */
   const felt = windWords(s, { imperial: imp(), short: true });
-  return `<div class="card" data-open-session="${esc(s.id)}">
-    <div class="meta"><span>${fmtWhen(s.startedAt)}</span><span>${esc(d?.name ?? '')}${d ? ' · ' : ''}${esc(targetText(s))}</span></div>
+  const inside = folders ? foldersOf(s).map(f => folders.get(f.id) ?? f.name) : [];
+  return `<div class="meta"><span>${fmtWhen(s.startedAt)}</span><span>${esc(d?.name ?? '')}${d ? ' · ' : ''}${esc(targetText(s))}</span></div>
     ${s.name ? `<div class="card-name">${esc(s.name)}</div>` : ''}
     <div class="story">${esc(storyOf(s))}${felt ? ` · ${esc(felt)}` : ''}</div>
-    ${del ? `<button type="button" class="btn ghost small del-link" data-del-session="${esc(s.id)}">Delete</button>` : ''}
-  </div>`;
+    ${inside.length ? `<div class="card-folders">In ${esc(inside.join(', '))}</div>` : ''}`;
 }
 
 /* ── Lay a trail / Set a hide ─────────────────────────────────────── */
@@ -5001,6 +5017,8 @@ function renderResult(s) {
   $('btnReplay').hidden = !(s.data.track?.length > 1);
   paintCallBlock(s);
   paintDebriefBlock(s);
+  closeFolderForm();
+  paintResultFolders(s);
   const note = $('resProvisional');
   note.hidden = !s.data.plan;
   if (s.data.plan) {
@@ -6022,19 +6040,289 @@ function openSession(id) {
    all the time: the list is for looking back, and a column of Delete buttons
    is one careless tap from losing a record. Each delete still asks first. */
 let sessDeleting = false;
+
+/* ── The list kept in order (log.js) ──────────────────────────────────
+   Narrowed by dog, handler and folder, searched, and grouped by day. What it
+   is narrowed to lasts while the app is open, so a handler who opens a run
+   and comes back finds the list as they left it. It is forgotten at the next
+   launch, when a list still narrowed to last month's seminar would look as if
+   runs had gone missing. Choosing sessions for a folder is a mode, like
+   Delete sessions, and the two are never on together. */
+const logView = { dog: null, handler: null, folder: null, query: '', picking: false, picked: new Set() };
+/* The rows, built once each time the sessions change (renderSessions). A
+   filter tapped or a letter typed only narrows what is built (paintLog), so a
+   search stays quick on a list of hundreds. */
+let logIx = null;
+let logShown = [];
+
+/* An empty folder is this phone's alone (log.js says why), kept with its
+   other preferences. It is only a name, so it never stops a save. */
+const HELD_FOLDERS = 'folders.held';
+const heldFolders = () => { try { return db.kv.get(HELD_FOLDERS, []); } catch { return []; } };
+const allFolders = (sessions = S.sessions) => folderList(sessions, heldFolders());
+function keepHeld(known) {
+  try { db.kv.set(HELD_FOLDERS, emptyHeld(known, S.sessions)); } catch { /* a name, nothing recorded */ }
+}
+
+/** Save folder changes ([{ id, folders }], log.js) in one write, keep any
+    folder they empty (`known` is every folder as it now stands), and bring
+    the copies held on screen up to date. False when the phone refused,
+    which the save banner has already said. */
+function saveFolders(changes, known) {
+  const patches = changes.map(c => ({ id: c.id, patch: { data: { folders: c.folders } } }));
+  if (patches.length && !guardSave(null, () => db.updateSessions(patches))) return false;
+  snap();
+  keepHeld(known);
+  const now = new Map(changes.map(c => [c.id, c.folders]));
+  const mend = (x) => (x && now.has(x.id) ? patchSession(x, { data: { folders: now.get(x.id) } }) : x);
+  run.session = mend(run.session);
+  pendingSession = mend(pendingSession);
+  return true;
+}
+
+const sessionsWord = (n) => `${n} session${n === 1 ? '' : 's'}`;
+
 function renderSessions() {
   snap();
   const all = S.sessions;
-  if (!all.length) sessDeleting = false;
+  if (!all.length) { sessDeleting = false; logView.picking = false; }
+  const folders = allFolders(all);
+  logIx = { rows: logRows(all, peopleFor), folders, names: new Map(folders.map(f => [f.id, f.name])) };
+  $('logSearch').value = logView.query;
+  paintLog();
+}
+
+function paintLog() {
+  if (!logIx) return;
+  const v = logView, all = logIx.rows;
   $('btnSessDelete').hidden = !all.length;
   $('btnSessDelete').textContent = sessDeleting ? 'Done deleting' : 'Delete sessions';
   $('sessDeleteNote').hidden = !sessDeleting;
-  $('sessionList').innerHTML = all.length
-    ? all.map(s => sessionCard(s, { del: sessDeleting })).join('')
-    : `<div class="card"><p class="body muted">No sessions yet.</p></div>`;
+  $('btnSessPick').hidden = !all.length;
+  $('btnSessPick').textContent = v.picking ? 'Done selecting' : 'Select';
+  $('logTools').hidden = !all.length;
+
+  /* Only a dog or handler with sessions is a filter, and only when there is
+     more than one to choose between. One whose last session has gone lets
+     go, rather than holding the list at nothing. */
+  const dogs = facets(all, 'dog'), handlers = facets(all, 'handler');
+  if (dogs.length < 2 || !dogs.some(d => d.key === v.dog)) v.dog = null;
+  if (handlers.length < 2 || !handlers.some(h => h.key === v.handler)) v.handler = null;
+  if (!logIx.folders.some(f => f.id === v.folder)) v.folder = null;
+  $('logDogRow').hidden = dogs.length < 2;
+  $('logDogs').innerHTML = dogs.map(d =>
+    `<button type="button" class="chip tag${d.key === v.dog ? ' selected' : ''}" data-log-dog="${esc(d.key)}" aria-pressed="${d.key === v.dog}">${esc(d.name)}</button>`).join('');
+  $('logHandlerRow').hidden = handlers.length < 2;
+  $('logHandlers').innerHTML = handlers.map(h =>
+    `<button type="button" class="chip tag${h.key === v.handler ? ' selected' : ''}" data-log-handler="${esc(h.key)}" aria-pressed="${h.key === v.handler}">${esc(h.name)}</button>`).join('');
+  $('logFolders').innerHTML = logIx.folders.map(f =>
+    `<button type="button" class="chip tag${f.id === v.folder ? ' selected' : ''}" data-log-folder="${esc(f.id)}" aria-pressed="${f.id === v.folder}">${esc(f.name)}</button>`).join('')
+    + '<button type="button" class="chip tag ghost" data-log-folder-new>+ New folder</button>';
+  $('logFolderTools').hidden = !v.folder;
+
+  const words = searchWords(v.query);
+  const rows = filterRows(all, { dog: v.dog, handler: v.handler, folder: v.folder, words });
+  logShown = rows;
+  $('logSearchClear').hidden = !v.query;
+  const narrowed = !!(v.dog || v.handler || v.folder || words.length);
+  $('logCount').textContent = !all.length ? '' : narrowed ? `${rows.length} of ${sessionsWord(all.length)}` : sessionsWord(all.length);
+  const mode = sessDeleting ? 'del' : v.picking ? 'pick' : 'look';
+  $('sessionList').innerHTML = !all.length
+    ? `<div class="card"><p class="body muted">No sessions yet.</p></div>`
+    : rows.length
+      ? groupRows(rows).map(g => `<h2 class="label log-day">${esc(g.label)}</h2>${g.rows.map(r => logCard(r, mode)).join('')}`).join('')
+      : logNothing(words);
+  paintPickBar();
 }
+
+function logCard(r, mode) {
+  if (!r.body) r.body = cardBody(r.s, logIx.names);
+  if (mode === 'pick') return sessionCard(r.s, { body: r.body, pick: logView.picked.has(r.s.id) });
+  return sessionCard(r.s, { body: r.body, del: mode === 'del' });
+}
+
+/* Nothing left once the list is narrowed: say why, and offer the way back. */
+function logNothing(words) {
+  const v = logView;
+  const folder = logIx.folders.find(f => f.id === v.folder);
+  const chips = !!(v.dog || v.handler || v.folder);
+  const say = words.length ? `No session matches “${v.query.trim()}”${chips ? ' with these filters' : ''}.`
+    : folder && !v.dog && !v.handler ? `Nothing in ${folder.name} yet. Show every session, tap Select and choose some, then tap ${folder.name} to put them in it.`
+      : 'No sessions for that choice.';
+  return `<div class="card"><p class="body muted">${esc(say)}</p><div class="card-acts">`
+    + (words.length ? '<button type="button" class="btn ghost small" data-log-clear="search">Clear the search</button>' : '')
+    + (chips ? '<button type="button" class="btn ghost small" data-log-clear="all">Show every session</button>' : '')
+    + '</div></div>';
+}
+
+function clearLog(what) {
+  if (what === 'all') Object.assign(logView, { dog: null, handler: null, folder: null });
+  logView.query = '';
+  $('logSearch').value = '';
+  paintLog();
+  $('logSearch').focus({ preventScroll: true });
+}
+
+/* ── Choosing sessions for a folder ── */
+function paintPickBar() {
+  const v = logView;
+  $('logPick').hidden = $('logPickHelp').hidden = !v.picking;
+  if (!v.picking || !logIx) return;
+  const live = new Set(logIx.rows.map(r => r.s.id));
+  for (const id of v.picked) if (!live.has(id)) v.picked.delete(id);
+  const n = v.picked.size;
+  $('logPickCount').textContent = n ? `${n} selected. Put ${n === 1 ? 'it' : 'them'} in:` : 'None selected yet.';
+  const chosen = logIx.rows.filter(r => v.picked.has(r.s.id)).map(r => r.s);
+  $('logPickFolders').innerHTML = logIx.folders.map((f) => {
+    const on = n > 0 && chosen.every(s => inFolder(s, f.id));
+    return `<button type="button" class="chip tag${on ? ' selected' : ''}" data-sel-folder="${esc(f.id)}" aria-pressed="${on}"${n ? '' : ' disabled'}>${esc(f.name)}</button>`;
+  }).join('') + '<button type="button" class="chip tag ghost" data-sel-folder-new>+ New folder</button>';
+}
+
+/* A tap selects the one card in place: the list is not drawn again, so a
+   long list keeps its place under the finger, and the screen reader's. */
+function pickSession(id) {
+  const v = logView;
+  const on = !v.picked.has(id);
+  if (on) v.picked.add(id); else v.picked.delete(id);
+  const card = [...$('sessionList').querySelectorAll('[data-open-session]')].find(c => c.dataset.openSession === id);
+  card?.classList.toggle('picked', on);
+  const b = card?.querySelector('[data-sel-session]');
+  if (b) pressed(b, on);
+  paintPickBar();
+}
+
+function setPicking(on) {
+  logView.picking = on;
+  logView.picked.clear();
+  if (on) sessDeleting = false;
+  closeFolderForm();
+  paintLog();
+}
+
+/** The chosen sessions into a folder, or out of it when it holds them all. */
+function fileChosen(fid) {
+  snap();
+  const known = allFolders();
+  const folder = known.find(f => f.id === fid);
+  const n = logView.picked.size;
+  if (!folder || !n) return;
+  const { on, changes } = toggleFolder(S.sessions, [...logView.picked], folder);
+  if (!saveFolders(changes, known)) return;
+  toast(on ? `${sessionsWord(n)} in ${folder.name}` : `${sessionsWord(n)} taken out of ${folder.name}`);
+  renderSessions();
+}
+
+/* ── A folder named, renamed or deleted ───────────────────────────────
+   One small form, in the list and on a result, for a new name or a new one
+   for a folder. A folder is never called the same as another, however it is
+   capitalised: two chips both saying "Wells" could not be told apart. */
+let folderEdit = null;   // { where: 'log' | 'res', mode: 'new' | 'rename', id }
+const FOLDER_FORM = {
+  log: { form: 'logFolderForm', input: 'logFolderName', save: 'logFolderSave' },
+  res: { form: 'resFolderForm', input: 'resFolderName', save: 'resFolderSave' },
+};
+
+function openFolderForm(where, mode, id = null) {
+  const f = FOLDER_FORM[where];
+  const was = mode === 'rename' ? allFolders().find(x => x.id === id) : null;
+  if (mode === 'rename' && !was) return;
+  folderEdit = { where, mode, id };
+  if (where === 'log') {
+    const n = logView.picking ? logView.picked.size : 0;
+    $('logFolderLabel').textContent = was ? `A new name for ${was.name}`
+      : n ? `Name the new folder. The ${n === 1 ? 'session' : `${n} sessions`} selected go in it.` : 'Name the new folder';
+  }
+  $(f.save).textContent = was ? 'Rename' : 'Create';
+  $(f.input).value = was?.name ?? '';
+  $(f.form).hidden = false;
+  $(f.input).focus();
+}
+
+function closeFolderForm() {
+  folderEdit = null;
+  for (const f of Object.values(FOLDER_FORM)) $(f.form).hidden = true;
+}
+
+function saveFolderForm(where) {
+  const ed = folderEdit;
+  if (!ed || ed.where !== where) return;
+  const input = $(FOLDER_FORM[where].input);
+  const name = cleanFolderName(input.value);
+  if (!name) { toast('Give the folder a name first.'); input.focus(); return; }
+  snap();
+  const known = allFolders();
+  const sid = $('resFolders').dataset.sid;
+
+  if (ed.mode === 'rename') {
+    const other = folderNamed(known, name, ed.id);
+    if (other) { toast(`There is already a folder called ${other.name}.`); input.focus(); return; }
+    const at = Date.now();
+    const now = known.map(x => (x.id === ed.id ? { ...x, name, at } : x));
+    if (!saveFolders(renameIn(S.sessions, ed.id, name, at), now)) return;
+    toast(`Renamed ${name}`);
+  } else {
+    /* A name already taken files into that folder rather than making a twin. */
+    const had = folderNamed(known, name);
+    const folder = had ?? { id: uid(), name, at: Date.now() };
+    const ids = where === 'res' ? [sid] : logView.picking ? [...logView.picked] : [];
+    const now = had ? known : [...known, folder];
+    if (!saveFolders(putMany(S.sessions, ids, folder), now)) return;
+    const n = ids.filter(Boolean).length;
+    toast(!n ? (had ? `There is already a folder called ${had.name}` : `Folder ${name} made`)
+      : where === 'res' ? `In ${folder.name}` : `${sessionsWord(n)} in ${folder.name}`);
+    /* A folder made empty in the list is shown, waiting for its sessions;
+       not while sessions are being chosen, which it would hide. */
+    if (where === 'log' && !n && !logView.picking) logView.folder = folder.id;
+  }
+  closeFolderForm();
+  if (where === 'res') paintResultFolders(sessionById(sid));
+  else renderSessions();
+}
+
+function deleteFolder(id) {
+  snap();
+  const known = allFolders();
+  const f = known.find(x => x.id === id);
+  if (!f) return;
+  if (!confirm(f.n ? `Delete the folder ${f.name}? The ${sessionsWord(f.n)} in it stay in your log; only the folder goes.`
+    : `Delete the folder ${f.name}?`)) return;
+  if (!saveFolders(dropFrom(S.sessions, id), known.filter(x => x.id !== id))) return;
+  if (logView.folder === id) logView.folder = null;
+  closeFolderForm();
+  toast('Folder deleted. Its sessions are still in the log.');
+  renderSessions();
+}
+
+/* ── Folders on a session's own result ── */
+function paintResultFolders(s) {
+  const all = db.sessions();
+  const kept = s && all.find(x => x.id === s.id);
+  /* A run the phone could not save has nothing to file yet. */
+  $('resFolderBox').hidden = !kept;
+  if (!kept) return;
+  $('resFolders').dataset.sid = kept.id;
+  $('resFolders').innerHTML = folderList(all, heldFolders()).map((f) => {
+    const on = inFolder(kept, f.id);
+    return `<button type="button" class="chip tag${on ? ' selected' : ''}" data-res-folder="${esc(f.id)}" aria-pressed="${on}">${esc(f.name)}</button>`;
+  }).join('') + '<button type="button" class="chip tag ghost" data-res-folder-new>+ New folder</button>';
+}
+
+function fileShown(fid) {
+  snap();
+  const sid = $('resFolders').dataset.sid;
+  const known = allFolders();
+  const folder = known.find(f => f.id === fid);
+  if (!folder || !sid) return;
+  const { on, changes } = toggleFolder(S.sessions, [sid], folder);
+  if (!saveFolders(changes, known)) return;
+  toast(on ? `In ${folder.name}` : `Taken out of ${folder.name}`);
+  paintResultFolders(sessionById(sid));
+}
+
 function openSessionList({ deleting = false } = {}) {
   sessDeleting = deleting;
+  if (deleting) logView.picking = false;
   go('scrSessions');   // go() paints the list
 }
 
@@ -6066,6 +6354,7 @@ function confirmDeleteSession(id) {
   const q = askDelete('session', { row: s, dog: S.dogs.find(d => d.id === s.dogId) ?? null,
     when: fmtWhen(s.startedAt), backedUp: stored && !!sync.user });
   if (!confirm(q)) return false;
+  const folders = allFolders();
   if (stored && !tryDelete(() => db.deleteSession(id))) return false;
   /* A session the phone refused to keep still has its crash copy, and that
      would be offered back at the next launch. It was deleted: it goes too. */
@@ -6075,6 +6364,9 @@ function confirmDeleteSession(id) {
   if (pendingSession?.id === id) pendingSession = null;
   if (shareOutSession?.id === id) shareOutSession = null;
   snap();
+  /* A folder whose last session this was stays, empty, rather than going
+     with it: deleting a session never takes a folder the handler made. */
+  keepHeld(folders);
   toast('Session deleted');
   return true;
 }
@@ -7336,7 +7628,12 @@ function wire() {
   });
 
   $('btnSessBack').addEventListener('click', () => { renderSettings(); leaveForm('scrSettings'); });
-  $('btnSessDelete').addEventListener('click', () => { sessDeleting = !sessDeleting; renderSessions(); });
+  $('btnSessDelete').addEventListener('click', () => {
+    sessDeleting = !sessDeleting;
+    if (sessDeleting) { logView.picking = false; closeFolderForm(); }
+    paintLog();
+  });
+  $('btnSessPick').addEventListener('click', () => setPicking(!logView.picking));
   $('sessionList').addEventListener('click', (e) => {
     /* The Delete button sits inside the card, so it is looked for first:
        a tap on it deletes (after asking) and never also opens the session. */
@@ -7345,9 +7642,64 @@ function wire() {
       if (confirmDeleteSession(del.dataset.delSession)) renderSessions();
       return;
     }
+    const clear = e.target.closest('[data-log-clear]');
+    if (clear) return clearLog(clear.dataset.logClear);
+    // While choosing for a folder, a tap anywhere on a card chooses it.
     const open = e.target.closest('[data-open-session]');
+    if (open && logView.picking) return pickSession(open.dataset.openSession);
     if (open) openSession(open.dataset.openSession);
   });
+  /* Every letter narrows the list at once; the rows are already built. */
+  $('logSearch').addEventListener('input', (e) => { logView.query = e.target.value; paintLog(); });
+  $('logSearch').addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    e.target.blur();          // put the keyboard away and show what was found
+  });
+  $('logSearchClear').addEventListener('click', () => clearLog('search'));
+  /* A chip tapped narrows the list; the same chip tapped again lets it go. */
+  $('logTools').addEventListener('click', (e) => {
+    const d = e.target.closest('[data-log-dog]');
+    if (d) { logView.dog = logView.dog === d.dataset.logDog ? null : d.dataset.logDog; return repaintFrom(d, paintLog); }
+    const h = e.target.closest('[data-log-handler]');
+    if (h) { logView.handler = logView.handler === h.dataset.logHandler ? null : h.dataset.logHandler; return repaintFrom(h, paintLog); }
+    const f = e.target.closest('[data-log-folder]');
+    if (f) {
+      logView.folder = logView.folder === f.dataset.logFolder ? null : f.dataset.logFolder;
+      closeFolderForm();
+      return repaintFrom(f, paintLog);
+    }
+    if (e.target.closest('[data-log-folder-new]')) openFolderForm('log', 'new');
+  });
+  $('logFolderRename').addEventListener('click', () => logView.folder && openFolderForm('log', 'rename', logView.folder));
+  $('logFolderDelete').addEventListener('click', () => logView.folder && deleteFolder(logView.folder));
+  $('logPickAll').addEventListener('click', () => {
+    for (const r of logShown) logView.picked.add(r.s.id);
+    paintLog();
+  });
+  $('logPickNone').addEventListener('click', () => { logView.picked.clear(); paintLog(); });
+  $('logPick').addEventListener('click', (e) => {
+    const f = e.target.closest('[data-sel-folder]');
+    if (f) return repaintFrom(f, () => fileChosen(f.dataset.selFolder));
+    if (e.target.closest('[data-sel-folder-new]')) openFolderForm('log', 'new');
+  });
+  $('resFolderBox').addEventListener('click', (e) => {
+    const f = e.target.closest('[data-res-folder]');
+    if (f) return repaintFrom(f, () => fileShown(f.dataset.resFolder));
+    if (e.target.closest('[data-res-folder-new]')) openFolderForm('res', 'new');
+  });
+  for (const where of ['log', 'res']) {
+    const { input } = FOLDER_FORM[where];
+    $(input).addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      saveFolderForm(where);
+    });
+  }
+  $('logFolderSave').addEventListener('click', () => saveFolderForm('log'));
+  $('resFolderSave').addEventListener('click', () => saveFolderForm('res'));
+  $('logFolderCancel').addEventListener('click', closeFolderForm);
+  $('resFolderCancel').addEventListener('click', closeFolderForm);
 
   // Settings
   $('btnSetDone').addEventListener('click', () => go('scrHome'));

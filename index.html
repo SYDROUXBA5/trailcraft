@@ -505,6 +505,21 @@
     <p class="body" id="resModel"></p>
     <p class="body small muted" id="resStability"></p>
     <p class="body small muted">The wind side and the scent band are estimates from a forecast, not measurements. They suggest an explanation; they do not judge the dog.</p>
+    <!-- The handler's own folders: a lit one holds this session. -->
+    <div id="resFolderBox" hidden>
+      <span class="label">Folders</span>
+      <div class="chip-row" id="resFolders"></div>
+      <div class="folder-form" id="resFolderForm" hidden>
+        <label class="name-field" for="resFolderName">
+          <span class="field-label">Name the new folder. This session goes in it.</span>
+          <input id="resFolderName" type="text" maxlength="40" autocomplete="off" autocapitalize="sentences" enterkeyhint="done" placeholder="e.g. Seminar Wells">
+        </label>
+        <div class="row-gap">
+          <button type="button" class="btn moss small" id="resFolderSave">Create</button>
+          <button type="button" class="btn ghost small" id="resFolderCancel">Cancel</button>
+        </div>
+      </div>
+    </div>
     <div class="page-bottom">
       <button class="btn ember" id="btnScanWalked" hidden>Scan the walked trail card</button>
       <button class="btn moss" id="btnShowMap">Show on map</button>
@@ -643,9 +658,51 @@
   <div class="page">
     <div class="home-head">
       <h1 class="display">Sessions</h1>
-      <button class="btn ghost small" id="btnSessDelete">Delete sessions</button>
+      <div class="head-acts">
+        <button class="btn ghost small" id="btnSessPick">Select</button>
+        <button class="btn ghost small" id="btnSessDelete">Delete sessions</button>
+      </div>
     </div>
     <p class="body small muted" id="sessDeleteNote" hidden>Tap Delete on any session you no longer need. Each one asks first.</p>
+    <!-- Narrowing the list: a search, then the dogs, handlers and folders
+         that have sessions. Drawn by paintLog; hidden while there are none. -->
+    <div class="log-tools" id="logTools">
+      <div class="log-search">
+        <input id="logSearch" type="text" aria-label="Search sessions" placeholder="Search names, dogs, notes" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">
+        <button type="button" class="btn ghost small" id="logSearchClear" hidden>Clear</button>
+      </div>
+      <div id="logDogRow"><span class="label">Dog</span><div class="chip-row" id="logDogs"></div></div>
+      <div id="logHandlerRow"><span class="label">Handler</span><div class="chip-row" id="logHandlers"></div></div>
+      <span class="label">Folders</span>
+      <div class="chip-row" id="logFolders"></div>
+      <div class="row-gap" id="logFolderTools" hidden>
+        <button type="button" class="btn ghost small" id="logFolderRename">Rename folder</button>
+        <button type="button" class="btn ghost small del-link" id="logFolderDelete">Delete folder</button>
+      </div>
+      <div class="folder-form" id="logFolderForm" hidden>
+        <label class="name-field" for="logFolderName">
+          <span class="field-label" id="logFolderLabel">Name the new folder</span>
+          <input id="logFolderName" type="text" maxlength="40" autocomplete="off" autocapitalize="sentences" enterkeyhint="done" placeholder="e.g. Seminar Wells">
+        </label>
+        <div class="row-gap">
+          <button type="button" class="btn moss small" id="logFolderSave">Create</button>
+          <button type="button" class="btn ghost small" id="logFolderCancel">Cancel</button>
+        </div>
+      </div>
+    </div>
+    <!-- Choosing sessions for a folder: Select in the header turns it on. -->
+    <div id="logPickHelp" hidden>
+      <p class="body small muted">Tap sessions to select them, then tap a folder below to put them in it. A lit folder already holds every one selected: tap it to take them out.</p>
+      <div class="row-gap">
+        <button type="button" class="btn ghost small" id="logPickAll">Select all shown</button>
+        <button type="button" class="btn ghost small" id="logPickNone">Select none</button>
+      </div>
+    </div>
+    <div class="log-pick" id="logPick" hidden>
+      <p class="body small" id="logPickCount" role="status"></p>
+      <div class="chip-row" id="logPickFolders"></div>
+    </div>
+    <p class="body small muted" id="logCount" role="status"></p>
     <div id="sessionList" class="recent"></div>
     <div class="page-bottom"><button class="btn ghost" id="btnSessBack">Back</button></div>
   </div>
