@@ -2,10 +2,11 @@
 
    The same app runs three ways: in Safari, as a Home Screen web app, and
    inside a real iOS app (Capacitor wraps this exact code). Only the last can
-   keep recording with the phone in a pocket and the screen dark, or tap the
-   handler's wrist. Not both at once: iOS gives an app with a dark screen no
-   sound, speech or buzz, so the coach's calls need the screen on (app.js
-   holdScreen). This module is the whole of the difference: everything
+   keep recording with the phone in a pocket and the screen dark, tap the
+   handler's wrist, or speak the coach's calls in a downloaded voice with
+   the screen locked. The tones and the buzz still need the screen on: iOS
+   plays a dark app's web sounds and taps for nobody (app.js holdScreen).
+   This module is the whole of the difference: everything
    else in the app asks it "is there a shell?" and carries on the same way
    when the answer is no.
 
@@ -148,3 +149,57 @@ export async function watchHeading(onHeading) {
   };
 }
 
+
+/* ── The coach's voice ───────────────────────────────────────────────
+   Inside the iPhone app the coach speaks through iOS itself (the Speech
+   plugin in ios/App/App/TrailcraftSpeech.swift), not the web view's
+   speechSynthesis, which lists only the voices the phone came with and
+   is silent once the screen goes dark. iOS lists the Premium and Enhanced
+   voices the handler downloaded too, and speaks with the screen locked,
+   dipping the handler's music under the call. Only a plugin the shell
+   really has counts: an app built before it existed has no Speech entry,
+   and there the web view speaks, as it always did. */
+const speech = () => (isNative() ? cap()?.Plugins?.Speech ?? null : null);
+
+/** Can the coach speak through iOS rather than the web view? */
+export const canSpeakNative = () => !!speech()?.speak;
+
+/** Every voice iOS holds, as it describes them: [{ identifier, name,
+    language, quality: 'premium' | 'enhanced' | 'default', novelty }].
+    Null when there is no such engine or it would not answer. */
+export async function nativeVoices() {
+  const S = speech();
+  if (!S?.voices) return null;
+  try {
+    const r = await S.voices();
+    return Array.isArray(r?.voices) ? r.voices : [];
+  } catch { return null; }
+}
+
+/** Say one call now, cutting off the one before. `voice` is a voice's
+    identifier (the coach's voiceURI), `rate` the web's pace, 1 being
+    normal. True once iOS has taken it; false when it could not. */
+export async function speakNative({ text, voice = null, lang = 'en-GB', rate = 1 }) {
+  const S = speech();
+  if (!S?.speak) return false;
+  try {
+    await S.speak({ text, lang, rate, ...(voice ? { voice } : {}) });
+    return true;
+  } catch { return false; }
+}
+
+/** Stop mid-word: the run is over. */
+export async function stopNativeSpeech() {
+  try { await speech()?.stop?.(); } catch { /* nothing was being said */ }
+}
+
+/** Call `fn` when iOS says its voices changed (one finished downloading).
+    Resolves to a function that stops listening, or null. */
+export async function watchNativeVoices(fn) {
+  const S = speech();
+  if (!S?.addListener) return null;
+  try {
+    const sub = await S.addListener('voicesChanged', () => fn());
+    return () => { try { sub?.remove?.(); } catch { /* already gone */ } };
+  } catch { return null; }
+}
