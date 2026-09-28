@@ -548,6 +548,15 @@ t('the session list deletes from a card without opening it, only once Delete ses
   assert.ok(handler.indexOf('[data-del-session]') > 0 && handler.indexOf('[data-del-session]') < handler.indexOf('[data-open-session]'),
     'the Delete inside a card is looked for before the card itself');
   assert.match(handler, /if \(confirmDeleteSession\(del\.dataset\.delSession\)\) renderSessions\(\);\s*return;/);
+  /* Replay, too, is a button inside the card: it opens the replay, not the card. */
+  assert.ok(handler.indexOf('[data-replay-session]') > 0 && handler.indexOf('[data-replay-session]') < handler.indexOf('[data-open-session]'));
+  assert.match(bodyOf('sessionCard'), /const rep = replay && s\.data\?\.track\?\.length > 1/, 'only a run with a track has one');
+  assert.match(bodyOf('logCard'), /sessionCard\(r\.s, \{ body: r\.body, del: mode === 'del', replay: true \}\)/, 'every card in the list, deleting or not');
+  assert.ok(!/replay: true/.test(bodyOf('renderHome')), 'home is not where runs are watched again');
+  // The replay opened from the list is that run's, and Done goes back to the list.
+  assert.match(bodyOf('replaySession'), /if \(s\.data\.result\) run\.session = s; else pendingSession = s;\s*openReplay\(s\);/);
+  assert.match(bodyOf('openReplay'), /replay\.back = currentScreen;/);
+  assert.match(js, /\$\('repBack'\)\.addEventListener\('click', \(\) => \{ const back = replay\.back; closeReplay\(\); leaveForm\(back \|\| 'scrResult'\); \}\);/);
   // Filters narrow what is built; only a change to the sessions builds it again.
   assert.match(bodyOf('renderSessions'), /logIx = \{ rows: logRows\(all, peopleFor\)/);
   assert.ok(!/logRows\(/.test(bodyOf('paintLog')), 'a search or a filter does not build the rows again');
@@ -861,7 +870,7 @@ t('a folder is kept on the sessions in it, and an empty one on this phone alone'
 
 t('record ids from the cloud are escaped wherever they go into markup', () => {
   const attrs = ['data-handler', 'data-dog', 'data-layer', 'data-open-session', 'data-del-session', 'data-run-session',
-    'data-sel-session', 'data-log-dog', 'data-log-handler', 'data-log-folder', 'data-sel-folder', 'data-res-folder',
+    'data-replay-session', 'data-sel-session', 'data-log-dog', 'data-log-handler', 'data-log-folder', 'data-sel-folder', 'data-res-folder',
     'data-dog-card', 'data-edit-handler', 'data-edit-layer', 'data-add-dog-for', '<option value'];
   let seen = 0;
   for (const a of attrs) {

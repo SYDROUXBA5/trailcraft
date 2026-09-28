@@ -1502,15 +1502,17 @@ function renderHome() {
 
 /* `del` is the session list with Delete sessions turned on: each card gains
    its own Delete button. Home never has one; it is not where records are kept.
-   While sessions are being chosen for a folder, each has a Select that says
-   whether it is (`pick`).
+   The session list also gives a run its Replay (`replay`), and while sessions
+   are being chosen for a folder, a Select that says whether it is (`pick`).
    `body` is the card's words, already written: the list builds them once
    each time the sessions change, not again for every letter of a search. */
-function sessionCard(s, { del = false, pick = null, body = null } = {}) {
+function sessionCard(s, { del = false, replay = false, pick = null, body = null } = {}) {
+  const rep = replay && s.data?.track?.length > 1
+    ? `<button type="button" class="btn ghost small" data-replay-session="${esc(s.id)}">Replay</button>` : '';
   return `<div class="card${pick ? ' picked' : ''}" data-open-session="${esc(s.id)}">
     ${body ?? cardBody(s)}
     ${pick != null ? `<button type="button" class="chip tag pick-chip${pick ? ' selected' : ''}" data-sel-session="${esc(s.id)}" aria-pressed="${pick}">Select</button>` : ''}
-    ${del ? `<button type="button" class="btn ghost small del-link" data-del-session="${esc(s.id)}">Delete</button>` : ''}
+    ${rep || del ? `<div class="card-acts">${rep}${del ? `<button type="button" class="btn ghost small del-link" data-del-session="${esc(s.id)}">Delete</button>` : ''}</div>` : ''}
   </div>`;
 }
 
@@ -2963,7 +2965,7 @@ function paintDebriefBlock(s) {
    clock, not the real one" since it was written. Nothing had ever passed it
    one. Here that argument finally gets used: plume.clock overrides
    Date.now(), and scrubbing is simply setting it. */
-const replay = { s: null, from: 0, to: 0, at: 0, playing: false, speed: 4, raf: 0, last: 0 };
+const replay = { s: null, from: 0, to: 0, at: 0, playing: false, speed: 4, raf: 0, last: 0, back: null };
 const REPLAY_SPEEDS = [1, 4, 10, 30];
 
 function openReplay(s) {
@@ -2991,6 +2993,11 @@ function openReplay(s) {
   }
   // Only once the map is drawn, so a replay that fails to open is not left half open.
   replay.s = s;
+  /* Opened from its result or straight from the session list: Done goes back
+     to whichever it was. A run the phone never finished grading has no
+     result for a debrief to sit beside, so it is only watched. */
+  replay.back = currentScreen;
+  $('repDebrief').hidden = !s.data.result;
   $('repSpeed').textContent = `${replay.speed}×`;
 
   go('scrReplay');
@@ -6138,7 +6145,7 @@ function paintLog() {
 function logCard(r, mode) {
   if (!r.body) r.body = cardBody(r.s, logIx.names);
   if (mode === 'pick') return sessionCard(r.s, { body: r.body, pick: logView.picked.has(r.s.id) });
-  return sessionCard(r.s, { body: r.body, del: mode === 'del' });
+  return sessionCard(r.s, { body: r.body, del: mode === 'del', replay: true });
 }
 
 /* Nothing left once the list is narrowed: say why, and offer the way back. */
@@ -6324,6 +6331,16 @@ function openSessionList({ deleting = false } = {}) {
   sessDeleting = deleting;
   if (deleting) logView.picking = false;
   go('scrSessions');   // go() paints the list
+}
+
+/** A run's replay, straight from its card in the list. The run becomes the
+    one on screen, exactly as opening it would make it, so the replay's
+    Debrief and whatever follows are about this run and no other. */
+function replaySession(id) {
+  const s = db.sessions().find(x => x.id === id);
+  if (!s) return;
+  if (s.data.result) run.session = s; else pendingSession = s;
+  openReplay(s);
 }
 
 /* ── Deleting ─────────────────────────────────────────────────────────
@@ -7642,6 +7659,9 @@ function wire() {
       if (confirmDeleteSession(del.dataset.delSession)) renderSessions();
       return;
     }
+    // Replay too: it opens the run's replay, not the card.
+    const rep = e.target.closest('[data-replay-session]');
+    if (rep) return replaySession(rep.dataset.replaySession);
     const clear = e.target.closest('[data-log-clear]');
     if (clear) return clearLog(clear.dataset.logClear);
     // While choosing for a folder, a tap anywhere on a card chooses it.
@@ -7713,7 +7733,15 @@ function wire() {
      is the whole point: the picture must move under the finger. */
   $('btnReplay').addEventListener('click', () => openReplay(run.session ?? pendingSession));
   $('btnDebrief').addEventListener('click', () => openDebrief(run.session ?? pendingSession));
-  $('repDebrief').addEventListener('click', () => { const s = replay.s; closeReplay(); openDebrief(s); });
+  /* From the session list, the run's result is put under the debrief first,
+     so Save or Not now lands on it as it does from the result, and the arrow
+     there leads back to the list rather than into the closed debrief. */
+  $('repDebrief').addEventListener('click', () => {
+    const s = replay.s, back = replay.back;
+    closeReplay();
+    if (back && back !== 'scrResult' && s?.data?.result) { renderResult(s); go('scrResult'); }
+    openDebrief(s);
+  });
   $('dbSave').addEventListener('click', saveDebrief);
   $('dbCancel').addEventListener('click', () => {
     if (dbDraft && debriefWind(dbFor)) toast('Grading it again in the wind you felt…');
@@ -7753,7 +7781,7 @@ function wire() {
       return repaintFrom(tag, paintDebrief);
     }
   });
-  $('repBack').addEventListener('click', () => { closeReplay(); leaveForm('scrResult'); });
+  $('repBack').addEventListener('click', () => { const back = replay.back; closeReplay(); leaveForm(back || 'scrResult'); });
   $('repPlay').addEventListener('click', () => (replay.playing ? replayPause() : replayPlay()));
   $('repSpeed').addEventListener('click', () => {
     const i = (REPLAY_SPEEDS.indexOf(replay.speed) + 1) % REPLAY_SPEEDS.length;

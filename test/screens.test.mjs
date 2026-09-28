@@ -200,6 +200,31 @@ await t('Done on a replay, Cancel on a correction, Back from sharing: the arrow 
   }
 });
 
+await t('a replay opened from the session list goes back to the list, and its debrief lands on the run', () => {
+  /* Replay on a card in the list opens the replay straight away. Done there
+     went to the result page it never came from; and a debrief written from it
+     returned to a result nobody had drawn, with the arrow leading back into
+     the closed debrief. */
+  const atList = () => { const a = app(); a.go('scrHome'); a.go('scrSettings'); a.go('scrSessions'); return a; };
+  let a = atList();
+  a.go('scrReplay');
+  Object.assign(a.sb.replay, { s: { id: 's1', data: { result: {} } }, back: 'scrSessions' });
+  a.click('repBack');
+  assert.equal(a.where(), 'scrSessions', 'Done returns to the list');
+  a.arrow();
+  assert.equal(a.where(), 'scrSettings');
+
+  a = atList();
+  a.go('scrReplay');
+  Object.assign(a.sb.replay, { s: { id: 's1', data: { result: {} } }, back: 'scrSessions' });
+  a.click('repDebrief');
+  assert.equal(a.where(), 'scrDebrief');
+  a.click('dbCancel');
+  assert.equal(a.where(), 'scrResult', 'the run’s own result, under the debrief');
+  a.arrow();
+  assert.equal(a.where(), 'scrSessions', 'and the arrow there goes back to the list, not into the debrief');
+});
+
 await t('Back from the session list, Keep my account, and Not now on sign-in: one press of the arrow goes home', () => {
   for (const [enter, close] of [['scrSessions', 'btnSessBack'], ['scrDelete', 'btnDeleteCancel'], ['scrSignIn', 'btnSkipSignIn']]) {
     const a = app();
