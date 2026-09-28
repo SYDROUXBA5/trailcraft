@@ -98,7 +98,19 @@ function withMissing(win, lose) {
      session went straight back into the folder it was taken out of. A copy
      with no list at all (an older build) still takes the other's. */
   const filed = plainObject(win.data) && 'folders' in win.data;
-  if (plainObject(lose.data)) fill(data, lose.data, (k) => cloudless(k) || (graded && k === 'windFelt') || (filed && k === 'folders'));
+  if (plainObject(lose.data)) fill(data, lose.data, (k) => cloudless(k) || (graded && k === 'windFelt') || (filed && (k === 'folders' || k === 'foldersAt')));
+  /* When both copies carry a list, the one changed last is the list, however
+     new the rest of either copy is. The folders are saved with their own
+     time (foldersAt) for this: otherwise a phone that had not heard of a
+     folder deleted, renamed or filed on the other, and then saved a debrief,
+     was the newer copy, and put the old list back on both. A list with no
+     time was saved before lists had one, and goes as the whole copy does. */
+  const filedAt = (r) => (Number.isFinite(r?.data?.foldersAt) ? r.data.foldersAt : 0);
+  if (filed && plainObject(lose.data) && Array.isArray(lose.data.folders) && filedAt(lose) > filedAt(win)) {
+    data.folders = lose.data.folders;
+    data.foldersAt = lose.data.foldersAt;
+    added++;
+  }
   if (plainObject(win.data) || plainObject(lose.data)) out.data = data;
   return added ? out : null;
 }
