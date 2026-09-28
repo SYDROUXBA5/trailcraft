@@ -5,7 +5,7 @@
    Mirrors the native app's store (trailcraft-native/src/store/db.ts) so the
    two stay one product: same tables, same remembered choices, same wording. */
 
-import { pathLen } from './geo.js';
+import { pathLen, densify, simplify, timestampsEndingAt } from './geo.js';
 import { visible, tombstone, pruneTombstones, RUN_FIELDS } from './sync-core.js';
 import { makeBackup, planRestore, BACKUP_FLAGS } from './backup.js';
 import { unwalkedPlan, trailShown, ranBlind } from './debrief.js';
@@ -125,6 +125,79 @@ export function runAgain(s, { id, summary }) {
   if (data.plan && !data.planOf && s?.id) data.planOf = s.id;
   const { updatedAt, deleted, ...rest } = s || {};
   return { ...rest, id, dogId: null, summary, data };
+}
+
+/* ── Plans, and a route laid again ────────────────────────────────────
+   A plan is a trail drawn before it is walked: the handler taps its corners,
+   the layer's phone walks them along it, and the walked card comes back as
+   the truth. A trail already laid and run can be laid again as a plan on
+   another day, for another dog: the same route, and nothing else. */
+
+/** A plan from its corners. The line through them is timed as if it had
+    just been walked, finishing `now`: a trail that has just been drawn is a
+    trail that has just been LAID, ending where the layer now stands. Timed
+    from the start instead, most of the line sat in the future — ground with
+    no scent on it yet — and the plume crept along it at walking pace rather
+    than simply being there. The times are provisional either way; the real
+    ones arrive with the walked card. `fromSession` is the trail whose route
+    this is, when it is one laid again. */
+export function planSession({ id, handlerId, layerId = null, corners, ageMin, now, summary, fromSession = null, name = '' }) {
+  const trail = timestampsEndingAt(densify(corners, 5), now, 1.3);
+  const data = { plan: true, ageMin, corners, trail, waypoints: [], weather: null, contamination: [] };
+  if (fromSession) data.fromSession = fromSession;
+  return { id, handlerId, dogId: null, layerId, targetId: 'person', startedAt: trail[0].t, summary,
+    ...(name ? { name } : {}), data };
+}
+
+/* A walked line carries a fix every couple of metres, wobbling with the GPS.
+   As a plan it is thinned to its corners: every fix dropped lies within the
+   tolerance of the line that is kept (simplify in geo.js), so a real corner
+   survives and the wobble does not. A long, twisting trail can still leave
+   more corners than anyone wants numbered on a map, so the tolerance grows a
+   step at a time, never past the width of a lane. */
+export const ROUTE_TOLS_M = [5, 8, 12];
+export const ROUTE_MAX_CORNERS = 40;
+
+const onEarth = (p) => Number.isFinite(p?.lat) && Number.isFinite(p?.lon);
+const latLon = (p) => ({ lat: p.lat, lon: p.lon });
+
+/** Whether a session's route can be laid again: a trail, not a hide search,
+    with a line to follow. Cheap, because the session list asks it of every
+    card each time a letter is typed into its search. */
+export const canLayAgain = (s) => !!s?.data && !s.deleted && targetById(s.targetId).kind === 'person'
+  && !s.data.hides?.length && Array.isArray(s.data.trail) && s.data.trail.length > 1;
+
+/** The corners of the route a trail was laid on, as a drawn plan holds them:
+    `{ lat, lon }` and nothing else, so no time, accuracy or height from the
+    first lay rides along. A plan nobody walked is exactly the corners that
+    were drawn. Anything walked is its walked line, thinned. */
+export function routeCorners(s) {
+  const d = s?.data;
+  if (!d) return [];
+  if (d.plan && !d.walked && Array.isArray(d.corners) && d.corners.filter(onEarth).length > 1) {
+    return d.corners.filter(onEarth).map(latLon);
+  }
+  const line = Array.isArray(d.trail) ? d.trail.filter(onEarth) : [];
+  if (line.length < 2) return [];
+  let pts = line;
+  for (const tol of ROUTE_TOLS_M) {
+    pts = simplify(line, tol);
+    if (pts.length <= ROUTE_MAX_CORNERS) break;
+  }
+  return pts.map(latLon);
+}
+
+/** What laying a trail's route again takes from it: the corners, which
+    trail they came from, and its name, because the route is what the name
+    was for. Not the dog, the run, its weather, the wind felt, the debrief,
+    the folders it was filed in, its hides or contamination: the new lay is
+    a new session, and those belonged to the day it was first laid. Null
+    when there is no route to lay. */
+export function routeOf(s) {
+  if (!canLayAgain(s)) return null;
+  const corners = routeCorners(s);
+  if (corners.length < 2 || pathLen(corners) < 1) return null;
+  return { corners, fromSession: s.id, name: typeof s.name === 'string' ? s.name : '' };
 }
 
 /* ── Search results written back to front ─────────────────────────────

@@ -594,6 +594,14 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.75; cursor: p
 }
 .age-chip:active { transform: scale(0.95); }
 .age-chip.selected { background: var(--moss); border-color: var(--moss); color: #fff; }
+/* A route laid again names who lays and runs it; changing them is a small
+   aside beside that sentence, not a second big button under Confirm. */
+.draw-who { gap: 6px; }
+.draw-who .body { overflow-wrap: anywhere; }
+.draw-who .btn { align-self: flex-start; }
+/* Confirm waits for somebody to lay it; it has to look as if it is waiting. */
+#scrDraw .btn:disabled { opacity: 0.45; cursor: default; }
+#scrDraw .btn:disabled:active { transform: none; filter: none; }
 
 /* The two countdown screens borrow the tutorial's deep moss: the biggest,
    most legible thing a phone can show across a field in full sun. */
