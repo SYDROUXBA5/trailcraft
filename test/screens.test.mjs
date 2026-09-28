@@ -480,27 +480,70 @@ await t('in the app a spoken call is said live with the screen dark; one with no
 });
 
 /* iOS takes a call but cannot play it while a phone call or Siri has the
-   sound. Taken as said, the coach went quiet with the handler none the wiser;
-   now it is counted with the calls the dark screen swallowed. */
-await t('a call iOS could not play is counted as missed, not as said', async () => {
+   sound. Taken as said, the coach went quiet with the handler none the wiser.
+   Counted with the dark screen's calls, it was still never said while the app
+   stayed on screen (back in Trailcraft during a phone call to watch the map,
+   or Siri up over it), and was later blamed on a dark screen. Now it is said
+   at once on screen, and in the dark it is counted and said with its cause. */
+await t('a call iOS could not play is said at once on screen, and with its own cause after the dark', async () => {
+  const toasts = [], listeners = [];
   const sb = {
-    isNative: () => true, coach: { on: true, missed: 0, sounds: null }, settings: { coachVoice: true }, BUZZ: {},
-    document: { visibilityState: 'hidden' }, navigator: { language: 'en-GB' }, haptic() {}, imp: () => false,
+    isNative: () => true, coach: { on: true, missed: 0, unheard: 0, sounds: null }, settings: { coachVoice: true }, BUZZ: {},
+    document: { visibilityState: 'hidden', addEventListener: (type, f) => listeners.push([type, f]) },
+    navigator: { language: 'en-GB' }, haptic() {}, imp: () => false, holdScreen() {}, toast: (m) => toasts.push(m),
     coachPhrase: (a) => a.kind, setTimeout: (f) => f(), clearTimeout() {}, voiceCache: { native: true },
     pickVoice: () => null, voiceList: () => [], speechLang: () => 'en-GB', webSpeak() { sb.web = true; },
     answer: true, speakNative: async () => sb.answer,
   };
   vm.createContext(sb);
   const dark = js.split('\n').find(l => l.startsWith('const speaksInTheDark = '));
-  vm.runInContext([dark, decl('function coachSpeak('), decl('function coachDeliver(')].join('\n'), sb);
+  const why = js.split('\n').find(l => l.startsWith('const COACH_UNHEARD = '));
+  assert.ok(why, 'app.js still names why a call went unheard');
+  const head = "document.addEventListener('visibilitychange', ";
+  const at = js.indexOf(`${head}() => {\n  if (document.visibilityState !== 'visible') return;\n  holdScreen();`);
+  vm.runInContext([dark, why, decl('function coachSpeak('), decl('function coachDeliver('),
+    `${head}${argFn(head, at)});`].join('\n'), sb);
+  const [[, back]] = listeners;
   const settle = () => new Promise((r) => setImmediate(r));
+
+  // On screen: told straight away, nothing left to count.
+  sb.document.visibilityState = 'visible';
+  sb.answer = 'unheard';
   sb.coachDeliver({ kind: 'off' });
   await settle();
-  assert.equal(sb.coach.missed, 0, 'heard');
+  assert.deepEqual(toasts, ['The phone would not let the coach speak (a phone call or Siri)'], 'said while the app is on screen');
+  assert.equal(sb.coach.missed + sb.coach.unheard, 0, 'and not held for a dark screen that may never come');
+  back();
+  assert.equal(toasts.length, 1, 'nor blamed on a dark screen later');
+
+  // In the dark: counted apart, and said with its cause once the screen is back.
+  toasts.length = 0;
+  sb.document.visibilityState = 'hidden';
+  sb.answer = true;
+  sb.coachDeliver({ kind: 'off' });
+  await settle();
+  assert.equal(sb.coach.unheard, 0, 'heard');
   sb.answer = 'unheard';
   sb.coachDeliver({ kind: 'still' });
+  sb.coachDeliver({ kind: 'back' });
   await settle();
-  assert.equal(sb.coach.missed, 1, 'taken by iOS but not heard: missed, and said once the handler is back');
+  assert.equal(sb.coach.unheard, 2, 'taken by iOS but not heard');
+  assert.equal(sb.coach.missed, 0, 'not what the dark screen swallowed');
+  assert.equal(toasts.length, 0, 'nobody to tell yet');
+  sb.coachDeliver({ kind: 'edge' });
+  assert.equal(sb.coach.missed, 1, 'the edge is a tone, and that is the dark screen');
+  sb.document.visibilityState = 'visible';
+  back();
+  assert.deepEqual(toasts, ['The screen was dark, so 1 coach call could not play. '
+    + 'The phone would not let the coach speak (a phone call or Siri), so 2 coach calls went unheard']);
+  assert.equal(sb.coach.missed + sb.coach.unheard, 0, 'said once');
+
+  sb.coach.on = false;
+  sb.coachDeliver({ kind: 'off' });
+  await settle();
+  assert.equal(toasts.length, 1, 'a call that comes back after Stop says nothing');
+  sb.coach.on = true;
+
   assert.equal(sb.voiceCache.native, true, 'and not a refusal: iOS keeps the voice');
   assert.ok(!sb.web, 'the web view does not take over');
   sb.answer = false;

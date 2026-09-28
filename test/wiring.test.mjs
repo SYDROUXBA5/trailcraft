@@ -138,6 +138,18 @@ t('no debug probe is left in the app', () => {
   }
 });
 
+/* The iOS app still installs on iOS 15.0, whose WebKit has no Array .at or
+   findLast (they came in 15.4). One `.at(-1)` at the top of store.js threw as
+   it loaded, app.js could not import it, and the app started blank. The
+   map's own view.at(point) is not an array, so only a number is caught. */
+t('nothing in the app leans on Array .at or findLast', () => {
+  for (const f of readdirSync(new URL('../public/', import.meta.url)).filter(x => x.endsWith('.js') && x !== 'token.js')) {
+    const src = readFileSync(new URL(`../public/${f}`, import.meta.url), 'utf8');
+    assert.ok(!/\.at\(\s*-?\d/.test(src), `${f} indexes an array with .at(), missing before iOS 15.4`);
+    assert.ok(!/\.findLast(Index)?\s*\(/.test(src), `${f} uses findLast, missing before iOS 15.4`);
+  }
+});
+
 /* Nothing else parses the app's own files: a duplicate `const` shipped a blank
    page once, caught only by eye. Node checks each module's syntax here. */
 t('every script in public/ parses as a module', () => {

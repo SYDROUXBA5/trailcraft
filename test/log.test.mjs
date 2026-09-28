@@ -13,7 +13,7 @@ import { readFileSync } from 'node:fs';
 import { fold, searchWords, dayGroup, groupRows, logRows, facets, filterRows,
          foldersOf, inFolder, folderList, folderNamed, cleanFolderName, FOLDER_NAME_MAX,
          putIn, takeOut, putMany, toggleFolder, renameIn, dropFrom, emptyHeld,
-         runAt, midnight, folderPatch, mergeFolders } from '../public/log.js';
+         runAt, recentRuns, midnight, folderPatch, mergeFolders } from '../public/log.js';
 import { createStore, runAgain } from '../public/store.js';
 import { mergeOne, mergeRecords } from '../public/sync-core.js';
 import { readBackup, planRestore } from '../public/backup.js';
@@ -321,6 +321,26 @@ t('a trail is listed on the day it was run, however long it was aged', () => {
   // The card shows the same time as the heading it sits under.
   const js = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8');
   assert.match(js, /<div class="meta"><span>\$\{fmtWhen\(runAt\(s\) \?\? s\.startedAt\)\}<\/span>/);
+});
+
+t('Home’s recent cards are the latest runs, in the order their times say', () => {
+  /* Seven trails laid today, and one laid last week run again this
+     afternoon. The store keeps them by when they were laid, so the first six
+     it holds left the run of an hour ago off Home, and put its time among
+     cards laid earlier in the day. */
+  const today = Array.from({ length: 7 }, (_, k) => sess(`t${k}`, NOW - (k + 2) * 3600e3));
+  const old = { ...sess('old', at(2026, 9, 21, 9)), data: { trackStarted: at(2026, 9, 21, 10) } };
+  const again = runAgain(old, { id: 'again', summary: '' });
+  again.data.trackStarted = NOW - 3600e3;
+  const store = [...today, again, old].sort((a, b) => b.startedAt - a.startedAt);
+  assert.ok(!store.slice(0, 6).includes(again), 'laid last week, so not among the six the store holds first');
+  const got = recentRuns(store, 6);
+  assert.deepEqual(got.map(s => s.id), ['again', 't0', 't1', 't2', 't3', 't4']);
+  for (let i = 1; i < got.length; i++) assert.ok(runAt(got[i - 1]) >= runAt(got[i]), 'newest run first');
+  assert.deepEqual(recentRuns([null, { data: {} }, today[0]], 6).map(s => s.id), ['t0', undefined], 'undated last');
+  assert.deepEqual(recentRuns(undefined, 6), []);
+  const js = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8');
+  assert.match(js, /const recent = recentRuns\(S\.sessions, 6\);/, 'Home takes them this way');
 });
 
 /* ── Folders changed on one phone, something else on the other ─────── */

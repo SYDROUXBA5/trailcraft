@@ -77,8 +77,9 @@ t('a long wobbly trail is thinned harder, but never past a lane’s width', () =
   assert.ok(got.length <= ROUTE_MAX_CORNERS, `${got.length} corners`);
   assert.ok(nearest(got, turn) < 8, 'the real corner is still there');
 
-  /* A trail that really does turn sixty times keeps every turn: no coarser
-     tolerance brings it under the cap, so none is taken. */
+  /* A trail that really does turn sixty times keeps every turn: it is over
+     the cap at every step, so the coarsest is taken, and a turn of 40 m legs
+     is far sharper than that. */
   const legs = Array.from({ length: 60 }, (_, k) => [k % 2 ? 135 : 45, 40]);
   const zig = walked(legs, { wob: 1 });
   const all = routeCorners({ targetId: 'person', data: { trail: zig.line } });
@@ -214,20 +215,33 @@ t('a double-back that carries on along the same line stays in the route', () => 
   assert.equal(routeCorners({ targetId: 'person', data: { trail: walked([[0, 200]], { wob: 1.5 }).line } }).length, 2);
 });
 
-t('more real turns than the cap: no coarser tolerance is taken, so a short jog stays', () => {
-  /* Fifty 40 m legs, and halfway along one of them a 9 m step out to the
-     side and back: kept at 5 m, gone at 12 m. Every step leaves more than
-     forty corners, so thinning harder would lose the jog and still not
-     reach the cap. */
-  const legs = Array.from({ length: 50 }, (_, k) => [k % 2 ? 135 : 45, 40]);
-  legs.splice(25, 1, [135, 20], [45, 9], [225, 9], [135, 20]);
-  const zig = walked(legs, { wob: 1 });
-  const tip = zig.corners[27];
-  assert.ok(simplify(zig.line, 12).length > ROUTE_MAX_CORNERS, 'over the cap at every step');
-  assert.ok(nearest(simplify(zig.line, 12), tip) > 5, 'the jog goes at 12 m');
-  const got = routeCorners({ targetId: 'person', data: { trail: zig.line } });
-  assert.ok(nearest(got, tip) < 4, 'the jog is kept');
-  assert.equal(got.length, simplify(zig.line, ROUTE_TOLS_M[0], { turns: true }).length, 'the 5 m thinning, as it was');
+t('over the cap at every step: the coarsest thinning is kept, not the GPS wander', () => {
+  /* Five kilometres with a real turn every 100 m, a fix every 2 m, and the
+     slow, drifting wobble a phone gives under trees (about 4 m, each fix
+     close to the last). Even at 12 m it has more than forty corners. The
+     5 m thinning keeps well over a hundred, most of them the drift; taking
+     it laid the route again as a zig-zag of the first day's GPS. Seeded, so
+     the test says the same thing every run. */
+  let seed = 1;
+  const rnd = () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32;
+  const line = [], turns = [];
+  let at = { ...A }, brg = 0, nx = 0, ny = 0;
+  for (let d = 0; d < 5000; d += 2) {
+    if (d && d % 100 === 0) { turns.push({ ...at }); brg += (rnd() < 0.5 ? -1 : 1) * (30 + 60 * rnd()); }
+    nx = 0.95 * nx + 2.16 * (rnd() * 2 - 1);
+    ny = 0.95 * ny + 2.16 * (rnd() * 2 - 1);
+    line.push(project(project(at, 90, nx), 0, ny));
+    at = project(at, brg, 2);
+  }
+  line.push({ ...at });
+  const at5 = simplify(line, ROUTE_TOLS_M[0], { turns: true });
+  const at12 = simplify(line, 12, { turns: true });
+  assert.ok(at12.length > ROUTE_MAX_CORNERS, `over the cap even at 12 m (${at12.length})`);
+  const got = routeCorners({ targetId: 'person', data: { trail: line } });
+  assert.equal(got.length, at12.length, 'the coarsest thinning');
+  assert.ok(got.length * 2 < at5.length, `${got.length} corners, not the ${at5.length} the drift makes at 5 m`);
+  const kept = turns.filter(p => nearest(got, p) < 10).length;
+  assert.ok(kept >= 0.85 * turns.length, `the real turns stay (${kept} of ${turns.length})`);
 });
 
 t('Lay this route again is offered exactly when there is a route to lay', () => {
@@ -262,6 +276,10 @@ t('a route laid again is not called a line the handler drew', () => {
     'no screen words say "the line you drew" of every plan');
   assert.match(js, /Graded against \$\{planLine\(s\)\}, not the walk itself/);
   assert.match(js, /off \$\{planLine\(s\)\}, and as much as/);
+  /* A walk that kept close to the route said "It followed that route
+     closely" straight after naming only the walk. */
+  assert.match(js, /It followed \$\{planLine\(s\)\} closely\./);
+  assert.ok(!/It followed \$\{s\.data\.fromSession/.test(js), 'the close walk names the route too');
   assert.match(js, /s\.data\?\.fromSession \? 'the route laid again' : 'the plan drawn'/);
 });
 
