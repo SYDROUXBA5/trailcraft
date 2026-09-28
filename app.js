@@ -35,11 +35,13 @@ import { trailModel, encodeShared, decodeShared, sharedUrl, toGpx, fileBase,
          resultSentence, sessionFromModel, keptSession, peopleOf } from './share.js';
 import { buildPdf, jpegSize } from './pdf.js';
 import { coachStep, initialCoach, coachPhrase, coachLine, TOL_OPTIONS, COACH_DEFAULTS,
-         rankVoices, pickVoice, voiceQuality, voiceLabel, voiceRate, voiceName, voiceAccent, voiceHint, speaksThroughWebKit, speechLang, SAMPLE_CALL } from './coach.js';
+         rankVoices, pickVoice, voiceQuality, voiceLabel, voiceRate, voiceName, voiceAccent, voiceHint, speaksThroughWebKit, speechLang, SAMPLE_CALL,
+         fromNativeVoice } from './coach.js';
 import { DEBRIEF, FLAGS, NOTE_TAGS, blankDebrief, debriefDone, debriefLine, labelOf, ownRun, stickyDebrief,
          unwalkedPlan, trailShown, ranBlind } from './debrief.js';
 import { CONFIDENCE, stampCall, confidenceOf, firstCall, firstCallWasFind, calibration, calibrationLine, callVerdict, runsOf } from './call.js';
-import { isNative, watchBackground, canHaptic, haptic, watchHeading, shareFile } from './native.js';
+import { isNative, watchBackground, canHaptic, haptic, watchHeading, shareFile,
+         canSpeakNative, nativeVoices, speakNative, stopNativeSpeech, watchNativeVoices } from './native.js';
 import { readBackup, restoreChanges, restoreQuestion, restoreNothing, BACKUP_MAX_BYTES } from './backup.js';
 import { checkAuthFields, AUTH_MIN_PASSWORD } from './sync-core.js';
 import { createStore, migrateV1, TARGETS, ODOURS, targetById, targetText, verbs, uid,
@@ -3503,8 +3505,9 @@ async function startWatch(hudId) {
   headingStart({ gesture: true });   // still inside the tap that started this, which is when an iPhone browser allows the ask
   /* Inside the iOS app the shell records in the background: the phone can
      go in a pocket with the screen dark and every fix still arrives. The
-     coach's calls do not: iOS plays no sound, speech or buzz for an app
-     with a dark screen, so a coached run says so instead of "pocket". */
+     coach's tones and buzzes do not: iOS plays nothing from a dark app's
+     web view, so a coached run says so instead of "pocket". Its spoken
+     calls do, when the app speaks through iOS (speaksInTheDark). */
   if (isNative()) {
     locateStop();
     rec.on = true; rec.pts = []; rec.dropped = 0; rec.droppedAt = 0; rec.blocked = false; rec.started = Date.now();
@@ -3515,7 +3518,9 @@ async function startWatch(hudId) {
           if (e?.code === 'NOT_AUTHORIZED') rec.blocked = true;
           toast(e?.code === 'NOT_AUTHORIZED' ? 'Location is off for Trailcraft — allow it in Settings' : 'GPS error');
         },
-        { message: coach.on && rec.kind === 'run' ? 'Recording. Coach calls need the screen on' : 'Recording — the phone can go in your pocket' });
+        { message: coach.on && rec.kind === 'run'
+            ? (speaksInTheDark() ? 'Recording. The coach still speaks with the phone locked' : 'Recording. Coach calls need the screen on')
+            : 'Recording — the phone can go in your pocket' });
     } catch { rec.bg = null; }
     if (!rec.bg) { rec.on = false; toast('Could not start GPS'); return false; }
     holdScreen();               // only while the coach is on (holdScreen)
@@ -3553,9 +3558,12 @@ async function startWatch(hudId) {
    page is hidden (the camera, a call, another app) and never takes it back by
    itself, so it is asked for again each time the page comes back. Inside the
    iOS app the shell records with the screen dark, so there it is held only
-   while the coach is on for a run, whose calls cannot play in the dark. A
-   lay or a walk goes in the pocket whatever the coach was left at. Where the
-   app's web view has no such hold, the coach's own note says to keep it awake. */
+   while the coach is on for a run, whose tones and buzzes cannot play in the
+   dark. Its spoken calls can, when the app speaks through iOS, so there the
+   note says the handler may lock the phone: the hold keeps the screen from
+   going off by itself, never from being locked. A lay or a walk goes in the
+   pocket whatever the coach was left at. Where the app's web view has no
+   such hold, the coach's own note says what plays with the screen dark. */
 async function holdScreen() {
   if ((isNative() && !(coach.on && rec.kind === 'run')) || !rec.on || rec.lock || document.visibilityState !== 'visible') return;
   try {
@@ -4645,7 +4653,8 @@ async function startRun(s) {
   weatherPanelFor(s, run.startedAt);
   terrainFor(s.data.trail || s.data.hides || []).then(T => { air.T = T; }).catch(() => {});
   $('runHudText').textContent = hudText();
-  toast(isNative() && coach.on ? 'Coach on. Its calls only play while the screen is on'
+  toast(isNative() && coach.on
+    ? (speaksInTheDark() ? 'Coach on. Its voice carries on with the phone locked' : 'Coach on. Its calls only play while the screen is on')
     : t.kind === 'person' ? 'Running blind — the trail is hidden' : 'Searching');
 }
 
@@ -5832,16 +5841,49 @@ function audioUnlock() {
    kept, asked for again whenever it is still empty, and replaced when the
    event comes. Once it has come, or a few seconds have passed, an empty
    list is settled: the phone is not naming its voices, and the coach
-   speaks in its default one. */
-const voiceCache = { list: [], all: false, settled: false };
+   speaks in its default one. In the iPhone app (`native`) the voices are
+   iOS's own, every one on the phone, and come from nativeVoicesFresh. */
+const voiceCache = { list: [], all: false, settled: false, native: false };
 function voiceList() {
+  if (voiceCache.native) return voiceCache.list;
   if (!voiceCache.list.length && 'speechSynthesis' in window) {
     try { voiceCache.list = [...(speechSynthesis.getVoices() || [])]; } catch { voiceCache.list = []; }
   }
   return voiceCache.list;
 }
 
+/** Whether the coach's words reach the handler with the screen dark: only
+    when the iPhone app speaks through iOS, and only with the voice on. */
+const speaksInTheDark = () => voiceCache.native && !!settings.coachVoice;
+
+/* The iPhone app's voices, taken from iOS: at the start, whenever the app
+   comes back to the front (the handler may have been in Settings for a
+   Premium one), and when iOS says a download has finished. */
+async function nativeVoicesFresh() {
+  const raw = await nativeVoices();
+  if (raw && voiceCache.native) voiceCache.list = raw.map(fromNativeVoice);
+  voiceCache.settled = true;
+  const at = document.activeElement;
+  if (at) repaintFrom(at, paintCoachVoice); else paintCoachVoice();
+}
+
+/* The iPhone app speaks through iOS: the same choice by the same ranking,
+   handed over by name, and heard with the screen locked. Should iOS ever
+   refuse it, the web view takes over for good, voices and all, as it spoke
+   before the app had a voice of its own. */
 function coachSpeak(text) {
+  if (!voiceCache.native) return webSpeak(text);
+  const v = pickVoice(voiceList(), navigator.language, settings.coachVoiceURI);
+  speakNative(v ? { text, voice: v.voiceURI, lang: v.lang, rate: voiceRate(voiceQuality(v)) }
+    : { text, lang: speechLang(navigator.language), rate: 1.05 })
+    .then((ok) => {
+      if (ok || !voiceCache.native) return;
+      voiceCache.native = false; voiceCache.list = []; voiceCache.settled = false;
+      webSpeak(text);
+    });
+}
+
+function webSpeak(text) {
   if (!('speechSynthesis' in window)) return;
   try {
     speechSynthesis.cancel();
@@ -5882,9 +5924,14 @@ function coachSpeak(text) {
 }
 
 function coachDeliver(alert) {
-  /* In the iOS app fixes keep coming with the screen dark, but nothing here
-     can be heard or felt then. Counted, and said once the screen is back. */
-  if (isNative() && document.visibilityState === 'hidden') coach.missed = (coach.missed || 0) + 1;
+  /* In the iOS app fixes keep coming with the screen dark. A call with words
+     is heard then too when the app speaks through iOS (speaksInTheDark), so
+     it is said live and not counted. The tones and the buzz are left as they
+     were: iOS plays a dark app's web sounds and taps for nobody, so a call
+     with no words (the edge), or any call with the voice off, is counted,
+     and said once the screen is back. */
+  const spoken = !!settings.coachVoice && alert.kind !== 'edge';
+  if (isNative() && document.visibilityState === 'hidden' && !(spoken && speaksInTheDark())) coach.missed = (coach.missed || 0) + 1;
   const kind = alert.kind === 'still' ? 'off' : alert.kind;
   if (settings.coachSound && coach.sounds?.[kind]) {
     const a = coach.sounds[kind];
@@ -5978,6 +6025,7 @@ function coachStop() {
   coach.on = false; coach.trail = null; coach.field = []; coach.state = null; coach.shadow = null;
   coach.reading = null; coach.status = 'on'; coach.line = ''; coach.missed = 0;
   try { speechSynthesis?.cancel(); } catch { /* fine */ }
+  if (voiceCache.native) stopNativeSpeech();
   // The run screen stays up while the result is worked out: leave it calm.
   $('runHud').classList.remove('off');
   const el = $('runHudText'); if (el && rec.kind === 'run') el.textContent = hudText();
@@ -6024,8 +6072,12 @@ function paintCoachControls() {
   const canBuzz = typeof navigator.vibrate === 'function' || canHaptic();
   $('coachVibrateRow').hidden = !canBuzz;
   /* The app records with the screen dark, and says everywhere that the phone
-     can go in a pocket. The coach cannot: iOS plays nothing for a dark app. */
-  const dark = isNative() ? ' Calls only play while the screen is on, so keep it awake during a coached run.' : '';
+     can go in a pocket. The coach's tones and buzzes cannot: iOS plays
+     nothing from a dark app's web view. Its spoken calls can, when the app
+     speaks through iOS, and then the note says so. */
+  const dark = !isNative() ? ''
+    : speaksInTheDark() ? ' Spoken calls carry on with the phone locked and in your pocket. The tones and buzzes only play while the screen is on.'
+    : ' Calls only play while the screen is on, so keep it awake during a coached run.';
   $('coachNote').textContent = (canBuzz
     ? 'Turn the volume up. Calls come at most every ten seconds, not for a single stray GPS fix, and twice at most while you stand still.'
     : 'iPhones do not let a web app vibrate, so the coach uses sound and voice. Turn the volume up — the tones play even with the ring/silent switch on silent. Calls come at most every ten seconds, not for a single stray GPS fix, and twice at most while you stand still.') + dark;
@@ -6039,7 +6091,7 @@ function paintCoachControls() {
 const VOICES_SHOWN = 5;
 const TICK = '<span class="check-mark" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span>';
 function paintCoachVoice() {
-  const can = 'speechSynthesis' in window;
+  const can = voiceCache.native || 'speechSynthesis' in window;
   const voices = can ? voiceList() : [], lang = navigator.language;
   /* Only a browser with no speech at all is mute. An empty list is not: an
      iPhone can name no voices and still speak every call in its default
@@ -6050,8 +6102,9 @@ function paintCoachVoice() {
   if (none) return;
   const ranked = rankVoices(voices, lang);
   const ua = navigator.userAgent || '';
-  // Under WebKit the coach can only have the voices built in, and says so.
-  const webkit = speaksThroughWebKit(ua, { native: isNative(), touches: navigator.maxTouchPoints || 0 });
+  /* Under WebKit the coach can only have the voices built in, and says so.
+     The iPhone app's own voice does not go through WebKit, and has them all. */
+  const webkit = !voiceCache.native && speaksThroughWebKit(ua, { native: isNative(), touches: navigator.maxTouchPoints || 0 });
   // A choice this phone no longer has is Automatic in effect, so it shows as Automatic.
   const mine = ranked.some(r => r.voice.voiceURI === settings.coachVoiceURI) ? settings.coachVoiceURI : '';
   const best = ranked[0];
@@ -6072,7 +6125,7 @@ function paintCoachVoice() {
   more.textContent = voiceCache.all ? 'Show fewer voices' : `Show all ${ranked.length} voices`;
   more.setAttribute('aria-expanded', String(voiceCache.all));
   $('coachVoiceSample').textContent = `“${coachPhrase(SAMPLE_CALL, { imperial: imp() })}”`;
-  const hint = voiceHint(voices, lang, { webkit, settled: voiceCache.settled });
+  const hint = voiceHint(voices, lang, { webkit, settled: voiceCache.settled, native: voiceCache.native });
   $('coachVoiceHint').textContent = hint;
   $('coachVoiceHint').hidden = !hint;
 }
@@ -7565,6 +7618,8 @@ function wire() {
     settings[box.id] = box.checked;
     saveSettings();
     coachSync();
+    // In the app the note says what plays with the phone locked, and that is the voice.
+    if (box.id === 'coachVoice') paintCoachControls();
   });
   $('coachControls').addEventListener('click', (e) => {
     const chip = e.target.closest('[data-tol]');
@@ -7576,9 +7631,19 @@ function wire() {
   });
   // Sound and speech are only allowed after a touch: the first one anywhere unlocks them.
   document.addEventListener('pointerdown', audioUnlock, { once: true });
-  /* Voices can arrive after the page does. The list is taken again and the
-     choice drawn again, with the screen reader left where it was. */
-  if ('speechSynthesis' in window) {
+  /* In the iPhone app the coach speaks through iOS, which lists every voice
+     on the phone: taken now, again each time the app comes back to the
+     front, and when iOS says one has finished downloading. */
+  if (canSpeakNative()) {
+    voiceCache.native = true;
+    nativeVoicesFresh();
+    watchNativeVoices(nativeVoicesFresh);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && voiceCache.native) nativeVoicesFresh();
+    });
+  } else if ('speechSynthesis' in window) {
+    /* Voices can arrive after the page does. The list is taken again and the
+       choice drawn again, with the screen reader left where it was. */
     const fresh = () => {
       voiceCache.list = [];
       voiceCache.settled = true;

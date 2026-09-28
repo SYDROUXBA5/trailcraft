@@ -213,7 +213,9 @@ export function coachLine(reading, status, { imperial = false } = {}) {
    phones hold better voices, and Apple's downloadable Enhanced and Premium
    ones sound like a person, though WebKit (Safari, and anything on an
    iPhone) only ever lists the voices the phone came with, so there the
-   best is the best built in. So the coach picks its voice rather than
+   best is the best built in. The iPhone app is the exception: it speaks
+   through iOS itself, which lists every voice on the phone, downloaded
+   ones too (fromNativeVoice). So the coach picks its voice rather than
    taking the default: the best quality first, then the handler's own
    English, and never a voice that needs a signal ahead of one that does
    not — the field with the best tracking ground is often the one with no
@@ -248,10 +250,25 @@ export function coachLang(lang) {
     coach will use and still hold an English one it will pick. */
 export const speechLang = (lang) => coachLang(lang).replace(/-([a-z]{2})$/, (_, r) => `-${r.toUpperCase()}`);
 
-/** How good a voice sounds, read from its URI and name. Before Premium
-    existed, iOS named its Enhanced voices "…-premium", so an old
-    com.apple.ttsbundle voice ending that way is Enhanced, not Premium. */
+/** A voice as iOS describes it to the app ({ identifier, name, language,
+    quality, novelty }), in the shape the browser gives, so one ranking
+    serves both. iOS says the quality outright, so it is taken as said,
+    not read from the name; only a compact voice has to be told by its
+    identifier, since iOS calls it default like any other plain one. Every
+    voice iOS lists is on the phone, so none needs a signal. */
+export function fromNativeVoice(v) {
+  const voiceURI = String(v?.identifier ?? '');
+  const quality = v?.quality === 'premium' || v?.quality === 'enhanced' ? v.quality
+    : /compact/i.test(voiceURI) ? 'compact' : 'plain';
+  return { voiceURI, name: String(v?.name ?? ''), lang: String(v?.language ?? ''), localService: true, default: false, quality, novelty: v?.novelty === true };
+}
+
+/** How good a voice sounds: as iOS said it, for a voice from the app's own
+    engine, else read from its URI and name. Before Premium existed, iOS
+    named its Enhanced voices "…-premium", so an old com.apple.ttsbundle
+    voice ending that way is Enhanced, not Premium. */
 export function voiceQuality(v) {
+  if (typeof QUALITY_ORDER[v?.quality] === 'number') return v.quality;
   const s = `${v?.voiceURI ?? ''} ${v?.name ?? ''}`.toLowerCase();
   if (/com\.apple\.ttsbundle\.\S*-premium/.test(s)) return 'enhanced';
   if (s.includes('premium')) return 'premium';
@@ -289,9 +306,10 @@ export function voiceAccent(lang) {
   }[l.slice(0, 5)] ?? 'English';
 }
 
-/** Whether a voice is one the coach may use at all: English, and not a joke. */
+/** Whether a voice is one the coach may use at all: English, and not a joke.
+    iOS marks its joke voices itself; the names catch the ones it does not. */
 function usable(v) {
-  if (!v || !/^en(-|$)/.test(langTag(v.lang))) return false;
+  if (!v || v.novelty === true || !/^en(-|$)/.test(langTag(v.lang))) return false;
   const key = (s) => String(s ?? '').replace(/\s*\(.*$/, '').replace(/\s+/g, '').toLowerCase();
   if (NOT_FOR_THE_COACH.has(key(v.name))) return false;
   const uri = String(v.voiceURI ?? '');
@@ -344,7 +362,9 @@ export function speaksThroughWebKit(ua = '', { native = false, touches = 0 } = {
 /** What to say about a better voice, and only where saying it helps.
     Nothing once a Premium voice is here. Under WebKit a downloaded voice
     never reaches the coach, so the honest thing is to say so, not to send
-    the handler off to download one. Elsewhere the steps are Apple's, so
+    the handler off to download one. The iPhone app speaks through iOS
+    itself (`native`), where a downloaded voice does reach the coach, so
+    there the way to one is given in full. Elsewhere the steps are Apple's, so
     they are given only where the voices are named the Apple way (a Mac
     outside Safari). On other phones a good voice cannot be told from a
     poor one, so a hint there could never be cleared: none is given. No
@@ -354,16 +374,21 @@ export function speaksThroughWebKit(ua = '', { native = false, touches = 0 } = {
     voice: an iPhone can list only its robotic Eloquence voices, or none at
     all, and speak all the same. So the block says so, and Play is there
     to hear it, rather than calling the coach mute. */
-export function voiceHint(voices, lang, { webkit = false, settled = false } = {}) {
+export function voiceHint(voices, lang, { webkit = false, settled = false, native = false } = {}) {
   const ranked = rankVoices(voices, lang);
   if (ranked.some(r => r.quality === 'premium')) return '';
   const unnamed = !ranked.length && (settled || (voices ?? []).length > 0)
     ? 'This phone does not name a voice the coach can use, so the calls are spoken in its default voice. Press Play to hear it.' : '';
+  if (native) return [unnamed, NATIVE_PREMIUM].filter(Boolean).join(' ');
   if (webkit) return [unnamed, 'Apple does not let this app use voices downloaded in Settings, so the coach speaks in the ones built in.'].filter(Boolean).join(' ');
   if (unnamed) return unnamed;
   const apple = ranked.some(r => /^com\.apple\./i.test(String(r.voice.voiceURI ?? '')) || /\((enhanced|premium)\)/i.test(String(r.voice.name ?? '')));
   return apple ? 'For the most natural voice, download an English voice marked Premium in Settings → Accessibility → Spoken Content.' : '';
 }
+
+/** The way to a Premium voice, for the app that can use one. The steps are
+    the same on an iPad, so no device is named. */
+export const NATIVE_PREMIUM = 'For a voice that sounds like a person, download an English voice marked Premium: open Settings, then Accessibility → Spoken Content → Voices → English. It shows up here once it has downloaded.';
 
 /** The call the Play button says, so the handler hears the real thing. */
 export const SAMPLE_CALL = { kind: 'off', metres: 15, side: 'left', where: 'left' };
