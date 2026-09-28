@@ -35,7 +35,7 @@ import { trailModel, encodeShared, decodeShared, sharedUrl, toGpx, fileBase,
          resultSentence, sessionFromModel, keptSession, peopleOf } from './share.js';
 import { buildPdf, jpegSize } from './pdf.js';
 import { coachStep, initialCoach, coachPhrase, coachLine, TOL_OPTIONS, COACH_DEFAULTS,
-         rankVoices, pickVoice, voiceQuality, voiceLabel, voiceRate, voiceName, voiceAccent, voiceHint, speaksThroughWebKit, SAMPLE_CALL } from './coach.js';
+         rankVoices, pickVoice, voiceQuality, voiceLabel, voiceRate, voiceName, voiceAccent, voiceHint, speaksThroughWebKit, speechLang, SAMPLE_CALL } from './coach.js';
 import { DEBRIEF, FLAGS, NOTE_TAGS, blankDebrief, debriefDone, debriefLine, labelOf, ownRun, stickyDebrief,
          unwalkedPlan, trailShown, ranBlind } from './debrief.js';
 import { CONFIDENCE, stampCall, confidenceOf, firstCall, firstCallWasFind, calibration, calibrationLine, callVerdict, runsOf } from './call.js';
@@ -5746,7 +5746,8 @@ function audioUnlock() {
    'voiceschanged'; the iPhone app may never say so at all. So the list is
    kept, asked for again whenever it is still empty, and replaced when the
    event comes. Once it has come, or a few seconds have passed, an empty
-   list is settled: there is no voice to be had. */
+   list is settled: the phone is not naming its voices, and the coach
+   speaks in its default one. */
 const voiceCache = { list: [], all: false, settled: false };
 function voiceList() {
   if (!voiceCache.list.length && 'speechSynthesis' in window) {
@@ -5761,8 +5762,10 @@ function coachSpeak(text) {
     speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(text);
     /* Named, or the iPhone reads it in its compact voice whatever better
-       ones it holds. With no English voice to name, the browser picks, as
-       it always did. */
+       ones it holds. With no English voice to name, the browser picks, but
+       in the English the coach speaks, not the phone's own language: an
+       iPhone may list only voices the coach will not use, and one set to
+       French would then read "Off the trail" in a French voice. */
     const v = pickVoice(voiceList(), navigator.language, settings.coachVoiceURI);
     if (v) {
       u.voice = v;
@@ -5771,18 +5774,22 @@ function coachSpeak(text) {
       /* A voice that needs a signal fails in a field without one, and a
          voice can go from the phone mid-run. Rather than stay silent the
          call is said once more in the browser's own voice. A call cut short
-         by the next one ('interrupted', 'canceled') is not said again. */
+         by the next one ('interrupted', 'canceled') is not said again.
+         It is said in English too, unless the voice that failed needed a
+         signal: then the phone had no English voice of its own to put
+         first, asking for English could land on that same voice and fail
+         again, and the phone's own language is the one likely to be heard. */
       u.onerror = (e) => {
         if (!['network', 'synthesis-failed', 'voice-unavailable'].includes(e?.error)) return;
         try {
           const again = new SpeechSynthesisUtterance(text);
-          again.lang = navigator.language || 'en-GB';
+          again.lang = v.localService === false ? (navigator.language || 'en-GB') : speechLang(navigator.language);
           again.rate = 1.05;
           speechSynthesis.speak(again);
         } catch { /* nothing to do */ }
       };
     } else {
-      u.lang = navigator.language || 'en-GB';
+      u.lang = speechLang(navigator.language);
       u.rate = 1.05;
     }
     speechSynthesis.speak(u);
@@ -5949,9 +5956,10 @@ const TICK = '<span class="check-mark" aria-hidden="true"><svg viewBox="0 0 24 2
 function paintCoachVoice() {
   const can = 'speechSynthesis' in window;
   const voices = can ? voiceList() : [], lang = navigator.language;
-  /* An engine with no voices at all, once they have had time to come, is no
-     voice either: Play would be silent, so the block says so instead. */
-  const none = !can || (voiceCache.settled && !voices.length);
+  /* Only a browser with no speech at all is mute. An empty list is not: an
+     iPhone can name no voices and still speak every call in its default
+     one, so Play stays, and the hint says the voice is the phone's own. */
+  const none = !can;
   $('coachVoiceNone').hidden = !none;
   $('coachVoiceBody').hidden = none;
   if (none) return;
@@ -5979,7 +5987,7 @@ function paintCoachVoice() {
   more.textContent = voiceCache.all ? 'Show fewer voices' : `Show all ${ranked.length} voices`;
   more.setAttribute('aria-expanded', String(voiceCache.all));
   $('coachVoiceSample').textContent = `“${coachPhrase(SAMPLE_CALL, { imperial: imp() })}”`;
-  const hint = voiceHint(voices, lang, { webkit });
+  const hint = voiceHint(voices, lang, { webkit, settled: voiceCache.settled });
   $('coachVoiceHint').textContent = hint;
   $('coachVoiceHint').hidden = !hint;
 }
@@ -7197,7 +7205,8 @@ function wire() {
     voiceList();   // Chrome only starts loading them when first asked
     /* A browser can hold the speech API with no engine behind it, and then
        never sends 'voiceschanged'. After a few seconds' grace the list is
-       taken again, and if it is still empty the block says there is no voice. */
+       taken again, and if it is still empty the block says the calls are
+       spoken in the phone's default voice. */
     setTimeout(fresh, 3000);
   }
   $('coachVoiceBox').addEventListener('click', (e) => {
