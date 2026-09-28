@@ -1,5 +1,5 @@
 /* A trail's route laid again (store.js: canLayAgain, routeCorners, routeOf,
-   planSession).
+   planSession, planLine).
 
    What is pinned: a walked line becomes a plan's corners, thinned so the
    GPS wobble goes and every real corner stays; a plan nobody walked keeps
@@ -10,8 +10,9 @@
    built by the same function and comes out as it always did. */
 
 import assert from 'node:assert/strict';
-import { canLayAgain, routeCorners, routeOf, planSession, runAgain,
+import { canLayAgain, routeCorners, routeOf, planSession, runAgain, planLine,
          ROUTE_TOLS_M, ROUTE_MAX_CORNERS } from '../public/store.js';
+import { readFileSync } from 'node:fs';
 import { RUN_FIELDS } from '../public/sync-core.js';
 import { project, dist, simplify, pathLen } from '../public/geo.js';
 
@@ -76,8 +77,8 @@ t('a long wobbly trail is thinned harder, but never past a lane’s width', () =
   assert.ok(got.length <= ROUTE_MAX_CORNERS, `${got.length} corners`);
   assert.ok(nearest(got, turn) < 8, 'the real corner is still there');
 
-  /* A trail that really does turn sixty times keeps every turn: the
-     tolerance stops growing long before it would cut one. */
+  /* A trail that really does turn sixty times keeps every turn: no coarser
+     tolerance brings it under the cap, so none is taken. */
   const legs = Array.from({ length: 60 }, (_, k) => [k % 2 ? 135 : 45, 40]);
   const zig = walked(legs, { wob: 1 });
   const all = routeCorners({ targetId: 'person', data: { trail: zig.line } });
@@ -194,6 +195,74 @@ t('a route laid again is still that route when the next dog runs it', () => {
   assert.equal(again.data.planOf, 'n', 'and the plan it was drawn as');
   assert.equal(again.name, 'Church lane loop');
   assert.ok(!('track' in again.data) && !('result' in again.data));
+});
+
+t('a double-back that carries on along the same line stays in the route', () => {
+  /* 100 m up, 40 m back a stride to one side, then 120 m on: every fix lies
+     within a few metres of the line from end to end, which is how the
+     double-back used to go and the route laid again became a straight line. */
+  const { line, corners } = walked([[0, 100], [90, 3], [180, 40], [0, 120]]);
+  assert.ok(pathLen(line) > 250, `${Math.round(pathLen(line))} m walked`);
+  for (const s of [{ targetId: 'person', data: { trail: line } },
+    { targetId: 'person', data: { plan: true, walked: true, corners: [corners[0], corners.at(-1)], trail: line } }]) {
+    const got = routeCorners(s);
+    assert.ok(nearest(got, corners[1]) < 5, 'the turn back is a corner');
+    assert.ok(nearest(got, corners[3]) < 5, 'and so is the turn on again');
+    assert.ok(pathLen(got) > 250, `laid again it is the walk, not ${Math.round(pathLen(got))} m of straight line`);
+  }
+  // A walk that only wobbles along its line keeps no corner for it.
+  assert.equal(routeCorners({ targetId: 'person', data: { trail: walked([[0, 200]], { wob: 1.5 }).line } }).length, 2);
+});
+
+t('more real turns than the cap: no coarser tolerance is taken, so a short jog stays', () => {
+  /* Fifty 40 m legs, and halfway along one of them a 9 m step out to the
+     side and back: kept at 5 m, gone at 12 m. Every step leaves more than
+     forty corners, so thinning harder would lose the jog and still not
+     reach the cap. */
+  const legs = Array.from({ length: 50 }, (_, k) => [k % 2 ? 135 : 45, 40]);
+  legs.splice(25, 1, [135, 20], [45, 9], [225, 9], [135, 20]);
+  const zig = walked(legs, { wob: 1 });
+  const tip = zig.corners[27];
+  assert.ok(simplify(zig.line, 12).length > ROUTE_MAX_CORNERS, 'over the cap at every step');
+  assert.ok(nearest(simplify(zig.line, 12), tip) > 5, 'the jog goes at 12 m');
+  const got = routeCorners({ targetId: 'person', data: { trail: zig.line } });
+  assert.ok(nearest(got, tip) < 4, 'the jog is kept');
+  assert.equal(got.length, simplify(zig.line, ROUTE_TOLS_M[0], { turns: true }).length, 'the 5 m thinning, as it was');
+});
+
+t('Lay this route again is offered exactly when there is a route to lay', () => {
+  // Round a field and back to the gate: 40 m across, the ends together.
+  const ring = [...Array.from({ length: 36 }, (_, k) => project(project(A, 0, 20), 180 + k * 10, 20)), { ...A }];
+  const cases = {
+    walk: walked([[0, 60]]).line,
+    pace: [A, project(A, 0, 0.6)],
+    oneReal: [A, { lat: NaN, lon: 1 }, { lat: 'x' }],
+    loop: [A, project(A, 0, 30), project(A, 90, 30), { ...A }],
+    tinyLoop: [A, project(A, 0, 3), project(A, 90, 3), { ...A }],
+    ring,
+  };
+  const offered = {};
+  for (const [name, trail] of Object.entries(cases)) {
+    const s = { id: name, targetId: 'person', data: { trail } };
+    offered[name] = canLayAgain(s);
+    assert.equal(offered[name], routeOf(s) !== null, `${name}: offered only when it can be laid`);
+  }
+  assert.deepEqual(offered, { walk: true, pace: false, oneReal: false, loop: true, tinyLoop: false, ring: true });
+});
+
+t('a route laid again is not called a line the handler drew', () => {
+  const again = planSession({ id: 'n', handlerId: 'h', ageMin: 10, now: NOW, summary: 's', ...routeOf(fullyRun()) });
+  const drawn = planSession({ id: 'd', handlerId: 'h', ageMin: 10, now: NOW, summary: 's', corners: [A, project(A, 0, 50)] });
+  assert.equal(planLine(again), 'the route from the earlier trail');
+  assert.equal(planLine(drawn), 'the line you drew');
+  /* The result screen and the question about an older walked card say it
+     through planLine, not in words of their own. */
+  const js = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8');
+  assert.ok(!/the line you drew/.test(js.replace(/\/\*\*? How far the layer's walk sat from the line you drew/, '')),
+    'no screen words say "the line you drew" of every plan');
+  assert.match(js, /Graded against \$\{planLine\(s\)\}, not the walk itself/);
+  assert.match(js, /off \$\{planLine\(s\)\}, and as much as/);
+  assert.match(js, /s\.data\?\.fromSession \? 'the route laid again' : 'the plan drawn'/);
 });
 
 console.log(`\n${pass} passed total\n`);

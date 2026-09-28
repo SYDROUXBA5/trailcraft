@@ -140,8 +140,16 @@ export function filterFixes(fixes, accCap, stillCap) {
 /** Douglas–Peucker with a metric tolerance. First and last points always
     survive, and every dropped point lies within `tolM` metres of the polyline
     that remains — the bound a Trail Card quotes when it thins a trail. Kept
-    points are the original objects, so t, acc, alt ride along untouched. */
-export function simplify(pts, tolM = 4) {
+    points are the original objects, so t, acc, alt ride along untouched.
+
+    `turns` also keeps a walk that turns back on itself inside a span: 100 m
+    up, 40 m back a stride to one side, then on up the same line. Every fix of
+    that lies within a few metres of the straight line from end to end, so on
+    distance alone the double-back went, and a route laid again from it was
+    another trail. With `turns`, where the walk falls back along the line by
+    more than the tolerance, the fix it turned at is kept, and the way back
+    then lies behind that corner, where the distance keeps it too. */
+export function simplify(pts, tolM = 4, { turns = false } = {}) {
   if (!pts || pts.length <= 2) return pts ? [...pts] : [];
   /* Perpendicular distances on a flat projection at the trail's own latitude:
      over the few kilometres a trail spans the projection error is millimetres,
@@ -163,6 +171,14 @@ export function simplify(pts, tolM = 4) {
       const s = L2 ? Math.max(0, Math.min(1, (px * bx + py * by) / L2)) : 0;
       const d2 = (px - s * bx) ** 2 + (py - s * by) ** 2;
       if (d2 > worst) { worst = d2; at = k; }
+    }
+    if (at < 0 && turns && L2) {
+      const L = Math.sqrt(L2);
+      let top = -Infinity, peak = -1;
+      for (let k = i + 1; k < j; k++) {
+        const along = ((X[k] - X[i]) * bx + (Y[k] - Y[i]) * by) / L;
+        if (along > top) { top = along; peak = k; } else if (top - along > tolM) { at = peak; break; }
+      }
     }
     if (at >= 0) { keep[at] = 1; spans.push([i, at], [at, j]); }
   }

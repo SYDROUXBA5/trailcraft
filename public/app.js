@@ -46,7 +46,7 @@ import { readBackup, restoreChanges, restoreQuestion, restoreNothing, BACKUP_MAX
 import { checkAuthFields, AUTH_MIN_PASSWORD } from './sync-core.js';
 import { createStore, migrateV1, TARGETS, ODOURS, targetById, targetText, verbs, uid,
          dogStats, ageBand, AGE_BANDS, LEVELS, levelById, dogAge, patchSession, runAgain,
-         planSession, canLayAgain, routeOf, askDelete, storageWords, APPROACH_V } from './store.js';
+         planSession, canLayAgain, routeOf, planLine, askDelete, storageWords, APPROACH_V } from './store.js';
 import { searchWords, logRows, facets, filterRows, groupRows, foldersOf, inFolder, folderList, folderNamed,
          cleanFolderName, putMany, toggleFolder, renameIn, dropFrom, emptyHeld } from './log.js';
 
@@ -4303,7 +4303,8 @@ function askWhichPlan(ids) {
     const s = sessionById(id);
     if (!s) continue;
     const dog = S.dogs.find(d => d.id === s.dogId)?.name;
-    if (confirm(`Is this the walk for the plan drawn ${fmtWhen(s.startedAt)}${dog ? `, run by ${dog}` : ''}?`)) return id;
+    const plan = s.data?.fromSession ? 'the route laid again' : 'the plan drawn';
+    if (confirm(`Is this the walk for ${plan} ${fmtWhen(s.startedAt)}${dog ? `, run by ${dog}` : ''}?`)) return id;
   }
   return null;
 }
@@ -5099,7 +5100,7 @@ function renderResult(s) {
   note.hidden = !s.data.plan;
   if (s.data.plan) {
     if (provisional) {
-      note.textContent = `Graded against the line you drew, not the walk itself. Nothing is banked to ${d?.name ?? 'this dog'}’s calibration until you scan the layer’s walked card.`;
+      note.textContent = `Graded against ${planLine(s)}, not the walk itself. Nothing is banked to ${d?.name ?? 'this dog'}’s calibration until you scan the layer’s walked card.`;
     } else {
       /* The walk is the record now. Say how far it drifted from the sketch,
          because a dog that looks wrong against the plan may have been exactly
@@ -5108,8 +5109,8 @@ function renderResult(s) {
       const who = s.data.walkedFrom || 'the layer';
       note.textContent = `Graded against the trail ${who} actually walked.`
         + (w && w.med >= 3
-          ? ` It sat about ${fmtM(w.med)} off the line you drew, and as much as ${fmtM(w.worst)} ${w.side} of it. Show on map draws both.`
-          : w ? ' It followed your line closely.' : '');
+          ? ` It sat about ${fmtM(w.med)} off ${planLine(s)}, and as much as ${fmtM(w.worst)} ${w.side} of it. Show on map draws both.`
+          : w ? ` It followed ${s.data.fromSession ? 'that route' : 'your line'} closely.` : '');
     }
   }
 }
