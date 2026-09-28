@@ -8,6 +8,7 @@
 
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import vm from 'node:vm';
 
 let pass = 0;
 const t = (name, fn) => { fn(); pass++; console.log(`  ok  ${name}`); };
@@ -430,6 +431,31 @@ t('a large text size cannot push a screen sideways', () => {
   assert.match(css, /\.mode-cards \{ display: flex; flex-wrap: wrap;/);
   assert.match(css, /\.mode-cards > \.radio-card \{ flex: 1 1 7em; \}/);
   assert.match(css, /\.dog-head > div \{ min-width: 0; \}/);
+});
+
+t('each button on a session card says which session it is for', () => {
+  /* A long log is hundreds of Replay, Lay this route again, Select and
+     Delete buttons, and VoiceOver's list of buttons gives them alone. Each
+     says its own word first, as it reads on screen, then the session. */
+  const sb = {
+    esc: (v) => String(v).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;'),
+    canLayAgain: () => true, cardBody: () => '<div class="meta"></div>', S: { dogs: [{ id: 'rex', name: 'Rex' }] },
+    fmtWhen: (t) => `when ${t}`, runAt: (s) => s.data?.trackStarted ?? s.startedAt,
+  };
+  vm.createContext(sb);
+  vm.runInContext(`${fnSrc('function sessionCard(')}\n${fnSrc('function cardWho(')}\nthis.sessionCard = sessionCard;`, sb);
+  const s = { id: 's1', name: 'Church "lane"', dogId: 'rex', startedAt: 1, data: { trackStarted: 2, track: [{}, {}] } };
+  const buttons = (html) => [...html.matchAll(/<button[^>]*>([^<]*)<\/button>/g)]
+    .map(([tag, word]) => [word, (tag.match(/aria-label="([^"]*)"/) || [])[1]]);
+  const look = buttons(sb.sessionCard(s, { replay: true, again: true, del: true }));
+  const pick = buttons(sb.sessionCard(s, { pick: false }));
+  const who = 'Church &quot;lane&quot;, Rex, when 2';
+  assert.deepEqual([...look, ...pick], [
+    ['Replay', `Replay: ${who}`], ['Lay this route again', `Lay this route again: ${who}`],
+    ['Delete', `Delete: ${who}`], ['Select', `Select: ${who}`]]);
+  assert.equal(buttons(sb.sessionCard(s, { pick: true, who: 'Built once' }))[0][1], 'Select: Built once', 'the list builds it once, with the card’s words');
+  assert.match(fnSrc('function logCard('), /r\.who = cardWho\(r\.s\)/);
+  assert.equal(buttons(sb.sessionCard(s)).length, 0, 'home’s cards have no buttons to name');
 });
 
 console.log(`\n${pass} passed total\n`);

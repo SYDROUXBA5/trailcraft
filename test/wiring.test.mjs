@@ -551,14 +551,14 @@ t('the session list deletes from a card without opening it, only once Delete ses
   /* Replay, too, is a button inside the card: it opens the replay, not the card. */
   assert.ok(handler.indexOf('[data-replay-session]') > 0 && handler.indexOf('[data-replay-session]') < handler.indexOf('[data-open-session]'));
   assert.match(bodyOf('sessionCard'), /const rep = replay && s\.data\?\.track\?\.length > 1/, 'only a run with a track has one');
-  assert.match(bodyOf('logCard'), /sessionCard\(r\.s, \{ body: r\.body, del: mode === 'del', replay: true, again: true \}\)/, 'every card in the list, deleting or not');
+  assert.match(bodyOf('logCard'), /sessionCard\(r\.s, \{ body: r\.body, who: r\.who, del: mode === 'del', replay: true, again: true \}\)/, 'every card in the list, deleting or not');
   assert.ok(!/replay: true/.test(bodyOf('renderHome')), 'home is not where runs are watched again');
   // The replay opened from the list is that run's, and Done goes back to the list.
   assert.match(bodyOf('replaySession'), /if \(s\.data\.result\) run\.session = s; else pendingSession = s;\s*openReplay\(s\);/);
   assert.match(bodyOf('openReplay'), /replay\.back = currentScreen;/);
   assert.match(js, /\$\('repBack'\)\.addEventListener\('click', \(\) => \{ const back = replay\.back; closeReplay\(\); leaveForm\(back \|\| 'scrResult'\); \}\);/);
   // Filters narrow what is built; only a change to the sessions builds it again.
-  assert.match(bodyOf('renderSessions'), /logIx = \{ rows: logRows\(all, peopleFor\)/);
+  assert.match(bodyOf('renderSessions'), /logIx = \{ rows: logRows\(all, peopleFor, now\)/);
   assert.ok(!/logRows\(/.test(bodyOf('paintLog')), 'a search or a filter does not build the rows again');
   assert.match(js, /\$\('logSearch'\)\.addEventListener\('input', \(e\) => \{ logView\.query = e\.target\.value; paintLog\(\); \}\);/);
 });
@@ -898,7 +898,7 @@ t('a trail’s route is laid again as a new plan, through the plan flow drawn pl
 });
 
 t('a folder is kept on the sessions in it, and an empty one on this phone alone', () => {
-  assert.match(bodyOf('saveFolders'), /patch: \{ data: \{ folders: c\.folders \} \}/, 'membership is written on the session');
+  assert.match(bodyOf('saveFolders'), /patch: folderPatch\(c\.folders, at\)/, 'membership is written on the session, with when it changed');
   assert.match(bodyOf('saveFolders'), /db\.updateSessions\(patches\)/, 'in one write however many move');
   assert.match(js, /const HELD_FOLDERS = 'folders\.held';/, 'empty folders are this phone’s own preference');
   assert.ok(!/cal:folders|handlers\.upsert\([^)]*folders/.test(js), 'not smuggled into calibration or a handler');

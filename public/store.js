@@ -120,6 +120,7 @@ export function runAgain(s, { id, summary }) {
      run, and the next dog's run on the same trail has not been filed yet.
      Not one of RUN_FIELDS, which also decide how two copies of a run merge. */
   delete data.folders;
+  delete data.foldersAt;
   /* A second run of a plan is still that plan: the walked card that comes
      back names the plan it was drawn as, and this is how the copy answers. */
   if (data.plan && !data.planOf && s?.id) data.planOf = s.id;

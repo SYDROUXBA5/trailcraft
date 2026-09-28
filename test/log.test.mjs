@@ -12,10 +12,11 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fold, searchWords, dayGroup, groupRows, logRows, facets, filterRows,
          foldersOf, inFolder, folderList, folderNamed, cleanFolderName, FOLDER_NAME_MAX,
-         putIn, takeOut, putMany, toggleFolder, renameIn, dropFrom, emptyHeld } from '../public/log.js';
+         putIn, takeOut, putMany, toggleFolder, renameIn, dropFrom, emptyHeld,
+         runAt, midnight, folderPatch, mergeFolders } from '../public/log.js';
 import { createStore, runAgain } from '../public/store.js';
 import { mergeOne, mergeRecords } from '../public/sync-core.js';
-import { readBackup } from '../public/backup.js';
+import { readBackup, planRestore } from '../public/backup.js';
 
 let pass = 0;
 const t = (name, fn) => { fn(); pass++; console.log(`  ok  ${name}`); };
@@ -298,6 +299,107 @@ t('a long history is narrowed without being built again', () => {
   assert.ok(Date.now() - t0 < 250, 'a search over 600 sessions is quick');
   assert.deepEqual(shown.map(r => r.s.id).slice(0, 2), ['s0', 's35']);
   assert.ok(groupRows(shown).length >= 2);
+});
+
+/* ── When it was run, not when it was laid ─────────────────────────── */
+
+t('a trail is listed on the day it was run, however long it was aged', () => {
+  /* startedAt is when the trail was laid, and a second run keeps it. The day
+     the dog ran it is the day the handler remembers. */
+  const a = { ...sess('a', at(2026, 9, 10, 9)), data: { trackStarted: at(2026, 9, 10, 10) } };
+  const b = runAgain(a, { id: 'b', summary: '' });
+  b.data.trackStarted = NOW - 10 * 60e3;                                   // run again ten minutes ago
+  const c = sess('c', NOW - 3 * 3600e3);                                    // laid this morning, not run yet
+  const d = { ...sess('d', at(2026, 9, 27, 21)), data: { trackStarted: at(2026, 9, 28, 8) } };   // aged overnight
+  const rows = logRows([a, b, c, d], () => ({}), NOW);
+  assert.deepEqual(rows.map(r => r.s.id), ['b', 'c', 'd', 'a'], 'newest run first');
+  assert.deepEqual(groupRows(rows).map(g => `${g.label}: ${g.rows.map(r => r.s.id)}`),
+    ['Today: b,c,d', 'September 2026: a']);
+  assert.equal(runAt(b), b.data.trackStarted);
+  assert.equal(runAt(c), c.startedAt, 'not run yet: when it was laid');
+  assert.equal(runAt({ data: {} }), null);
+  // The card shows the same time as the heading it sits under.
+  const js = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8');
+  assert.match(js, /<div class="meta"><span>\$\{fmtWhen\(runAt\(s\) \?\? s\.startedAt\)\}<\/span>/);
+});
+
+/* ── Folders changed on one phone, something else on the other ─────── */
+
+t('a folder change is not undone by a later edit to something else on a stale copy', () => {
+  const G = { id: 'fG', name: 'Gate trails', at: 25 };
+  const stale = (extra) => ({ ...sess('s', 1), updatedAt: 40, ...extra,
+    data: { folders: [W], foldersAt: 10, debrief: { note: 'Good turn at the gate' } } });
+  const cases = [
+    ['taken out', [], 'the empty list'],
+    ['renamed', [{ ...W, name: 'Wells, spring', at: 30 }], 'the new name'],
+    ['filed', [W, G], 'the second folder'],
+  ];
+  for (const [what, list, keeps] of cases) {
+    const here = { ...sess('s', 1), updatedAt: 30, data: { ...folderPatch(list, 30).data } };
+    const there = stale(what === 'renamed' ? { name: 'Renamed there' } : {});
+    for (const [l, r] of [[here, there], [there, here]]) {
+      const { keep, up } = mergeOne(l, r, { union: true });
+      assert.deepEqual(keep.data.folders, list, `${what}: ${keeps} stands`);
+      assert.equal(keep.data.foldersAt, 30);
+      assert.deepEqual(keep.data.debrief, { note: 'Good turn at the gate' }, 'and the later edit is kept too');
+      assert.equal(keep.updatedAt, 41, 'stamped newer than both, so every phone takes it');
+      assert.equal(up, true);
+      if (what === 'renamed') assert.equal(keep.name, 'Renamed there');
+    }
+    // A backup of the stale copy restored over the phone leaves it alone too.
+    const plan = planRestore({ sessions: [here] }, { sessions: [there] });
+    assert.deepEqual(plan.tables.sessions.rows[0].data.folders, list, `${what}: a restore does not bring the old list back`);
+  }
+  // Neither list has a time (saved before lists had one): the newer copy's, as before.
+  const older = { ...sess('s', 1), updatedAt: 10, data: { folders: [W] } };
+  const newer = { ...sess('s', 1), updatedAt: 20, data: { folders: [] } };
+  assert.deepEqual(mergeOne(older, newer, { union: true }).keep.data.folders, []);
+  // Saved together, the list and its time; and a second run carries neither.
+  assert.deepEqual(folderPatch([W], 5), { data: { folders: [W], foldersAt: 5 } });
+  const js = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8');
+  const save = js.slice(js.indexOf('\nfunction saveFolders('), js.indexOf('\n}', js.indexOf('\nfunction saveFolders(')));
+  assert.match(save, /patch: folderPatch\(c\.folders, at\)/);
+  assert.match(save, /patchSession\(x, folderPatch\(now\.get\(x\.id\), at\)\)/);
+  const again = runAgain({ ...sess('r', 1), data: folderPatch([W], 5).data }, { id: 'r2', summary: '' });
+  assert.ok(!('folders' in again.data) && !('foldersAt' in again.data));
+});
+
+t('folder names of emoji or symbols alone are told apart; twins can be made one', () => {
+  const dog = [{ id: 'x1', name: '🐕' }];
+  assert.equal(folderNamed(dog, '🌲'), null, 'a tree is not a dog');
+  assert.equal(folderNamed(dog, ' 🐕 ')?.id, 'x1', 'the same emoji is the same folder');
+  assert.equal(folderNamed([{ id: 'q', name: '???' }], '!!!'), null);
+  assert.equal(folderNamed([{ id: 'q', name: '🐕' }], 'Dog'), null);
+  assert.equal(folderNamed([{ id: 'w', name: 'Wells' }], '🐕'), null);
+  /* Two phones each made "Wells" before either had heard of the other:
+     renaming one to the other's name makes them one folder. */
+  const aaa = { id: 'aaa', name: 'Wells', at: 1 }, bbb = { id: 'bbb', name: 'wells', at: 2 };
+  const s1 = sess('s1', 1, { data: { folders: [aaa] } });
+  const s2 = sess('s2', 2, { data: { folders: [bbb] } });
+  const s3 = sess('s3', 3, { data: { folders: [bbb, aaa, C] } });
+  assert.equal(folderList([s1, s2]).length, 2);
+  const changes = mergeFolders([s1, s2, s3], 'bbb', aaa);
+  assert.deepEqual(changes.map(c => c.id), ['s2', 's3'], 'only the sessions in the twin change');
+  const after = [s1, ...changes.map(c => ({ ...sess(c.id, 1), data: { folders: c.folders } }))];
+  assert.deepEqual(folderList(after).map(f => `${f.name}:${f.n}`), ['Rex – cold trails:1', 'Wells:3']);
+  assert.deepEqual(changes[1].folders.map(f => f.id), ['fCold', 'aaa'], 'in each folder once');
+});
+
+t('day headings are worked out again once the day has turned', () => {
+  /* Rows built at 23:59 call a run at 22:59 Today; five minutes later it is
+     Yesterday, and the list has to be built again to say so. */
+  const late = at(2026, 9, 28, 23, 59), after = at(2026, 9, 29, 0, 5);
+  const run = sess('late', at(2026, 9, 28, 22, 59));
+  assert.equal(logRows([run], () => ({}), late)[0].g.label, 'Today');
+  assert.equal(logRows([run], () => ({}), after)[0].g.label, 'Yesterday');
+  assert.notEqual(midnight(late), midnight(after));
+  const js = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8');
+  const fn = (head) => js.slice(js.indexOf(`\n${head}`), js.indexOf('\n}', js.indexOf(`\n${head}`)));
+  assert.match(fn('function renderSessions('), /logRows\(all, peopleFor, now\)[^\n]*day: midnight\(now\)/, 'the rows remember the day they were built on');
+  assert.match(fn('function paintLog('), /if \(logIx\.day !== midnight\(Date\.now\(\)\)\) \{ renderSessions\(\); return; \}/,
+    'a filter or letter typed after midnight builds them again');
+  assert.match(js, /addEventListener\('visibilitychange', \(\) => \{\n  if \(document\.visibilityState === 'visible' && currentScreen === 'scrSessions'\) renderSessions\(\);/,
+    'and so does coming back to the phone with the list open');
 });
 
 console.log(`\n${pass} passed total\n`);

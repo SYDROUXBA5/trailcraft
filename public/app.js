@@ -47,8 +47,8 @@ import { checkAuthFields, AUTH_MIN_PASSWORD } from './sync-core.js';
 import { createStore, migrateV1, TARGETS, ODOURS, targetById, targetText, verbs, uid,
          dogStats, ageBand, AGE_BANDS, LEVELS, levelById, dogAge, patchSession, runAgain,
          planSession, canLayAgain, routeOf, planLine, askDelete, storageWords, APPROACH_V } from './store.js';
-import { searchWords, logRows, facets, filterRows, groupRows, foldersOf, inFolder, folderList, folderNamed,
-         cleanFolderName, putMany, toggleFolder, renameIn, dropFrom, emptyHeld } from './log.js';
+import { searchWords, logRows, runAt, midnight, facets, filterRows, groupRows, foldersOf, inFolder, folderList, folderNamed,
+         cleanFolderName, putMany, toggleFolder, renameIn, dropFrom, mergeFolders, emptyHeld, folderPatch } from './log.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
 const BUILD = '2026-09-27b';
@@ -1517,17 +1517,30 @@ function renderHome() {
    this route again (`again`), and while sessions are being chosen for a
    folder, a Select that says whether it is (`pick`).
    `body` is the card's words, already written: the list builds them once
-   each time the sessions change, not again for every letter of a search. */
-function sessionCard(s, { del = false, replay = false, again = false, pick = null, body = null } = {}) {
+   each time the sessions change, not again for every letter of a search.
+   `who` is which session it is (cardWho), built with them. Each button says
+   it after its own word: a long log is hundreds of Replay and Select
+   buttons, and a screen reader's list of buttons gives them with nothing
+   around them to say which run each one is for. */
+function sessionCard(s, { del = false, replay = false, again = false, pick = null, body = null, who = null } = {}) {
+  const acts = del || replay || again || pick != null;
+  const w = acts ? esc(who ?? cardWho(s)) : '';
   const rep = replay && s.data?.track?.length > 1
-    ? `<button type="button" class="btn ghost small" data-replay-session="${esc(s.id)}">Replay</button>` : '';
+    ? `<button type="button" class="btn ghost small" data-replay-session="${esc(s.id)}" aria-label="Replay: ${w}">Replay</button>` : '';
   const lay = again && canLayAgain(s)
-    ? `<button type="button" class="btn ghost small" data-again-session="${esc(s.id)}">Lay this route again</button>` : '';
+    ? `<button type="button" class="btn ghost small" data-again-session="${esc(s.id)}" aria-label="Lay this route again: ${w}">Lay this route again</button>` : '';
   return `<div class="card${pick ? ' picked' : ''}" data-open-session="${esc(s.id)}">
     ${body ?? cardBody(s)}
-    ${pick != null ? `<button type="button" class="chip tag pick-chip${pick ? ' selected' : ''}" data-sel-session="${esc(s.id)}" aria-pressed="${pick}">Select</button>` : ''}
-    ${rep || lay || del ? `<div class="card-acts">${rep}${lay}${del ? `<button type="button" class="btn ghost small del-link" data-del-session="${esc(s.id)}">Delete</button>` : ''}</div>` : ''}
+    ${pick != null ? `<button type="button" class="chip tag pick-chip${pick ? ' selected' : ''}" data-sel-session="${esc(s.id)}" aria-pressed="${pick}" aria-label="Select: ${w}">Select</button>` : ''}
+    ${rep || lay || del ? `<div class="card-acts">${rep}${lay}${del ? `<button type="button" class="btn ghost small del-link" data-del-session="${esc(s.id)}" aria-label="Delete: ${w}">Delete</button>` : ''}</div>` : ''}
   </div>`;
+}
+
+/** Which session a card is, in a few words: its name, the dog and when it
+    was run, as the card shows them. */
+function cardWho(s) {
+  const d = S.dogs.find(x => x.id === s.dogId);
+  return [s.name, d?.name, fmtWhen(runAt(s) ?? s.startedAt)].filter(Boolean).join(', ');
 }
 
 /* A card's words. `folders` (id → name, from the folder list) adds the
@@ -1538,7 +1551,8 @@ function cardBody(s, folders = null) {
   /* A run graded in a wind felt on the ground says so in its line. */
   const felt = windWords(s, { imperial: imp(), short: true });
   const inside = folders ? foldersOf(s).map(f => folders.get(f.id) ?? f.name) : [];
-  return `<div class="meta"><span>${fmtWhen(s.startedAt)}</span><span>${esc(d?.name ?? '')}${d ? ' · ' : ''}${esc(targetText(s))}</span></div>
+  /* When it was run, as the list's day headings go by (log.js runAt). */
+  return `<div class="meta"><span>${fmtWhen(runAt(s) ?? s.startedAt)}</span><span>${esc(d?.name ?? '')}${d ? ' · ' : ''}${esc(targetText(s))}</span></div>
     ${s.name ? `<div class="card-name">${esc(s.name)}</div>` : ''}
     <div class="story">${esc(storyOf(s))}${felt ? ` · ${esc(felt)}` : ''}</div>
     ${inside.length ? `<div class="card-folders">In ${esc(inside.join(', '))}</div>` : ''}`;
@@ -6190,12 +6204,13 @@ function keepHeld(known) {
     the copies held on screen up to date. False when the phone refused,
     which the save banner has already said. */
 function saveFolders(changes, known) {
-  const patches = changes.map(c => ({ id: c.id, patch: { data: { folders: c.folders } } }));
+  const at = Date.now();
+  const patches = changes.map(c => ({ id: c.id, patch: folderPatch(c.folders, at) }));
   if (patches.length && !guardSave(null, () => db.updateSessions(patches))) return false;
   snap();
   keepHeld(known);
   const now = new Map(changes.map(c => [c.id, c.folders]));
-  const mend = (x) => (x && now.has(x.id) ? patchSession(x, { data: { folders: now.get(x.id) } }) : x);
+  const mend = (x) => (x && now.has(x.id) ? patchSession(x, folderPatch(now.get(x.id), at)) : x);
   run.session = mend(run.session);
   pendingSession = mend(pendingSession);
   return true;
@@ -6208,13 +6223,23 @@ function renderSessions() {
   const all = S.sessions;
   if (!all.length) { sessDeleting = false; logView.picking = false; }
   const folders = allFolders(all);
-  logIx = { rows: logRows(all, peopleFor), folders, names: new Map(folders.map(f => [f.id, f.name])) };
+  const now = Date.now();
+  logIx = { rows: logRows(all, peopleFor, now), folders, names: new Map(folders.map(f => [f.id, f.name])), day: midnight(now) };
   $('logSearch').value = logView.query;
   paintLog();
 }
 
+/* The day headings are worked out as the rows are built, so a list left open
+   over midnight went on calling yesterday's runs Today. Coming back to the
+   phone builds it again, which also shows any runs a sync has brought in
+   meanwhile, and a filter or search after midnight does the same (paintLog). */
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && currentScreen === 'scrSessions') renderSessions();
+});
+
 function paintLog() {
   if (!logIx) return;
+  if (logIx.day !== midnight(Date.now())) { renderSessions(); return; }
   const v = logView, all = logIx.rows;
   $('btnSessDelete').hidden = !all.length;
   $('btnSessDelete').textContent = sessDeleting ? 'Done deleting' : 'Delete sessions';
@@ -6257,9 +6282,9 @@ function paintLog() {
 }
 
 function logCard(r, mode) {
-  if (!r.body) r.body = cardBody(r.s, logIx.names);
-  if (mode === 'pick') return sessionCard(r.s, { body: r.body, pick: logView.picked.has(r.s.id) });
-  return sessionCard(r.s, { body: r.body, del: mode === 'del', replay: true, again: true });
+  if (!r.body) { r.body = cardBody(r.s, logIx.names); r.who = cardWho(r.s); }
+  if (mode === 'pick') return sessionCard(r.s, { body: r.body, who: r.who, pick: logView.picked.has(r.s.id) });
+  return sessionCard(r.s, { body: r.body, who: r.who, del: mode === 'del', replay: true, again: true });
 }
 
 /* Nothing left once the list is narrowed: say why, and offer the way back. */
@@ -6377,7 +6402,20 @@ function saveFolderForm(where) {
 
   if (ed.mode === 'rename') {
     const other = folderNamed(known, name, ed.id);
-    if (other) { toast(`There is already a folder called ${other.name}.`); input.focus(); return; }
+    /* The name is another folder's: two made on two phones before either had
+       heard of the other, most likely. Refused outright, the pair could never
+       be put together, so the handler is asked to make them one. */
+    if (other) {
+      const from = known.find(x => x.id === ed.id);
+      if (!from || !confirm(`There is already a folder called ${other.name}. Make ${from.name} part of it?`
+        + (from.n ? ` The ${sessionsWord(from.n)} in ${from.name} go into ${other.name}.` : ''))) { input.focus(); return; }
+      if (!saveFolders(mergeFolders(S.sessions, from.id, other), known.filter(x => x.id !== from.id))) return;
+      if (logView.folder === from.id) logView.folder = other.id;
+      toast(`${from.name} is now part of ${other.name}`);
+      closeFolderForm();
+      if (where === 'res') paintResultFolders(sessionById(sid)); else renderSessions();
+      return;
+    }
     const at = Date.now();
     const now = known.map(x => (x.id === ed.id ? { ...x, name, at } : x));
     if (!saveFolders(renameIn(S.sessions, ed.id, name, at), now)) return;

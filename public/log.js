@@ -58,7 +58,8 @@ export const searchWords = (query) => fold(query).split(' ').filter(Boolean);
 
 /* ── Days and months ───────────────────────────────────────────────── */
 
-const midnight = (t) => { const d = new Date(t); return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime(); };
+/** The start of the phone's own calendar day that `t` falls in. */
+export const midnight = (t) => { const d = new Date(t); return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime(); };
 
 /** The heading a session sits under: Today, Yesterday, the weekday and date
     for the rest of the last seven days, then one heading a month. Whole
@@ -113,18 +114,26 @@ function wordsOf(s, people) {
     .filter(x => typeof x === 'string').join(' '));
 }
 
+/** When a session was run, or laid when it has not been run yet. startedAt
+    is when the trail was laid, and a second run of it keeps that: a trail
+    aged overnight, or one run again a fortnight on, is the day the dog ran
+    it, which is the day the handler remembers and the day its dog's and
+    handler's own lists already put it under. */
+export const runAt = (s) => (fin(s?.data?.trackStarted) ? s.data.trackStarted : fin(s?.startedAt) ? s.startedAt : null);
+
 /** One row per session, newest first, holding everything the list is
     narrowed, searched and grouped by. `peopleOf(s)` gives the dog, handler
     and layer as the app shows them ({ id?, name }). */
 export function logRows(sessions, peopleOf = () => ({}), now = Date.now()) {
   const rows = (sessions || []).filter(Boolean).map((s) => {
     const people = peopleOf(s) || {};
+    const t = runAt(s);
     return {
-      s, t: fin(s.startedAt) ? s.startedAt : null,
+      s, t,
       dog: who(people.dog), handler: who(people.handler),
       folders: foldersOf(s).map(f => f.id),
       words: wordsOf(s, people),
-      g: dayGroup(s.startedAt, now),
+      g: dayGroup(t, now),
     };
   });
   /* Newest first, whatever order the sessions were kept in; undated last. */
@@ -206,10 +215,22 @@ export function folderList(sessions = [], held = []) {
 
 /** A folder already called this, however it is capitalised or accented,
     other than `except`. Two folders both called "Wells" could not be told
-    apart in a row of chips. */
+    apart in a row of chips. A name of emoji or symbols alone has no letters
+    for fold to keep, and every such name folded to nothing, so "🌲" found
+    "🐕" and a new folder was filed into the other; those are compared as
+    they are written instead. */
 export function folderNamed(list, name, except = null) {
-  const want = fold(name);
-  return (list || []).find(f => f.id !== except && fold(f.name) === want) ?? null;
+  const key = (n) => fold(n) || `=${String(n ?? '').trim().toLowerCase()}`;
+  const want = key(name);
+  return (list || []).find(f => f.id !== except && key(f.name) === want) ?? null;
+}
+
+/** Two folders that ended up with the same name, made on two phones before
+    either had heard of the other: `from`'s sessions go into `into`, and
+    `from` goes. A session already in both is simply taken out of `from`. */
+export function mergeFolders(sessions, fromId, into) {
+  return (sessions || []).filter(s => inFolder(s, fromId))
+    .map(s => ({ id: s.id, folders: [...takeOut(s, fromId).filter(f => f.id !== into.id), entry(into)] }));
 }
 
 const entry = (f) => ({ id: f.id, name: f.name, at: fin(f.at) ? f.at : 0 });
@@ -221,6 +242,11 @@ export const takeOut = (s, id) => foldersOf(s).filter(f => f.id !== id);
 
 /* Changes are [{ id, folders }]: a session and the whole list it now carries,
    so a save lays down one field and nothing else. */
+
+/** How a change is saved: the list, and when it changed (foldersAt). When two
+    phones' copies of a session meet, the list changed last wins even if the
+    other copy was saved later for something else (sync-core.js withMissing). */
+export const folderPatch = (folders, at) => ({ data: { folders, foldersAt: at } });
 
 /** Put these sessions in a folder. One already in it is left alone. */
 export function putMany(sessions, ids, folder) {
