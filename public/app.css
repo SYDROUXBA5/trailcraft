@@ -1425,6 +1425,17 @@ body:has(#scrWalk:not([hidden])) { --top-row: calc(var(--safe-t) + 104px); }
 #coachControls .unit-head { display: block; margin: 12px 0 8px; }
 #coachControls .age-row { margin-bottom: 4px; }
 #coachControls .age-chip { min-height: 44px; font-size: calc(14 * var(--px)); }
+/* The coach's voice: the settings' own tick list, on paper like the tiles
+   above it, a little tighter so six rows do not fill a phone. A voice's
+   name can be long ("Microsoft Sonia Online (Natural) - English (United
+   Kingdom)"), so it wraps rather than pushing the card sideways. */
+#coachVoiceList { background: var(--paper); box-shadow: none; border-radius: 16px; }
+#coachVoiceList .check-row { min-height: 56px; padding: 9px 14px; }
+#coachVoiceList .check-text b { overflow-wrap: anywhere; }
+.voice-more { display: block; margin: 8px 0 0 auto; }
+.voice-play { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 10px; }
+.voice-play .btn { flex: none; display: inline-flex; align-items: center; gap: 6px; }
+.voice-play .coach-cap { flex: 1 1 10em; min-width: 0; margin: 0; }
 
 /* ── A save that failed ───────────────────────────────────────────────
    Above every screen, ember-edged, and it stays: the handler decides when
