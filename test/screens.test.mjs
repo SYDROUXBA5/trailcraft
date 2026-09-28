@@ -426,7 +426,7 @@ await t('a coach call made while the app’s screen was dark is counted, and sai
     isNative: () => true, coach: { missed: 0, sounds: null }, settings: {}, BUZZ: {},
     document: { visibilityState: 'hidden', addEventListener: (type, f) => listeners.push([type, f]) },
     navigator: {}, haptic() {}, coachSpeak() {}, coachPhrase: () => '', imp: () => false,
-    holdScreen() {}, toast: (m) => toasts.push(m), setTimeout,
+    holdScreen() {}, toast: (m) => toasts.push(m), setTimeout, speaksInTheDark: () => false,
   };
   vm.createContext(sb);
   const head = "document.addEventListener('visibilitychange', ";
@@ -447,6 +447,36 @@ await t('a coach call made while the app’s screen was dark is counted, and sai
   sb.document.visibilityState = 'hidden';
   sb.coachDeliver({ kind: 'off' });
   assert.equal(sb.coach.missed, 0, 'a web page is not the app: nothing is claimed about it');
+});
+
+/* The iPhone app now speaks through iOS, which is heard with the screen
+   locked: a call with words is spoken live and not counted as missed. The
+   tones and the buzz still play for nobody in the dark, so a call made of
+   those alone is counted as before. */
+await t('in the app a spoken call is said live with the screen dark; one with no words is still counted', () => {
+  const spoken = [];
+  const sb = {
+    isNative: () => true, coach: { missed: 0, sounds: null }, settings: { coachVoice: true }, BUZZ: {},
+    document: { visibilityState: 'hidden' }, navigator: {}, haptic() {}, coachPhrase: (a) => a.kind, imp: () => false,
+    coachSpeak: (w) => spoken.push(w), setTimeout: (f) => f(), voiceCache: { native: true },
+  };
+  vm.createContext(sb);
+  const dark = js.split('\n').find(l => l.startsWith('const speaksInTheDark = '));
+  assert.ok(dark, 'app.js still has speaksInTheDark');
+  vm.runInContext([dark, decl('function coachDeliver(')].join('\n'), sb);
+  sb.coachDeliver({ kind: 'off' });
+  sb.coachDeliver({ kind: 'still' });
+  sb.coachDeliver({ kind: 'back' });
+  assert.deepEqual(spoken, ['off', 'still', 'back'], 'spoken as they came');
+  assert.equal(sb.coach.missed, 0, 'heard, so not missed');
+  sb.coachDeliver({ kind: 'edge' });
+  assert.equal(sb.coach.missed, 1, 'the edge is a tone and a buzz, and neither plays in the dark');
+  sb.settings.coachVoice = false;
+  sb.coachDeliver({ kind: 'off' });
+  assert.equal(sb.coach.missed, 2, 'with the voice off there are no words to hear');
+  sb.settings.coachVoice = true; sb.voiceCache.native = false;
+  sb.coachDeliver({ kind: 'off' });
+  assert.equal(sb.coach.missed, 3, 'an app whose shell has no voice of its own speaks through the web view, silent in the dark');
 });
 
 await t('a map screen holds the page at its own size, and the way back lets it be pinched again', () => {

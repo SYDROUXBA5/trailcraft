@@ -7,6 +7,7 @@ import CoreLocation
 class MainViewController: CAPBridgeViewController {
     override open func capacitorDidLoad() {
         bridge?.registerPluginInstance(HeadingPlugin())
+        bridge?.registerPluginInstance(SpeechPlugin())      // TrailcraftSpeech.swift: the coach's voice
     }
 }
 
