@@ -241,6 +241,13 @@ export function coachLang(lang) {
   return /^en-[a-z]{2}(?![a-z])/.test(l) ? l.slice(0, 5) : 'en-gb';
 }
 
+/** That English as the speech engines spell their own voices, "en-GB", for
+    when the coach has no voice to name and asks for a language instead.
+    Not the phone's language: an iPhone set to French would then read
+    "Off the trail" in a French voice. An iPhone can list no voice the
+    coach will use and still hold an English one it will pick. */
+export const speechLang = (lang) => coachLang(lang).replace(/-([a-z]{2})$/, (_, r) => `-${r.toUpperCase()}`);
+
 /** How good a voice sounds, read from its URI and name. Before Premium
     existed, iOS named its Enhanced voices "…-premium", so an old
     com.apple.ttsbundle voice ending that way is Enhanced, not Premium. */
@@ -341,11 +348,19 @@ export function speaksThroughWebKit(ua = '', { native = false, touches = 0 } = {
     they are given only where the voices are named the Apple way (a Mac
     outside Safari). On other phones a good voice cannot be told from a
     poor one, so a hint there could never be cleared: none is given. No
-    device is named, because an iPad is not an iPhone. */
-export function voiceHint(voices, lang, { webkit = false } = {}) {
+    device is named, because an iPad is not an iPhone.
+    With no voice the coach can name, once the list has come or the wait
+    for it is over, the calls are still spoken, in the phone's default
+    voice: an iPhone can list only its robotic Eloquence voices, or none at
+    all, and speak all the same. So the block says so, and Play is there
+    to hear it, rather than calling the coach mute. */
+export function voiceHint(voices, lang, { webkit = false, settled = false } = {}) {
   const ranked = rankVoices(voices, lang);
   if (ranked.some(r => r.quality === 'premium')) return '';
-  if (webkit) return 'Apple does not let this app use voices downloaded in Settings, so the coach speaks in the ones built in.';
+  const unnamed = !ranked.length && (settled || (voices ?? []).length > 0)
+    ? 'This phone does not name a voice the coach can use, so the calls are spoken in its default voice. Press Play to hear it.' : '';
+  if (webkit) return [unnamed, 'Apple does not let this app use voices downloaded in Settings, so the coach speaks in the ones built in.'].filter(Boolean).join(' ');
+  if (unnamed) return unnamed;
   const apple = ranked.some(r => /^com\.apple\./i.test(String(r.voice.voiceURI ?? '')) || /\((enhanced|premium)\)/i.test(String(r.voice.name ?? '')));
   return apple ? 'For the most natural voice, download an English voice marked Premium in Settings → Accessibility → Spoken Content.' : '';
 }

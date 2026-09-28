@@ -13,7 +13,7 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import {
   rankVoices, pickVoice, voiceQuality, voiceLabel, voiceRate, voiceName, voiceAccent, voiceHint, speaksThroughWebKit,
-  coachLang, coachPhrase, SAMPLE_CALL, COACH_DEFAULTS,
+  coachLang, speechLang, coachPhrase, SAMPLE_CALL, COACH_DEFAULTS,
 } from '../public/coach.js';
 
 let pass = 0;
@@ -84,6 +84,21 @@ const WEBKIT = [
     .map(n => V(n, 'en-US', `com.apple.speech.synthesis.voice.${n.replace(/\s/g, '')}`)),
   V('Thomas', 'fr-FR', 'com.apple.voice.compact.fr-FR.Thomas'),
   V('Anna', 'de-DE', 'com.apple.voice.compact.de-DE.Anna'),
+];
+
+/* What an iPhone on iOS 16 to 18 can hand a page instead, as Apple's
+   developer forums report: of English, only the Eloquence set and the
+   novelty voices, none of which the coach will use, and the phone's own
+   language beside them. The system still holds an English voice, and picks
+   it when asked for English by language. */
+const IPHONE_ELOQUENCE = [
+  ...['Eddy', 'Flo', 'Grandma', 'Grandpa', 'Reed', 'Rocko', 'Sandy', 'Shelley'].flatMap(n => [
+    V(`${n} (English (UK))`, 'en-GB', `com.apple.eloquence.en-GB.${n}`),
+    V(`${n} (English (US))`, 'en-US', `com.apple.eloquence.en-US.${n}`),
+  ]),
+  ...['Albert', 'Bad News', 'Bahh', 'Bells', 'Boing', 'Bubbles', 'Jester', 'Superstar', 'Zarvox']
+    .map(n => V(n, 'en-US', `com.apple.speech.synthesis.voice.${n.replace(/\s/g, '')}`)),
+  V('Thomas', 'fr-FR', 'com.apple.voice.compact.fr-FR.Thomas'),
 ];
 
 const IPHONE_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1';
@@ -186,6 +201,29 @@ t('the handler’s own English, or British when the phone speaks another languag
   assert.equal(rankVoices(WEBKIT, 'fr-FR')[0].voice.name, 'Daniel');
   // …but a natural voice in another accent beats a compact one in their own.
   assert.equal(rankVoices(DOWNLOADED, 'en-AU')[0].voice.name, 'Serena');
+});
+
+t('with nothing to name, the coach asks for its English, spelt as the engines spell it', () => {
+  assert.equal(speechLang('fr-FR'), 'en-GB', 'not the phone’s French');
+  assert.equal(speechLang('en-AU'), 'en-AU');
+  assert.equal(speechLang('en_us'), 'en-US');
+  assert.equal(speechLang('en'), 'en-GB');
+  assert.equal(speechLang(undefined), 'en-GB');
+  // An iPhone that lists only the Eloquence and novelty voices: nothing the coach will name.
+  assert.deepEqual(rankVoices(IPHONE_ELOQUENCE, 'fr-FR'), []);
+  assert.equal(pickVoice(IPHONE_ELOQUENCE, 'fr-FR'), null);
+  assert.equal(pickVoice(IPHONE_ELOQUENCE, 'en-GB', 'com.apple.eloquence.en-GB.Eddy'), null, 'not even when once chosen');
+});
+
+t('when no voice can be named, the hint says the phone’s default speaks, once the list is in', () => {
+  const unnamed = 'This phone does not name a voice the coach can use, so the calls are spoken in its default voice. Press Play to hear it.';
+  const apple = 'Apple does not let this app use voices downloaded in Settings, so the coach speaks in the ones built in.';
+  assert.equal(voiceHint(IPHONE_ELOQUENCE, 'fr-FR', { webkit: true }), `${unnamed} ${apple}`, 'listed, so no wait is needed');
+  assert.equal(voiceHint([], 'en-GB', { webkit: true, settled: true }), `${unnamed} ${apple}`);
+  assert.equal(voiceHint([], 'en-GB', { settled: true }), unnamed);
+  assert.equal(voiceHint([], 'en-GB', { webkit: true }), apple, 'while the voices may still be coming, no note');
+  assert.equal(voiceHint([], 'en-GB'), '');
+  assert.equal(voiceHint(WEBKIT, 'en-GB', { webkit: true, settled: true }), apple, 'a voice to name: no note');
 });
 
 t('a Mac outside Safari: names say the quality, Alex stays, the organ does not', () => {
@@ -373,7 +411,7 @@ function speaker(list, { lang = 'en-GB', chosen = null } = {}) {
   const speechSynthesis = { getVoices: () => list, cancel() {}, speak: (u) => said.push(u) };
   const sb = {
     window: {}, navigator: { language: lang }, speechSynthesis, settings: { coachVoiceURI: chosen },
-    pickVoice, voiceRate, voiceQuality,
+    pickVoice, voiceRate, voiceQuality, speechLang,
     SpeechSynthesisUtterance: function (text) { this.text = text; },
   };
   sb.window.speechSynthesis = speechSynthesis;
@@ -397,12 +435,18 @@ t('coachSpeak names the voice, and paces it by its quality', () => {
   assert.equal(moira.said[0].rate, 1.05);
 });
 
-t('with no voice to name, coachSpeak speaks exactly as it did', () => {
-  const { sb, said } = speaker([], { lang: 'fr-FR' });
-  sb.coachSpeak('Off the trail');
-  assert.equal(said[0].voice, undefined);
-  assert.equal(said[0].lang, 'fr-FR');
-  assert.equal(said[0].rate, 1.05);
+t('with no voice to name, coachSpeak asks for English, never the phone’s own language', () => {
+  for (const list of [[], IPHONE_ELOQUENCE]) {
+    const { sb, said } = speaker(list, { lang: 'fr-FR' });
+    sb.coachSpeak('Off the trail, 15 metres to the left');
+    assert.equal(said.length, 1, 'still spoken');
+    assert.equal(said[0].voice, undefined, 'the phone picks the voice');
+    assert.equal(said[0].lang, 'en-GB', 'an English one: a French voice reading the call is the robot this was meant to end');
+    assert.equal(said[0].rate, 1.05);
+  }
+  const aussie = speaker(IPHONE_ELOQUENCE, { lang: 'en-AU' });
+  aussie.sb.coachSpeak('Off the trail');
+  assert.equal(aussie.said[0].lang, 'en-AU', 'the handler’s own English where it is English');
 });
 
 t('a named voice that fails is said again in the browser’s own, once; a call cut short is not', () => {
@@ -421,7 +465,7 @@ t('a named voice that fails is said again in the browser’s own, once; a call c
     assert.equal(said.length, 2, `${error}: said again`);
     assert.equal(said[1].text, 'Off the trail, 15 metres to the left');
     assert.equal(said[1].voice, undefined, 'in the browser’s own voice');
-    assert.equal(said[1].lang, 'fr-FR');
+    assert.equal(said[1].lang, 'fr-FR', 'the voice needed a signal: asking for English could land on it again, and the French one is on the phone');
     assert.equal(said[1].rate, 1.05);
     assert.equal(said[1].onerror, undefined, 'once, never round and round');
   }
@@ -431,6 +475,18 @@ t('a named voice that fails is said again in the browser’s own, once; a call c
     said[0].onerror({ error });
     assert.equal(said.length, 1, `${error}: the next call took over, so this one is not said again`);
   }
+});
+
+t('a voice on the phone that fails is said again in English, not the phone’s own language', () => {
+  // A French iPhone: Daniel is named, and fails; the signal was never the trouble.
+  const { sb, said } = speaker(WEBKIT, { lang: 'fr-FR' });
+  sb.coachSpeak('Off the trail, 15 metres to the left');
+  assert.equal(said[0].voice.name, 'Daniel');
+  said[0].onerror({ error: 'synthesis-failed' });
+  assert.equal(said.length, 2);
+  assert.equal(said[1].voice, undefined, 'in the phone’s own choice of voice');
+  assert.equal(said[1].lang, 'en-GB', 'but an English one');
+  assert.equal(said[1].onerror, undefined, 'once');
 });
 
 t('an empty first answer from getVoices is not kept', () => {
@@ -530,14 +586,30 @@ t('no speech engine: the block says so and hides the rest', () => {
   assert.equal(els.coachVoiceList, undefined, 'nothing is drawn');
 });
 
-t('an engine with no voices at all, once settled, says there is no voice rather than offer a silent Play', () => {
-  const none = painter([], { settled: true });
-  assert.equal(none.els.coachVoiceNone.hidden, false);
-  assert.equal(none.els.coachVoiceBody.hidden, true, 'Play and the hint go with the rest');
-  assert.equal(none.els.coachVoiceList, undefined, 'nothing is drawn');
+t('an empty voice list, once settled, is not called mute: the coach still speaks, and Play stays', () => {
+  // Safari has answered getVoices() with nothing and spoken in a default voice all the same.
+  for (const opts of [{ ua: IPHONE_UA, touches: 5, native: true }, {}]) {
+    const empty = painter([], { settled: true, ...opts });
+    assert.equal(empty.els.coachVoiceNone.hidden, true, 'coachSpeak speaks every call here, so the block does not say it cannot');
+    assert.equal(empty.els.coachVoiceBody.hidden, false, 'Play is kept: it is how the handler hears the default');
+    assert.deepEqual(empty.rows.map(r => [r.name, r.on]), [['Automatic', true]]);
+    assert.equal(empty.els.coachVoiceHint.hidden, false);
+    assert.match(empty.els.coachVoiceHint.textContent, /^This phone does not name a voice the coach can use, so the calls are spoken in its default voice\. Press Play to hear it\./);
+  }
   const some = painter(DOWNLOADED, { settled: true });
   assert.equal(some.els.coachVoiceNone.hidden, true);
   assert.equal(some.els.coachVoiceBody.hidden, false);
+});
+
+t('an iPhone that lists only the Eloquence and novelty voices: Automatic, Play, and a plain note', () => {
+  const phone = painter(IPHONE_ELOQUENCE, { ua: IPHONE_UA, touches: 5, native: true });
+  assert.equal(phone.els.coachVoiceNone.hidden, true);
+  assert.equal(phone.els.coachVoiceBody.hidden, false);
+  assert.deepEqual(phone.rows.map(r => [r.name, r.sub, r.on]), [['Automatic', 'The best built-in voice', true]], 'no robot offered as a row');
+  assert.equal(phone.els.coachVoiceMore.hidden, true);
+  assert.equal(phone.els.coachVoiceHint.hidden, false);
+  assert.equal(phone.els.coachVoiceHint.textContent,
+    'This phone does not name a voice the coach can use, so the calls are spoken in its default voice. Press Play to hear it. Apple does not let this app use voices downloaded in Settings, so the coach speaks in the ones built in.');
 });
 
 t('no voices yet: Automatic alone, and the list is drawn again when they come', () => {
