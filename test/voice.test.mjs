@@ -12,7 +12,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import {
-  rankVoices, pickVoice, voiceQuality, voiceLabel, voiceRate, voiceName, voiceAccent, voiceHint,
+  rankVoices, pickVoice, voiceQuality, voiceLabel, voiceRate, voiceName, voiceAccent, voiceHint, speaksThroughWebKit,
   coachLang, coachPhrase, SAMPLE_CALL, COACH_DEFAULTS,
 } from '../public/coach.js';
 
@@ -39,10 +39,11 @@ function line(head) {
 
 const V = (name, lang, voiceURI, extra = {}) => ({ name, lang, voiceURI, localService: true, default: false, ...extra });
 
-/* An iPhone on iOS 17 with Serena Premium and Daniel Enhanced downloaded:
-   the compact voices it ships with, the novelty voices, the Eloquence set
-   and other languages all come back from getVoices() too. */
-const IOS = [
+/* A Mac with Serena Premium and Daniel Enhanced downloaded, as a browser
+   other than Safari lists it: the compact voices it ships with, the
+   novelty voices, the Eloquence set and other languages come back from
+   getVoices() too. No WebKit list looks like this (see WEBKIT below). */
+const DOWNLOADED = [
   V('Samantha', 'en-US', 'com.apple.voice.compact.en-US.Samantha', { default: true }),
   V('Daniel', 'en-GB', 'com.apple.voice.compact.en-GB.Daniel'),
   V('Karen', 'en-AU', 'com.apple.voice.compact.en-AU.Karen'),
@@ -63,12 +64,34 @@ const IOS = [
   V('Anna', 'de-DE', 'com.apple.voice.compact.de-DE.Anna'),
 ];
 
-/* An iPhone as it comes: nothing downloaded. */
-const IOS_FRESH = IOS.filter(v => /compact|speech\.synthesis|eloquence/.test(v.voiceURI));
+/* What WebKit gives a page: Safari, the iPhone app's web view, and every
+   browser on an iPhone. WebKit passes on only the voices the system came
+   with (AVSpeechSynthesisVoice.isSystemVoice) and marks them all local, so
+   a Premium or Enhanced voice downloaded in Settings never appears, nor
+   does the Eloquence set. Taken from a Mac on macOS 26: compact Daniel,
+   the "super-compact" voices, the novelty voices under their display
+   names (Deranged is Wobble, Hysterical is Jester, Princess is Superstar),
+   and other languages. */
+const WEBKIT = [
+  V('Daniel', 'en-GB', 'com.apple.voice.compact.en-GB.Daniel'),
+  V('Karen', 'en-AU', 'com.apple.voice.super-compact.en-AU.Karen'),
+  V('Moira', 'en-IE', 'com.apple.voice.super-compact.en-IE.Moira'),
+  V('Rishi', 'en-IN', 'com.apple.voice.super-compact.en-IN.Rishi'),
+  V('Samantha', 'en-US', 'com.apple.voice.super-compact.en-US.Samantha', { default: true }),
+  V('Tessa', 'en-ZA', 'com.apple.voice.super-compact.en-ZA.Tessa'),
+  ...['Albert', 'Bad News', 'Bahh', 'Bells', 'Boing', 'Bubbles', 'Cellos', 'Wobble', 'Fred', 'Good News', 'Jester',
+    'Junior', 'Kathy', 'Organ', 'Superstar', 'Ralph', 'Trinoids', 'Whisper', 'Zarvox']
+    .map(n => V(n, 'en-US', `com.apple.speech.synthesis.voice.${n.replace(/\s/g, '')}`)),
+  V('Thomas', 'fr-FR', 'com.apple.voice.compact.fr-FR.Thomas'),
+  V('Anna', 'de-DE', 'com.apple.voice.compact.de-DE.Anna'),
+];
 
-/* Safari on a Mac: "(Enhanced)" and "(Premium)" in the names, Alex (a
+const IPHONE_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1';
+const MAC_CHROME_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36';
+
+/* Chrome on a Mac: "(Enhanced)" and "(Premium)" in the names, Alex (a
    good plain voice), and the novelty voices under their Mac names. */
-const MAC_SAFARI = [
+const MAC_CHROME = [
   V('Alex', 'en-US', 'com.apple.speech.synthesis.voice.Alex'),
   V('Daniel', 'en-GB', 'com.apple.voice.compact.en-GB.Daniel'),
   V('Daniel (Enhanced)', 'en-GB', 'com.apple.voice.enhanced.en-GB.Daniel'),
@@ -105,6 +128,15 @@ const ANDROID = [
   V('Deutsch Deutschland', 'de-DE', 'Deutsch Deutschland'),
 ];
 
+/* Edge on Windows: the machine's own voices, and Microsoft's neural ones,
+   named "(Natural)" and spoken on Microsoft's servers. */
+const EDGE = [
+  V('Microsoft Hazel - English (United Kingdom)', 'en-GB', 'Microsoft Hazel - English (United Kingdom)', { default: true }),
+  V('Microsoft Sonia Online (Natural) - English (United Kingdom)', 'en-GB', 'Microsoft Sonia Online (Natural) - English (United Kingdom)', { localService: false }),
+  V('Microsoft Aria Online (Natural) - English (United States)', 'en-US', 'Microsoft Aria Online (Natural) - English (United States)', { localService: false }),
+  V('Microsoft Denise Online (Natural) - French (France)', 'fr-FR', 'Microsoft Denise Online (Natural) - French (France)', { localService: false }),
+];
+
 const uris = (ranked) => ranked.map(r => r.voice.voiceURI);
 
 /* ── The pure choosing ─────────────────────────────────────────────── */
@@ -124,8 +156,8 @@ t('the quality is read from the URI and the name', () => {
     'a good voice is not hurried; a basic one keeps the pace it had');
 });
 
-t('an iPhone: Premium, then Enhanced, then the compact voices; no joke voices, no other languages', () => {
-  const r = rankVoices(IOS, 'en-GB');
+t('downloaded voices: Premium, then Enhanced, then the compact voices; no joke voices, no other languages', () => {
+  const r = rankVoices(DOWNLOADED, 'en-GB');
   assert.deepEqual(uris(r), [
     'com.apple.voice.premium.en-GB.Serena',
     'com.apple.voice.enhanced.en-GB.Daniel',
@@ -149,15 +181,15 @@ t('the handler’s own English, or British when the phone speaks another languag
   assert.equal(coachLang('en'), 'en-gb');
   assert.equal(coachLang(undefined), 'en-gb');
   // Within a quality the handler's own accent comes first…
-  assert.equal(rankVoices(IOS_FRESH, 'en-AU')[0].voice.name, 'Karen');
-  assert.equal(rankVoices(IOS_FRESH, 'en-US')[0].voice.name, 'Samantha');
-  assert.equal(rankVoices(IOS_FRESH, 'fr-FR')[0].voice.name, 'Daniel');
+  assert.equal(rankVoices(WEBKIT, 'en-AU')[0].voice.name, 'Karen');
+  assert.equal(rankVoices(WEBKIT, 'en-US')[0].voice.name, 'Samantha');
+  assert.equal(rankVoices(WEBKIT, 'fr-FR')[0].voice.name, 'Daniel');
   // …but a natural voice in another accent beats a compact one in their own.
-  assert.equal(rankVoices(IOS, 'en-AU')[0].voice.name, 'Serena');
+  assert.equal(rankVoices(DOWNLOADED, 'en-AU')[0].voice.name, 'Serena');
 });
 
-t('Safari on a Mac: names say the quality, Alex stays, the organ does not', () => {
-  const r = rankVoices(MAC_SAFARI, 'en-GB');
+t('a Mac outside Safari: names say the quality, Alex stays, the organ does not', () => {
+  const r = rankVoices(MAC_CHROME, 'en-GB');
   assert.deepEqual(r.map(x => x.voice.name), ['Zoe (Premium)', 'Daniel (Enhanced)', 'Alex', 'Daniel', 'Fiona']);
   assert.deepEqual(r.map(x => voiceName(x.voice)), ['Zoe', 'Daniel', 'Alex', 'Daniel', 'Fiona'], 'the label says the quality, not the name');
   assert.equal(voiceAccent('en-GB-u-sd-gbsct'), 'Scottish');
@@ -188,29 +220,80 @@ t('Chrome on Android: underscores in the tags, the network voice last', () => {
 });
 
 t('the handler’s choice holds while the phone has it, and falls back when it goes', () => {
-  assert.equal(pickVoice(IOS, 'en-GB').voiceURI, 'com.apple.voice.premium.en-GB.Serena', 'Automatic is the best');
-  assert.equal(pickVoice(IOS, 'en-GB', 'com.apple.voice.compact.en-IE.Moira').voiceURI, 'com.apple.voice.compact.en-IE.Moira');
-  assert.equal(pickVoice(IOS, 'en-GB', 'com.apple.voice.premium.en-GB.Malcolm').voiceURI,
+  assert.equal(pickVoice(DOWNLOADED, 'en-GB').voiceURI, 'com.apple.voice.premium.en-GB.Serena', 'Automatic is the best');
+  assert.equal(pickVoice(DOWNLOADED, 'en-GB', 'com.apple.voice.compact.en-IE.Moira').voiceURI, 'com.apple.voice.compact.en-IE.Moira');
+  assert.equal(pickVoice(DOWNLOADED, 'en-GB', 'com.apple.voice.premium.en-GB.Malcolm').voiceURI,
     'com.apple.voice.premium.en-GB.Serena', 'a voice deleted since it was chosen: the best one left');
-  assert.equal(pickVoice(IOS, 'en-GB', 'com.apple.speech.synthesis.voice.Zarvox').voiceURI,
+  assert.equal(pickVoice(DOWNLOADED, 'en-GB', 'com.apple.speech.synthesis.voice.Zarvox').voiceURI,
     'com.apple.voice.premium.en-GB.Serena', 'a joke voice is never used, even when stored');
-  assert.equal(pickVoice(IOS, 'en-GB', 'com.apple.voice.compact.fr-FR.Thomas').voiceURI,
+  assert.equal(pickVoice(DOWNLOADED, 'en-GB', 'com.apple.voice.compact.fr-FR.Thomas').voiceURI,
     'com.apple.voice.premium.en-GB.Serena', 'nor one that cannot say the English');
   assert.equal(pickVoice([], 'en-GB'), null, 'no voices yet: the browser picks, as it always did');
   assert.equal(pickVoice([], 'en-GB', 'com.apple.voice.premium.en-GB.Serena'), null);
   assert.equal(pickVoice(undefined, 'en-GB'), null);
-  assert.equal(pickVoice(IOS.filter(v => !v.lang.startsWith('en')), 'fr-FR'), null, 'no English voice at all');
+  assert.equal(pickVoice(DOWNLOADED.filter(v => !v.lang.startsWith('en')), 'fr-FR'), null, 'no English voice at all');
   assert.deepEqual(rankVoices([], 'en-GB'), []);
 });
 
-t('the hint for a better voice: only while there is no Premium one, with the steps only on an iPhone', () => {
-  assert.equal(voiceHint(IOS, 'en-GB', { iphone: true }), '', 'Serena is Premium: nothing to say');
-  const phone = voiceHint(IOS_FRESH, 'en-GB', { iphone: true });
-  assert.equal(phone, 'For the most natural voice, download one on your iPhone: Settings → Accessibility → Spoken Content → Voices → English, then any voice marked Premium.');
-  const other = voiceHint(ANDROID, 'en-GB');
-  assert.match(other, /natural voice/);
-  assert.ok(!/iPhone|Premium|Accessibility/.test(other), 'no iPhone menus on another phone');
-  assert.equal(voiceHint([], 'en-GB', { iphone: true }), phone, 'no voices listed: the hint still helps');
+t('WebKit: only the voices built in, so the coach says so and never sends the handler to download one', () => {
+  const r = rankVoices(WEBKIT, 'en-GB');
+  assert.deepEqual(r.map(x => x.voice.name), ['Daniel', 'Karen', 'Moira', 'Rishi', 'Samantha', 'Tessa'], 'no novelty voice, no other language');
+  assert.ok(r.every(x => x.quality === 'compact' && x.known && x.local));
+  assert.equal(pickVoice(WEBKIT, 'en-GB').voiceURI, 'com.apple.voice.compact.en-GB.Daniel');
+  assert.equal(pickVoice(WEBKIT, 'en-US').voiceURI, 'com.apple.voice.super-compact.en-US.Samantha');
+  const said = voiceHint(WEBKIT, 'en-GB', { webkit: true });
+  assert.equal(said, 'Apple does not let this app use voices downloaded in Settings, so the coach speaks in the ones built in.');
+  assert.ok(!/download (one|an)|marked Premium|iPhone|iPad/.test(said), 'no steps that could never work');
+  assert.equal(voiceHint([], 'en-GB', { webkit: true }), said);
+  assert.equal(voiceHint(DOWNLOADED, 'en-GB', { webkit: true }), '', 'should WebKit ever pass a Premium voice on, nothing to say');
+});
+
+t('which pages speak through WebKit', () => {
+  const MAC_SAFARI_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15';
+  assert.equal(speaksThroughWebKit(IPHONE_UA), true);
+  assert.equal(speaksThroughWebKit('Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/128.0 Mobile/15E148 Safari/604.1'), true, 'Chrome on an iPhone is WebKit too');
+  assert.equal(speaksThroughWebKit(MAC_SAFARI_UA), true, 'Safari on a Mac');
+  assert.equal(speaksThroughWebKit(MAC_SAFARI_UA, { touches: 5 }), true, 'an iPad asking for the desktop site');
+  assert.equal(speaksThroughWebKit('Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:130.0) Gecko/20100101 Firefox/130.0', { touches: 5 }), true, 'a touch screen that says Macintosh is an iPad, whatever the browser');
+  assert.equal(speaksThroughWebKit('', { native: true }), true, 'the iPhone app');
+  assert.equal(speaksThroughWebKit(MAC_CHROME_UA), false);
+  assert.equal(speaksThroughWebKit('Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:130.0) Gecko/20100101 Firefox/130.0'), false);
+  assert.equal(speaksThroughWebKit('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36 Edg/128.0.0.0'), false);
+  assert.equal(speaksThroughWebKit('Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0 Mobile Safari/537.36', { touches: 5 }), false);
+  assert.equal(speaksThroughWebKit(undefined), false);
+});
+
+t('off Apple the hint is given only where it can be acted on, and names no device', () => {
+  assert.equal(voiceHint(ANDROID, 'en-GB'), '', 'Android’s voices cannot be told apart by quality: no hint that could never clear');
+  assert.equal(voiceHint(EDGE, 'en-GB'), '');
+  assert.equal(voiceHint(CHROME, 'en-GB'), '');
+  assert.equal(voiceHint([], 'en-GB'), '');
+  const mac = voiceHint(MAC_CHROME.filter(v => !/premium/i.test(v.name)), 'en-GB');
+  assert.equal(mac, 'For the most natural voice, download an English voice marked Premium in Settings → Accessibility → Spoken Content.',
+    'a Mac outside Safari can download one, and a Premium voice then clears it');
+  assert.equal(voiceHint(MAC_CHROME, 'en-GB'), '');
+  assert.equal(voiceHint(DOWNLOADED.filter(v => !/premium/.test(v.voiceURI)), 'en-GB'), mac);
+  for (const list of [WEBKIT, DOWNLOADED, MAC_CHROME, CHROME, ANDROID, EDGE, []]) {
+    for (const webkit of [true, false]) assert.ok(!/iPhone|iPad/.test(voiceHint(list, 'en-GB', { webkit })), 'an iPad is not an iPhone');
+  }
+});
+
+t('a quality that cannot be read is not called Basic', () => {
+  assert.deepEqual(rankVoices(ANDROID, 'en-GB').map(r => r.known), [false, false, false, false]);
+  assert.deepEqual(rankVoices(CHROME, 'en-GB').map(r => r.known), [false, false, false, false, false]);
+  assert.ok(rankVoices(DOWNLOADED, 'en-GB').every(r => r.known), 'Apple names every voice by its quality');
+  assert.equal(rankVoices([V('Alex', 'en-US', 'com.apple.speech.synthesis.voice.Alex')], 'en-GB')[0].known, true, 'an Apple voice with no mark is a plain one');
+});
+
+t('Microsoft’s "(Natural)" voices are Enhanced, and the name drops the word', () => {
+  const sonia = EDGE[1];
+  assert.equal(voiceQuality(sonia), 'enhanced');
+  assert.equal(voiceRate(voiceQuality(sonia)), 1);
+  assert.equal(voiceName(sonia), 'Microsoft Sonia Online - English (United Kingdom)', 'the app’s “Natural” is Apple’s Premium, so one row never says both');
+  const r = rankVoices(EDGE, 'en-GB');
+  assert.deepEqual(r.map(x => [x.voice.name.split(' ')[1], x.quality, x.known, x.local]),
+    [['Hazel', 'plain', false, true], ['Sonia', 'enhanced', true, false], ['Aria', 'enhanced', true, false]],
+    'the voice on the machine still comes before the one that needs a signal');
 });
 
 t('the sample call is the real one, in either unit', () => {
@@ -247,7 +330,8 @@ t('each voice row says whether it is chosen, from the test that lights it', () =
   const f = decl('function paintCoachVoice()');
   assert.match(f, /const on = uri === mine;\s*return `<button type="button" class="check-row\$\{on \? ' on' : ''\}" data-voice="\$\{esc\(uri\)\}" aria-pressed="\$\{on\}">/);
   assert.match(f, /\$\{esc\(name\)\}[\s\S]*\$\{esc\(sub\)\}/, 'names from the phone are escaped');
-  assert.match(f, /row\('', 'Automatic', `The best voice on this phone/);
+  assert.match(f, /row\('', 'Automatic', `\$\{webkit \? 'The best built-in voice' : 'The best voice on this phone'\}/,
+    'under WebKit Automatic is the best voice built in, not the best on the phone');
   assert.match(f, /ranked\.filter\(\(r, i\) => i < VOICES_SHOWN \|\| r\.voice\.voiceURI === mine\)/, 'a long list is cut, never the chosen voice');
   assert.match(decl('function paintCoachControls()'), /\n {2}paintCoachVoice\(\);\n\}$/, 'drawn whenever the coach controls are');
 });
@@ -264,7 +348,8 @@ t('voices that arrive late are taken again and drawn again, keeping focus', () =
   const w = decl('function wire()');
   assert.match(w, /speechSynthesis\.addEventListener\('voiceschanged', fresh\)/);
   assert.match(w, /else speechSynthesis\.onvoiceschanged = fresh;/, 'where the engine is not an EventTarget');
-  assert.match(w, /const fresh = \(\) => \{\s*voiceCache\.list = \[\];\s*voiceList\(\);\s*const at = document\.activeElement;\s*if \(at\) repaintFrom\(at, paintCoachVoice\); else paintCoachVoice\(\);/);
+  assert.match(w, /const fresh = \(\) => \{\s*voiceCache\.list = \[\];\s*voiceCache\.settled = true;\s*voiceList\(\);\s*const at = document\.activeElement;\s*if \(at\) repaintFrom\(at, paintCoachVoice\); else paintCoachVoice\(\);/);
+  assert.match(w, /voiceList\(\);   \/\/ Chrome only starts[\s\S]{0,400}setTimeout\(fresh, 3000\);/, 'an engine that never says so is settled after a grace');
   assert.match(decl('function voiceList()'), /if \(!voiceCache\.list\.length && 'speechSynthesis' in window\)/, 'an empty list is asked for again');
 });
 
@@ -272,7 +357,8 @@ t('tapping a voice keeps it, and Play says the sample call in it', () => {
   const w = decl('function wire()');
   const click = w.slice(w.indexOf("$('coachVoiceBox').addEventListener('click'"));
   assert.match(click, /settings\.coachVoiceURI = row\.dataset\.voice \|\| null;\s*saveSettings\(\);\s*return repaintFrom\(row, paintCoachVoice\);/);
-  assert.match(click, /voiceCache\.all = !voiceCache\.all;/);
+  assert.match(click, /voiceCache\.all = !voiceCache\.all;\s*paintCoachVoice\(\);[\s\S]{0,300}if \(!voiceCache\.all\) \$\('coachVoiceMore'\)\.scrollIntoView\(\{ block: 'nearest' \}\);/,
+    'folding the list from its foot brings the button back into view, with no glide');
   assert.match(click, /if \(e\.target\.closest\('#coachVoicePlay'\)\) coachSpeak\(coachPhrase\(SAMPLE_CALL, \{ imperial: imp\(\) \}\)\);/);
   // The priming on the first touch is untouched: it still speaks a silent space.
   assert.match(decl('function audioUnlock()'), /const u = new SpeechSynthesisUtterance\(' '\);\s*u\.volume = 0;\s*speechSynthesis\.speak\(u\);/);
@@ -298,13 +384,13 @@ function speaker(list, { lang = 'en-GB', chosen = null } = {}) {
 }
 
 t('coachSpeak names the voice, and paces it by its quality', () => {
-  const { sb, said } = speaker(IOS);
+  const { sb, said } = speaker(DOWNLOADED);
   sb.coachSpeak('Back on the trail');
   assert.equal(said.length, 1);
   assert.equal(said[0].voice.voiceURI, 'com.apple.voice.premium.en-GB.Serena');
   assert.equal(said[0].lang, 'en-GB', 'the voice’s own language, so the engine does not swap it');
   assert.equal(said[0].rate, 1);
-  const moira = speaker(IOS, { chosen: 'com.apple.voice.compact.en-IE.Moira' });
+  const moira = speaker(DOWNLOADED, { chosen: 'com.apple.voice.compact.en-IE.Moira' });
   moira.sb.coachSpeak('Still off');
   assert.equal(moira.said[0].voice.name, 'Moira');
   assert.equal(moira.said[0].lang, 'en-IE');
@@ -319,32 +405,60 @@ t('with no voice to name, coachSpeak speaks exactly as it did', () => {
   assert.equal(said[0].rate, 1.05);
 });
 
+t('a named voice that fails is said again in the browser’s own, once; a call cut short is not', () => {
+  // A French phone with no local English voice: Automatic is a network one.
+  const list = [
+    V('Microsoft Hortense - French (France)', 'fr-FR', 'Microsoft Hortense - French (France)'),
+    V('Google français', 'fr-FR', 'Google français', { localService: false }),
+    V('Google UK English Female', 'en-GB', 'Google UK English Female', { localService: false }),
+  ];
+  for (const error of ['network', 'synthesis-failed', 'voice-unavailable']) {
+    const { sb, said } = speaker(list, { lang: 'fr-FR' });
+    sb.coachSpeak('Off the trail, 15 metres to the left');
+    assert.equal(said[0].voice.name, 'Google UK English Female');
+    assert.equal(typeof said[0].onerror, 'function', 'a named voice has a way back');
+    said[0].onerror({ error });
+    assert.equal(said.length, 2, `${error}: said again`);
+    assert.equal(said[1].text, 'Off the trail, 15 metres to the left');
+    assert.equal(said[1].voice, undefined, 'in the browser’s own voice');
+    assert.equal(said[1].lang, 'fr-FR');
+    assert.equal(said[1].rate, 1.05);
+    assert.equal(said[1].onerror, undefined, 'once, never round and round');
+  }
+  for (const error of ['interrupted', 'canceled']) {
+    const { sb, said } = speaker(list, { lang: 'fr-FR' });
+    sb.coachSpeak('Still off');
+    said[0].onerror({ error });
+    assert.equal(said.length, 1, `${error}: the next call took over, so this one is not said again`);
+  }
+});
+
 t('an empty first answer from getVoices is not kept', () => {
   const list = [];
   const { sb, said } = speaker(list);
   sb.coachSpeak('Off the trail');
   assert.equal(said[0].voice, undefined);
-  list.push(...IOS);                        // the voices load a moment later
+  list.push(...DOWNLOADED);                        // the voices load a moment later
   sb.coachSpeak('Off the trail');
   assert.equal(said[1].voice.name, 'Serena');
-  assert.equal(sb.voiceCache.list.length, IOS.length);
+  assert.equal(sb.voiceCache.list.length, DOWNLOADED.length);
 });
 
 /** paintCoachVoice, lifted out, against fake elements. */
-function painter(list, { chosen = null, all = false, speech = true, ua = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X)', imperial = false } = {}) {
+function painter(list, { chosen = null, all = false, settled = false, speech = true, ua = MAC_CHROME_UA, touches = 0, native = false, imperial = false } = {}) {
   const els = {};
   const $ = (id) => (els[id] ??= { id, hidden: false, innerHTML: '', textContent: '', attrs: {}, setAttribute(k, v) { this.attrs[k] = v; } });
   const speechSynthesis = { getVoices: () => list };
   const window = speech ? { speechSynthesis } : {};
   const sb = {
-    $, window, speechSynthesis, navigator: { language: 'en-GB', userAgent: ua, maxTouchPoints: 5 },
-    settings: { coachVoiceURI: chosen }, isNative: () => false, imp: () => imperial,
+    $, window, speechSynthesis, navigator: { language: 'en-GB', userAgent: ua, maxTouchPoints: touches },
+    settings: { coachVoiceURI: chosen }, isNative: () => native, imp: () => imperial,
     esc: (s) => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])),
-    rankVoices, voiceLabel, voiceName, voiceAccent, voiceHint, coachPhrase, SAMPLE_CALL,
+    rankVoices, voiceLabel, voiceName, voiceAccent, voiceHint, speaksThroughWebKit, coachPhrase, SAMPLE_CALL,
   };
   vm.createContext(sb);
   vm.runInContext([line('const voiceCache = '), decl('function voiceList()'), line('const VOICES_SHOWN = '),
-    line('const TICK = '), decl('function paintCoachVoice()'), `voiceCache.all = ${all}; paintCoachVoice();`].join('\n'), sb);
+    line('const TICK = '), decl('function paintCoachVoice()'), `voiceCache.all = ${all}; voiceCache.settled = ${settled}; paintCoachVoice();`].join('\n'), sb);
   const read = () => [...els.coachVoiceList?.innerHTML.matchAll(/data-voice="([^"]*)" aria-pressed="(true|false)"><span class="check-text"><b>([^<]*)<\/b><i>([^<]*)<\/i>/g) ?? []]
     .map(([, uri, on, name, sub]) => ({ uri, on: on === 'true', name, sub }));
   // What the 'voiceschanged' handler does, and the list as it is then.
@@ -353,7 +467,7 @@ function painter(list, { chosen = null, all = false, speech = true, ua = 'Mozill
 }
 
 t('the settings list: Automatic first, the best few, each with its quality', () => {
-  const { els, rows } = painter(IOS);
+  const { els, rows } = painter(DOWNLOADED);
   assert.deepEqual(rows.map(r => r.name), ['Automatic', 'Serena', 'Daniel', 'Daniel', 'Karen', 'Moira']);
   assert.equal(rows[0].sub, 'The best voice on this phone — Serena, Natural');
   assert.deepEqual(rows.slice(1).map(r => r.sub), ['British · Natural', 'British · Enhanced', 'British · Basic', 'Australian · Basic', 'Irish · Basic']);
@@ -368,33 +482,62 @@ t('the settings list: Automatic first, the best few, each with its quality', () 
 });
 
 t('the chosen voice is shown and pressed even past the cut, and all can be opened', () => {
-  const sam = painter(IOS, { chosen: 'com.apple.voice.compact.en-US.Samantha' });
+  const sam = painter(DOWNLOADED, { chosen: 'com.apple.voice.compact.en-US.Samantha' });
   assert.equal(sam.rows.length, 7);
   assert.deepEqual(sam.rows.filter(r => r.on).map(r => r.name), ['Samantha']);
-  const all = painter(IOS, { all: true, imperial: true });
+  const all = painter(DOWNLOADED, { all: true, imperial: true });
   assert.equal(all.rows.length, 8);
   assert.equal(all.els.coachVoiceMore.textContent, 'Show fewer voices');
   assert.equal(all.els.coachVoiceMore.attrs['aria-expanded'], 'true');
   assert.equal(all.els.coachVoiceSample.textContent, '“Off the trail, 50 feet to the left”');
-  const stale = painter(IOS, { chosen: 'com.apple.voice.premium.en-GB.Malcolm' });
+  const stale = painter(DOWNLOADED, { chosen: 'com.apple.voice.premium.en-GB.Malcolm' });
   assert.deepEqual(stale.rows.filter(r => r.on).map(r => r.name), ['Automatic'], 'a voice gone from the phone shows as Automatic');
 });
 
-t('a fresh iPhone gets the steps; Chrome gets them in general terms, and a note on signal', () => {
-  const fresh = painter(IOS_FRESH);
-  assert.equal(fresh.els.coachVoiceHint.hidden, false);
-  assert.match(fresh.els.coachVoiceHint.textContent, /^For the most natural voice, download one on your iPhone: Settings → Accessibility/);
-  assert.equal(fresh.els.coachVoiceMore.hidden, true, 'five voices: nothing to open');
-  const chrome = painter(CHROME, { ua: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/128' });
-  assert.ok(!/iPhone/.test(chrome.els.coachVoiceHint.textContent));
-  assert.deepEqual(chrome.rows.at(-1), { uri: 'Google US English', on: false, name: 'Google US English', sub: 'American · Basic · needs a signal' });
+t('an iPhone is told plainly that only the built-in voices can be used; Automatic says built in', () => {
+  for (const opts of [{ ua: IPHONE_UA, touches: 5 }, { native: true, ua: IPHONE_UA, touches: 5 },
+    { ua: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15', touches: 5 }]) {
+    const phone = painter(WEBKIT, opts);
+    assert.equal(phone.rows[0].sub, 'The best built-in voice — Daniel, Basic');
+    assert.deepEqual(phone.rows.slice(1).map(r => r.sub), ['British · Basic', 'Australian · Basic', 'Irish · Basic', 'Indian · Basic', 'American · Basic']);
+    assert.equal(phone.els.coachVoiceHint.hidden, false);
+    assert.equal(phone.els.coachVoiceHint.textContent, 'Apple does not let this app use voices downloaded in Settings, so the coach speaks in the ones built in.');
+    assert.equal(phone.els.coachVoiceMore.hidden, false, 'six voices: the sixth is behind the button');
+  }
+});
+
+t('off Apple: no quality guessed, no hint that could never clear, and a note on signal', () => {
+  const chrome = painter(CHROME, { ua: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36' });
+  assert.equal(chrome.els.coachVoiceHint.hidden, true);
+  assert.equal(chrome.rows[0].sub, 'The best voice on this phone — Microsoft Hazel - English (United Kingdom)');
+  assert.deepEqual(chrome.rows.at(-1), { uri: 'Google US English', on: false, name: 'Google US English', sub: 'American · needs a signal' });
+  const android = painter(ANDROID, { ua: 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0 Mobile Safari/537.36', touches: 5 });
+  assert.deepEqual(android.rows.map(r => r.sub), ['The best voice on this phone — English United Kingdom', 'British', 'Indian', 'American', 'British · needs a signal']);
+  assert.equal(android.els.coachVoiceHint.hidden, true);
+  const edge = painter(EDGE, { ua: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36 Edg/128.0.0.0' });
+  assert.deepEqual(edge.rows.slice(1).map(r => [r.name, r.sub]), [
+    ['Microsoft Hazel - English (United Kingdom)', 'British'],
+    ['Microsoft Sonia Online - English (United Kingdom)', 'British · Enhanced · needs a signal'],
+    ['Microsoft Aria Online - English (United States)', 'American · Enhanced · needs a signal'],
+  ]);
+  assert.equal(edge.els.coachVoiceHint.hidden, true);
 });
 
 t('no speech engine: the block says so and hides the rest', () => {
-  const { els } = painter(IOS, { speech: false });
+  const { els } = painter(DOWNLOADED, { speech: false });
   assert.equal(els.coachVoiceNone.hidden, false);
   assert.equal(els.coachVoiceBody.hidden, true);
   assert.equal(els.coachVoiceList, undefined, 'nothing is drawn');
+});
+
+t('an engine with no voices at all, once settled, says there is no voice rather than offer a silent Play', () => {
+  const none = painter([], { settled: true });
+  assert.equal(none.els.coachVoiceNone.hidden, false);
+  assert.equal(none.els.coachVoiceBody.hidden, true, 'Play and the hint go with the rest');
+  assert.equal(none.els.coachVoiceList, undefined, 'nothing is drawn');
+  const some = painter(DOWNLOADED, { settled: true });
+  assert.equal(some.els.coachVoiceNone.hidden, true);
+  assert.equal(some.els.coachVoiceBody.hidden, false);
 });
 
 t('no voices yet: Automatic alone, and the list is drawn again when they come', () => {
@@ -402,7 +545,7 @@ t('no voices yet: Automatic alone, and the list is drawn again when they come', 
   const { els, rows, again } = painter(list);
   assert.deepEqual(rows.map(r => [r.name, r.sub, r.on]), [['Automatic', 'The best voice on this phone', true]]);
   assert.equal(els.coachVoiceMore.hidden, true);
-  list.push(...IOS);
+  list.push(...DOWNLOADED);
   assert.deepEqual(again().map(r => r.name), ['Automatic', 'Serena', 'Daniel', 'Daniel', 'Karen', 'Moira']);
   assert.equal(els.coachVoiceMore.hidden, false);
 });
