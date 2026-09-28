@@ -97,11 +97,11 @@ await t('an app built before the plugins were in says there is nothing to share 
 /* ── The coach's voice ─────────────────────────────────────────────── */
 
 /** A shell with the Speech plugin, keeping what it was asked. */
-function speechShell({ fails = false, voices = [] } = {}) {
+function speechShell({ fails = false, voices = [], answer } = {}) {
   const seen = { spoken: [], stops: 0, listeners: [] };
   const Speech = {
     async voices() { if (fails) throw new Error('no'); return { voices }; },
-    async speak(o) { if (fails) throw new Error('Nothing to say'); seen.spoken.push(o); },
+    async speak(o) { if (fails) throw new Error('Nothing to say'); seen.spoken.push(o); return answer; },
     async stop() { seen.stops++; },
     async addListener(name, fn) { seen.listeners.push([name, fn]); return { remove() { seen.removed = true; } }; },
   };
@@ -187,6 +187,36 @@ await t('the voice is heard with the phone locked, over the music, and lets the 
   const list = modes.slice(0, modes.indexOf('</array>'));
   assert.match(list, /<string>location<\/string>/, 'still recording in the dark');
   assert.match(list, /<string>audio<\/string>/, 'and heard there');
+});
+
+await t('a call iOS took but could not play is said to be unheard, not refused', async () => {
+  /* During a phone call or Siri iOS will not give the app the sound. The
+     plugin still takes the call and says so ({ heard: false }): a refusal
+     would hand the coach to the web view for good. */
+  speechShell({ answer: { heard: false } });
+  assert.equal(await speakNative({ text: 'Off the trail' }), 'unheard');
+  speechShell({ answer: { heard: true } });
+  assert.equal(await speakNative({ text: 'Off the trail' }), true);
+  speechShell();
+  assert.equal(await speakNative({ text: 'Off the trail' }), true, 'a shell built before it said so is taken at its word');
+  const swift = read('ios/App/App/TrailcraftSpeech.swift');
+  assert.match(swift, /private func takeAudio\(\) -> Bool/);
+  assert.match(swift, /let heard = self\.takeAudio\(\)[\s\S]*?call\.resolve\(\["heard": heard\]\)/, 'resolved with it, never rejected');
+  assert.ok(!/call\.reject\([^)]*audio/i.test(swift));
+  assert.match(swift, /name: AVAudioSession\.interruptionNotification/, 'a phone call or Siri is listened for');
+  assert.match(swift, /== \.began else \{ return \}[\s\S]*?self\.synth\.stopSpeaking\(at: \.immediate\)/, 'and cuts the call off');
+});
+
+await t('the audio background mode is explained for App Review, with a way to hear it', () => {
+  const doc = read('docs/IOS-APP.md');
+  const notes = doc.slice(doc.indexOf('## App Review notes'));
+  assert.ok(doc.includes('## App Review notes'), 'the notes are there to paste');
+  assert.match(notes, /\*\*audio\*\* — used only for the coach's spoken calls during a coached run/);
+  assert.match(notes, /made active only while a call is\s+> being spoken/);
+  assert.match(notes, /\*\*location\*\*/);
+  assert.match(notes, /Lock the phone/, 'with steps a reviewer can follow indoors');
+  // The voice's way in Settings, by both its names.
+  assert.match(doc, /Read & Speak \(called\s+Spoken Content before iOS 26\)/);
 });
 
 delete globalThis.window;

@@ -16,7 +16,7 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import {
   rankVoices, pickVoice, voiceQuality, voiceLabel, voiceRate, voiceName, voiceAccent, voiceHint, speaksThroughWebKit,
-  coachLang, speechLang, coachPhrase, SAMPLE_CALL, COACH_DEFAULTS, fromNativeVoice, NATIVE_PREMIUM,
+  coachLang, speechLang, coachPhrase, SAMPLE_CALL, COACH_DEFAULTS, fromNativeVoice, NATIVE_PREMIUM, MAC_PREMIUM,
 } from '../public/coach.js';
 
 let pass = 0;
@@ -336,8 +336,10 @@ t('off Apple the hint is given only where it can be acted on, and names no devic
   assert.equal(voiceHint(CHROME, 'en-GB'), '');
   assert.equal(voiceHint([], 'en-GB'), '');
   const mac = voiceHint(MAC_CHROME.filter(v => !/premium/i.test(v.name)), 'en-GB');
-  assert.equal(mac, 'For the most natural voice, download an English voice marked Premium in Settings → Accessibility → Spoken Content.',
-    'a Mac outside Safari can download one, and a Premium voice then clears it');
+  assert.equal(mac, MAC_PREMIUM, 'a Mac outside Safari can download one, and a Premium voice then clears it');
+  /* Read & Speak since macOS 26, Spoken Content before it; and the voice is
+     marked Premium in Settings but Natural here. */
+  assert.equal(mac, 'For the most natural voice, download an English voice marked Premium in System Settings → Accessibility → Read & Speak (called Spoken Content before macOS 26). It shows up here marked Natural.');
   assert.equal(voiceHint(MAC_CHROME, 'en-GB'), '');
   assert.equal(voiceHint(DOWNLOADED.filter(v => !/premium/.test(v.voiceURI)), 'en-GB'), mac);
   for (const list of [WEBKIT, DOWNLOADED, MAC_CHROME, CHROME, ANDROID, EDGE, []]) {
@@ -404,7 +406,12 @@ t('in the app the same ranking: Premium, Enhanced, compact; English only; no jok
 t('in the app the hint gives the way to a Premium voice, and goes once one is here', () => {
   const bare = IOS_APP_BARE.map(fromNativeVoice);
   assert.equal(voiceHint(bare, 'en-GB', { native: true }), NATIVE_PREMIUM);
-  assert.match(NATIVE_PREMIUM, /download an English voice marked Premium: open Settings, then Accessibility → Spoken Content → Voices → English\./);
+  /* iOS 26 renamed Spoken Content to Read & Speak, so the menu the hint named
+     was not there on a current iPhone; a phone not yet updated still has the
+     old name. Premium is Settings' word for it, Natural is this app's. */
+  assert.match(NATIVE_PREMIUM, /download an English voice marked Premium: open Settings, then Accessibility → Read & Speak \(called Spoken Content on older versions\) → Voices → English\./);
+  assert.match(NATIVE_PREMIUM, /shows up here, marked Natural\.$/);
+  assert.equal(voiceLabel('premium'), 'Natural', 'which is what the app calls it');
   assert.ok(!/Apple does not let/.test(voiceHint(bare, 'en-GB', { native: true })), 'in the app a downloaded voice does reach the coach');
   assert.ok(!/iPhone|iPad/.test(NATIVE_PREMIUM), 'the steps are the same on an iPad');
   assert.equal(voiceHint(IOS_APP.map(fromNativeVoice), 'en-GB', { native: true }), '', 'a Premium voice is here: nothing to say');
@@ -500,7 +507,7 @@ function speaker(list, { lang = 'en-GB', chosen = null, ios = null, refuse = fal
   sb.window.speechSynthesis = speechSynthesis;
   sb.IOS = ios;
   vm.createContext(sb);
-  vm.runInContext([line('const voiceCache = '), decl('function voiceList()'), decl('function coachSpeak(text)'), decl('function webSpeak(text)'),
+  vm.runInContext([line('const voiceCache = '), decl('function voiceList()'), decl('function coachSpeak(text, '), decl('function webSpeak(text)'),
     'if (IOS) { voiceCache.native = true; voiceCache.list = IOS.map(fromNativeVoice); }',
     'this.coachSpeak = coachSpeak; this.voiceCache = voiceCache;'].join('\n'), sb);
   return { sb, said, told };

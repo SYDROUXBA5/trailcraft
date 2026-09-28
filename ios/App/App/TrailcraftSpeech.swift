@@ -33,6 +33,8 @@ public class SpeechPlugin: CAPPlugin, CAPBridgedPlugin, AVSpeechSynthesizerDeleg
 
     override public func load() {
         synth.delegate = self
+        NotificationCenter.default.addObserver(self, selector: #selector(interruption(_:)),
+                                               name: AVAudioSession.interruptionNotification, object: nil)
         /* A voice downloaded while the app is open turns up without a relaunch
            (iOS 17 and later; before that, the list is read again whenever the
            app comes back to the front). */
@@ -44,6 +46,20 @@ public class SpeechPlugin: CAPPlugin, CAPBridgedPlugin, AVSpeechSynthesizerDeleg
 
     @objc private func voicesChanged() {
         notifyListeners("voicesChanged", data: [:])
+    }
+
+    /* A phone call or Siri takes the sound from under a call being spoken
+       (iOS has already let go of the session for us). The call is cut off
+       rather than left to finish into nothing. The next call asks for the
+       session again (takeAudio), and whether iOS gives it back is what that
+       call reports as heard, so once the interruption is over nothing is
+       left to put right here. */
+    @objc private func interruption(_ note: Notification) {
+        guard let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
+              AVAudioSession.InterruptionType(rawValue: raw) == .began else { return }
+        DispatchQueue.main.async {
+            self.synth.stopSpeaking(at: .immediate)
+        }
     }
 
     /// Every voice on the phone, with how good iOS says it is. The web side
@@ -70,6 +86,10 @@ public class SpeechPlugin: CAPPlugin, CAPBridgedPlugin, AVSpeechSynthesizerDeleg
 
     /// Say one call now. It cuts off whatever was still being said, as the
     /// coach on the web does: the newest call is the one that is true.
+    /// Resolves with `heard`: false when iOS would not give the app the sound
+    /// (a phone call, Siri), so the coach counts the call as missed and says
+    /// so, rather than going quiet as if the dog were on the line. Not a
+    /// rejection, which would hand the coach to the web view for good.
     @objc func speak(_ call: CAPPluginCall) {
         let text = call.getString("text") ?? ""
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
@@ -89,10 +109,10 @@ public class SpeechPlugin: CAPPlugin, CAPBridgedPlugin, AVSpeechSynthesizerDeleg
                 ?? AVSpeechSynthesisVoice(language: "en-GB")
             utterance.rate = SpeechPlugin.platformRate(rate)
             if self.synth.isSpeaking { self.synth.stopSpeaking(at: .immediate) }
-            self.takeAudio()
+            let heard = self.takeAudio()
             self.said += 1
             self.synth.speak(utterance)
-            call.resolve()
+            call.resolve(["heard": heard])
         }
     }
 
@@ -117,15 +137,17 @@ public class SpeechPlugin: CAPPlugin, CAPBridgedPlugin, AVSpeechSynthesizerDeleg
        under it (spoken audio pauses) rather than stopping for good. Both
        options leave the session mixable, and a mixable session is one iOS lets
        an app start from the background. Voice prompt is Apple's mode for
-       short spoken prompts like a satnav's. */
-    private func takeAudio() {
+       short spoken prompts like a satnav's. False when iOS refused it. */
+    private func takeAudio() -> Bool {
         let session = AVAudioSession.sharedInstance()
         do {
             try session.setCategory(.playback, mode: .voicePrompt,
                                     options: [.duckOthers, .interruptSpokenAudioAndMixWithOthers])
             try session.setActive(true)
+            return true
         } catch {
             CAPLog.print("Speech: could not take the audio session: \(error)")
+            return false
         }
     }
 

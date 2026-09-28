@@ -5712,7 +5712,7 @@ function closeLive() {
    run's trail and scent field, the sounds, the voice, the pill and the HUD. */
 const coach = { on: false, trail: null, field: [], plan: false, state: null, reading: null,
                 status: 'on', line: '', tick: 0, sounds: null, unlocked: false,
-                everOn: false, used: null, shadow: null, missed: 0 };
+                everOn: false, used: null, shadow: null, missed: 0, sayTimer: 0 };
 
 /* Two silent coaches run on EVERY trail run, blind or assisted: a plain
    corridor and the experimental scent corridor. They never speak; they only
@@ -5885,13 +5885,16 @@ async function nativeVoicesFresh() {
 /* The iPhone app speaks through iOS: the same choice by the same ranking,
    handed over by name, and heard with the screen locked. Should iOS ever
    refuse it, the web view takes over for good, voices and all, as it spoke
-   before the app had a voice of its own. */
-function coachSpeak(text) {
+   before the app had a voice of its own. A call iOS took but could not play
+   (a phone call, Siri) is `unheard`: the coach counts it as missed, so a
+   silent coach is never taken for a dog that stayed on the line. */
+function coachSpeak(text, { unheard = null } = {}) {
   if (!voiceCache.native) return webSpeak(text);
   const v = pickVoice(voiceList(), navigator.language, settings.coachVoiceURI);
   speakNative(v ? { text, voice: v.voiceURI, lang: v.lang, rate: voiceRate(voiceQuality(v)) }
     : { text, lang: speechLang(navigator.language), rate: 1.05 })
     .then((ok) => {
+      if (ok === 'unheard') { unheard?.(); return; }
       if (ok || !voiceCache.native) return;
       voiceCache.native = false; voiceCache.list = []; voiceCache.settled = false;
       webSpeak(text);
@@ -5957,8 +5960,17 @@ function coachDeliver(alert) {
     else haptic(alert.kind);           // the iOS app can; a web page on an iPhone cannot
   }
   if (settings.coachVoice && alert.kind !== 'edge') {
-    // After the tone, so the two do not talk over each other.
-    setTimeout(() => coachSpeak(coachPhrase(alert, { imperial: imp() })), settings.coachSound ? 450 : 0);
+    /* After the tone, so the two do not talk over each other; at once in the
+       dark, where the tone plays for nobody and the wait only holds the
+       words back. The wait is kept on the coach, so Stop takes back a call
+       not yet said and it is never spoken after the run is over. */
+    const dark = document.visibilityState === 'hidden' && speaksInTheDark();
+    clearTimeout(coach.sayTimer);
+    coach.sayTimer = setTimeout(() => {
+      coach.sayTimer = 0;
+      if (!coach.on) return;
+      coachSpeak(coachPhrase(alert, { imperial: imp() }), { unheard: () => { if (coach.on) coach.missed = (coach.missed || 0) + 1; } });
+    }, settings.coachSound && !dark ? 450 : 0);
   }
 }
 
@@ -6037,6 +6049,7 @@ function coachApply(r) {
 
 function coachStop() {
   clearInterval(coach.tick); coach.tick = 0; clearInterval(coach.shadowTick); coach.shadowTick = 0;
+  clearTimeout(coach.sayTimer); coach.sayTimer = 0;
   coach.on = false; coach.trail = null; coach.field = []; coach.state = null; coach.shadow = null;
   coach.reading = null; coach.status = 'on'; coach.line = ''; coach.missed = 0;
   try { speechSynthesis?.cancel(); } catch { /* fine */ }

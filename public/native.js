@@ -178,13 +178,17 @@ export async function nativeVoices() {
 
 /** Say one call now, cutting off the one before. `voice` is a voice's
     identifier (the coach's voiceURI), `rate` the web's pace, 1 being
-    normal. True once iOS has taken it; false when it could not. */
+    normal. True once iOS has taken it; false when it could not. 'unheard'
+    (still truthy: iOS did take it) when iOS would not give the app the
+    sound to say it in, during a phone call or Siri, so the coach can count
+    it as missed rather than as said. A shell built before it said so
+    answers nothing, and is taken at its word as before. */
 export async function speakNative({ text, voice = null, lang = 'en-GB', rate = 1 }) {
   const S = speech();
   if (!S?.speak) return false;
   try {
-    await S.speak({ text, lang, rate, ...(voice ? { voice } : {}) });
-    return true;
+    const r = await S.speak({ text, lang, rate, ...(voice ? { voice } : {}) });
+    return r?.heard === false ? 'unheard' : true;
   } catch { return false; }
 }
 

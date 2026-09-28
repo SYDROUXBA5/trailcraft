@@ -456,9 +456,9 @@ await t('a coach call made while the app’s screen was dark is counted, and sai
 await t('in the app a spoken call is said live with the screen dark; one with no words is still counted', () => {
   const spoken = [];
   const sb = {
-    isNative: () => true, coach: { missed: 0, sounds: null }, settings: { coachVoice: true }, BUZZ: {},
+    isNative: () => true, coach: { on: true, missed: 0, sounds: null }, settings: { coachVoice: true }, BUZZ: {},
     document: { visibilityState: 'hidden' }, navigator: {}, haptic() {}, coachPhrase: (a) => a.kind, imp: () => false,
-    coachSpeak: (w) => spoken.push(w), setTimeout: (f) => f(), voiceCache: { native: true },
+    coachSpeak: (w) => spoken.push(w), setTimeout: (f) => f(), clearTimeout() {}, voiceCache: { native: true },
   };
   vm.createContext(sb);
   const dark = js.split('\n').find(l => l.startsWith('const speaksInTheDark = '));
@@ -477,6 +477,61 @@ await t('in the app a spoken call is said live with the screen dark; one with no
   sb.settings.coachVoice = true; sb.voiceCache.native = false;
   sb.coachDeliver({ kind: 'off' });
   assert.equal(sb.coach.missed, 3, 'an app whose shell has no voice of its own speaks through the web view, silent in the dark');
+});
+
+/* iOS takes a call but cannot play it while a phone call or Siri has the
+   sound. Taken as said, the coach went quiet with the handler none the wiser;
+   now it is counted with the calls the dark screen swallowed. */
+await t('a call iOS could not play is counted as missed, not as said', async () => {
+  const sb = {
+    isNative: () => true, coach: { on: true, missed: 0, sounds: null }, settings: { coachVoice: true }, BUZZ: {},
+    document: { visibilityState: 'hidden' }, navigator: { language: 'en-GB' }, haptic() {}, imp: () => false,
+    coachPhrase: (a) => a.kind, setTimeout: (f) => f(), clearTimeout() {}, voiceCache: { native: true },
+    pickVoice: () => null, voiceList: () => [], speechLang: () => 'en-GB', webSpeak() { sb.web = true; },
+    answer: true, speakNative: async () => sb.answer,
+  };
+  vm.createContext(sb);
+  const dark = js.split('\n').find(l => l.startsWith('const speaksInTheDark = '));
+  vm.runInContext([dark, decl('function coachSpeak('), decl('function coachDeliver(')].join('\n'), sb);
+  const settle = () => new Promise((r) => setImmediate(r));
+  sb.coachDeliver({ kind: 'off' });
+  await settle();
+  assert.equal(sb.coach.missed, 0, 'heard');
+  sb.answer = 'unheard';
+  sb.coachDeliver({ kind: 'still' });
+  await settle();
+  assert.equal(sb.coach.missed, 1, 'taken by iOS but not heard: missed, and said once the handler is back');
+  assert.equal(sb.voiceCache.native, true, 'and not a refusal: iOS keeps the voice');
+  assert.ok(!sb.web, 'the web view does not take over');
+  sb.answer = false;
+  sb.coachDeliver({ kind: 'back' });
+  await settle();
+  assert.equal(sb.voiceCache.native, false, 'a real refusal still hands over to the web view');
+  assert.equal(sb.web, true);
+});
+
+await t('a call waiting for its tone is dropped at Stop, and is not held back in the dark', () => {
+  const timers = [], spoken = [];
+  const sb = {
+    isNative: () => true, coach: { on: true, missed: 0, sounds: null }, settings: { coachVoice: true, coachSound: true }, BUZZ: {},
+    document: { visibilityState: 'visible' }, navigator: {}, haptic() {}, coachPhrase: (a) => a.kind, imp: () => false,
+    coachSpeak: (w) => spoken.push(w), voiceCache: { native: true },
+    setTimeout: (f, ms) => { timers.push({ f, ms, live: true }); return timers.length; },
+    clearTimeout: (id) => { if (timers[id - 1]) timers[id - 1].live = false; },
+  };
+  vm.createContext(sb);
+  const dark = js.split('\n').find(l => l.startsWith('const speaksInTheDark = '));
+  vm.runInContext([dark, decl('function coachDeliver(')].join('\n'), sb);
+  sb.coachDeliver({ kind: 'off' });
+  assert.equal(timers[0].ms, 450, 'on screen, after the tone');
+  sb.document.visibilityState = 'hidden';
+  sb.coachDeliver({ kind: 'back' });
+  assert.equal(timers[1].ms, 0, 'in the dark the tone plays for nobody: said at once');
+  assert.equal(timers[0].live, false, 'the newer call replaces one still waiting');
+  sb.coach.on = false;                      // Stop pressed before the wait was over
+  for (const x of timers) if (x.live) x.f();
+  assert.deepEqual(spoken, [], 'nothing is said after the run is over');
+  assert.match(decl('function coachStop('), /clearTimeout\(coach\.sayTimer\); coach\.sayTimer = 0;/, 'and Stop takes the waiting call back');
 });
 
 await t('a map screen holds the page at its own size, and the way back lets it be pinched again', () => {
