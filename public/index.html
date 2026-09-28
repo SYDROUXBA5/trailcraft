@@ -284,6 +284,12 @@
 <section id="scrDraw" class="screen glass" hidden>
   <div class="hud-pill"><span id="drawText">Tap where the trail starts</span></div>
   <div class="glass-bottom">
+    <!-- A route laid again: whose trail it was, and who lays and runs it now. -->
+    <div class="card draw-who" id="drawWho" hidden>
+      <span class="label" style="margin-top:0" id="drawWhoRoute">Same route</span>
+      <p class="body small" id="drawWhoText"></p>
+      <button type="button" class="btn ghost small" id="drawWhoChange">Change who</button>
+    </div>
     <div class="card" id="ageCard" hidden>
       <span class="label" style="margin-top:0">Dog starts after</span>
       <div class="age-row" id="ageRow">
@@ -487,6 +493,7 @@
     <span class="label" id="resWho"></span>
     <h1 class="display" id="resSentence"></h1>
     <p class="body small provisional" id="resProvisional" hidden></p>
+    <p class="body small muted" id="resRoute" hidden></p>
     <span class="label">Recorded</span>
     <div class="grid2" id="resGrid"></div>
     <p class="body small muted" id="resCoach"></p>
@@ -524,6 +531,7 @@
       <button class="btn ember" id="btnScanWalked" hidden>Scan the walked trail card</button>
       <button class="btn moss" id="btnShowMap">Show on map</button>
       <button class="btn moss" id="btnReplay" hidden>Replay this run</button>
+      <button class="btn" id="btnLayAgain" hidden>Lay this route again</button>
       <button class="btn" id="btnShareOut">Share this run</button>
       <button class="btn ghost" id="btnResDone">Done</button>
       <button class="btn ghost small del-link" id="btnResDelete">Delete this session</button>

@@ -7,7 +7,7 @@
    without. Weather: Open-Meteo, the one public API with soil temperature. */
 
 import {
-  pathLen, cardinal, dist, dwellFold, bearing, project, fmtDist, fmtShort, fmtDur, fmtSpeed, fmtTemp, unitShort, fmtWeight, kgToShown, shownToKg, fmtCoord, scentField, plumePolygon, densify, timestamps, signedOffsets, meanSigned, sideOfDrift, sideAgreement, lineCorrect, departure, timestampsEndingAt, progressAlong, splitLine, smoothBearing, medianAbs, sideShares, approachToWind,
+  pathLen, cardinal, dist, dwellFold, bearing, project, fmtDist, fmtShort, fmtDur, fmtSpeed, fmtTemp, unitShort, fmtWeight, kgToShown, shownToKg, fmtCoord, scentField, plumePolygon, densify, timestamps, signedOffsets, meanSigned, sideOfDrift, sideAgreement, lineCorrect, departure, progressAlong, splitLine, smoothBearing, medianAbs, sideShares, approachToWind,
 } from './geo.js';
 import { stepPoints, contamTimed, trailFrom, walkedOfTrail, gpsTrouble, forecastNote } from './geo.js';
 import { packDraft, unpackDraft, draftAlive, draftStats } from './draft.js';
@@ -44,7 +44,7 @@ import { readBackup, restoreChanges, restoreQuestion, restoreNothing, BACKUP_MAX
 import { checkAuthFields, AUTH_MIN_PASSWORD } from './sync-core.js';
 import { createStore, migrateV1, TARGETS, ODOURS, targetById, targetText, verbs, uid,
          dogStats, ageBand, AGE_BANDS, LEVELS, levelById, dogAge, patchSession, runAgain,
-         askDelete, storageWords, APPROACH_V } from './store.js';
+         planSession, canLayAgain, routeOf, askDelete, storageWords, APPROACH_V } from './store.js';
 import { searchWords, logRows, facets, filterRows, groupRows, foldersOf, inFolder, folderList, folderNamed,
          cleanFolderName, putMany, toggleFolder, renameIn, dropFrom, emptyHeld } from './log.js';
 
@@ -1065,6 +1065,15 @@ function fitTo(...groups) {
   pts.forEach(p => b.extend([p.lon, p.lat]));
   map.fitBounds(b, { padding: 80, pitch: 45, duration: 700 });
 }
+/** The same, into the part of the map a tall sheet at the bottom leaves
+    showing, flat, so every corner can be seen before anything is decided. */
+function fitAboveSheet(pts, sheet) {
+  if (!mapReady || !(pts?.length > 1)) return;
+  const b = new GL.LngLatBounds();
+  pts.forEach(p => b.extend([p.lon, p.lat]));
+  const h = sheet?.offsetHeight || 320;
+  map.fitBounds(b, { padding: { top: 90, left: 40, right: 40, bottom: h + 30 }, pitch: 0, duration: 600 });
+}
 
 /* ── Weather (Open-Meteo, 15-minute series incl. soil temperature) ── */
 const WX_VARS = [
@@ -1502,17 +1511,20 @@ function renderHome() {
 
 /* `del` is the session list with Delete sessions turned on: each card gains
    its own Delete button. Home never has one; it is not where records are kept.
-   The session list also gives a run its Replay (`replay`), and while sessions
-   are being chosen for a folder, a Select that says whether it is (`pick`).
+   The session list also gives a run its Replay (`replay`), a trail its Lay
+   this route again (`again`), and while sessions are being chosen for a
+   folder, a Select that says whether it is (`pick`).
    `body` is the card's words, already written: the list builds them once
    each time the sessions change, not again for every letter of a search. */
-function sessionCard(s, { del = false, replay = false, pick = null, body = null } = {}) {
+function sessionCard(s, { del = false, replay = false, again = false, pick = null, body = null } = {}) {
   const rep = replay && s.data?.track?.length > 1
     ? `<button type="button" class="btn ghost small" data-replay-session="${esc(s.id)}">Replay</button>` : '';
+  const lay = again && canLayAgain(s)
+    ? `<button type="button" class="btn ghost small" data-again-session="${esc(s.id)}">Lay this route again</button>` : '';
   return `<div class="card${pick ? ' picked' : ''}" data-open-session="${esc(s.id)}">
     ${body ?? cardBody(s)}
     ${pick != null ? `<button type="button" class="chip tag pick-chip${pick ? ' selected' : ''}" data-sel-session="${esc(s.id)}" aria-pressed="${pick}">Select</button>` : ''}
-    ${rep || del ? `<div class="card-acts">${rep}${del ? `<button type="button" class="btn ghost small del-link" data-del-session="${esc(s.id)}">Delete</button>` : ''}</div>` : ''}
+    ${rep || lay || del ? `<div class="card-acts">${rep}${lay}${del ? `<button type="button" class="btn ghost small del-link" data-del-session="${esc(s.id)}">Delete</button>` : ''}</div>` : ''}
   </div>`;
 }
 
@@ -2665,12 +2677,7 @@ function openFix(s) {
   go('scrFix');
   paintFix();
   /* Fit the trail into the part of the map the sheet leaves showing. */
-  if (mapReady) {
-    const b = new GL.LngLatBounds();
-    t.forEach(p => b.extend([p.lon, p.lat]));
-    const sheet = $('fixSheet').offsetHeight || 320;
-    map.fitBounds(b, { padding: { top: 90, left: 40, right: 40, bottom: sheet + 30 }, pitch: 0, duration: 600 });
-  }
+  fitAboveSheet(t, $('fixSheet'));
 }
 
 function fixRange() {
@@ -3927,7 +3934,9 @@ function saveContam() {
    walked trail comes back as a second card and the verdict is graded
    against the truth on the ground, not the sketch. */
 
-const draw = { pts: [], ageMin: 10, step: 'map' };
+/* `route` is set when the line is an earlier trail's, being laid again
+   (routeOf in store.js): its corners, where they came from, and its name. */
+const draw = { pts: [], ageMin: 10, step: 'map', route: null };
 
 /** The ageing choice, and the one chip whose label changes. */
 function paintAge() {
@@ -3955,27 +3964,35 @@ function drawStep(step) {
   $('drawBackRow').hidden = !age;
   $('drawSave').hidden = age;
   $('drawTools').hidden = age;
+  /* A route laid again is the earlier trail's line, not one to redraw, so
+     there is no map to go back to: only who lays it, and a way out. */
+  $('drawWho').hidden = !(age && draw.route);
+  $('drawBack').textContent = draw.route ? 'Cancel' : 'Back to the map';
+  if (draw.route) paintDrawWho(); else $('drawConfirm').disabled = false;
   map.getCanvas().style.cursor = age ? '' : 'crosshair';
   paintDraw();
   styleGap();
   requestAnimationFrame(styleGap);
 }
 
-function openDraw() {
+function openDraw(route = null) {
   if (rec.on) return toast('A recording is already going. Stop that one first.');
   clearMap();
   /* Corners are tapped by finger, so the map has to be on the handler before
      the first tap — drawing from wherever the map happened to be sitting puts
-     the whole trail in the wrong field. */
-  locateMe({ zoom: 17 });
-  draw.pts = [];
+     the whole trail in the wrong field. A route laid again is already drawn,
+     and the map goes to it instead, wherever the handler is standing. */
+  if (!route) locateMe({ zoom: 17 });
+  draw.route = route;
+  draw.pts = route ? route.corners.map(p => ({ ...p })) : [];
   draw.ageMin = 10;
   $('ageCustom').hidden = true;
   $('ageMins').value = '';
   paintAge();
   map.on('click', onDrawTap);
-  drawStep('map');
+  drawStep(route ? 'age' : 'map');
   go('scrDraw');
+  if (route) fitAboveSheet(draw.pts, document.querySelector('#scrDraw .glass-bottom'));
 }
 function onDrawTap(e) {
   if (draw.step !== 'map') return;             // choosing the head start: the line is finished
@@ -4005,23 +4022,20 @@ function closeDraw() {
 }
 function saveDrawPlan() {
   if (draw.pts.length < 2) return;
+  if (draw.route && !relayWho().ok) return;
   closeDraw();
-  /* Densify, then a provisional walking clock anchored at the END: a trail
-     that has just been drawn is a trail that has just been LAID, finishing
-     where the layer now stands. Anchored at the start instead, most of the
-     line sat in the future — ground carrying no scent yet — so the plume
-     crept along it at walking pace instead of simply being there.
-
-     These times are provisional either way; the real ones arrive with the
-     walked card. */
-  const planPts = timestampsEndingAt(densify(draw.pts, 5), Date.now(), 1.3);
-  const sess = {
-    id: uid(), handlerId: S.handler.id, dogId: null,
-    layerId: S.layer?.id ?? null, targetId: 'person', startedAt: planPts[0].t,
-    summary: `${fmtKm(pathLen(planPts))} trail planned, not walked yet.`,
-    data: { plan: true, ageMin: draw.ageMin, corners: draw.pts, trail: planPts,
-            waypoints: [], weather: null, contamination: [] },
-  };
+  /* The one way a plan is made, drawn or laid again (planSession in
+     store.js, which says why its clock ends now). A route laid again is a
+     new session that remembers only which trail it came from, and its name. */
+  const route = draw.route;
+  draw.route = null;
+  const sess = planSession({
+    id: uid(), handlerId: S.handler.id, layerId: S.layer?.id ?? null,
+    corners: draw.pts, ageMin: draw.ageMin, now: Date.now(),
+    summary: `${fmtKm(pathLen(draw.pts))} trail planned, not walked yet.`,
+    ...(route ? { fromSession: route.fromSession, name: route.name } : {}),
+  });
+  const planPts = sess.data.trail;
   guardSave(sess, () => db.addSession(sess));
   snap();
   pendingSession = sess;
@@ -4030,6 +4044,47 @@ function saveDrawPlan() {
   fetchWeather(planPts[0].lat, planPts[0].lon, Date.now())
     .then(wx => keepWeather(sess.id, wx))
     .catch(() => { /* offline — joins later */ });
+}
+
+/* ── A route laid again ──────────────────────────────────────────────
+   A trail already laid and run, laid again on the same route for a new run,
+   often for another dog on another day. It becomes a plan exactly as if its
+   corners had just been drawn, and carries on from the question after Save
+   plan: how long it ages, then the share screen, where the layer walks it on
+   this phone or is sent it as a plan card. Whoever is chosen on the home
+   screen now lays it, handles and runs, and that step names them before
+   Confirm, because the trail being laid again was very often someone else's.
+   Hide searches have no line to walk, so they have no route to lay again. */
+function layRouteAgain(id) {
+  const route = routeOf(sessionById(id));
+  if (!route) return toast('That trail has no route to lay again');
+  if (rec.on) return toast('A recording is already going. Stop that one first.');
+  if (recordingWaits()) return;
+  openDraw(route);
+}
+
+/** Who lays the route and who runs it, from the home screen's choices, and
+    whether that is enough to lay it. */
+function relayWho() {
+  if (S.layerOnly && !S.dog) return { ok: true, text: 'You lay it. The handler scans your card and runs the dog.' };
+  if (!S.dog) return { ok: false, text: 'No dog is chosen yet. Add one on the home screen.' };
+  if (!S.layer) return { ok: false, text: 'Nobody is chosen to lay it, and it cannot be you. Choose who on the home screen.' };
+  return { ok: true, text: `${S.layer.name} lays it, ${S.handler.name} runs ${S.dog.name}.` };
+}
+function paintDrawWho() {
+  const who = relayWho();
+  $('drawWhoRoute').textContent = sameRouteWords(draw.route?.fromSession);
+  $('drawWhoText').textContent = who.text;
+  $('drawConfirm').disabled = !who.ok;
+}
+
+/** "Same route as …": the earlier trail by its name, or by when it was laid
+    when it has none. A trail deleted since is still said to be one. */
+function sameRouteWords(id) {
+  const src = id ? sessionById(id) : null;
+  if (!src) return 'Same route as an earlier trail';
+  const name = typeof src.name === 'string' ? src.name.trim() : '';
+  return `Same route as ${name || `the trail laid ${fmtWhen(src.startedAt)}`}`;
 }
 
 /* ── Handler countdown ── */
@@ -5022,6 +5077,11 @@ function renderResult(s) {
   const provisional = !!s.data.plan && !s.data.walked;
   $('btnScanWalked').hidden = !provisional;
   $('btnReplay').hidden = !(s.data.track?.length > 1);
+  $('btnLayAgain').hidden = !canLayAgain(s);
+  /* A trail laid on an earlier one's route says whose, so two dogs' runs on
+     the same ground can be found and set side by side. */
+  $('resRoute').textContent = s.data.fromSession ? `${sameRouteWords(s.data.fromSession)}.` : '';
+  $('resRoute').hidden = !s.data.fromSession;
   paintCallBlock(s);
   paintDebriefBlock(s);
   closeFolderForm();
@@ -6145,7 +6205,7 @@ function paintLog() {
 function logCard(r, mode) {
   if (!r.body) r.body = cardBody(r.s, logIx.names);
   if (mode === 'pick') return sessionCard(r.s, { body: r.body, pick: logView.picked.has(r.s.id) });
-  return sessionCard(r.s, { body: r.body, del: mode === 'del', replay: true });
+  return sessionCard(r.s, { body: r.body, del: mode === 'del', replay: true, again: true });
 }
 
 /* Nothing left once the list is narrowed: say why, and offer the way back. */
@@ -7377,7 +7437,24 @@ function wire() {
   $('drawCancel').addEventListener('click', () => { closeDraw(); clearMap(); go('scrHome'); });
   $('drawSave').addEventListener('click', () => { if (draw.pts.length > 1) drawStep('age'); });
   $('drawConfirm').addEventListener('click', saveDrawPlan);
-  $('drawBack').addEventListener('click', () => drawStep('map'));
+  /* Back to the map is for redrawing the line. A route laid again has no
+     line to redraw, so the same button leaves, back to the trail it came from. */
+  $('drawBack').addEventListener('click', () => {
+    if (!draw.route) return drawStep('map');
+    draw.route = null;
+    closeDraw();
+    clearMap();
+    goBack();
+  });
+  /* Who lays and who runs are the home screen's choices, so they are changed
+     there, and the route is laid again from its trail once they are. */
+  $('drawWhoChange').addEventListener('click', () => {
+    draw.route = null;
+    closeDraw();
+    clearMap();
+    go('scrHome');
+    toast('Choose who lays it and who runs, then tap Lay this route again once more');
+  });
 
   // The countdown, on the handler's phone
   $('btnOff').addEventListener('click', () => {
@@ -7662,6 +7739,9 @@ function wire() {
     // Replay too: it opens the run's replay, not the card.
     const rep = e.target.closest('[data-replay-session]');
     if (rep) return replaySession(rep.dataset.replaySession);
+    // And laying its route again starts a new plan, not the card either.
+    const again = e.target.closest('[data-again-session]');
+    if (again) return layRouteAgain(again.dataset.againSession);
     const clear = e.target.closest('[data-log-clear]');
     if (clear) return clearLog(clear.dataset.logClear);
     // While choosing for a folder, a tap anywhere on a card chooses it.
@@ -7732,6 +7812,7 @@ function wire() {
      be lost every repaint. `input` fires all the way through a drag, which
      is the whole point: the picture must move under the finger. */
   $('btnReplay').addEventListener('click', () => openReplay(run.session ?? pendingSession));
+  $('btnLayAgain').addEventListener('click', () => { if (run.session) layRouteAgain(run.session.id); });
   $('btnDebrief').addEventListener('click', () => openDebrief(run.session ?? pendingSession));
   /* From the session list, the run's result is put under the debrief first,
      so Save or Not now lands on it as it does from the result, and the arrow

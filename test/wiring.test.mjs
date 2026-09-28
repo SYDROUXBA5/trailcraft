@@ -551,7 +551,7 @@ t('the session list deletes from a card without opening it, only once Delete ses
   /* Replay, too, is a button inside the card: it opens the replay, not the card. */
   assert.ok(handler.indexOf('[data-replay-session]') > 0 && handler.indexOf('[data-replay-session]') < handler.indexOf('[data-open-session]'));
   assert.match(bodyOf('sessionCard'), /const rep = replay && s\.data\?\.track\?\.length > 1/, 'only a run with a track has one');
-  assert.match(bodyOf('logCard'), /sessionCard\(r\.s, \{ body: r\.body, del: mode === 'del', replay: true \}\)/, 'every card in the list, deleting or not');
+  assert.match(bodyOf('logCard'), /sessionCard\(r\.s, \{ body: r\.body, del: mode === 'del', replay: true, again: true \}\)/, 'every card in the list, deleting or not');
   assert.ok(!/replay: true/.test(bodyOf('renderHome')), 'home is not where runs are watched again');
   // The replay opened from the list is that run's, and Done goes back to the list.
   assert.match(bodyOf('replaySession'), /if \(s\.data\.result\) run\.session = s; else pendingSession = s;\s*openReplay\(s\);/);
@@ -714,7 +714,7 @@ t('a back gesture never leaves a recording, and a screen swiped away is tidied u
     assert.ok(screens.includes(scr), `${scr} is a screen`);
     assert.ok(new RegExp(`\\n  ${scr}: \\(\\) => [^\\n]*${what.replace(/[()?.]/g, '\\$&')}`).test(js), `${scr} runs ${what} when swiped away`);
   }
-  for (const fn of ['function startLay() {', 'function openDraw() {', 'function startWalk(card) {']) {
+  for (const fn of ['function startLay() {', 'function openDraw(route = null) {', 'function startWalk(card) {']) {
     assert.match(fnSrc(fn), /\n\s*if \(rec\.on\) return toast\(/, `${fn} refuses while something else is recording`);
   }
   assert.match(fnSrc('async function startRun(s) {'), /plumeStop\(\);/, 'a plume left drawing never paints onto a blind run');
@@ -858,6 +858,40 @@ t('a photo from a synced record cannot break out of the avatar markup', () => {
   assert.match(real, /has-photo/);
 });
 
+t('a trail’s route is laid again as a new plan, through the plan flow drawn plans take', () => {
+  /* Offered on a trail's result and its card in the list, never a hide's. */
+  assert.ok(htmlIds.has('btnLayAgain') && htmlIds.has('resRoute'));
+  assert.match(bodyOf('renderResult'), /\$\('btnLayAgain'\)\.hidden = !canLayAgain\(s\);/);
+  assert.match(bodyOf('sessionCard'), /const lay = again && canLayAgain\(s\)/);
+  assert.ok(!/again: true/.test(bodyOf('renderHome')), 'home is not where trails are laid again from');
+  const i = js.indexOf("$('sessionList').addEventListener('click'");
+  const handler = js.slice(i, js.indexOf('\n  });', i));
+  assert.ok(handler.indexOf('[data-again-session]') > 0 && handler.indexOf('[data-again-session]') < handler.indexOf('[data-open-session]'),
+    'the button inside a card is looked for before the card itself');
+  assert.match(js, /\$\('btnLayAgain'\)\.addEventListener\('click', \(\) => \{ if \(run\.session\) layRouteAgain\(run\.session\.id\); \}\);/);
+  // It enters the drawn plan's flow after Save plan: the age, then the share screen.
+  const lay = bodyOf('layRouteAgain');
+  assert.match(lay, /const route = routeOf\(sessionById\(id\)\);/);
+  assert.match(lay, /if \(rec\.on\) return toast\(/, 'never while something is recording');
+  assert.match(lay, /openDraw\(route\);/);
+  const open = fnSrc('function openDraw(route = null) {');
+  assert.match(open, /if \(!route\) locateMe\(/, 'the map goes to the route, not the handler');
+  assert.match(open, /drawStep\(route \? 'age' : 'map'\);/);
+  // One builder makes every plan, and the one laid again says where it came from.
+  const save = bodyOf('saveDrawPlan');
+  assert.match(save, /if \(draw\.route && !relayWho\(\)\.ok\) return;/, 'not without somebody to lay it and a dog to run it');
+  assert.match(save, /planSession\(\{/);
+  assert.match(save, /\.\.\.\(route \? \{ fromSession: route\.fromSession, name: route\.name \} : \{\}\),/);
+  assert.match(save, /go\('scrShare'\);\s*renderShare\(sess\);/);
+  assert.ok(!/data: \{ plan: true/.test(js), 'no plan built anywhere else in app.js');
+  // Who lays and runs it is named before Confirm, and changed on the home screen.
+  assert.match(fnSrc('function drawStep('), /\$\('drawWho'\)\.hidden = !\(age && draw\.route\);/);
+  assert.match(bodyOf('paintDrawWho'), /\$\('drawConfirm'\)\.disabled = !who\.ok;/);
+  assert.match(bodyOf('relayWho'), /`\$\{S\.layer\.name\} lays it, \$\{S\.handler\.name\} runs \$\{S\.dog\.name\}\.`/);
+  assert.match(js, /\$\('drawWhoChange'\)\.addEventListener\('click', \(\) => \{[\s\S]{0,80}go\('scrHome'\);/);
+  assert.match(bodyOf('renderResult'), /\$\('resRoute'\)\.hidden = !s\.data\.fromSession;/, 'its result says it is the same route');
+});
+
 t('a folder is kept on the sessions in it, and an empty one on this phone alone', () => {
   assert.match(bodyOf('saveFolders'), /patch: \{ data: \{ folders: c\.folders \} \}/, 'membership is written on the session');
   assert.match(bodyOf('saveFolders'), /db\.updateSessions\(patches\)/, 'in one write however many move');
@@ -870,7 +904,7 @@ t('a folder is kept on the sessions in it, and an empty one on this phone alone'
 
 t('record ids from the cloud are escaped wherever they go into markup', () => {
   const attrs = ['data-handler', 'data-dog', 'data-layer', 'data-open-session', 'data-del-session', 'data-run-session',
-    'data-replay-session', 'data-sel-session', 'data-log-dog', 'data-log-handler', 'data-log-folder', 'data-sel-folder', 'data-res-folder',
+    'data-replay-session', 'data-again-session', 'data-sel-session', 'data-log-dog', 'data-log-handler', 'data-log-folder', 'data-sel-folder', 'data-res-folder',
     'data-dog-card', 'data-edit-handler', 'data-edit-layer', 'data-add-dog-for', '<option value'];
   let seen = 0;
   for (const a of attrs) {
