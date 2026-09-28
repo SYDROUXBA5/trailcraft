@@ -6,18 +6,22 @@
    The choosing is pure and runs here on voice lists taken from real phones
    and browsers. The glue in app.js (the voice cache, the settings rows, the
    Play button) is read from the source, and coachSpeak and the painter are
-   lifted out and run against small fakes of the page and the speech engine. */
+   lifted out and run against small fakes of the page and the speech engine.
+   In the iPhone app the coach speaks through iOS itself (native.js, the
+   Speech plugin): its voices are mapped to the browser's shape and go
+   through the very same ranking. */
 
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import {
   rankVoices, pickVoice, voiceQuality, voiceLabel, voiceRate, voiceName, voiceAccent, voiceHint, speaksThroughWebKit,
-  coachLang, speechLang, coachPhrase, SAMPLE_CALL, COACH_DEFAULTS,
+  coachLang, speechLang, coachPhrase, SAMPLE_CALL, COACH_DEFAULTS, fromNativeVoice, NATIVE_PREMIUM,
 } from '../public/coach.js';
 
 let pass = 0;
 const t = (name, fn) => { fn(); pass++; console.log(`  ok  ${name}`); };
+const ta = async (name, fn) => { await fn(); pass++; console.log(`  ok  ${name}`); };
 
 const html = readFileSync(new URL('../public/index.html', import.meta.url), 'utf8');
 const js = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8');
@@ -152,7 +156,32 @@ const EDGE = [
   V('Microsoft Denise Online (Natural) - French (France)', 'fr-FR', 'Microsoft Denise Online (Natural) - French (France)', { localService: false }),
 ];
 
+/* An iPhone on iOS 18 as the app's own engine describes it
+   (AVSpeechSynthesisVoice): every voice on the phone, with the quality iOS
+   gives it and whether iOS calls it a novelty. Serena and Zoe were
+   downloaded as Premium, Daniel as Enhanced, and Moira is an old Enhanced
+   voice from before Premium existed. Princess is a novelty voice under a
+   name no list of jokes would know; iOS says what it is. */
+const N = (identifier, name, language, quality = 'default', novelty = false) => ({ identifier, name, language, quality, novelty });
+const IOS_APP = [
+  N('com.apple.voice.compact.en-GB.Daniel', 'Daniel', 'en-GB'),
+  N('com.apple.voice.compact.en-US.Samantha', 'Samantha', 'en-US'),
+  N('com.apple.voice.compact.en-AU.Karen', 'Karen', 'en-AU'),
+  N('com.apple.voice.enhanced.en-GB.Daniel', 'Daniel', 'en-GB', 'enhanced'),
+  N('com.apple.voice.premium.en-GB.Serena', 'Serena', 'en-GB', 'premium'),
+  N('com.apple.voice.premium.en-US.Zoe', 'Zoe', 'en-US', 'premium'),
+  N('com.apple.ttsbundle.Moira-premium', 'Moira', 'en-IE', 'enhanced'),
+  N('com.apple.speech.synthesis.voice.Trinoids', 'Trinoids', 'en-US', 'default', true),
+  N('com.apple.speech.synthesis.voice.Princess', 'Princess', 'en-US', 'default', true),
+  N('com.apple.eloquence.en-GB.Eddy', 'Eddy', 'en-GB'),
+  N('com.apple.voice.premium.fr-FR.Thomas', 'Thomas', 'fr-FR', 'premium'),
+];
+/* The same phone before anything was downloaded. */
+const IOS_APP_BARE = IOS_APP.filter(v => v.quality === 'default');
+
 const uris = (ranked) => ranked.map(r => r.voice.voiceURI);
+/** What the page handed over, as plain data: objects made in the lifted code are of another realm. */
+const plain = (x) => JSON.parse(JSON.stringify(x));
 
 /* ── The pure choosing ─────────────────────────────────────────────── */
 
@@ -334,6 +363,57 @@ t('Microsoft’s "(Natural)" voices are Enhanced, and the name drops the word', 
     'the voice on the machine still comes before the one that needs a signal');
 });
 
+/* ── The iPhone app's own voice ────────────────────────────────────── */
+
+t('in the app a voice is taken as iOS describes it: quality as said, all on the phone', () => {
+  assert.deepEqual(fromNativeVoice(N('com.apple.voice.premium.en-GB.Serena', 'Serena', 'en-GB', 'premium')),
+    { voiceURI: 'com.apple.voice.premium.en-GB.Serena', name: 'Serena', lang: 'en-GB', localService: true, default: false, quality: 'premium', novelty: false });
+  const q = (v) => voiceQuality(fromNativeVoice(v));
+  assert.equal(q(N('com.apple.voice.enhanced.en-GB.Daniel', 'Daniel', 'en-GB', 'enhanced')), 'enhanced');
+  assert.equal(q(N('com.apple.voice.compact.en-GB.Daniel', 'Daniel', 'en-GB')), 'compact', 'iOS calls it default: the identifier says compact');
+  assert.equal(q(N('com.apple.voice.super-compact.en-AU.Karen', 'Karen', 'en-AU')), 'compact');
+  assert.equal(q(N('com.apple.speech.synthesis.voice.Fred', 'Fred', 'en-US')), 'plain');
+  // Taken as said, not read from the name: an odd name cannot promote or demote it.
+  assert.equal(q(N('com.apple.ttsbundle.Moira-premium', 'Moira', 'en-IE', 'enhanced')), 'enhanced');
+  assert.equal(q(N('com.apple.voice.x.en-GB.Premium', 'Premium', 'en-GB', 'default')), 'plain');
+  assert.equal(q(N('com.apple.voice.compact.en-GB.Kate', 'Kate', 'en-GB', 'premium')), 'premium');
+  assert.equal(fromNativeVoice(N('a', 'b', 'en-GB', 'default', true)).novelty, true);
+  assert.equal(fromNativeVoice({}).voiceURI, '', 'a voice with nothing to say is not a crash');
+  // A browser's voice has no quality of its own, and is read as it always was.
+  assert.equal(voiceQuality({ voiceURI: 'com.apple.voice.premium.en-GB.Serena', name: 'Serena' }), 'premium');
+});
+
+t('in the app the same ranking: Premium, Enhanced, compact; English only; no joke voice, even one iOS names oddly', () => {
+  const ranked = rankVoices(IOS_APP.map(fromNativeVoice), 'en-GB');
+  assert.deepEqual(uris(ranked), [
+    'com.apple.voice.premium.en-GB.Serena',
+    'com.apple.voice.premium.en-US.Zoe',
+    'com.apple.voice.enhanced.en-GB.Daniel',
+    'com.apple.ttsbundle.Moira-premium',
+    'com.apple.voice.compact.en-GB.Daniel',
+    'com.apple.voice.compact.en-AU.Karen',
+    'com.apple.voice.compact.en-US.Samantha',
+  ]);
+  assert.ok(ranked.every(r => r.known && r.local), 'iOS said the quality, and every voice is on the phone');
+  assert.equal(pickVoice(IOS_APP.map(fromNativeVoice), 'en-US').voiceURI, 'com.apple.voice.premium.en-US.Zoe', 'the handler’s own English among equals');
+  // The choice is kept in coachVoiceURI as iOS's identifier, which is also what WebKit called it.
+  assert.equal(pickVoice(IOS_APP.map(fromNativeVoice), 'en-GB', 'com.apple.voice.compact.en-AU.Karen').name, 'Karen');
+  assert.equal(pickVoice(IOS_APP.map(fromNativeVoice), 'en-GB', 'com.apple.speech.synthesis.voice.Princess').name, 'Serena', 'a joke voice is never taken, even chosen');
+});
+
+t('in the app the hint gives the way to a Premium voice, and goes once one is here', () => {
+  const bare = IOS_APP_BARE.map(fromNativeVoice);
+  assert.equal(voiceHint(bare, 'en-GB', { native: true }), NATIVE_PREMIUM);
+  assert.match(NATIVE_PREMIUM, /download an English voice marked Premium: open Settings, then Accessibility → Spoken Content → Voices → English\./);
+  assert.ok(!/Apple does not let/.test(voiceHint(bare, 'en-GB', { native: true })), 'in the app a downloaded voice does reach the coach');
+  assert.ok(!/iPhone|iPad/.test(NATIVE_PREMIUM), 'the steps are the same on an iPad');
+  assert.equal(voiceHint(IOS_APP.map(fromNativeVoice), 'en-GB', { native: true }), '', 'a Premium voice is here: nothing to say');
+  assert.equal(voiceHint([], 'en-GB', { native: true, settled: true }),
+    `This phone does not name a voice the coach can use, so the calls are spoken in its default voice. Press Play to hear it. ${NATIVE_PREMIUM}`);
+  // Safari on an iPhone is still WebKit, and is still told the truth about it.
+  assert.equal(voiceHint(WEBKIT, 'en-GB', { webkit: true }), 'Apple does not let this app use voices downloaded in Settings, so the coach speaks in the ones built in.');
+});
+
 t('the sample call is the real one, in either unit', () => {
   assert.equal(coachPhrase(SAMPLE_CALL), 'Off the trail, 15 metres to the left');
   assert.equal(coachPhrase(SAMPLE_CALL, { imperial: true }), 'Off the trail, 50 feet to the left');
@@ -405,20 +485,25 @@ t('tapping a voice keeps it, and Play says the sample call in it', () => {
 
 /* ── Run for real ──────────────────────────────────────────────────── */
 
-/** coachSpeak and the voice cache, lifted out, with a fake speech engine. */
-function speaker(list, { lang = 'en-GB', chosen = null } = {}) {
-  const said = [];
+/** coachSpeak and the voice cache, lifted out, with a fake speech engine.
+    With `ios`, the app speaks through a fake of iOS holding those voices,
+    which takes a call (or refuses it, with `refuse`). */
+function speaker(list, { lang = 'en-GB', chosen = null, ios = null, refuse = false } = {}) {
+  const said = [], told = [];
   const speechSynthesis = { getVoices: () => list, cancel() {}, speak: (u) => said.push(u) };
   const sb = {
     window: {}, navigator: { language: lang }, speechSynthesis, settings: { coachVoiceURI: chosen },
-    pickVoice, voiceRate, voiceQuality, speechLang,
+    pickVoice, voiceRate, voiceQuality, speechLang, fromNativeVoice,
+    speakNative: async (o) => { told.push(o); return !refuse; },
     SpeechSynthesisUtterance: function (text) { this.text = text; },
   };
   sb.window.speechSynthesis = speechSynthesis;
+  sb.IOS = ios;
   vm.createContext(sb);
-  vm.runInContext([line('const voiceCache = '), decl('function voiceList()'), decl('function coachSpeak(text)'),
+  vm.runInContext([line('const voiceCache = '), decl('function voiceList()'), decl('function coachSpeak(text)'), decl('function webSpeak(text)'),
+    'if (IOS) { voiceCache.native = true; voiceCache.list = IOS.map(fromNativeVoice); }',
     'this.coachSpeak = coachSpeak; this.voiceCache = voiceCache;'].join('\n'), sb);
-  return { sb, said };
+  return { sb, said, told };
 }
 
 t('coachSpeak names the voice, and paces it by its quality', () => {
@@ -500,8 +585,62 @@ t('an empty first answer from getVoices is not kept', () => {
   assert.equal(sb.voiceCache.list.length, DOWNLOADED.length);
 });
 
+await ta('in the app coachSpeak hands iOS the voice by name, at its pace, and leaves the web engine alone', async () => {
+  const { sb, said, told } = speaker(WEBKIT, { ios: IOS_APP });
+  sb.coachSpeak('Off the trail, 15 metres to the left');
+  assert.deepEqual(plain(told), [{ text: 'Off the trail, 15 metres to the left', voice: 'com.apple.voice.premium.en-GB.Serena', lang: 'en-GB', rate: 1 }]);
+  assert.equal(said.length, 0, 'the web view says nothing');
+  const karen = speaker([], { ios: IOS_APP, chosen: 'com.apple.voice.compact.en-AU.Karen' });
+  karen.sb.coachSpeak('Still off');
+  assert.deepEqual(plain(karen.told[0]), { text: 'Still off', voice: 'com.apple.voice.compact.en-AU.Karen', lang: 'en-AU', rate: 1.05 });
+  // No English voice to name: iOS is asked for the coach's English, not the phone's language.
+  const french = speaker([], { ios: [N('com.apple.voice.compact.fr-FR.Thomas', 'Thomas', 'fr-FR')], lang: 'fr-FR' });
+  french.sb.coachSpeak('Off the trail');
+  assert.deepEqual(plain(french.told[0]), { text: 'Off the trail', lang: 'en-GB', rate: 1.05 });
+  await new Promise(r => setImmediate(r));
+  assert.equal(sb.voiceCache.native, true, 'iOS took it: the app keeps its own voice');
+});
+
+await ta('should iOS refuse a call, the web view says it, and speaks from then on', async () => {
+  const { sb, said, told } = speaker(WEBKIT, { ios: IOS_APP, refuse: true });
+  sb.coachSpeak('Back on the trail');
+  assert.equal(told.length, 1);
+  await new Promise(r => setImmediate(r));
+  assert.equal(said.length, 1, 'said, not lost');
+  assert.equal(said[0].text, 'Back on the trail');
+  assert.equal(said[0].voice.voiceURI, 'com.apple.voice.compact.en-GB.Daniel', 'in a voice the web engine has, not one of iOS’s');
+  assert.equal(sb.voiceCache.native, false);
+  sb.coachSpeak('Still off');
+  assert.equal(told.length, 1, 'iOS is not asked again');
+  assert.equal(said.length, 2);
+});
+
+await ta('in the app the voices are iOS’s, taken again when the app comes back and when one downloads', () => {
+  const w = decl('function wire()');
+  assert.match(w, /if \(canSpeakNative\(\)\) \{\s*voiceCache\.native = true;\s*nativeVoicesFresh\(\);\s*watchNativeVoices\(nativeVoicesFresh\);/);
+  assert.match(w, /document\.addEventListener\('visibilitychange', \(\) => \{\s*if \(document\.visibilityState === 'visible' && voiceCache\.native\) nativeVoicesFresh\(\);/,
+    'back from Settings with a Premium voice, it is in the list');
+  assert.match(w, /\} else if \('speechSynthesis' in window\) \{/, 'the web view’s own list never overwrites iOS’s');
+  assert.match(decl('function voiceList()'), /^function voiceList\(\) \{\n {2}if \(voiceCache\.native\) return voiceCache\.list;/);
+  // Run: the list comes from iOS, mapped, and the choice is drawn again.
+  const painted = [];
+  const sb = {
+    voiceCache: { list: [], settled: false, native: true }, fromNativeVoice,
+    nativeVoices: async () => IOS_APP, document: { activeElement: null },
+    paintCoachVoice: () => painted.push(sb.voiceCache.list.length), repaintFrom: () => {},
+  };
+  vm.createContext(sb);
+  vm.runInContext(decl('async function nativeVoicesFresh()'), sb);
+  return sb.nativeVoicesFresh().then(() => {
+    assert.equal(sb.voiceCache.list.length, IOS_APP.length);
+    assert.equal(sb.voiceCache.list[4].quality, 'premium');
+    assert.equal(sb.voiceCache.settled, true);
+    assert.deepEqual(painted, [IOS_APP.length]);
+  });
+});
+
 /** paintCoachVoice, lifted out, against fake elements. */
-function painter(list, { chosen = null, all = false, settled = false, speech = true, ua = MAC_CHROME_UA, touches = 0, native = false, imperial = false } = {}) {
+function painter(list, { chosen = null, all = false, settled = false, speech = true, ua = MAC_CHROME_UA, touches = 0, native = false, imperial = false, ios = null } = {}) {
   const els = {};
   const $ = (id) => (els[id] ??= { id, hidden: false, innerHTML: '', textContent: '', attrs: {}, setAttribute(k, v) { this.attrs[k] = v; } });
   const speechSynthesis = { getVoices: () => list };
@@ -511,10 +650,13 @@ function painter(list, { chosen = null, all = false, settled = false, speech = t
     settings: { coachVoiceURI: chosen }, isNative: () => native, imp: () => imperial,
     esc: (s) => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])),
     rankVoices, voiceLabel, voiceName, voiceAccent, voiceHint, speaksThroughWebKit, coachPhrase, SAMPLE_CALL,
+    fromNativeVoice, IOS: ios,
   };
   vm.createContext(sb);
   vm.runInContext([line('const voiceCache = '), decl('function voiceList()'), line('const VOICES_SHOWN = '),
-    line('const TICK = '), decl('function paintCoachVoice()'), `voiceCache.all = ${all}; voiceCache.settled = ${settled}; paintCoachVoice();`].join('\n'), sb);
+    line('const TICK = '), decl('function paintCoachVoice()'),
+    'if (IOS) { voiceCache.native = true; voiceCache.list = IOS.map(fromNativeVoice); }',
+    `voiceCache.all = ${all}; voiceCache.settled = ${settled}; paintCoachVoice();`].join('\n'), sb);
   const read = () => [...els.coachVoiceList?.innerHTML.matchAll(/data-voice="([^"]*)" aria-pressed="(true|false)"><span class="check-text"><b>([^<]*)<\/b><i>([^<]*)<\/i>/g) ?? []]
     .map(([, uri, on, name, sub]) => ({ uri, on: on === 'true', name, sub }));
   // What the 'voiceschanged' handler does, and the list as it is then.
@@ -610,6 +752,26 @@ t('an iPhone that lists only the Eloquence and novelty voices: Automatic, Play, 
   assert.equal(phone.els.coachVoiceHint.hidden, false);
   assert.equal(phone.els.coachVoiceHint.textContent,
     'This phone does not name a voice the coach can use, so the calls are spoken in its default voice. Press Play to hear it. Apple does not let this app use voices downloaded in Settings, so the coach speaks in the ones built in.');
+});
+
+t('in the app: every voice, downloaded ones first, and the way to a Premium one until there is one', () => {
+  const opts = { native: true, ua: IPHONE_UA, touches: 5 };
+  const phone = painter(WEBKIT, { ...opts, ios: IOS_APP });
+  assert.equal(phone.rows[0].sub, 'The best voice on this phone — Serena, Natural', 'not "built in": the app has them all');
+  assert.deepEqual(phone.rows.slice(1).map(r => [r.name, r.sub]), [
+    ['Serena', 'British · Natural'], ['Zoe', 'American · Natural'], ['Daniel', 'British · Enhanced'],
+    ['Moira', 'Irish · Enhanced'], ['Daniel', 'British · Basic'],
+  ]);
+  assert.equal(phone.els.coachVoiceHint.hidden, true, 'a Premium voice is here');
+  const bare = painter(WEBKIT, { ...opts, ios: IOS_APP_BARE });
+  assert.equal(bare.rows[0].sub, 'The best voice on this phone — Daniel, Basic');
+  assert.equal(bare.els.coachVoiceHint.hidden, false);
+  assert.equal(bare.els.coachVoiceHint.textContent, NATIVE_PREMIUM);
+  assert.ok(!/Apple does not let/.test(bare.els.coachVoiceHint.textContent));
+  // With the web engine gone from the page, the app still speaks, so the block is not called mute.
+  const quiet = painter([], { ...opts, speech: false, ios: IOS_APP });
+  assert.equal(quiet.els.coachVoiceNone.hidden, true);
+  assert.equal(quiet.rows.length, 6);
 });
 
 t('no voices yet: Automatic alone, and the list is drawn again when they come', () => {

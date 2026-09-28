@@ -6,6 +6,11 @@ The iPhone app is the same code as the website, inside a native shell
 - **recording that keeps going with the phone in a pocket and the screen dark**
   (`@capacitor-community/background-geolocation`);
 - **haptics** — the coach can tap your wrist (`@capacitor/haptics`);
+- **the coach's voice from iOS itself** — any voice on the phone, including the
+  Premium ones downloaded in Settings → Accessibility → Spoken Content →
+  Voices, still heard with the phone locked, over your music (the Speech
+  plugin in `ios/App/App/TrailcraftSpeech.swift`). The tones and taps still
+  need the screen on;
 - later: Apple sign-in, notifications, files in the Files app.
 
 Everything else — the map, the scent model, the coach, sharing — is the very

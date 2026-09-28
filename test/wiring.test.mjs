@@ -770,13 +770,16 @@ t('a web recording keeps the screen awake after the page has been hidden', () =>
 });
 
 /* In the iPhone app a run records with the screen dark, and the app said the
-   phone could go in a pocket. The coach's calls cannot play then: iOS gives
-   a dark app no sound, speech or buzz. So a coached run says so where the
-   handler will read it. The hold itself is run in screens.test.mjs. */
-t('in the iPhone app a coached run says its calls need the screen on', () => {
+   phone could go in a pocket. The coach's tones and buzzes cannot play then:
+   iOS plays nothing from a dark app's web view. So a coached run says so
+   where the handler will read it. Its spoken calls can, once the app speaks
+   through iOS (speaksInTheDark), and then that is what it says. The hold
+   itself is run in screens.test.mjs. */
+t('in the iPhone app a coached run says what plays with the screen dark', () => {
   const watch = fnSrc('async function startWatch(hudId)');
-  assert.match(watch, /message: coach\.on && rec\.kind === 'run' \? 'Recording\. Coach calls need the screen on' : 'Recording — the phone can go in your pocket'/,
-    'a coached run does not promise the pocket, and a lay or walk is never a coached run');
+  assert.match(watch, /message: coach\.on && rec\.kind === 'run'\s*\? \(speaksInTheDark\(\) \? 'Recording\. The coach still speaks with the phone locked' : 'Recording\. Coach calls need the screen on'\)\s*: 'Recording — the phone can go in your pocket'/,
+    'a coached run does not promise the pocket unless its voice carries on there, and a lay or walk is never a coached run');
+  assert.match(js, /\nconst speaksInTheDark = \(\) => voiceCache\.native && !!settings\.coachVoice;\n/, 'only the app’s own voice, and only with the voice on');
   /* A run whose GPS would not start left the coach on, and the next lay held
      the screen awake and said the coach needed it. */
   assert.match(fnSrc('async function startRun(s) {'),
@@ -788,10 +791,12 @@ t('in the iPhone app a coached run says its calls need the screen on', () => {
   assert.match(sync, /holdScreen\(\);/, 'turned on mid-run, the coach asks for the screen');
   assert.match(sync, /if \(isNative\(\)\) letScreenGo\(\);/, 'turned off, the app goes back to recording in the dark');
   assert.match(fnSrc('function paintCoachControls()'),
-    /const dark = isNative\(\) \? ' Calls only play while the screen is on, so keep it awake during a coached run\.' : '';/);
+    /const dark = !isNative\(\) \? ''\s*: speaksInTheDark\(\) \? ' Spoken calls carry on with the phone locked and in your pocket\. The tones and buzzes only play while the screen is on\.'\s*: ' Calls only play while the screen is on, so keep it awake during a coached run\.';/);
   assert.match(fnSrc('function paintCoachControls()'), /\$\('coachNote'\)\.textContent = \(canBuzz[\s\S]*\) \+ dark;/);
   assert.match(fnSrc('async function startRun(s) {'),
-    /toast\(isNative\(\) && coach\.on \? 'Coach on\. Its calls only play while the screen is on'/);
+    /toast\(isNative\(\) && coach\.on\s*\? \(speaksInTheDark\(\) \? 'Coach on\. Its voice carries on with the phone locked' : 'Coach on\. Its calls only play while the screen is on'\)/);
+  assert.match(js, /settings\[box\.id\] = box\.checked;\s*saveSettings\(\);\s*coachSync\(\);[^\n]*\n[^\n]*\n\s*if \(box\.id === 'coachVoice'\) paintCoachControls\(\);/,
+    'turning the voice on or off changes what the note says plays in the dark');
 });
 
 t('the HUD says when the GPS is keeping nothing, and a mark says when it is a guess', () => {
