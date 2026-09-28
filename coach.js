@@ -211,7 +211,9 @@ export function coachLine(reading, status, { imperial = false } = {}) {
    Left to choose for itself, an iPhone reads the calls in its small
    "compact" voice, and a handler out in a field hears a machine. Most
    phones hold better voices, and Apple's downloadable Enhanced and Premium
-   ones sound like a person. So the coach picks its voice rather than
+   ones sound like a person, though WebKit (Safari, and anything on an
+   iPhone) only ever lists the voices the phone came with, so there the
+   best is the best built in. So the coach picks its voice rather than
    taking the default: the best quality first, then the handler's own
    English, and never a voice that needs a signal ahead of one that does
    not — the field with the best tracking ground is often the one with no
@@ -247,9 +249,17 @@ export function voiceQuality(v) {
   if (/com\.apple\.ttsbundle\.\S*-premium/.test(s)) return 'enhanced';
   if (s.includes('premium')) return 'premium';
   if (s.includes('enhanced')) return 'enhanced';
+  // Microsoft's neural voices say "(Natural)": as good as an Enhanced one, and paced like it.
+  if (s.includes('(natural)')) return 'enhanced';
   if (s.includes('compact')) return 'compact';
   return 'plain';
 }
+
+/** Whether a voice's quality can be read at all. Apple names every voice
+    by its quality, so an Apple voice with no mark is a plain one; any other
+    voice without a mark could be good or bad, and calling it "Basic" would
+    be a guess. */
+const qualityKnown = (v, quality) => quality !== 'plain' || /^com\.apple\./i.test(String(v?.voiceURI ?? ''));
 
 /** The honest word for it on screen. Only Premium earns "Natural". */
 export const voiceLabel = (quality) =>
@@ -260,7 +270,7 @@ export const voiceLabel = (quality) =>
 export const voiceRate = (quality) => (quality === 'premium' || quality === 'enhanced' ? 1 : 1.05);
 
 /** The name to show: "Zoe (Premium)" is Zoe, and the label says the rest. */
-export const voiceName = (v) => String(v?.name ?? '').replace(/\s*\((enhanced|premium)\)/ig, '').trim() || 'Unnamed voice';
+export const voiceName = (v) => String(v?.name ?? '').replace(/\s*\((enhanced|premium|natural)\)/ig, '').trim() || 'Unnamed voice';
 
 /** Which English it speaks, in a word. */
 export function voiceAccent(lang) {
@@ -282,15 +292,19 @@ function usable(v) {
   return !(/^com\.apple\./i.test(uri) && NOT_FOR_THE_COACH.has(key(uri.split('.').pop())));
 }
 
-/** The voices the coach could speak in, best first, each with its quality:
-    [{ voice, quality, local }]. On this phone before one that needs a
+/** The voices the coach could speak in, best first, each with its quality
+    and whether that quality could be read at all:
+    [{ voice, quality, known, local }]. On this phone before one that needs a
     signal; then Premium, Enhanced, plain, compact; then the handler's own
     English before the others; then by name, so the list holds still. */
 export function rankVoices(voices, lang) {
   const own = coachLang(lang);
   const nameOf = (v) => String(v.name ?? '');
   return [...(voices ?? [])].filter(usable)
-    .map(voice => ({ voice, quality: voiceQuality(voice), local: voice.localService !== false }))
+    .map(voice => {
+      const quality = voiceQuality(voice);
+      return { voice, quality, known: qualityKnown(voice, quality), local: voice.localService !== false };
+    })
     .sort((a, b) => (b.local - a.local)
       || (QUALITY_ORDER[a.quality] - QUALITY_ORDER[b.quality])
       || ((langTag(a.voice.lang).slice(0, 5) === own ? 0 : 1) - (langTag(b.voice.lang).slice(0, 5) === own ? 0 : 1))
@@ -309,14 +323,31 @@ export function pickVoice(voices, lang, preferredURI = null) {
   return ranked[0]?.voice ?? null;
 }
 
-/** What to say when there is a better voice to be had: nothing once a
-    Premium voice is on the phone. Only an iPhone gets the exact steps;
-    anywhere else the menus differ too much to name them. */
-export function voiceHint(voices, lang, { iphone = false } = {}) {
-  if (rankVoices(voices, lang).some(r => r.quality === 'premium')) return '';
-  return iphone
-    ? 'For the most natural voice, download one on your iPhone: Settings → Accessibility → Spoken Content → Voices → English, then any voice marked Premium.'
-    : 'For a more natural voice, download a higher-quality English voice in this phone’s text-to-speech settings.';
+/** Whether the page speaks through WebKit, which hands it only the voices
+    the iPhone or Mac came with and never one downloaded in Settings. That
+    is the iPhone app, every browser on an iPhone or iPad (Apple allows
+    them no other engine), an iPad asking for the desktop site (it says
+    Macintosh, but has a touch screen), and Safari on a Mac. */
+export function speaksThroughWebKit(ua = '', { native = false, touches = 0 } = {}) {
+  if (native || /iPhone|iPad|iPod/.test(ua)) return true;
+  if (!/Macintosh/.test(ua)) return false;
+  return touches > 1 || (/AppleWebKit/.test(ua) && !/Chrome|Chromium|Edg\/|Firefox|OPR\//.test(ua));
+}
+
+/** What to say about a better voice, and only where saying it helps.
+    Nothing once a Premium voice is here. Under WebKit a downloaded voice
+    never reaches the coach, so the honest thing is to say so, not to send
+    the handler off to download one. Elsewhere the steps are Apple's, so
+    they are given only where the voices are named the Apple way (a Mac
+    outside Safari). On other phones a good voice cannot be told from a
+    poor one, so a hint there could never be cleared: none is given. No
+    device is named, because an iPad is not an iPhone. */
+export function voiceHint(voices, lang, { webkit = false } = {}) {
+  const ranked = rankVoices(voices, lang);
+  if (ranked.some(r => r.quality === 'premium')) return '';
+  if (webkit) return 'Apple does not let this app use voices downloaded in Settings, so the coach speaks in the ones built in.';
+  const apple = ranked.some(r => /^com\.apple\./i.test(String(r.voice.voiceURI ?? '')) || /\((enhanced|premium)\)/i.test(String(r.voice.name ?? '')));
+  return apple ? 'For the most natural voice, download an English voice marked Premium in Settings → Accessibility → Spoken Content.' : '';
 }
 
 /** The call the Play button says, so the handler hears the real thing. */
