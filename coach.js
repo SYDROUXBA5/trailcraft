@@ -383,12 +383,21 @@ export function voiceHint(voices, lang, { webkit = false, settled = false, nativ
   if (webkit) return [unnamed, 'Apple does not let this app use voices downloaded in Settings, so the coach speaks in the ones built in.'].filter(Boolean).join(' ');
   if (unnamed) return unnamed;
   const apple = ranked.some(r => /^com\.apple\./i.test(String(r.voice.voiceURI ?? '')) || /\((enhanced|premium)\)/i.test(String(r.voice.name ?? '')));
-  return apple ? 'For the most natural voice, download an English voice marked Premium in Settings → Accessibility → Spoken Content.' : '';
+  return apple ? MAC_PREMIUM : '';
 }
+
+/* Apple renamed Spoken Content to Read & Speak in the 26 releases, on the
+   iPhone, the iPad and the Mac alike, and a handler may be on either side of
+   that, so both names are given. Settings calls the good voices Premium; this
+   app calls them Natural (voiceLabel), so the hint says what to look for in
+   each. */
+
+/** The way to a Premium voice on a Mac, in a browser that can use one. */
+export const MAC_PREMIUM = 'For the most natural voice, download an English voice marked Premium in System Settings → Accessibility → Read & Speak (called Spoken Content before macOS 26). It shows up here marked Natural.';
 
 /** The way to a Premium voice, for the app that can use one. The steps are
     the same on an iPad, so no device is named. */
-export const NATIVE_PREMIUM = 'For a voice that sounds like a person, download an English voice marked Premium: open Settings, then Accessibility → Spoken Content → Voices → English. It shows up here once it has downloaded.';
+export const NATIVE_PREMIUM = 'For a voice that sounds like a person, download an English voice marked Premium: open Settings, then Accessibility → Read & Speak (called Spoken Content on older versions) → Voices → English. Once it has downloaded it shows up here, marked Natural.';
 
 /** The call the Play button says, so the handler hears the real thing. */
 export const SAMPLE_CALL = { kind: 'off', metres: 15, side: 'left', where: 'left' };
