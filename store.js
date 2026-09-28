@@ -5,7 +5,7 @@
    Mirrors the native app's store (trailcraft-native/src/store/db.ts) so the
    two stay one product: same tables, same remembered choices, same wording. */
 
-import { pathLen, densify, simplify, timestampsEndingAt } from './geo.js';
+import { pathLen, densify, simplify, timestampsEndingAt, dist } from './geo.js';
 import { visible, tombstone, pruneTombstones, RUN_FIELDS } from './sync-core.js';
 import { makeBackup, planRestore, BACKUP_FLAGS } from './backup.js';
 import { unwalkedPlan, trailShown, ranBlind } from './debrief.js';
@@ -154,18 +154,44 @@ export function planSession({ id, handlerId, layerId = null, corners, ageMin, no
    tolerance of the line that is kept (simplify in geo.js), so a real corner
    survives and the wobble does not. A long, twisting trail can still leave
    more corners than anyone wants numbered on a map, so the tolerance grows a
-   step at a time, never past the width of a lane. */
+   step at a time, never past the width of a lane. A coarser step is taken
+   only when it brings the corners under the cap: a trail that really turns
+   more than forty times has more than forty corners at every step, and
+   thinning it harder would only drop real ones (a short jog, a double-back)
+   and still leave too many to number. */
 export const ROUTE_TOLS_M = [5, 8, 12];
 export const ROUTE_MAX_CORNERS = 40;
 
 const onEarth = (p) => Number.isFinite(p?.lat) && Number.isFinite(p?.lon);
 const latLon = (p) => ({ lat: p.lat, lon: p.lon });
 
+/* How far out a trail that comes back to where it started must reach to be
+   a route: past the coarsest tolerance, plus the metre the ends may be apart,
+   so the fix furthest out is always kept as a corner (see goesSomewhere). */
+const LOOP_M = ROUTE_TOLS_M.at(-1) + 2;
+
+/* Whether a line goes anywhere, as routeOf will find it. Its ends a metre or
+   more apart is a route whatever thinning does, because the first and last
+   fixes are always kept. Ends together is a loop back to the start, which is
+   only a route once some fix is far enough out to survive the thinning. Two
+   fixes a pace apart, or one real fix and the rest nonsense, are not: the
+   button was offered on those and then refused. Nearly always settled by the
+   two ends, so the whole line is read only for a loop. */
+function goesSomewhere(trail) {
+  const first = trail.find(onEarth);
+  const last = trail.findLast(onEarth);
+  if (!first || last === first) return false;
+  if (dist(first, last) >= 1) return true;
+  return trail.some(p => onEarth(p) && dist(first, p) > LOOP_M);
+}
+
 /** Whether a session's route can be laid again: a trail, not a hide search,
     with a line to follow. Cheap, because the session list asks it of every
-    card each time a letter is typed into its search. */
+    card each time a letter is typed into its search; and it agrees with
+    routeOf, so the button is never offered on a trail it would refuse. */
 export const canLayAgain = (s) => !!s?.data && !s.deleted && targetById(s.targetId).kind === 'person'
-  && !s.data.hides?.length && Array.isArray(s.data.trail) && s.data.trail.length > 1;
+  && !s.data.hides?.length && Array.isArray(s.data.trail) && s.data.trail.length > 1
+  && goesSomewhere(s.data.trail);
 
 /** The corners of the route a trail was laid on, as a drawn plan holds them:
     `{ lat, lon }` and nothing else, so no time, accuracy or height from the
@@ -179,10 +205,13 @@ export function routeCorners(s) {
   }
   const line = Array.isArray(d.trail) ? d.trail.filter(onEarth) : [];
   if (line.length < 2) return [];
-  let pts = line;
-  for (const tol of ROUTE_TOLS_M) {
-    pts = simplify(line, tol);
+  const thin = (tol) => simplify(line, tol, { turns: true });
+  const first = thin(ROUTE_TOLS_M[0]);
+  let pts = first;
+  for (const tol of ROUTE_TOLS_M.slice(1)) {
     if (pts.length <= ROUTE_MAX_CORNERS) break;
+    const coarser = thin(tol);
+    if (coarser.length <= ROUTE_MAX_CORNERS) pts = coarser;
   }
   return pts.map(latLon);
 }
@@ -199,6 +228,12 @@ export function routeOf(s) {
   if (corners.length < 2 || pathLen(corners) < 1) return null;
   return { corners, fromSession: s.id, name: typeof s.name === 'string' ? s.name : '' };
 }
+
+/** What a plan's line is called on screen. A route laid again goes straight
+    to the trail's age with its corners filled in, and nothing on it can be
+    drawn or moved, so "the line you drew" would name something the handler
+    never did. */
+export const planLine = (s) => (s?.data?.fromSession ? 'the route from the earlier trail' : 'the line you drew');
 
 /* ── Search results written back to front ─────────────────────────────
    A search result used to name the approach the wrong way round: a dog that
