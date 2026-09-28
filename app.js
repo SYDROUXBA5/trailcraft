@@ -34,7 +34,8 @@ import { trailModel, encodeShared, decodeShared, sharedUrl, toGpx, fileBase,
          detailSections, headline, notes, liveMeta, liveModel, cleanResult,
          resultSentence, sessionFromModel, keptSession, peopleOf } from './share.js';
 import { buildPdf, jpegSize } from './pdf.js';
-import { coachStep, initialCoach, coachPhrase, coachLine, TOL_OPTIONS, COACH_DEFAULTS } from './coach.js';
+import { coachStep, initialCoach, coachPhrase, coachLine, TOL_OPTIONS, COACH_DEFAULTS,
+         rankVoices, pickVoice, voiceQuality, voiceLabel, voiceRate, voiceName, voiceAccent, voiceHint, SAMPLE_CALL } from './coach.js';
 import { DEBRIEF, FLAGS, NOTE_TAGS, blankDebrief, debriefDone, debriefLine, labelOf, ownRun, stickyDebrief,
          unwalkedPlan, trailShown, ranBlind } from './debrief.js';
 import { CONFIDENCE, stampCall, confidenceOf, firstCall, firstCallWasFind, calibration, calibrationLine, callVerdict, runsOf } from './call.js';
@@ -5740,13 +5741,36 @@ function audioUnlock() {
   } catch { /* no voice on this phone */ }
 }
 
+/* The phone's voices. Safari and Chrome often answer getVoices() with an
+   empty list until they have loaded them, and say so later with
+   'voiceschanged'; the iPhone app may never say so at all. So the list is
+   kept, asked for again whenever it is still empty, and replaced when the
+   event comes. */
+const voiceCache = { list: [], all: false };
+function voiceList() {
+  if (!voiceCache.list.length && 'speechSynthesis' in window) {
+    try { voiceCache.list = [...(speechSynthesis.getVoices() || [])]; } catch { voiceCache.list = []; }
+  }
+  return voiceCache.list;
+}
+
 function coachSpeak(text) {
   if (!('speechSynthesis' in window)) return;
   try {
     speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(text);
-    u.lang = navigator.language || 'en-GB';
-    u.rate = 1.05;
+    /* Named, or the iPhone reads it in its compact voice whatever better
+       ones it holds. With no English voice to name, the browser picks, as
+       it always did. */
+    const v = pickVoice(voiceList(), navigator.language, settings.coachVoiceURI);
+    if (v) {
+      u.voice = v;
+      u.lang = v.lang;
+      u.rate = voiceRate(voiceQuality(v));
+    } else {
+      u.lang = navigator.language || 'en-GB';
+      u.rate = 1.05;
+    }
     speechSynthesis.speak(u);
   } catch { /* nothing to do */ }
 }
@@ -5899,6 +5923,45 @@ function paintCoachControls() {
   $('coachNote').textContent = (canBuzz
     ? 'Turn the volume up. Calls come at most every ten seconds, not for a single stray GPS fix, and twice at most while you stand still.'
     : 'iPhones do not let a web app vibrate, so the coach uses sound and voice. Turn the volume up — the tones play even with the ring/silent switch on silent. Calls come at most every ten seconds, not for a single stray GPS fix, and twice at most while you stand still.') + dark;
+  paintCoachVoice();
+}
+
+/* The coach's voice, chosen on this phone and kept on it: another phone has
+   other voices, so the choice is never synced. The list is the best few
+   until the handler asks for all of them — a Mac can hold sixty English
+   voices, and this card also opens in the middle of a run. */
+const VOICES_SHOWN = 5;
+const TICK = '<span class="check-mark" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span>';
+function paintCoachVoice() {
+  const can = 'speechSynthesis' in window;
+  $('coachVoiceNone').hidden = can;
+  $('coachVoiceBody').hidden = !can;
+  if (!can) return;
+  const voices = voiceList(), lang = navigator.language;
+  const ranked = rankVoices(voices, lang);
+  // A choice this phone no longer has is Automatic in effect, so it shows as Automatic.
+  const mine = ranked.some(r => r.voice.voiceURI === settings.coachVoiceURI) ? settings.coachVoiceURI : '';
+  const best = ranked[0];
+  const about = (r) => [voiceAccent(r.voice.lang), voiceLabel(r.quality), r.local ? '' : 'needs a signal'].filter(Boolean).join(' · ');
+  const row = (uri, name, sub) => {
+    const on = uri === mine;
+    return `<button type="button" class="check-row${on ? ' on' : ''}" data-voice="${esc(uri)}" aria-pressed="${on}"><span class="check-text"><b>${esc(name)}</b><i>${esc(sub)}</i></span>${TICK}</button>`;
+  };
+  const shown = voiceCache.all ? ranked : ranked.filter((r, i) => i < VOICES_SHOWN || r.voice.voiceURI === mine);
+  const html = row('', 'Automatic', `The best voice on this phone${best ? ` — ${voiceName(best.voice)}, ${voiceLabel(best.quality)}` : ''}`)
+    + shown.map(r => row(r.voice.voiceURI, voiceName(r.voice), about(r))).join('');
+  // Drawn again only when it changed: voices can arrive more than once.
+  if (voiceCache.html !== html) { $('coachVoiceList').innerHTML = html; voiceCache.html = html; }
+  const more = $('coachVoiceMore');
+  more.hidden = ranked.length <= VOICES_SHOWN;
+  more.textContent = voiceCache.all ? 'Show fewer voices' : `Show all ${ranked.length} voices`;
+  more.setAttribute('aria-expanded', String(voiceCache.all));
+  $('coachVoiceSample').textContent = `“${coachPhrase(SAMPLE_CALL, { imperial: imp() })}”`;
+  const ua = navigator.userAgent || '';
+  const iphone = isNative() || /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+  const hint = voiceHint(voices, lang, { iphone });
+  $('coachVoiceHint').textContent = hint;
+  $('coachVoiceHint').hidden = !hint;
 }
 
 /* The in-run sheet shows the very same controls: the node moves. */
@@ -7099,6 +7162,33 @@ function wire() {
   });
   // Sound and speech are only allowed after a touch: the first one anywhere unlocks them.
   document.addEventListener('pointerdown', audioUnlock, { once: true });
+  /* Voices can arrive after the page does. The list is taken again and the
+     choice drawn again, with the screen reader left where it was. */
+  if ('speechSynthesis' in window) {
+    const fresh = () => {
+      voiceCache.list = [];
+      voiceList();
+      const at = document.activeElement;
+      if (at) repaintFrom(at, paintCoachVoice); else paintCoachVoice();
+    };
+    if (typeof speechSynthesis.addEventListener === 'function') speechSynthesis.addEventListener('voiceschanged', fresh);
+    else speechSynthesis.onvoiceschanged = fresh;
+    voiceList();   // Chrome only starts loading them when first asked
+  }
+  $('coachVoiceBox').addEventListener('click', (e) => {
+    const row = e.target.closest('[data-voice]');
+    if (row) {
+      settings.coachVoiceURI = row.dataset.voice || null;
+      saveSettings();
+      return repaintFrom(row, paintCoachVoice);
+    }
+    if (e.target.closest('#coachVoiceMore')) {
+      voiceCache.all = !voiceCache.all;
+      return paintCoachVoice();
+    }
+    // Said in the voice just chosen, in the handler's units: the real call, not a test phrase.
+    if (e.target.closest('#coachVoicePlay')) coachSpeak(coachPhrase(SAMPLE_CALL, { imperial: imp() }));
+  });
   $('callOpts').addEventListener('click', (e) => {
     const b = e.target.closest('[data-conf]');
     if (b) pickCall(b.dataset.conf);

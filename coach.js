@@ -38,6 +38,7 @@ export const COACH_DEFAULTS = {
   coachSound: true,
   coachVibrate: true,    // only where the phone can (not iPhone)
   coachShow: false,      // the distance on screen — off keeps the run blind
+  coachVoiceURI: null,   // which voice speaks: one of this phone's voices, or null for the best one here
 };
 
 export const QUIET_MS = 10_000;    // never two alerts closer than this
@@ -205,3 +206,118 @@ export function coachLine(reading, status, { imperial = false } = {}) {
   if (status === 'off') return `Off · ${d} ${side}`.trim();
   return `${d} ${side}`.trim();
 }
+
+/* ── The voice ────────────────────────────────────────────────────────
+   Left to choose for itself, an iPhone reads the calls in its small
+   "compact" voice, and a handler out in a field hears a machine. Most
+   phones hold better voices, and Apple's downloadable Enhanced and Premium
+   ones sound like a person. So the coach picks its voice rather than
+   taking the default: the best quality first, then the handler's own
+   English, and never a voice that needs a signal ahead of one that does
+   not — the field with the best tracking ground is often the one with no
+   bars. */
+
+/* Apple's joke voices, and the old robotic ones, by name. Nobody wants
+   "Off the trail" sung by a pipe organ. The Eloquence set (Eddy, Flo,
+   Grandma…) is the 1990s screen-reader voice: clear, but a robot. */
+const NOT_FOR_THE_COACH = new Set([
+  'Albert', 'Bad News', 'Bahh', 'Bells', 'Boing', 'Bubbles', 'Cellos', 'Good News', 'Jester',
+  'Organ', 'Pipe Organ', 'Superstar', 'Trinoids', 'Whisper', 'Wobble', 'Zarvox', 'Deranged', 'Hysterical',
+  'Eddy', 'Flo', 'Grandma', 'Grandpa', 'Reed', 'Rocko', 'Sandy', 'Shelley',
+  'Fred', 'Junior', 'Kathy', 'Ralph',
+].map(n => n.replace(/\s+/g, '').toLowerCase()));
+
+const QUALITY_ORDER = { premium: 0, enhanced: 1, plain: 2, compact: 3 };
+
+/** A language tag, the same however the phone spells it: "en_GB" is "en-gb". */
+const langTag = (l) => String(l ?? '').replace(/_/g, '-').toLowerCase();
+
+/** The English the coach speaks: the handler's own, or British when the
+    phone is set to another language (the words are English whatever it is). */
+export function coachLang(lang) {
+  const l = langTag(lang);
+  return /^en-[a-z]{2}(?![a-z])/.test(l) ? l.slice(0, 5) : 'en-gb';
+}
+
+/** How good a voice sounds, read from its URI and name. Before Premium
+    existed, iOS named its Enhanced voices "…-premium", so an old
+    com.apple.ttsbundle voice ending that way is Enhanced, not Premium. */
+export function voiceQuality(v) {
+  const s = `${v?.voiceURI ?? ''} ${v?.name ?? ''}`.toLowerCase();
+  if (/com\.apple\.ttsbundle\.\S*-premium/.test(s)) return 'enhanced';
+  if (s.includes('premium')) return 'premium';
+  if (s.includes('enhanced')) return 'enhanced';
+  if (s.includes('compact')) return 'compact';
+  return 'plain';
+}
+
+/** The honest word for it on screen. Only Premium earns "Natural". */
+export const voiceLabel = (quality) =>
+  quality === 'premium' ? 'Natural' : quality === 'enhanced' ? 'Enhanced' : 'Basic';
+
+/** The good voices are paced like speech already; hurried, they gabble.
+    The basic ones are a little slow, and a call is better short. */
+export const voiceRate = (quality) => (quality === 'premium' || quality === 'enhanced' ? 1 : 1.05);
+
+/** The name to show: "Zoe (Premium)" is Zoe, and the label says the rest. */
+export const voiceName = (v) => String(v?.name ?? '').replace(/\s*\((enhanced|premium)\)/ig, '').trim() || 'Unnamed voice';
+
+/** Which English it speaks, in a word. */
+export function voiceAccent(lang) {
+  const l = langTag(lang);
+  if (/gbsct|scotland/.test(l)) return 'Scottish';
+  return {
+    'en-gb': 'British', 'en-us': 'American', 'en-au': 'Australian', 'en-ie': 'Irish', 'en-in': 'Indian',
+    'en-za': 'South African', 'en-nz': 'New Zealand', 'en-ca': 'Canadian', 'en-sg': 'Singaporean',
+  }[l.slice(0, 5)] ?? 'English';
+}
+
+/** Whether a voice is one the coach may use at all: English, and not a joke. */
+function usable(v) {
+  if (!v || !/^en(-|$)/.test(langTag(v.lang))) return false;
+  const key = (s) => String(s ?? '').replace(/\s*\(.*$/, '').replace(/\s+/g, '').toLowerCase();
+  if (NOT_FOR_THE_COACH.has(key(v.name))) return false;
+  const uri = String(v.voiceURI ?? '');
+  if (/\.eloquence\./i.test(uri)) return false;
+  return !(/^com\.apple\./i.test(uri) && NOT_FOR_THE_COACH.has(key(uri.split('.').pop())));
+}
+
+/** The voices the coach could speak in, best first, each with its quality:
+    [{ voice, quality, local }]. On this phone before one that needs a
+    signal; then Premium, Enhanced, plain, compact; then the handler's own
+    English before the others; then by name, so the list holds still. */
+export function rankVoices(voices, lang) {
+  const own = coachLang(lang);
+  const nameOf = (v) => String(v.name ?? '');
+  return [...(voices ?? [])].filter(usable)
+    .map(voice => ({ voice, quality: voiceQuality(voice), local: voice.localService !== false }))
+    .sort((a, b) => (b.local - a.local)
+      || (QUALITY_ORDER[a.quality] - QUALITY_ORDER[b.quality])
+      || ((langTag(a.voice.lang).slice(0, 5) === own ? 0 : 1) - (langTag(b.voice.lang).slice(0, 5) === own ? 0 : 1))
+      || nameOf(a.voice).localeCompare(nameOf(b.voice)));
+}
+
+/** The voice to speak in: the handler's choice while this phone still has
+    it and the coach may use it, else the best there is, else null — and
+    then the browser speaks in its own default, as it always did. */
+export function pickVoice(voices, lang, preferredURI = null) {
+  const ranked = rankVoices(voices, lang);
+  if (preferredURI) {
+    const mine = ranked.find(r => r.voice.voiceURI === preferredURI);
+    if (mine) return mine.voice;
+  }
+  return ranked[0]?.voice ?? null;
+}
+
+/** What to say when there is a better voice to be had: nothing once a
+    Premium voice is on the phone. Only an iPhone gets the exact steps;
+    anywhere else the menus differ too much to name them. */
+export function voiceHint(voices, lang, { iphone = false } = {}) {
+  if (rankVoices(voices, lang).some(r => r.quality === 'premium')) return '';
+  return iphone
+    ? 'For the most natural voice, download one on your iPhone: Settings → Accessibility → Spoken Content → Voices → English, then any voice marked Premium.'
+    : 'For a more natural voice, download a higher-quality English voice in this phone’s text-to-speech settings.';
+}
+
+/** The call the Play button says, so the handler hears the real thing. */
+export const SAMPLE_CALL = { kind: 'off', metres: 15, side: 'left', where: 'left' };

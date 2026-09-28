@@ -952,6 +952,19 @@
             <label class="tile" for="coachSound"><input id="coachSound" type="checkbox"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10v4M8 7v10M12 4v16M16 7v10M20 10v4" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/></svg><b>Tones</b><i>A tick, a firm tone, a chime</i></label>
             <label class="tile" for="coachVibrate" id="coachVibrateRow" hidden><input id="coachVibrate" type="checkbox"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="3" width="8" height="18" rx="2" fill="none" stroke="currentColor" stroke-width="1.9"/><path d="M4.5 8.5v7M19.5 8.5v7" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg><b>Buzz</b><i>A short tap with each call</i></label>
           </div>
+          <span class="unit-head" id="coachVoiceHead">Coach voice</span>
+          <div class="coach-voice" id="coachVoiceBox">
+            <p class="coach-cap" id="coachVoiceNone" hidden>This phone has no voice for the coach, so it cannot speak the calls. The tones still work.</p>
+            <div id="coachVoiceBody">
+              <div class="check-list" id="coachVoiceList" role="group" aria-labelledby="coachVoiceHead"></div>
+              <button type="button" class="btn ghost small voice-more" id="coachVoiceMore" aria-controls="coachVoiceList" aria-expanded="false" hidden>Show all voices</button>
+              <div class="voice-play">
+                <button type="button" class="btn ghost small" id="coachVoicePlay" aria-describedby="coachVoiceSample"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M8 5.5v13l10.5-6.5z" fill="currentColor"/></svg>Play</button>
+                <span class="coach-cap" id="coachVoiceSample">“Off the trail, 15 metres to the left”</span>
+              </div>
+              <p class="coach-cap" id="coachVoiceHint" hidden></p>
+            </div>
+          </div>
           <label class="switch-row" for="coachShow">
             <span>Show the distance on screen<i>Off keeps the run blind — the coach still speaks</i></span>
             <input id="coachShow" type="checkbox">
