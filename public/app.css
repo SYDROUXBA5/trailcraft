@@ -1278,6 +1278,32 @@ body:has(#scrWalk:not([hidden])) { --top-row: calc(var(--safe-t) + 104px); }
 .page-bottom .del-link { margin-top: 10px; }
 .recent .card .del-link { align-self: flex-end; }
 
+/* ── The session list kept in order: search, filters, folders ────────
+   Rows of chips scroll sideways inside themselves, so a long run of dogs or
+   folders never pushes the page sideways, at any text size. */
+.head-acts { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.log-tools { display: flex; flex-direction: column; gap: 6px; }
+.log-search { display: flex; gap: 8px; align-items: center; }
+.log-search input { flex: 1; min-width: 0; min-height: 48px; }
+.chip.tag { padding: 8px 18px; min-height: 48px; }
+.chip.tag:disabled { opacity: 0.45; cursor: default; }
+h2.log-day { margin: 14px 0 0; }
+.card-acts { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.card .card-folders { font: 600 calc(13 * var(--px)) var(--body); color: var(--muted); overflow-wrap: anywhere; }
+.pick-chip { align-self: flex-start; }
+/* A chosen card is ringed as well as its Select lit: the ring is what a
+   thumb sees halfway down a long list. */
+.recent .card.picked { outline: 3px solid var(--moss); outline-offset: -2px; }
+/* Where the chosen sessions go stays in reach while the list scrolls under it. */
+.log-pick {
+  position: sticky; top: calc(var(--safe-t) + 6px); z-index: 2;
+  background: var(--card); border: 1px solid var(--border); border-radius: var(--r);
+  padding: 10px 12px 4px; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.14);
+}
+.log-pick > p { margin: 0 0 4px; font-weight: 600; }
+.folder-form { display: flex; flex-direction: column; gap: 4px; }
+.folder-form .name-field { margin: 0; }
+
 /* ── The account card in Settings ─────────────────────────────────── */
 .account { display: flex; flex-direction: column; gap: 12px; }
 .account-who { display: flex; align-items: center; gap: 12px; min-width: 0; }

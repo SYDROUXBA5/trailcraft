@@ -729,7 +729,8 @@ await t('every place a run’s wind is shown says it was felt, against what the 
   assert.match(decl('function renderResult('), /const felt = windWords\(s, \{ imperial: imp\(\) \}\);/);
   assert.match(html, /<span class="label" id="resModelLabel">Modelled<\/span>\s*<p class="body small" id="resWind" hidden><\/p>/);
   assert.match(decl('function paintReplay('), /const felt = windWords\(s, \{ imperial: imp\(\), short: true \}\);[\s\S]*\+ \(felt \? ` · \$\{felt\}` : ''\)/);
-  assert.match(decl('function sessionCard('), /\$\{felt \? ` · \$\{esc\(felt\)\}` : ''\}/, 'escaped, as any line in a list');
+  // A card's words are written by cardBody, for the session list and home alike.
+  assert.match(decl('function cardBody('), /\$\{felt \? ` · \$\{esc\(felt\)\}` : ''\}/, 'escaped, as any line in a list');
 
   /* The shared page and the PDF: their Weather section. */
   const base = { kind: 'trail', target: 'Person', wx: northerly(), runAt: RUN };

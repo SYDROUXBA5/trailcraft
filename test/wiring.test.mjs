@@ -548,6 +548,10 @@ t('the session list deletes from a card without opening it, only once Delete ses
   assert.ok(handler.indexOf('[data-del-session]') > 0 && handler.indexOf('[data-del-session]') < handler.indexOf('[data-open-session]'),
     'the Delete inside a card is looked for before the card itself');
   assert.match(handler, /if \(confirmDeleteSession\(del\.dataset\.delSession\)\) renderSessions\(\);\s*return;/);
+  // Filters narrow what is built; only a change to the sessions builds it again.
+  assert.match(bodyOf('renderSessions'), /logIx = \{ rows: logRows\(all, peopleFor\)/);
+  assert.ok(!/logRows\(/.test(bodyOf('paintLog')), 'a search or a filter does not build the rows again');
+  assert.match(js, /\$\('logSearch'\)\.addEventListener\('input', \(e\) => \{ logView\.query = e\.target\.value; paintLog\(\); \}\);/);
 });
 
 t('every view of a run takes its wind from windAt, and the grade only banks the run\'s own wind', () => {
@@ -845,8 +849,19 @@ t('a photo from a synced record cannot break out of the avatar markup', () => {
   assert.match(real, /has-photo/);
 });
 
+t('a folder is kept on the sessions in it, and an empty one on this phone alone', () => {
+  assert.match(bodyOf('saveFolders'), /patch: \{ data: \{ folders: c\.folders \} \}/, 'membership is written on the session');
+  assert.match(bodyOf('saveFolders'), /db\.updateSessions\(patches\)/, 'in one write however many move');
+  assert.match(js, /const HELD_FOLDERS = 'folders\.held';/, 'empty folders are this phone’s own preference');
+  assert.ok(!/cal:folders|handlers\.upsert\([^)]*folders/.test(js), 'not smuggled into calibration or a handler');
+  assert.match(bodyOf('confirmDeleteSession'), /keepHeld\(folders\);/, 'deleting a folder’s last session keeps the folder');
+  assert.match(bodyOf('renderResult'), /paintResultFolders\(s\);/, 'a result can be filed');
+  assert.ok(htmlIds.has('resFolderBox') && htmlIds.has('btnSessPick'), 'from the result and from a choice in the list');
+});
+
 t('record ids from the cloud are escaped wherever they go into markup', () => {
   const attrs = ['data-handler', 'data-dog', 'data-layer', 'data-open-session', 'data-del-session', 'data-run-session',
+    'data-sel-session', 'data-log-dog', 'data-log-handler', 'data-log-folder', 'data-sel-folder', 'data-res-folder',
     'data-dog-card', 'data-edit-handler', 'data-edit-layer', 'data-add-dog-for', '<option value'];
   let seen = 0;
   for (const a of attrs) {

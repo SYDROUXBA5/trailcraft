@@ -42,6 +42,13 @@ t('every chip that can be chosen says whether it is', () => {
     ['data-pick', 'd[f.id] === o.v'],
     ['data-seen', 'dbSeen?.[f.id] === o.v'],
     ['data-colour', 'c.hex === cur'],
+    // The session list's filters, its folders, and choosing sessions for one.
+    ['data-log-dog', 'd.key === v.dog'],
+    ['data-log-handler', 'h.key === v.handler'],
+    ['data-log-folder=', 'f.id === v.folder'],
+    ['data-sel-folder=', 'on'],
+    ['data-res-folder=', 'on'],
+    ['data-sel-session', 'pick'],
   ];
   for (const [attr, test] of rows) {
     const line = js.split('\n').find(l => l.includes(attr) && l.includes('<button'));
