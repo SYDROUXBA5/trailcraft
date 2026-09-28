@@ -116,6 +116,10 @@ export function patchSession(s, patch) {
 export function runAgain(s, { id, summary }) {
   const data = { ...(s?.data || {}) };
   for (const k of RUN_FIELDS) delete data[k];
+  /* Nor the folders the first run was put in (log.js): the handler files a
+     run, and the next dog's run on the same trail has not been filed yet.
+     Not one of RUN_FIELDS, which also decide how two copies of a run merge. */
+  delete data.folders;
   /* A second run of a plan is still that plan: the walked card that comes
      back names the plan it was drawn as, and this is how the copy answers. */
   if (data.plan && !data.planOf && s?.id) data.planOf = s.id;
@@ -334,6 +338,28 @@ export function createStore(backend) {
       write(K.sessions, all);
       notify('sessions', all[i]);
       return all[i];
+    },
+    /** Change several sessions at once ([{ id, patch }]), each merged as
+        updateSession does. A folder renamed or deleted, or twenty runs put in
+        one, is one read and one write of the whole list rather than one of
+        each per session, which on a long history is the difference between
+        a tap and a stall. Every session changed is announced as its own
+        save. Returns them as saved. */
+    updateSessions(changes) {
+      const all = read(K.sessions, []);
+      const at = new Map();
+      all.forEach((s, i) => { if (s?.id && !s.deleted) at.set(s.id, i); });
+      const now = Date.now(), done = [];
+      for (const { id, patch } of changes || []) {
+        const i = at.get(id);
+        if (i === undefined) continue;
+        all[i] = { ...patchSession(all[i], patch), updatedAt: now };
+        done.push(all[i]);
+      }
+      if (!done.length) return [];
+      write(K.sessions, all);
+      for (const s of done) notify('sessions', s);
+      return done;
     },
     /* The run goes first and its drift row is set aside after. Deleting is
        how a full phone makes room, and the row's write makes the blob a
