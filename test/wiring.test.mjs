@@ -228,7 +228,7 @@ t('"backed up" means backed up', () => {
 
 t('seeing the answer once counts for the rest of the run', () => {
   assert.match(js, /callSeen = !!run\.revealedAt;/, 'a call is judged on whether they have looked, not on what is on screen');
-  assert.match(js, /if \(run\.revealed && !run\.revealedAt\) run\.revealedAt = Date\.now\(\);/,
+  assert.match(js, /const firstLook = run\.revealed && !run\.revealedAt;\s*\n\s*if \(firstLook\) run\.revealedAt = Date\.now\(\);/,
     'the first reveal is stamped and never unstamped');
   assert.match(js, /run\.revealedAt = s\.data\.revealedAt \|\| 0;/,
     'a second run of the same trail knows the answer was already shown');
@@ -409,6 +409,26 @@ t('a run banks towards the dog’s drift only when nothing was steering and the 
   const grade = js.slice(js.indexOf('async function computeResult('), js.indexOf('\nfunction searchResult('));
   assert.match(grade, /if \(bank && !offBaseline && !noisy\) \{\s*\n\s*db\.addCalibration\(/,
     'a track the GPS could not place on either side banks nothing');
+});
+
+t('A trail run ends on Found and shows the trail on Done; a hide search keeps Stop', () => {
+  assert.match(html, /id="btnReveal">Done</);
+  assert.match(html, /id="btnRunStop">Found</);
+  assert.match(js, /\$\('btnRunStop'\)\.textContent = t\.kind === 'person' \? 'Found' : 'Stop';/);
+  assert.match(js, /function revealLabel\(t\) \{ return t\.kind === 'person' \? 'Done' : 'Reveal hides'; \}/);
+  assert.doesNotMatch(js, /'Reveal trail'/, 'no path puts the old words back');
+  assert.match(js, /Tap \$\{rec\.kind === 'run' \? \$\('btnRunStop'\)\.textContent : 'Stop'\} to finish/,
+    'the back-gesture hint names the button actually on screen');
+});
+
+t('Done on a trail only shows it, and says once that Found is what ends the run', () => {
+  const body = js.match(/function toggleReveal\(\) \{[\s\S]*?\n\}\n/)[0];
+  assert.match(body, /const firstLook = run\.revealed && !run\.revealedAt;\s*\n\s*if \(firstLook\) run\.revealedAt = Date\.now\(\);/,
+    'the first look is caught before revealedAt is set');
+  assert.match(body, /if \(firstLook\) toast\('Trail shown\. Tap Found to finish\.'\);\s*\n\s*\} else \{/,
+    'said inside the trail branch, so a hide search never mentions Found');
+  assert.doesNotMatch(body, /stopRun|finishRun/, 'Done never ends the run');
+  assert.match(js, /\$\('btnRunStop'\)\.addEventListener\('click', stopRun\)/, 'Found is still the one that ends it');
 });
 
 t('Stop works once, and grading cannot wait for ever on the weather', () => {

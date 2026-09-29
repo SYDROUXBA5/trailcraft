@@ -1019,12 +1019,36 @@ await t('Reveal draws the air panel again in the words of the wind felt on the g
   const sb = {
     run: { session: s, revealed: false, revealedAt: 0, startedAt: RUN }, targetById, trailOf: (x) => x.data.trail, windAt,
     setTrail() {}, plumeStart() {}, plumeStop() {}, setSrc() {}, lineOf: () => ({ features: [] }), pointsOf: () => ({}), EMPTY: {},
-    weatherPanelFor: (x, at) => panels.push([x, at]), $: () => ({ textContent: '' }), Date,
+    weatherPanelFor: (x, at) => panels.push([x, at]), $: () => ({ textContent: '' }), Date, toast() {},
   };
   vm.createContext(sb);
   vm.runInContext(decl('function toggleReveal('), sb);
   sb.toggleReveal();
   assert.deepEqual(panels, [[s, RUN]], 'the panel, at the run’s start, which the scent is drawn in');
+});
+
+await t('Done on a trail shows it and says, once, that Found ends the run', () => {
+  const toasts = [], btn = { textContent: 'Done' };
+  const sb = {
+    run: { session: trailRun({ windFelt: felt('calm') }), revealed: false, revealedAt: 0, startedAt: RUN }, targetById,
+    trailOf: (x) => x.data.trail, windAt, setTrail() {}, plumeStart() {}, plumeStop() {}, setSrc() {},
+    lineOf: () => ({ features: [] }), pointsOf: () => ({}), EMPTY: {}, weatherPanelFor() {},
+    $: () => btn, Date, toast: (m) => toasts.push(m),
+  };
+  vm.createContext(sb);
+  vm.runInContext(decl('function toggleReveal('), sb);
+  vm.runInContext(decl('function revealLabel('), sb);
+  sb.toggleReveal();
+  assert.deepEqual([toasts, btn.textContent], [['Trail shown. Tap Found to finish.'], 'Hide it again']);
+  assert.ok(sb.run.revealed && sb.run.revealedAt, 'the trail is on screen and the look is recorded');
+  sb.toggleReveal();
+  assert.equal(btn.textContent, 'Done', 'hidden again, the button is Done as the handler asked');
+  sb.toggleReveal();
+  assert.equal(toasts.length, 1, 'a second look is not told again');
+  /* A run resumed after an earlier look has seen it already. */
+  toasts.length = 0; sb.run.revealed = false; sb.run.revealedAt = RUN + 60e3;
+  sb.toggleReveal();
+  assert.deepEqual(toasts, [], 'nor is a resumed run that had looked before');
 });
 
 await t('an open picker drawn again keeps focus on the button a screen reader was on', () => {
@@ -1075,7 +1099,7 @@ await t('a wind picked with the trail revealed blows from where it was picked, o
     run: { session: live, revealed: false, revealedAt: 0, startedAt: START }, targetById, trailOf: (x) => x.data.trail, windAt,
     setTrail() {}, plumeStart: (tr, w) => plumes.push(w.wind_direction), plumeStop() {}, setSrc() {},
     lineOf: () => ({ features: [] }), pointsOf: () => ({}), EMPTY: {},
-    weatherPanelFor: (x, at) => panels.push(windAt(x, at).wx.wind_direction), $: () => ({ textContent: '' }), Date,
+    weatherPanelFor: (x, at) => panels.push(windAt(x, at).wx.wind_direction), $: () => ({ textContent: '' }), Date, toast() {},
   };
   vm.createContext(rv);
   vm.runInContext(decl('function toggleReveal('), rv);

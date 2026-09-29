@@ -257,7 +257,8 @@ window.addEventListener('popstate', () => {
     try { history.pushState({ tc: currentScreen }, ''); } catch { /* file:// and the like */ }
     toast(rec.kind === 'walk' ? 'Still recording the walk. Tap I’m in place or Cancel to leave.'
       : rec.kind === 'hide' ? 'Tap Done to keep these hides, or Cancel to throw them away.'
-        : 'Still recording. Tap Stop to finish.');
+        /* A run's button is Found on a trail, so the words match the button. */
+        : `Still recording. Tap ${rec.kind === 'run' ? $('btnRunStop').textContent : 'Stop'} to finish.`);
     return;
   }
   if (currentScreen && currentScreen !== 'scrHome') goBackNow();
@@ -2785,7 +2786,7 @@ let callSeen = false;  // had the handler already seen the answer when it was ma
 function openCall(wp) {
   callWp = wp;
   /* Not "is the trail on screen now" — "has this handler seen it at all".
-     Reveal, hide again, then indicate used to count as a blind call, and a
+     Reveal (Done on a trail), hide again, then indicate used to count as a blind call, and a
      confidence record built from calls made after looking is worthless. */
   callSeen = !!run.revealedAt;
   $('callOpts').innerHTML = CONFIDENCE.map(c =>
@@ -4669,7 +4670,12 @@ async function startRun(s) {
     const base = `${dogName} · ${fmtDur(Date.now() - rec.started)} · ${t.kind === 'person' ? 'trail' : 'hide'} ${age}`;
     return coach.line ? `${base} · ${coach.line}` : base;
   };
-  $('btnReveal').textContent = t.kind === 'person' ? 'Reveal trail' : 'Reveal hides';
+  /* On a trail the two buttons say what the handler is doing: Found when the
+     dog reaches the person, Done when they stop searching blind and want to
+     see the trail. A hide search keeps Stop, because Found would claim every
+     hide had been found. */
+  $('btnReveal').textContent = revealLabel(t);
+  $('btnRunStop').textContent = t.kind === 'person' ? 'Found' : 'Stop';
   go('scrRun');
   /* The coach went on above, for this run. A run that never started must not
      leave it on: the next lay or walk would keep the screen awake and say
@@ -4693,12 +4699,14 @@ function toggleReveal() {
   run.revealed = !run.revealed;
   /* Hiding it again does not unsee it. Kept with the run, so the record says
      when the answer was shown and which calls came before it. */
-  if (run.revealed && !run.revealedAt) run.revealedAt = Date.now();
+  const firstLook = run.revealed && !run.revealedAt;
+  if (firstLook) run.revealedAt = Date.now();
   const t = targetById(s.targetId);
   if (t.kind === 'person') {
     setTrail(run.revealed ? s.data.trail : null);
-    /* The plume is the trail, drawn in air. Showing it before Reveal would
-       hand the handler the answer, so it waits for the same button. */
+    /* The plume is the trail, drawn in air. Showing it before Reveal (Done
+       on a trail) would hand the handler the answer, so it waits for the
+       same button. */
     if (run.revealed) {
       /* In the air the dog set off in, as everything on the run screen is,
          and the panel with it, in the words of any wind felt on the ground,
@@ -4710,13 +4718,19 @@ function toggleReveal() {
       ? { type: 'FeatureCollection',
           features: (s.data.contamination || []).map(c => lineOf(c.points).features[0]).filter(Boolean) }
       : EMPTY);
+    /* Done only shows the trail. GPS, the coach and any live share carry on
+       until Found, and everywhere else in the app Done closes something, so
+       the first look says so once. */
+    if (firstLook) toast('Trail shown. Tap Found to finish.');
   } else {
     setSrc('hides', run.revealed ? pointsOf(s.data.hides) : EMPTY);
   }
   $('btnReveal').textContent = run.revealed
     ? 'Hide it again'
-    : (t.kind === 'person' ? 'Reveal trail' : 'Reveal hides');
+    : revealLabel(t);
 }
+
+function revealLabel(t) { return t.kind === 'person' ? 'Done' : 'Reveal hides'; }
 
 function addWaypoint(kind) {
   const last = rec.pts[rec.pts.length - 1];
@@ -4750,7 +4764,7 @@ function dropRunCopy() {
   snap();
 }
 
-/* One Stop per run. Grading can take several seconds on a poor signal with
+/* One Stop (Found on a trail) per run. Grading can take several seconds on a poor signal with
    the run screen still up, and a second tap used to grade the run again: a
    second calibration row for the same run, and a save made after the coach's
    record had already been cleared. */
@@ -5236,7 +5250,7 @@ function saveSession(s, patch) {
    the signal allows, often after the handler has moved on: a contamination
    trail drawn, the layer marked off, the run begun. It is written as the one
    field it is, and a run already going is given it too, so the wind shows,
-   Reveal can draw the plume, and the run is graded against it. */
+   Reveal (Done on a trail) can draw the plume, and the run is graded against it. */
 function keepWeather(id, wx) {
   const live = run.session?.id === id ? run.session : null;
   if (live) live.data.weather = wx;
