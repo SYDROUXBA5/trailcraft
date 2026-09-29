@@ -287,7 +287,7 @@ function airSessionFor(id) {
 
 /* And which moment of that trail's air. A screen about a run shows the wind
    its plume, band and coach are drawn in: the replay's own clock, or the
-   moment the dog set off, on the run screen before and after Reveal alike.
+   moment the dog set off, on the run screen before and after the answer is shown alike.
    Anything else, a trail not run yet among them, shows
    the air it was laid in (null). The panel, the arrow and the streaks used to
    show the laid-time wind on all of these, beside a plume blowing another way. */
@@ -2947,7 +2947,11 @@ function saveDebrief() {
   d.by = S.handler?.name ?? null;
   d.at = Date.now();
   const seen = cleanSeen(dbSeen);
-  const saved = guardSave(s, () => saveSession(s, { data: { debrief: d,
+  /* Found's claim is only where the debrief starts. When the handler says
+     otherwise it is withdrawn, so the record never says found beside a
+     debrief that says missed. */
+  const unclaim = s.data?.found === true && d.outcome !== 'found' ? { found: false } : {};
+  const saved = guardSave(s, () => saveSession(s, { data: { debrief: d, ...unclaim,
     ...(seen ? { seen: { ...seen, at: Date.now() } } : {}) } }));
   snap();
   const s2 = saved ?? db.sessions().find(x => x.id === s.id) ?? s;
@@ -4600,14 +4604,15 @@ const ageUnknown = (d, short = false) => (d?.plan
 
 /* ── Run / Search ─────────────────────────────────────────────────── */
 /* The run screen shows the wind at the run's start, the moment the dog set
-   off, before and after Reveal alike. It is the moment the coach and the
-   grade read, and the one a wind picked on the ground is measured against
-   (feltSubject). Drawn at the moment of Reveal instead, a forecast that had
+   off, before and after the answer is shown alike (Show trail, or Reveal
+   hides on a search). It is the moment the coach and the grade read, and the
+   one a wind picked on the ground is measured against (feltSubject). Drawn at
+   the moment it was shown instead, a forecast that had
    swung since the start put the scent on another side from the one picked. */
 const run = { session: null, revealed: false, startedAt: 0, copy: false, stopping: false, found: false };
 
 async function startRun(s) {
-  if (rec.on) return toast('A run is already going — stop that one first');
+  if (rec.on) return toast('A run is already going. Finish that one first.');
   if (recordingWaits()) return;
   /* A plume left drawing by a screen that was swiped away rather than closed
      would paint the answer onto a blind run. */
@@ -4648,7 +4653,7 @@ async function startRun(s) {
     endLive({}).catch(() => {});
   }
   paintLiveBtn();
-  fillSurfaces(s);              // ready by the time Reveal wants the plume
+  fillSurfaces(s);              // ready by the time Show trail wants the plume
   coachStart(s);
   if (storageWords(db.usage().bytes, STORAGE_MB).nearly) toast('Storage nearly full. Delete old sessions from the session list in Settings.');
 
@@ -4663,7 +4668,7 @@ async function startRun(s) {
 
   hudText = () => {
     /* A run where no fix is being kept looks, on a bare clock, exactly like a
-       run being recorded, and ends at Stop as "too short to grade". */
+       run being recorded, and ends at Found, Done or Stop as "too short to grade". */
     const trouble = gpsTrouble({ last: rec.pts[rec.pts.length - 1], startedAt: rec.started,
       droppedAt: rec.droppedAt, blocked: rec.blocked });
     if (trouble) return gpsTroubleText(trouble);
@@ -4704,6 +4709,9 @@ async function startRun(s) {
 }
 
 function toggleReveal() {
+  /* Once the run is ending the answer is no longer the handler's to see on
+     this screen: the result has it, drawn in full. */
+  if (run.stopping) return;
   const s = run.session;
   run.revealed = !run.revealed;
   /* Hiding it again does not unsee it. Kept with the run, so the record says
@@ -4732,13 +4740,13 @@ function toggleReveal() {
 }
 
 /* Each reveal button says what a tap will do; only the one for this kind of
-   run is on screen. Show trail also says, to a screen reader and in its
-   lit look, that the trail is up, because it stays on screen through the
-   rest of the run rather than being a step on the way to the end. */
+   run is on screen. Show trail is also lit while the trail is up, because it
+   stays on screen through the rest of the run. Its words carry the state for
+   a screen reader, so it is not marked pressed as well: "Hide trail,
+   selected" said two things at once. */
 function paintReveal() {
   const b = $('btnShowTrail');
   b.textContent = run.revealed ? 'Hide trail' : 'Show trail';
-  b.setAttribute('aria-pressed', String(run.revealed));
   b.classList.toggle('on', run.revealed);
   $('btnReveal').textContent = run.revealed ? 'Hide it again' : 'Reveal hides';
 }
@@ -4782,15 +4790,17 @@ function dropRunCopy() {
    cleared. Found and Done sit side by side, so the first tap holds off both.
    `found` is Found's claim that the dog reached the person. It is saved with
    the run, and the debrief starts from it (blankDebrief), where a mis-tap
-   of either button is put right. */
+   of either button is put right. The reveal buttons are held too: a look
+   taken while the run was being graded was saved with it, and a run done
+   blind came back as "trail shown". */
+const RUN_END_HOLDS = ['btnRunStop', 'btnRunDone', 'btnShowTrail', 'btnReveal'];
 async function stopRun(found = false) {
   if (run.stopping) return;
   run.stopping = true;
   run.found = found;
-  $('btnRunStop').disabled = true;
-  $('btnRunDone').disabled = true;
+  for (const id of RUN_END_HOLDS) $(id).disabled = true;
   try { await finishRun(); }
-  finally { run.stopping = false; run.found = false; $('btnRunStop').disabled = false; $('btnRunDone').disabled = false; }
+  finally { run.stopping = false; run.found = false; for (const id of RUN_END_HOLDS) $(id).disabled = false; }
 }
 
 async function finishRun() {
@@ -5806,7 +5816,7 @@ function coachSummary() {
 }
 
 /** The coach line on the result card. "Blind" is a claim about what the
-    handler knew, not only about the coach: a run where Reveal was pressed
+    handler knew, not only about the coach: a run where the trail was shown
     had the answer on screen, and one the debrief says the handler knew had
     it in their head, and calling either blind hands a trainer evidence that
     is not there. It is the one test every screen uses (ranBlind). `d` is the

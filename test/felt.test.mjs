@@ -1051,16 +1051,17 @@ const revealSandbox = (session) => {
   return sb;
 };
 
-await t('Show trail shows the trail and the plume, says Hide trail while they are up, and is pressed', () => {
+await t('Show trail shows the trail and the plume, says Hide trail while they are up, and is lit', () => {
   const sb = revealSandbox(trailRun({ windFelt: felt('calm') }));
   const b = sb.btns.btnShowTrail;
   sb.toggleReveal();
-  assert.deepEqual([b.textContent, b.attrs['aria-pressed'], b.on], ['Hide trail', 'true', true]);
+  assert.deepEqual([b.textContent, b.attrs['aria-pressed'], b.on], ['Hide trail', undefined, true],
+    'its words carry the state; "Hide trail, selected" said it twice');
   assert.deepEqual([sb.drawn.trail, sb.drawn.plume], [[true], 1], 'the trail and its plume, as Reveal drew them');
   const first = sb.run.revealedAt;
   assert.ok(sb.run.revealed && first > 0, 'the first look is stamped');
   sb.toggleReveal();
-  assert.deepEqual([b.textContent, b.attrs['aria-pressed'], b.on], ['Show trail', 'false', false]);
+  assert.deepEqual([b.textContent, b.attrs['aria-pressed'], b.on], ['Show trail', undefined, false]);
   assert.equal(sb.run.revealedAt, first, 'hiding it again does not unsee it');
   sb.toggleReveal();
   assert.equal(sb.run.revealedAt, first, 'nor does a second look move the moment of the first');
@@ -1069,6 +1070,15 @@ await t('Show trail shows the trail and the plume, says Hide trail while they ar
   again.run.revealedAt = RUN - 60e3;
   again.toggleReveal();
   assert.equal(again.run.revealedAt, RUN - 60e3);
+});
+
+await t('a tap on Show trail while the run is being graded shows nothing and stamps nothing', () => {
+  const sb = revealSandbox(trailRun({ windFelt: felt('calm') }));
+  sb.run.stopping = true;
+  sb.toggleReveal();
+  assert.equal(sb.run.revealedAt, 0, 'a run done blind stays blind');
+  assert.deepEqual([sb.run.revealed, sb.drawn.trail, sb.drawn.plume], [false, [], 0],
+    'and no plume is started after the finish has stopped it');
 });
 
 await t('a hide search reveals its hides from Reveal hides, as before', () => {

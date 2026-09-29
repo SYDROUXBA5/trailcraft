@@ -413,8 +413,12 @@ t('a run banks towards the dog’s drift only when nothing was steering and the 
 
 t('a trail run ends on Found or Done, and Show trail sits up with Coach and Share live', () => {
   const live = html.match(/<div class="live-row">[\s\S]*?<\/div>/)[0];
-  assert.match(live, /<button class="btn small moss-on-dark live-btn trail-btn" id="btnShowTrail" aria-pressed="false">Show trail<\/button>/,
-    'the same small button as Coach and Share live, a toggle from the start');
+  assert.match(live, /<button class="btn small moss-on-dark live-btn trail-btn" id="btnShowTrail">Show trail<\/button>/,
+    'the same small button as Coach and Share live; its words say what a tap will do');
+  assert.match(readFileSync(new URL('../public/app.css', import.meta.url), 'utf8'), /\.btn\.live-btn \{ width: auto; min-height: 44px;/,
+    'a map-screen target, 44px at least');
+  assert.match(html, /<button class="btn ghost small" id="btnCoachDone">Close<\/button>/,
+    'the coach sheet closes on Close, so the run screen has only one Done, and it ends the run');
   assert.ok(live.indexOf('id="btnCoach"') < live.indexOf('id="btnLive"') && live.indexOf('id="btnLive"') < live.indexOf('id="btnShowTrail"'),
     'Coach, Share live, Show trail, in that order');
   const bottom = html.slice(html.indexOf('id="wpRow"'), html.indexOf('id="coachSheet"'));
@@ -446,10 +450,14 @@ t('Found claims the find and Done does not; either can be put right in the debri
 });
 
 t('Stop works once, and grading cannot wait for ever on the weather', () => {
-  assert.match(js, /async function stopRun\(found = false\) \{\s*\n\s*if \(run\.stopping\) return;\s*\n\s*run\.stopping = true;\s*\n\s*run\.found = found;\s*\n\s*\$\('btnRunStop'\)\.disabled = true;\s*\n\s*\$\('btnRunDone'\)\.disabled = true;/,
+  assert.match(js, /const RUN_END_HOLDS = \['btnRunStop', 'btnRunDone', 'btnShowTrail', 'btnReveal'\];/,
+    'both ends, and both reveals, are held while the run is graded');
+  assert.match(js, /async function stopRun\(found = false\) \{\s*\n\s*if \(run\.stopping\) return;\s*\n\s*run\.stopping = true;\s*\n\s*run\.found = found;\s*\n\s*for \(const id of RUN_END_HOLDS\) \$\(id\)\.disabled = true;/,
     'a second tap, on either of the two side by side, does nothing while the first is still grading');
-  assert.match(js, /finally \{ run\.stopping = false; run\.found = false; \$\('btnRunStop'\)\.disabled = false; \$\('btnRunDone'\)\.disabled = false; \}/,
-    'and the next run can be ended, claiming nothing until asked');
+  assert.match(js, /finally \{ run\.stopping = false; run\.found = false; for \(const id of RUN_END_HOLDS\) \$\(id\)\.disabled = false; \}/,
+    'and the next run can be ended, and its trail shown, claiming nothing until asked');
+  assert.match(js, /function toggleReveal\(\) \{[\s\S]{0,200}?if \(run\.stopping\) return;/,
+    'a look taken during grading is not saved with a run done blind');
   const wx = js.slice(js.indexOf('async function fetchWeather'), js.indexOf('async function fetchWeather') + 700);
   assert.match(wx, /fetch\(url, \{ signal: ctl\.signal \}\)/, 'the weather ask can be called off');
   assert.match(wx, /setTimeout\(\(\) => ctl\.abort\(\), within\)/);

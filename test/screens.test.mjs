@@ -167,6 +167,22 @@ await t('a saved debrief returns to the result, and the arrow there leads on, no
   assert.equal(a.where(), 'scrSessions', 'the arrow led back into the saved debrief');
 });
 
+await t('a debrief that says the dog missed withdraws a Found tapped by mistake', () => {
+  const saved = [];
+  const run = (data, outcome) => {
+    const a = app();
+    a.sb.saveSession = (s, patch) => { saved.push(patch.data); return s; };
+    atResult(a);
+    a.sb.openDebrief({ id: 's1', data });
+    a.sb.dbDraft.outcome = outcome;
+    a.sb.saveDebrief();
+    return saved.at(-1);
+  };
+  assert.equal(run({ found: true }, 'missed').found, false, 'the record no longer says found beside a miss');
+  assert.ok(!('found' in run({ found: true }, 'found')), 'a find the debrief agrees with is left as it is');
+  assert.ok(!('found' in run({}, 'missed')), 'a run that claimed nothing is given nothing to withdraw');
+});
+
 await t('a closed debrief still on screen ignores a tap instead of throwing', () => {
   const a = app();
   a.sb.dbDraft = null;

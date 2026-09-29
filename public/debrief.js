@@ -186,7 +186,7 @@ export function ownRun(session) {
     rather than `plan`, and no walked card will ever come for it. */
 export const unwalkedPlan = (data) => (!!data?.plan || !!data?.drawn) && !data?.walked;
 
-/** Whether the answer was ever on the handler's screen: Reveal pressed, or
+/** Whether the answer was ever on the handler's screen: Show trail pressed, or
     the coach switched on, which stamps the same moment because it reads out
     where the trail is. It stays set on a second run of the same trail — the
     handler has seen it, and running it again does not unsee it. */
@@ -204,7 +204,7 @@ export const handlerKnew = (data) => data?.debrief?.blind === 'open';
 
     The call maths is stricter in one direction and kinder in another, and
     both on purpose (call.js, callVerdict): it wants the debrief to say
-    positively that nobody knew, and a call made before Reveal was pressed
+    positively that nobody knew, and a call made before the trail was shown
     was still made blind, even though the run as a whole was not. */
 export function ranBlind(data) {
   return !!data && !data.coach?.assisted && !trailShown(data) && !handlerKnew(data);

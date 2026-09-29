@@ -1339,7 +1339,9 @@ h2.log-day { margin: 14px 0 0; }
 /* Show trail keeps to the right edge whichever of the others is up, and at
    320px the three wrap rather than push the screen sideways. */
 .live-row .trail-btn { margin-left: auto; }
-.btn.live-btn { width: auto; min-height: 40px; padding: 6px 16px; font-size: 13.5px; }
+/* 44px at least, as every target on a map screen is: these are tapped on the
+   move, and Show trail took over from a full-size button. */
+.btn.live-btn { width: auto; min-height: 44px; padding: 6px 16px; font-size: 13.5px; }
 .btn.live-btn.on { background: var(--ember); border-color: var(--ember); color: #fff; }
 
 /* A shared trail's details: sections of facts, each titled. */
