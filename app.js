@@ -466,6 +466,12 @@ const srcData = { runner: EMPTY, steps: EMPTY, dog: EMPTY, paws: EMPTY, wps: EMP
                   routeDone: EMPTY, routeAhead: EMPTY, puck: EMPTY, scent: EMPTY, contamScent: EMPTY, wind: EMPTY,
                   flow: EMPTY, flowPulse: EMPTY, air: EMPTY, acc: EMPTY };
 
+/** Where the map opens before any fix: the contiguous United States. */
+const USA_BOUNDS = [[-124.8, 24.4], [-66.9, 49.4]];
+/** Coming down from the country-wide view to a first fix, the camera takes
+    the tilted street-level look the map screens are drawn for. Anywhere
+    closer in, the handler's own tilt is left alone. */
+const fromAfar = () => (map.getZoom() < 8 ? { pitch: 55 } : {});
 const SAT_STYLE = 'mapbox://styles/mapbox/standard-satellite';
 /* Satellite for the field, terrain for the contours and paths, streets for
    town. All three carry the same 3D ground and the same overlays. */
@@ -490,7 +496,11 @@ function buildMap() {
   map = new GL.Map({
     container: 'map',
     style: noToken ? RASTER_FALLBACK : (MAP_STYLES[settings.mapStyle] ?? MAP_STYLES.satellite).url,
-    center: [-2.6449, 51.2094], zoom: 15, pitch: 55, maxPitch: 85,
+    /* The whole of the lower 48, flat, until the phone says where it is:
+       the owner asked for the United States rather than one town in
+       Somerset. The first fix swings the camera down to the ground and
+       tilts it (fromAfar below). */
+    bounds: USA_BOUNDS, fitBoundsOptions: { padding: 16 }, pitch: 0, maxPitch: 85,
     attributionControl: { compact: true },
     /* Mapbox's own speed reports stay off. Its count of map loads, which it
        bills by, cannot be switched off; the privacy page says so. */
@@ -832,7 +842,7 @@ function locateMe({ zoom = 17.5, settleMs = 12000, good = 8, keepOn = null } = {
     const { latitude: lat, longitude: lon } = p.coords;
     lastFix = { lat, lon, t: Date.now() };
     paintMe(lat, lon, acc);
-    map.easeTo({ center: [lon, lat], zoom, duration: 700, essential: true });
+    map.easeTo({ center: [lon, lat], zoom, ...fromAfar(), duration: 700, essential: true });
     if (acc <= good) locateStop();            // as tight as it gets: stop burning the radio
   }, () => { /* the HUD and the GPS check say why */ },
      { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 });
@@ -857,7 +867,7 @@ function followFix(p, zoom) {
   const first = !locate.centred;
   locate.centred = { lat, lon };
   /* The first time, set the zoom; after that keep whatever you pinched to. */
-  map.easeTo({ center: [lon, lat], ...(first ? { zoom } : {}), duration: 700, essential: true });
+  map.easeTo({ center: [lon, lat], ...(first ? { zoom, ...fromAfar() } : {}), duration: 700, essential: true });
 }
 function locateStop() {
   if (locate.watch) navigator.geolocation?.clearWatch(locate.watch);
