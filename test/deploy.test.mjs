@@ -11,7 +11,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { REQUIRED, checkBranch, uncommitted, splitPublic, checkSplit, gitEnv, withWebKey, WEB_KEY } from '../scripts/deploy.mjs';
+import { REQUIRED, checkBranch, uncommitted, splitPublic, checkSplit, gitEnv } from '../scripts/deploy.mjs';
 
 // Keep this machine's git settings (signing, hooks, templates) out of the throwaway repo.
 Object.assign(process.env, {
@@ -50,24 +50,6 @@ function reset() {
 let pass = 0;
 const tests = [];
 const t = (name, fn) => tests.push([name, fn]);
-
-t('the website gets its own public map key on top of the split, and never a secret one', () => {
-  reset();
-  const sha = splitPublic(dir);
-  assert.equal(withWebKey(sha, dir), sha, 'no key file: the site publishes exactly as split');
-  put(WEB_KEY, "window.MB_TOKEN = 'pk.test-key.abc';\n");
-  const keyed = withWebKey(sha, dir);
-  checkSplit(keyed, dir);
-  assert.equal(git('rev-parse', `${keyed}^`), sha, 'the key sits on top of the split');
-  assert.equal(git('show', `${keyed}:token.js`), "window.MB_TOKEN = 'pk.test-key.abc';");
-  assert.deepEqual(git('ls-tree', '--name-only', keyed).split('\n').filter(n => n !== 'token.js'),
-    git('ls-tree', '--name-only', sha).split('\n'), 'and nothing else changes');
-  put(WEB_KEY, "window.MB_TOKEN = 'sk.secret';\n");
-  assert.throws(() => withWebKey(sha, dir), /not a single public Mapbox key/);
-  put(WEB_KEY, "window.MB_TOKEN = 'pk.a'; fetch('//evil')\n");
-  assert.throws(() => withWebKey(sha, dir), /not a single public Mapbox key/, 'nothing but the key');
-  reset();
-});
 
 t('a clean main passes, and the split is public/ from HEAD with the site at its root', () => {
   checkBranch(dir);

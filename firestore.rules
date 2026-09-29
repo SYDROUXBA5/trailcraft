@@ -2,6 +2,12 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    // The website's map key: public by design (Mapbox honours it only on the
+    // Trailcraft website), read by anyone, written from the console only.
+    match /public/web {
+      allow get: if true;
+    }
+
     // A handler's own records: readable and writable by that account only.
     match /users/{uid}/{table}/{recordId} {
       function mine() {

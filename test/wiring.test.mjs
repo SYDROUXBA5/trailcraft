@@ -526,7 +526,12 @@ t('only a live run’s owner can list or delete it; strangers still only read an
     'a stranger can open a run by its id, but never list them');
   const runRules = live.slice(0, live.indexOf('match /chunks'));
   assert.ok(!/allow read:/.test(runRules), 'no plain read on a run: it would let anyone list them');
-  assert.ok(!/allow [a-z, ]*: if true/.test(rules), 'nothing is open to everyone');
+  /* One thing is open to everyone, on purpose: the website's map key, a
+     public key Mapbox honours only on the Trailcraft website. Exactly one
+     document, read by its name, never listed or written. */
+  const open = rules.match(/match \/public\/web \{\s*allow get: if true;\s*\}/);
+  assert.ok(open, 'the website can read its map key');
+  assert.ok(!/allow [a-z, ]*: if true/.test(rules.replace(open[0], '')), 'nothing else is open to everyone');
   assert.match(rules, /match \/\{document=\*\*\} \{ allow read, write: if false; \}/, 'everything else stays shut');
 });
 
@@ -536,7 +541,7 @@ t('the privacy page names who runs it, how to reach them, and every service the 
   const named = {
     'api.mapbox.com': 'Mapbox', 'tile.openstreetmap.org': 'OpenStreetMap', 'api.open-meteo.com': 'Open-Meteo',
     'fonts.googleapis.com': 'Google Fonts', 'fonts.gstatic.com': 'Google Fonts', 'cdn.jsdelivr.net': 'jsDelivr',
-    'www.gstatic.com': 'Firebase', 'sydrouxba5.github.io': 'GitHub Pages',
+    'www.gstatic.com': 'Firebase', 'firestore.googleapis.com': 'Firebase', 'sydrouxba5.github.io': 'GitHub Pages',
   };
   const dir = new URL('../public/', import.meta.url);
   const hosts = new Set();
@@ -1192,6 +1197,27 @@ t('the map opens on the United States, and the first fix brings it down to the g
   assert.doesNotMatch(build, /-2\.6449/, 'no town in Somerset as the starting point');
   assert.match(js, /const USA_BOUNDS = \[\[-124\.8, 24\.4\], \[-66\.9, 49\.4\]\]/);
   assert.equal((js.match(/\.\.\.fromAfar\(\)/g) ?? []).length, 2, 'both first-fix centrings tilt down from afar');
+});
+
+t('the website reads its own public map key before the map is built, and keeps it out of the settings', () => {
+  /* The website has no key in the repository (GitHub refuses one). It reads
+     a public, site-only key from one Firebase document; the app and the
+     Desktop copy never ask, a secret key is never taken, and the key never
+     lands in the saved settings where a replaced one would stick. */
+  const load = js.slice(js.indexOf('async function loadWebKey()'), js.indexOf('const db = createStore('));
+  assert.match(load, /if \(settings\.mbToken \|\| isNative\(\) \|\| location\.protocol === 'file:'\) return;/);
+  assert.match(load, /documents\/public\/web\?key=/);
+  assert.match(load, /setTimeout\(\(\) => done\(''\), 2500\)/, 'the first start waits a couple of seconds at most');
+  assert.doesNotMatch(load, /settings\.mbToken =|saveSettings/, 'never saved into the settings');
+  const valid = /^pk\.[A-Za-z0-9._-]+$/;
+  assert.match(js, /const PUBLIC_MAP_KEY = \/\^pk\\\.\[A-Za-z0-9\._-\]\+\$\/;/);
+  assert.ok(valid.test('pk.eyJ1Ijoi.abc_-') && !valid.test('sk.eyJ1Ijoi.abc') && !valid.test("pk.a'; alert(1)"));
+  assert.match(js, /loadWebKey\(\)\.then\(start, start\);/, 'the map is built once the answer is in');
+  assert.equal((js.match(/^buildMap\(\);/gm) ?? []).length, 0, 'and not before');
+  // Every Mapbox request reads the one accessor; the settings field is the handler's own key only.
+  const reads = [...js.matchAll(/settings\.mbToken/g)].length;
+  assert.equal(reads, 5, `settings.mbToken is read only where the handler's own key is meant (found ${reads})`);
+  assert.match(privacy, /reads one public setting from Google Firebase when it opens/);
 });
 
 console.log(`\n${pass} passed total\n`);

@@ -43,6 +43,7 @@ import { CONFIDENCE, stampCall, confidenceOf, firstCall, firstCallWasFind, calib
 import { isNative, watchBackground, canHaptic, haptic, watchHeading, shareFile,
          canSpeakNative, nativeVoices, speakNative, stopNativeSpeech, watchNativeVoices } from './native.js';
 import { readBackup, restoreChanges, restoreQuestion, restoreNothing, BACKUP_MAX_BYTES } from './backup.js';
+import { firebaseConfig } from './firebase-config.js';
 import { checkAuthFields, AUTH_MIN_PASSWORD } from './sync-core.js';
 import { createStore, migrateV1, TARGETS, ODOURS, targetById, targetText, verbs, uid,
          dogStats, ageBand, AGE_BANDS, LEVELS, levelById, dogAge, patchSession, runAgain,
@@ -80,6 +81,51 @@ const saveSettings = () => localStorage.setItem('tc.settings', JSON.stringify(se
     saveSettings();
     history.replaceState(null, '', location.pathname + location.search);
   }
+}
+
+/* The website's own map key. The iPhone app and the Desktop copy carry a key
+   with them (token.js); the website cannot, because a key may not go in the
+   public repository and GitHub refuses one there. So the website reads a
+   public key, one Mapbox honours only on the Trailcraft website, from one
+   public Firebase document before the map is built (loadWebKey), and keeps a
+   copy for the next start and for a start with no signal. It is never put in
+   the settings: those hold a key the handler pasted, and a website key that
+   has been replaced must not stick there. */
+const WEB_KEY_CACHE = 'trailcraft.webMapKey';
+const PUBLIC_MAP_KEY = /^pk\.[A-Za-z0-9._-]+$/;
+let webKey = '';
+try {
+  const kept = localStorage.getItem(WEB_KEY_CACHE) || '';
+  if (PUBLIC_MAP_KEY.test(kept)) webKey = kept;
+} catch { /* a private window: ask again */ }
+/** The key the map uses: the app's own or the one the handler pasted, else
+    the website's. Every Mapbox request reads it here. */
+const mapKey = () => settings.mbToken || webKey;
+
+/** Ask Firebase for the website's key. The first time, the map waits for the
+    answer (never more than a couple of seconds), so it is built once and of
+    the right kind; after that the kept copy is used at once and this only
+    refreshes it for next time. */
+async function loadWebKey() {
+  if (settings.mbToken || isNative() || location.protocol === 'file:') return;
+  const { apiKey, projectId } = firebaseConfig ?? {};
+  if (!apiKey || !projectId) return;
+  const ask = (async () => {
+    const stop = typeof AbortController === 'function' ? new AbortController() : null;
+    const timer = stop && setTimeout(() => stop.abort(), 8000);
+    try {
+      const res = await fetch(`https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/public/web?key=${apiKey}`,
+        { signal: stop?.signal, cache: 'no-store' });
+      if (!res.ok) return '';
+      const k = (await res.json())?.fields?.mapboxToken?.stringValue ?? '';
+      if (!PUBLIC_MAP_KEY.test(k)) return '';
+      try { localStorage.setItem(WEB_KEY_CACHE, k); } catch { /* kept for this visit only */ }
+      return k;
+    } catch { return ''; } finally { if (timer) clearTimeout(timer); }
+  })();
+  if (webKey) return;
+  const k = await Promise.race([ask, new Promise(done => setTimeout(() => done(''), 2500))]);
+  if (k) webKey = k;
 }
 
 const db = createStore(localStorage);
@@ -447,7 +493,7 @@ function toggleStylePick() {
 }
 function mapChromeShow(on) {
   if (on) headingStart(); else headingStop();           // the compass runs while a map is on screen, and only then
-  $('btnMapStyle').hidden = !on || !settings.mbToken;   // the tokenless map has one style only
+  $('btnMapStyle').hidden = !on || !mapKey();   // the tokenless map has one style only
   $('btnRecentre').hidden = !on;
   if (!on) closeStylePick();
   styleGap();                       // now, and once more after layout settles
@@ -459,7 +505,7 @@ function setMapStyle(key) {
   if (key === settings.mapStyle) return;
   settings.mapStyle = key; saveSettings();
   paintStylePick();
-  if (map && settings.mbToken) map.setStyle(MAP_STYLES[key].url);   // style.load puts the overlays back
+  if (map && mapKey()) map.setStyle(MAP_STYLES[key].url);   // style.load puts the overlays back
 }
 const EMPTY = { type: 'FeatureCollection', features: [] };
 let map, mapReady = false;
@@ -493,9 +539,9 @@ const RASTER_FALLBACK = {
 function buildMap() {
   /* mapbox-gl v3 demands a VALID token even for foreign styles, so the
      tokenless install runs MapLibre with plain OSM tiles instead. */
-  const noToken = !settings.mbToken;
+  const noToken = !mapKey();
   GL = (noToken && typeof maplibregl !== 'undefined') ? maplibregl : mapboxgl;
-  if (GL === mapboxgl) mapboxgl.accessToken = settings.mbToken || 'pk.tokenless';
+  if (GL === mapboxgl) mapboxgl.accessToken = mapKey() || 'pk.tokenless';
   map = new GL.Map({
     container: 'map',
     style: noToken ? RASTER_FALLBACK : (MAP_STYLES[settings.mapStyle] ?? MAP_STYLES.satellite).url,
@@ -525,7 +571,7 @@ function buildMap() {
 }
 
 function addOverlays() {
-  if (settings.mbToken) {
+  if (mapKey()) {
     if (!map.getSource('dem')) {
       map.addSource('dem', { type: 'raster-dem', url: 'mapbox://mapbox.mapbox-terrain-dem-v1', tileSize: 512, maxzoom: 14 });
     }
@@ -1702,7 +1748,7 @@ function groundTile(kind, z, x, y) {
   const key = `${kind}/${z}/${x}/${y}`;
   if (groundTiles.has(key)) return groundTiles.get(key);
   const job = (async () => {
-    const res = await fetch(`https://api.mapbox.com/v4/${TILESETS[kind]}/${z}/${x}/${y}.mvt?access_token=${settings.mbToken}`);
+    const res = await fetch(`https://api.mapbox.com/v4/${TILESETS[kind]}/${z}/${x}/${y}.mvt?access_token=${mapKey()}`);
     if (!res.ok && res.status !== 404) throw new Error(`ground tile ${res.status}`);
     const t = res.ok ? decodeTile(new Uint8Array(await res.arrayBuffer()), z, x, y, GROUND_LAYERS[kind]) : {};
     t.kind = kind;
@@ -1716,7 +1762,7 @@ function groundTile(kind, z, x, y) {
 }
 
 async function groundFor(pts) {
-  if (!settings.mbToken || !pts?.length) return null;
+  if (!mapKey() || !pts?.length) return null;
   const tiles = await Promise.all([
     ...tilesCovering(pts, tileOf).map(t => groundTile('streets', t.z, t.x, t.y)),
     ...tilesCovering(pts, tileOf, { zooms: [14, 13, 12] }).map(t => groundTile('terrain', t.z, t.x, t.y)),
@@ -1741,7 +1787,7 @@ const surfBusy = new Map();             // session id → the ask in flight
    when someone presses Re-read, and the one it replaces is kept. */
 function fillSurfaces(s, { reread = false } = {}) {
   const pts = s?.data?.trail;
-  if (!pts || pts.length < 2 || !settings.mbToken || navigator.onLine === false) return Promise.resolve(null);
+  if (!pts || pts.length < 2 || !mapKey() || navigator.onLine === false) return Promise.resolve(null);
   if (!reread && surfValid(s)) return Promise.resolve(s);
   if (surfBusy.has(s.id)) return surfBusy.get(s.id);
   const job = (async () => {
@@ -1846,7 +1892,7 @@ function paintGround(id, s) {
    enters it; until it answers the ground counts as ordinary. */
 const liveGround = { key: '', ground: null };
 function liveHard(pt) {
-  if (!settings.mbToken) return false;
+  if (!mapKey()) return false;
   const t = tileOf(pt.lat, pt.lon, 15), key = `${t.x}/${t.y}`;
   if (key !== liveGround.key) {
     liveGround.key = key;
@@ -1884,7 +1930,7 @@ async function plumeTerrain(force = false) {
    ground round the trail, far enough out to cover where its scent can drift,
    and refreshed as a live trail grows, like the terrain. */
 async function wallsFor(pts) {
-  if (!settings.mbToken || !pts?.length) return null;
+  if (!mapKey() || !pts?.length) return null;
   const tiles = await Promise.all(tilesCovering(pts, tileOf, { padDeg: 0.0012, max: 16 })
     .map(t => groundTile('streets', t.z, t.x, t.y)));
   return wallIndex(buildGround(tiles).walls, pts[0]);
@@ -3762,7 +3808,7 @@ function miniView(pts, W = MINI_W, H = MINI_H) {
 /** The satellite square behind the line — null without a token, and the card
     keeps its plain panel rather than showing a broken picture. */
 function miniImgUrl(view, W = MINI_W, H = MINI_H) {
-  const tok = (settings.mbToken || '').trim();
+  const tok = (mapKey() || '').trim();
   if (!/^pk\./.test(tok)) return null;
   return `https://api.mapbox.com/styles/v1/mapbox/satellite-streets-v12/static/`
     + `${view.lonC.toFixed(6)},${view.latC.toFixed(6)},${view.z},0/`
@@ -8511,18 +8557,24 @@ for (const id of BACKABLE) {
   b.addEventListener('click', goBack);
   page.prepend(b);
 }
-buildMap();
-wire();
-initSync(db);            // does nothing until a Firebase config exists; before boot so a live link can wait on it
-/* Back in the app, or back in signal: take what another phone changed since,
-   before anything here is edited over it (sync.js resync). */
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') resync(); });
-addEventListener('online', () => resync());
-boot();
-checkForUpdate();
-if (migrated) toast('Your team and trails came along to the new Trailcraft');
-if (!settings.mbToken) setTimeout(() =>
-  toast('Basic map — paste your Mapbox token in Settings for satellite & 3D'), 1500);
+/* The website may still be asking for its map key (loadWebKey); the map is
+   built once the answer is in, so it is built once and of the right kind.
+   Everywhere else the answer is immediate. */
+function start() {
+  buildMap();
+  wire();
+  initSync(db);            // does nothing until a Firebase config exists; before boot so a live link can wait on it
+  /* Back in the app, or back in signal: take what another phone changed since,
+     before anything here is edited over it (sync.js resync). */
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') resync(); });
+  addEventListener('online', () => resync());
+  boot();
+  checkForUpdate();
+  if (migrated) toast('Your team and trails came along to the new Trailcraft');
+  if (!mapKey()) setTimeout(() =>
+    toast('Basic map — paste your Mapbox token in Settings for satellite & 3D'), 1500);
+}
+loadWebKey().then(start, start);
 
 if ('serviceWorker' in navigator && window.isSecureContext) {
   navigator.serviceWorker.register('sw.js').catch(() => { /* cache is a bonus */ });
