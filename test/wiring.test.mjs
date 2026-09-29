@@ -228,7 +228,7 @@ t('"backed up" means backed up', () => {
 
 t('seeing the answer once counts for the rest of the run', () => {
   assert.match(js, /callSeen = !!run\.revealedAt;/, 'a call is judged on whether they have looked, not on what is on screen');
-  assert.match(js, /const firstLook = run\.revealed && !run\.revealedAt;\s*\n\s*if \(firstLook\) run\.revealedAt = Date\.now\(\);/,
+  assert.match(js, /if \(run\.revealed && !run\.revealedAt\) run\.revealedAt = Date\.now\(\);/,
     'the first reveal is stamped and never unstamped');
   assert.match(js, /run\.revealedAt = s\.data\.revealedAt \|\| 0;/,
     'a second run of the same trail knows the answer was already shown');
@@ -411,31 +411,45 @@ t('a run banks towards the dog’s drift only when nothing was steering and the 
     'a track the GPS could not place on either side banks nothing');
 });
 
-t('A trail run ends on Found and shows the trail on Done; a hide search keeps Stop', () => {
-  assert.match(html, /id="btnReveal">Done</);
-  assert.match(html, /id="btnRunStop">Found</);
-  assert.match(js, /\$\('btnRunStop'\)\.textContent = t\.kind === 'person' \? 'Found' : 'Stop';/);
-  assert.match(js, /function revealLabel\(t\) \{ return t\.kind === 'person' \? 'Done' : 'Reveal hides'; \}/);
-  assert.doesNotMatch(js, /'Reveal trail'/, 'no path puts the old words back');
-  assert.match(js, /Tap \$\{rec\.kind === 'run' \? \$\('btnRunStop'\)\.textContent : 'Stop'\} to finish/,
-    'the back-gesture hint names the button actually on screen');
+t('a trail run ends on Found or Done, and Show trail sits up with Coach and Share live', () => {
+  const live = html.match(/<div class="live-row">[\s\S]*?<\/div>/)[0];
+  assert.match(live, /<button class="btn small moss-on-dark live-btn trail-btn" id="btnShowTrail" aria-pressed="false">Show trail<\/button>/,
+    'the same small button as Coach and Share live, a toggle from the start');
+  assert.ok(live.indexOf('id="btnCoach"') < live.indexOf('id="btnLive"') && live.indexOf('id="btnLive"') < live.indexOf('id="btnShowTrail"'),
+    'Coach, Share live, Show trail, in that order');
+  const bottom = html.slice(html.indexOf('id="wpRow"'), html.indexOf('id="coachSheet"'));
+  assert.match(bottom, /<button class="btn ghost" id="btnRunDone">Done<\/button>\s*\n\s*<button class="btn big ember grow" id="btnRunStop">Found<\/button>/,
+    'Done where Reveal trail was, Found, the big one, where Stop was');
+  assert.doesNotMatch(bottom, /btnShowTrail/, 'Show trail is not beside the buttons that end the run');
+  const start = js.slice(js.indexOf('\nasync function startRun('), js.indexOf('\nfunction toggleReveal('));
+  assert.match(start, /const onTrail = t\.kind === 'person';\s*\n\s*\$\('btnShowTrail'\)\.hidden = !onTrail;\s*\n\s*\$\('btnRunDone'\)\.hidden = !onTrail;\s*\n\s*\$\('btnReveal'\)\.hidden = onTrail;\s*\n\s*\$\('btnRunStop'\)\.textContent = onTrail \? 'Found' : 'Stop';\s*\n\s*paintReveal\(\);/);
+  assert.match(js, /\$\('btnShowTrail'\)\.addEventListener\('click', toggleReveal\);/, 'Show trail does what Reveal did');
+  assert.doesNotMatch(js, /'Reveal trail'|revealLabel|Trail shown\. Tap Found/, 'nothing of the rename-only version is left');
+  assert.match(js, /rec\.kind === 'run' && !\$\('btnRunDone'\)\.hidden \? 'Still recording\. Tap Found or Done to finish\.'\s*\n\s*: 'Still recording\. Tap Stop to finish\.'/,
+    'the back-gesture hint names the buttons actually on screen');
 });
 
-t('Done on a trail only shows it, and says once that Found is what ends the run', () => {
-  const body = js.match(/function toggleReveal\(\) \{[\s\S]*?\n\}\n/)[0];
-  assert.match(body, /const firstLook = run\.revealed && !run\.revealedAt;\s*\n\s*if \(firstLook\) run\.revealedAt = Date\.now\(\);/,
-    'the first look is caught before revealedAt is set');
-  assert.match(body, /if \(firstLook\) toast\('Trail shown\. Tap Found to finish\.'\);\s*\n\s*\} else \{/,
-    'said inside the trail branch, so a hide search never mentions Found');
-  assert.doesNotMatch(body, /stopRun|finishRun/, 'Done never ends the run');
-  assert.match(js, /\$\('btnRunStop'\)\.addEventListener\('click', stopRun\)/, 'Found is still the one that ends it');
+t('Found claims the find and Done does not; either can be put right in the debrief', () => {
+  assert.match(js, /\$\('btnRunStop'\)\.addEventListener\('click', \(\) => stopRun\(!\$\('btnRunDone'\)\.hidden\)\);/,
+    'the big button claims a find only on a trail, where it says Found');
+  assert.match(js, /\$\('btnRunDone'\)\.addEventListener\('click', \(\) => stopRun\(false\)\);/, 'Done ends the run claiming nothing');
+  assert.doesNotMatch(js, /addEventListener\('click', stopRun\)/, 'a click event is never taken for a find');
+  const stop = js.slice(js.indexOf('async function finishRun'), js.indexOf('/* ── The result'));
+  assert.match(stop, /const found = run\.found \? \{ found: true \} : \{\};/);
+  assert.match(stop, /revealedAt: run\.revealedAt \|\| s\.data\.revealedAt \|\| null, \.\.\.felt, \.\.\.found \} \};/, 'kept with the walk');
+  assert.match(stop, /\.\.\.\(had \? \{ windFelt \} : \{\}\), \.\.\.found \},/, 'and with the grade');
+  assert.doesNotMatch(stop, /rec\.wps\.push|kind: 'Indication'/, 'no mark is added: the find is where the track ends');
+  assert.match(js, /blankDebrief\(last, \{ found: s\.data\.found === true \}\)/, 'the debrief starts from it');
+  assert.match(js, /dbDraft = s\.data\.debrief \? \{ \.\.\.s\.data\.debrief \} : blankDebrief\(/,
+    'only a debrief not written yet: one already saved is the handler’s word');
+  assert.match(js, /return await stopRun\(\);/, 'a run recovered after a crash claims no find');
 });
 
 t('Stop works once, and grading cannot wait for ever on the weather', () => {
-  assert.match(js, /async function stopRun\(\) \{\s*\n\s*if \(run\.stopping\) return;\s*\n\s*run\.stopping = true;\s*\n\s*\$\('btnRunStop'\)\.disabled = true;/,
-    'a second tap does nothing while the first is still grading');
-  assert.match(js, /finally \{ run\.stopping = false; \$\('btnRunStop'\)\.disabled = false; \}/, 'and the next run can be stopped');
-  assert.match(js, /\$\('btnRunStop'\)\.addEventListener\('click', stopRun\);/);
+  assert.match(js, /async function stopRun\(found = false\) \{\s*\n\s*if \(run\.stopping\) return;\s*\n\s*run\.stopping = true;\s*\n\s*run\.found = found;\s*\n\s*\$\('btnRunStop'\)\.disabled = true;\s*\n\s*\$\('btnRunDone'\)\.disabled = true;/,
+    'a second tap, on either of the two side by side, does nothing while the first is still grading');
+  assert.match(js, /finally \{ run\.stopping = false; run\.found = false; \$\('btnRunStop'\)\.disabled = false; \$\('btnRunDone'\)\.disabled = false; \}/,
+    'and the next run can be ended, claiming nothing until asked');
   const wx = js.slice(js.indexOf('async function fetchWeather'), js.indexOf('async function fetchWeather') + 700);
   assert.match(wx, /fetch\(url, \{ signal: ctl\.signal \}\)/, 'the weather ask can be called off');
   assert.match(wx, /setTimeout\(\(\) => ctl\.abort\(\), within\)/);

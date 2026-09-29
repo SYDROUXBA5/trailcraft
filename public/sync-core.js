@@ -58,8 +58,9 @@ const plainObject = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
    copies of a session meet, the copy that holds the run gives all of them —
    which dog ran it, who handled it and what it said, as well as the track.
    The wind the handler felt on the ground (windFelt) is one of them: it was
-   felt on the day of that run, and the next dog's day may blow another way. */
-export const RUN_FIELDS = ['track', 'trackStarted', 'trackWaypoints', 'result', 'coach', 'debrief', 'seen', 'runWeather', 'windFelt'];
+   felt on the day of that run, and the next dog's day may blow another way.
+   So is a run ended on Found (found): the next dog has found nobody yet. */
+export const RUN_FIELDS = ['track', 'trackStarted', 'trackWaypoints', 'result', 'coach', 'debrief', 'seen', 'runWeather', 'windFelt', 'found'];
 const RUN_TOP = ['dogId', 'handlerId', 'summary'];
 const hasRun = (r) => (Array.isArray(r?.data?.track) && r.data.track.length > 0) || !!r?.data?.result;
 const empty = (v) => v == null || v === '' || (Array.isArray(v) && v.length === 0);

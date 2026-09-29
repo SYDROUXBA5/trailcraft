@@ -403,6 +403,7 @@ t('merging a stale copy keeps the run whole and never lets an empty value win', 
 
 t('a second run starts without the first run’s fetched weather', () => {
   assert.ok(RUN_FIELDS.includes('runWeather'), 'the wind a run was graded in belongs to that run');
+  assert.ok(RUN_FIELDS.includes('found'), 'so does a run ended on Found: the next dog on the trail has found nobody yet');
 });
 
 console.log(`\n${pass} passed total\n`);

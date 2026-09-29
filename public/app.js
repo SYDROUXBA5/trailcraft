@@ -38,7 +38,7 @@ import { coachStep, initialCoach, coachPhrase, coachLine, TOL_OPTIONS, COACH_DEF
          rankVoices, pickVoice, voiceQuality, voiceLabel, voiceRate, voiceName, voiceAccent, voiceHint, speaksThroughWebKit, speechLang, SAMPLE_CALL,
          fromNativeVoice } from './coach.js';
 import { DEBRIEF, FLAGS, NOTE_TAGS, blankDebrief, debriefDone, debriefLine, labelOf, ownRun, stickyDebrief,
-         unwalkedPlan, trailShown, ranBlind } from './debrief.js';
+         unwalkedPlan, trailShown, ranBlind, tapsLeft } from './debrief.js';
 import { CONFIDENCE, stampCall, confidenceOf, firstCall, firstCallWasFind, calibration, calibrationLine, callVerdict, runsOf } from './call.js';
 import { isNative, watchBackground, canHaptic, haptic, watchHeading, shareFile,
          canSpeakNative, nativeVoices, speakNative, stopNativeSpeech, watchNativeVoices } from './native.js';
@@ -257,8 +257,10 @@ window.addEventListener('popstate', () => {
     try { history.pushState({ tc: currentScreen }, ''); } catch { /* file:// and the like */ }
     toast(rec.kind === 'walk' ? 'Still recording the walk. Tap I’m in place or Cancel to leave.'
       : rec.kind === 'hide' ? 'Tap Done to keep these hides, or Cancel to throw them away.'
-        /* A run's button is Found on a trail, so the words match the button. */
-        : `Still recording. Tap ${rec.kind === 'run' ? $('btnRunStop').textContent : 'Stop'} to finish.`);
+        /* A trail ends at Found or Done and a hide search at Stop, so the
+           words match the buttons on screen. */
+        : rec.kind === 'run' && !$('btnRunDone').hidden ? 'Still recording. Tap Found or Done to finish.'
+          : 'Still recording. Tap Stop to finish.');
     return;
   }
   if (currentScreen && currentScreen !== 'scrHome') goBackNow();
@@ -2786,8 +2788,8 @@ let callSeen = false;  // had the handler already seen the answer when it was ma
 function openCall(wp) {
   callWp = wp;
   /* Not "is the trail on screen now" — "has this handler seen it at all".
-     Reveal (Done on a trail), hide again, then indicate used to count as a blind call, and a
-     confidence record built from calls made after looking is worthless. */
+     Show trail, hide it again, then indicate used to count as a blind call,
+     and a confidence record built from calls made after looking is worthless. */
   callSeen = !!run.revealedAt;
   $('callOpts').innerHTML = CONFIDENCE.map(c =>
     `<button type="button" class="call-opt" data-conf="${c.v}"><b>${esc(c.label)}</b><i>${esc(c.why)}</i></button>`).join('');
@@ -2871,7 +2873,7 @@ function openDebrief(s) {
   /* Sticky fields carry over from this handler's own last debrief: they run
      handler-blind all morning and nobody wants to say so eleven times. */
   const last = stickyDebrief(db.sessions(), s);
-  dbDraft = s.data.debrief ? { ...s.data.debrief } : blankDebrief(last);
+  dbDraft = s.data.debrief ? { ...s.data.debrief } : blankDebrief(last, { found: s.data.found === true });
   dbSeen = s.data.seen ? { ...s.data.seen } : blankSeen();
   /* Whatever was set before or during the run is where it starts. */
   dbWind = feltOf(s.data);
@@ -2909,7 +2911,8 @@ function paintDebrief() {
     </div>` : '');
   $('dbNoteTags').innerHTML = NOTE_TAGS.map(t =>
     `<button type="button" class="chip${d.noteTag === t.v ? ' selected' : ''}" data-notetag="${t.v}" aria-pressed="${d.noteTag === t.v}">${esc(t.label)}</button>`).join('');
-  $('dbSave').textContent = debriefDone(d) ? 'Save' : 'Two taps to go';
+  /* Counted, not fixed: a run ended on Found has its first answer given. */
+  $('dbSave').textContent = debriefDone(d) ? 'Save' : tapsLeft(d) === 1 ? 'One tap to go' : 'Two taps to go';
 }
 
 /** The wind on the ground, put on the run when the debrief is left, and the
@@ -4601,7 +4604,7 @@ const ageUnknown = (d, short = false) => (d?.plan
    grade read, and the one a wind picked on the ground is measured against
    (feltSubject). Drawn at the moment of Reveal instead, a forecast that had
    swung since the start put the scent on another side from the one picked. */
-const run = { session: null, revealed: false, startedAt: 0, copy: false, stopping: false };
+const run = { session: null, revealed: false, startedAt: 0, copy: false, stopping: false, found: false };
 
 async function startRun(s) {
   if (rec.on) return toast('A run is already going — stop that one first');
@@ -4670,12 +4673,18 @@ async function startRun(s) {
     const base = `${dogName} · ${fmtDur(Date.now() - rec.started)} · ${t.kind === 'person' ? 'trail' : 'hide'} ${age}`;
     return coach.line ? `${base} · ${coach.line}` : base;
   };
-  /* On a trail the two buttons say what the handler is doing: Found when the
-     dog reaches the person, Done when they stop searching blind and want to
-     see the trail. A hide search keeps Stop, because Found would claim every
-     hide had been found. */
-  $('btnReveal').textContent = revealLabel(t);
-  $('btnRunStop').textContent = t.kind === 'person' ? 'Found' : 'Stop';
+  /* A trail ends at one of two buttons: Found when the dog reaches the
+     person, which the debrief then starts from, and Done for any other end,
+     which it asks about. Show trail is the answer, so it sits up with Coach
+     and Share live, away from the buttons that end the run. A hide search
+     keeps Reveal hides and Stop, because Found would claim every hide had
+     been found. */
+  const onTrail = t.kind === 'person';
+  $('btnShowTrail').hidden = !onTrail;
+  $('btnRunDone').hidden = !onTrail;
+  $('btnReveal').hidden = onTrail;
+  $('btnRunStop').textContent = onTrail ? 'Found' : 'Stop';
+  paintReveal();
   go('scrRun');
   /* The coach went on above, for this run. A run that never started must not
      leave it on: the next lay or walk would keep the screen awake and say
@@ -4699,14 +4708,12 @@ function toggleReveal() {
   run.revealed = !run.revealed;
   /* Hiding it again does not unsee it. Kept with the run, so the record says
      when the answer was shown and which calls came before it. */
-  const firstLook = run.revealed && !run.revealedAt;
-  if (firstLook) run.revealedAt = Date.now();
+  if (run.revealed && !run.revealedAt) run.revealedAt = Date.now();
   const t = targetById(s.targetId);
   if (t.kind === 'person') {
     setTrail(run.revealed ? s.data.trail : null);
-    /* The plume is the trail, drawn in air. Showing it before Reveal (Done
-       on a trail) would hand the handler the answer, so it waits for the
-       same button. */
+    /* The plume is the trail, drawn in air. Showing it before Show trail
+       would hand the handler the answer, so it waits for the same button. */
     if (run.revealed) {
       /* In the air the dog set off in, as everything on the run screen is,
          and the panel with it, in the words of any wind felt on the ground,
@@ -4718,19 +4725,23 @@ function toggleReveal() {
       ? { type: 'FeatureCollection',
           features: (s.data.contamination || []).map(c => lineOf(c.points).features[0]).filter(Boolean) }
       : EMPTY);
-    /* Done only shows the trail. GPS, the coach and any live share carry on
-       until Found, and everywhere else in the app Done closes something, so
-       the first look says so once. */
-    if (firstLook) toast('Trail shown. Tap Found to finish.');
   } else {
     setSrc('hides', run.revealed ? pointsOf(s.data.hides) : EMPTY);
   }
-  $('btnReveal').textContent = run.revealed
-    ? 'Hide it again'
-    : revealLabel(t);
+  paintReveal();
 }
 
-function revealLabel(t) { return t.kind === 'person' ? 'Done' : 'Reveal hides'; }
+/* Each reveal button says what a tap will do; only the one for this kind of
+   run is on screen. Show trail also says, to a screen reader and in its
+   lit look, that the trail is up, because it stays on screen through the
+   rest of the run rather than being a step on the way to the end. */
+function paintReveal() {
+  const b = $('btnShowTrail');
+  b.textContent = run.revealed ? 'Hide trail' : 'Show trail';
+  b.setAttribute('aria-pressed', String(run.revealed));
+  b.classList.toggle('on', run.revealed);
+  $('btnReveal').textContent = run.revealed ? 'Hide it again' : 'Reveal hides';
+}
 
 function addWaypoint(kind) {
   const last = rec.pts[rec.pts.length - 1];
@@ -4764,16 +4775,22 @@ function dropRunCopy() {
   snap();
 }
 
-/* One Stop (Found on a trail) per run. Grading can take several seconds on a poor signal with
-   the run screen still up, and a second tap used to grade the run again: a
-   second calibration row for the same run, and a save made after the coach's
-   record had already been cleared. */
-async function stopRun() {
+/* One end per run, whichever button made it: Found, Done or Stop. Grading
+   can take several seconds on a poor signal with the run screen still up,
+   and a second tap used to grade the run again: a second calibration row for
+   the same run, and a save made after the coach's record had already been
+   cleared. Found and Done sit side by side, so the first tap holds off both.
+   `found` is Found's claim that the dog reached the person. It is saved with
+   the run, and the debrief starts from it (blankDebrief), where a mis-tap
+   of either button is put right. */
+async function stopRun(found = false) {
   if (run.stopping) return;
   run.stopping = true;
+  run.found = found;
   $('btnRunStop').disabled = true;
+  $('btnRunDone').disabled = true;
   try { await finishRun(); }
-  finally { run.stopping = false; $('btnRunStop').disabled = false; }
+  finally { run.stopping = false; run.found = false; $('btnRunStop').disabled = false; $('btnRunDone').disabled = false; }
 }
 
 async function finishRun() {
@@ -4809,8 +4826,11 @@ async function finishRun() {
      (computeResult). Only this run's (feltOf), not one left on the trail. */
   const had = s.data.windFelt !== undefined;
   const felt = had ? { windFelt: feltOf(s.data) } : {};
+  /* A run ended on Found says so, with the walk and again with the grade.
+     It marks no place: the find is where the track ends, as it always was. */
+  const found = run.found ? { found: true } : {};
   const raw = { data: { track: rec.pts, trackStarted: run.startedAt, trackWaypoints: rec.wps,
-    revealedAt: run.revealedAt || s.data.revealedAt || null, ...felt } };
+    revealedAt: run.revealedAt || s.data.revealedAt || null, ...felt, ...found } };
   guardSave(patchSession(s, raw), () => saveSession(s, raw));
   /* Only a run where nothing was steering banks towards the dog's drift
      (teachesDrift): not a plan-graded one, whose drawn line is a sketch and
@@ -4831,7 +4851,7 @@ async function finishRun() {
     summary: result.sentence,
     data: { track: rec.pts, trackStarted: run.startedAt, trackWaypoints: rec.wps,
       revealedAt: run.revealedAt || s.data.revealedAt || null, result, coach: coachRecord,
-      ...(runWeather ? { runWeather } : {}), ...(had ? { windFelt } : {}) },
+      ...(runWeather ? { runWeather } : {}), ...(had ? { windFelt } : {}), ...found },
   };
   /* If the phone refuses the save, the run stays in memory and on screen:
      the result still shows, it can be sent as a link or a file, and the
@@ -5250,7 +5270,7 @@ function saveSession(s, patch) {
    the signal allows, often after the handler has moved on: a contamination
    trail drawn, the layer marked off, the run begun. It is written as the one
    field it is, and a run already going is given it too, so the wind shows,
-   Reveal (Done on a trail) can draw the plume, and the run is graded against it. */
+   Show trail can draw the plume, and the run is graded against it. */
 function keepWeather(id, wx) {
   const live = run.session?.id === id ? run.session : null;
   if (live) live.data.weather = wx;
@@ -7670,7 +7690,11 @@ function wire() {
 
   // Run
   $('btnReveal').addEventListener('click', toggleReveal);
-  $('btnRunStop').addEventListener('click', stopRun);
+  $('btnShowTrail').addEventListener('click', toggleReveal);
+  /* The big button is Found on a trail and Stop on a hide search, and only
+     Found claims a find. Done ends a trail claiming nothing. */
+  $('btnRunStop').addEventListener('click', () => stopRun(!$('btnRunDone').hidden));
+  $('btnRunDone').addEventListener('click', () => stopRun(false));
   $('btnCoach').addEventListener('click', openCoachSheet);
   $('btnCoachDone').addEventListener('click', closeCoachSheet);
   /* The wind on the ground, from the air panel on the run screen. */
@@ -8345,7 +8369,7 @@ async function recoverKeep() {
       liveState = { id: d.liveId, url: d.liveUrl || '', timer: 0 };
     }
     try {
-      return await stopRun();             // grades and saves it, as Stop would have
+      return await stopRun();             // grades and saves it, claiming no find: which button would have ended it is not known
     } catch {
       /* The walk itself was written into the session before grading, so it is
          safe; the draft goes rather than being offered again for ever. */

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { DEBRIEF, FLAGS, NOTE_TAGS, DEBRIEF_V, blankDebrief, debriefDone, debriefLine,
-         labelOf, fieldById, debriefRates, varietyGaps, toldField, toldOf, stickyDebrief } from '../public/debrief.js';
+         labelOf, fieldById, debriefRates, varietyGaps, toldField, toldOf, stickyDebrief, tapsLeft } from '../public/debrief.js';
 
 let pass = 0;
 const t = (name, fn) => { fn(); pass++; console.log(`  ok  ${name}`); };
@@ -36,6 +36,23 @@ t('a blank carries sticky fields forward and nothing else', () => {
   assert.equal(d.v, DEBRIEF_V);
   assert.equal(blankDebrief().blind, null);
   assert.equal(blankDebrief(null).outcome, null);
+});
+
+t('a run ended on Found starts the debrief at Found it; Done or Stop starts it at nothing', () => {
+  const last = full({ blind: 'double', outcome: 'missed' });
+  const d = blankDebrief(last, { found: true });
+  assert.equal(d.outcome, 'found', 'the handler said so with the button, and is not asked again');
+  assert.equal(d.blind, 'double', 'the sticky fields carry over as ever');
+  assert.equal(d.target, null, 'nothing else is taken as said');
+  assert.equal(debriefDone(d), false, 'it is a start, not a debrief: what was out there is still asked');
+  assert.equal(tapsLeft(d), 1);
+  assert.equal(blankDebrief(last, { found: false }).outcome, null, 'Done claims nothing, not even "not found"');
+  assert.equal(blankDebrief(last).outcome, null);
+  /* A Found tapped by mistake is one tap to put right. */
+  d.outcome = 'missed';
+  assert.equal(labelOf('outcome', d.outcome), 'Missed it');
+  assert.equal(tapsLeft(blankDebrief()), 2);
+  assert.equal(tapsLeft(full()), 0);
 });
 
 t('done means the two required fields, not all five', () => {

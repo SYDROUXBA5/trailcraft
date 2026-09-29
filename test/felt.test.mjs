@@ -498,10 +498,10 @@ await t('set during a run, it lives with the run until Stop, and nothing is grad
 await t('Stop saves it with the run, a recovered run takes it back, and a new run starts clean', () => {
   const stop = js.slice(js.indexOf('async function finishRun'), js.indexOf('/* ── The result'));
   assert.match(stop, /const had = s\.data\.windFelt !== undefined;\s*const felt = had \? \{ windFelt: feltOf\(s\.data\) \} : \{\};/);
-  assert.match(stop, /revealedAt: run\.revealedAt \|\| s\.data\.revealedAt \|\| null, \.\.\.felt \} \};/, 'with the walk, before the grade');
+  assert.match(stop, /revealedAt: run\.revealedAt \|\| s\.data\.revealedAt \|\| null, \.\.\.felt(, \.\.\.found)? \} \};/, 'with the walk, before the grade');
   assert.match(stop, /const \{ runWeather: fetched, windFelt, \.\.\.result \} = await computeResult\(/);
   assert.match(stop, /const runWeather = fetched \?\? s\.data\.runWeather \?\? null;/, 'the run’s own forecast, fetched or taken on the run screen');
-  assert.match(stop, /\.\.\.\(runWeather \? \{ runWeather \} : \{\}\), \.\.\.\(had \? \{ windFelt \} : \{\}\) \},/, 'and with the result, as the grade measured it');
+  assert.match(stop, /\.\.\.\(runWeather \? \{ runWeather \} : \{\}\), \.\.\.\(had \? \{ windFelt \} : \{\}\)(, \.\.\.found)? \},/, 'and with the result, as the grade measured it');
   assert.match(decl('function keepDraft('), /windFelt: rec\.kind === 'run' \? run\.session\?\.data\?\.windFelt \?\? null : null,/);
   assert.match(decl('async function recoverKeep('), /if \(d\.windFelt\) s\.data\.windFelt = d\.windFelt;\s*\n\s*run\.session = s;/);
   assert.match(decl('async function startRun('), /if \(!run\.copy && s\.data && !had\.data\?\.windFelt\) delete s\.data\.windFelt;/);
@@ -1019,7 +1019,7 @@ await t('Reveal draws the air panel again in the words of the wind felt on the g
   const sb = {
     run: { session: s, revealed: false, revealedAt: 0, startedAt: RUN }, targetById, trailOf: (x) => x.data.trail, windAt,
     setTrail() {}, plumeStart() {}, plumeStop() {}, setSrc() {}, lineOf: () => ({ features: [] }), pointsOf: () => ({}), EMPTY: {},
-    weatherPanelFor: (x, at) => panels.push([x, at]), $: () => ({ textContent: '' }), Date, toast() {},
+    weatherPanelFor: (x, at) => panels.push([x, at]), $: () => ({ textContent: '' }), Date, paintReveal() {},
   };
   vm.createContext(sb);
   vm.runInContext(decl('function toggleReveal('), sb);
@@ -1027,28 +1027,57 @@ await t('Reveal draws the air panel again in the words of the wind felt on the g
   assert.deepEqual(panels, [[s, RUN]], 'the panel, at the run’s start, which the scent is drawn in');
 });
 
-await t('Done on a trail shows it and says, once, that Found ends the run', () => {
-  const toasts = [], btn = { textContent: 'Done' };
+/* The run screen's buttons, with the trail's reveal moved up to Show trail. */
+const revealButtons = () => {
+  const btn = () => {
+    const b = { textContent: '', attrs: {}, on: false, setAttribute: (k, v) => { b.attrs[k] = v; },
+      classList: { toggle: (c, v) => { if (c === 'on') b.on = !!v; } } };
+    return b;
+  };
+  return { btnShowTrail: btn(), btnReveal: btn() };
+};
+const revealSandbox = (session) => {
+  const btns = revealButtons(), drawn = { trail: [], hides: [], plume: 0 };
   const sb = {
-    run: { session: trailRun({ windFelt: felt('calm') }), revealed: false, revealedAt: 0, startedAt: RUN }, targetById,
-    trailOf: (x) => x.data.trail, windAt, setTrail() {}, plumeStart() {}, plumeStop() {}, setSrc() {},
+    run: { session, revealed: false, revealedAt: 0, startedAt: RUN }, targetById, trailOf: (x) => x.data.trail, windAt,
+    setTrail: (x) => drawn.trail.push(!!x), plumeStart: () => { drawn.plume++; }, plumeStop() {},
+    setSrc: (k, v) => { if (k === 'hides') drawn.hides.push(v !== sb.EMPTY); },
     lineOf: () => ({ features: [] }), pointsOf: () => ({}), EMPTY: {}, weatherPanelFor() {},
-    $: () => btn, Date, toast: (m) => toasts.push(m),
+    $: (id) => btns[id], Date, btns, drawn,
   };
   vm.createContext(sb);
   vm.runInContext(decl('function toggleReveal('), sb);
-  vm.runInContext(decl('function revealLabel('), sb);
+  vm.runInContext(decl('function paintReveal('), sb);
+  return sb;
+};
+
+await t('Show trail shows the trail and the plume, says Hide trail while they are up, and is pressed', () => {
+  const sb = revealSandbox(trailRun({ windFelt: felt('calm') }));
+  const b = sb.btns.btnShowTrail;
   sb.toggleReveal();
-  assert.deepEqual([toasts, btn.textContent], [['Trail shown. Tap Found to finish.'], 'Hide it again']);
-  assert.ok(sb.run.revealed && sb.run.revealedAt, 'the trail is on screen and the look is recorded');
+  assert.deepEqual([b.textContent, b.attrs['aria-pressed'], b.on], ['Hide trail', 'true', true]);
+  assert.deepEqual([sb.drawn.trail, sb.drawn.plume], [[true], 1], 'the trail and its plume, as Reveal drew them');
+  const first = sb.run.revealedAt;
+  assert.ok(sb.run.revealed && first > 0, 'the first look is stamped');
   sb.toggleReveal();
-  assert.equal(btn.textContent, 'Done', 'hidden again, the button is Done as the handler asked');
+  assert.deepEqual([b.textContent, b.attrs['aria-pressed'], b.on], ['Show trail', 'false', false]);
+  assert.equal(sb.run.revealedAt, first, 'hiding it again does not unsee it');
   sb.toggleReveal();
-  assert.equal(toasts.length, 1, 'a second look is not told again');
-  /* A run resumed after an earlier look has seen it already. */
-  toasts.length = 0; sb.run.revealed = false; sb.run.revealedAt = RUN + 60e3;
+  assert.equal(sb.run.revealedAt, first, 'nor does a second look move the moment of the first');
+  /* A second run of a trail already seen keeps the older look. */
+  const again = revealSandbox(trailRun());
+  again.run.revealedAt = RUN - 60e3;
+  again.toggleReveal();
+  assert.equal(again.run.revealedAt, RUN - 60e3);
+});
+
+await t('a hide search reveals its hides from Reveal hides, as before', () => {
+  const sb = revealSandbox({ id: 'h1', targetId: 'article', startedAt: T0, data: { hides: [{ lat: 51, lon: -2 }] } });
   sb.toggleReveal();
-  assert.deepEqual(toasts, [], 'nor is a resumed run that had looked before');
+  assert.deepEqual([sb.btns.btnReveal.textContent, sb.drawn.hides, sb.drawn.trail], ['Hide it again', [true], []]);
+  sb.toggleReveal();
+  assert.deepEqual([sb.btns.btnReveal.textContent, sb.drawn.hides], ['Reveal hides', [true, false]]);
+  assert.ok(sb.run.revealedAt > 0, 'a look at the hides is stamped the same way');
 });
 
 await t('an open picker drawn again keeps focus on the button a screen reader was on', () => {
@@ -1099,7 +1128,7 @@ await t('a wind picked with the trail revealed blows from where it was picked, o
     run: { session: live, revealed: false, revealedAt: 0, startedAt: START }, targetById, trailOf: (x) => x.data.trail, windAt,
     setTrail() {}, plumeStart: (tr, w) => plumes.push(w.wind_direction), plumeStop() {}, setSrc() {},
     lineOf: () => ({ features: [] }), pointsOf: () => ({}), EMPTY: {},
-    weatherPanelFor: (x, at) => panels.push(windAt(x, at).wx.wind_direction), $: () => ({ textContent: '' }), Date, toast() {},
+    weatherPanelFor: (x, at) => panels.push(windAt(x, at).wx.wind_direction), $: () => ({ textContent: '' }), Date, paintReveal() {},
   };
   vm.createContext(rv);
   vm.runInContext(decl('function toggleReveal('), rv);

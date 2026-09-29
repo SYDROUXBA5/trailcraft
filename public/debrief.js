@@ -115,12 +115,20 @@ export const toldOf = (id, v) => {
 };
 
 /** A fresh debrief. `last` carries the sticky fields forward: a class runs
-    handler-blind all morning and nobody wants to say so eleven times. */
-export function blankDebrief(last = null) {
+    handler-blind all morning and nobody wants to say so eleven times.
+    `found` is a run ended on Found: the handler has already said how it
+    ended, so it starts at Found it rather than asking again. It is only where
+    the debrief starts, and a Found tapped by mistake is put right here with
+    one tap. A run ended on Done or Stop claims nothing, and is asked. */
+export function blankDebrief(last = null, { found = false } = {}) {
   const d = { v: DEBRIEF_V, flags: [], note: '', noteTag: null };
   for (const f of DEBRIEF) d[f.id] = (f.sticky && last?.[f.id]) || null;
+  if (found) d.outcome = 'found';
   return d;
 }
+
+/** How many required answers are still to give, for the Save button. */
+export const tapsLeft = (d) => DEBRIEF.filter(f => f.required && !d?.[f.id]).length;
 
 /** Is it finished enough to save? Only the required fields count. */
 export const debriefDone = (d) => !!d && DEBRIEF.every(f => !f.required || d[f.id]);

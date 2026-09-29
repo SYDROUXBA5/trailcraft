@@ -129,7 +129,7 @@ It is a reading of a map, not of the ground, and the card says so. A concrete fa
 Single-phone for now; hides are not yet in the QR format. The handler places one or more hides on the map, then searches. The record shows time to the first *Indication* mark, distance from the nearest hide at that moment, and the approach relative to the wind (into / across / with). The odour chosen on the home screen is saved with it.
 
 ### 4.8 Running a trail
-**Blind by default:** only the start dot shows. *Done* shows the trail and the plume, and hides them again; the run carries on until *Found*, which ends it. (A hide search keeps *Reveal hides* and *Stop*.) Mark buttons: Indication, Lost it, Re-found, Article, Reward. The map stays north-up during a run, because the result speaks of "right of the line".
+**Blind by default:** only the start dot shows. *Show trail*, a small button beside *Coach* and *Share live*, shows the trail and the plume, and hides them again. Two buttons end the run: *Found*, when the dog reaches the person, which starts the debrief at "Found it", and *Done* for any other end, which leaves the debrief to ask. Either can be put right in the debrief. (A hide search keeps *Reveal hides* and *Stop*.) Mark buttons: Indication, Lost it, Re-found, Article, Reward. The map stays north-up during a run, because the result speaks of "right of the line".
 
 ### 4.9 The result card — rewritten after your review
 **Recorded, first:** the median distance from the line; the share of time spent left of it, on it (within 3 m), and right of it; the trail's age at the start; run time and distance; and the ground the trail crossed, in metres per surface. The dog's track is first corrected by the line length.
