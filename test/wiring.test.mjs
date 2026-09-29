@@ -1141,4 +1141,15 @@ t('the run HUD and the replay caption give a drawn line no age either', () => {
   assert.equal(cap.textContent, 'Trail age not known — drawn, not walked', 'a drawn card never gets a walk');
 });
 
+t('the map opens on the United States, and the first fix brings it down to the ground', () => {
+  /* The owner asked for the USA rather than Wells. Before a fix the camera
+     frames the lower 48 flat; the first fix from that far out tilts it to
+     the street-level view the map screens are drawn for. */
+  const build = js.slice(js.indexOf('map = new GL.Map({'), js.indexOf('attributionControl'));
+  assert.match(build, /bounds: USA_BOUNDS/);
+  assert.doesNotMatch(build, /-2\.6449/, 'no town in Somerset as the starting point');
+  assert.match(js, /const USA_BOUNDS = \[\[-124\.8, 24\.4\], \[-66\.9, 49\.4\]\]/);
+  assert.equal((js.match(/\.\.\.fromAfar\(\)/g) ?? []).length, 2, 'both first-fix centrings tilt down from afar');
+});
+
 console.log(`\n${pass} passed total\n`);
