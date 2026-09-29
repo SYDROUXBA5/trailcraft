@@ -19,3 +19,4 @@ build/
 .review-batch2.json
 .review-batch2-finish.json
 .review-batch3.json
+token.web.js

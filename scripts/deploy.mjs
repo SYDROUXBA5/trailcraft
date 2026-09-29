@@ -15,6 +15,7 @@
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
 
 export const BRANCH = 'main';
 export const PREFIX = 'public';
@@ -87,6 +88,31 @@ export function checkSplit(sha, cwd = REPO) {
   }
 }
 
+/* The website's own map key. The app's key (public/token.js) never leaves
+   this Mac: it is gitignored, so the split cannot see it, and without a key
+   everyone who opened a shared link on the website got the plain street map.
+   The website has a separate key, one Mapbox honours only on
+   sydrouxba5.github.io, kept beside the repository in token.web.js (ignored
+   too) and laid on top of the split as token.js. It lives only on gh-pages,
+   which is the public website anyway. Without the file the site publishes as
+   before. Only a public key (pk.) is ever published: a secret one (sk.)
+   would open the account to anyone reading the page. */
+export const WEB_KEY = 'token.web.js';
+const PUBLIC_KEY = /^window\.MB_TOKEN = '(pk\.[A-Za-z0-9._-]+)';\n?$/;
+
+export function withWebKey(sha, cwd = REPO) {
+  const file = path.join(cwd, WEB_KEY);
+  if (!existsSync(file)) return sha;
+  if (!PUBLIC_KEY.test(readFileSync(file, 'utf8'))) {
+    throw new Error(`${WEB_KEY} is not a single public Mapbox key (window.MB_TOKEN = 'pk.…';). Nothing was pushed.`);
+  }
+  const blob = git(['hash-object', '-w', file], cwd);
+  const rows = git(['ls-tree', `${sha}^{tree}`], cwd).split('\n').filter(r => r && !r.endsWith('\ttoken.js'));
+  rows.push(`100644 blob ${blob}\ttoken.js`);
+  const tree = execFileSync('git', ['mktree'], { cwd, env: gitEnv(), input: `${rows.join('\n')}\n`, encoding: 'utf8' }).trim();
+  return git(['commit-tree', tree, '-p', sha, '-m', "The website's own map key"], cwd);
+}
+
 export function deploy(cwd = REPO) {
   checkBranch(cwd);
   const dirty = uncommitted(cwd);
@@ -99,7 +125,7 @@ export function deploy(cwd = REPO) {
     throw new Error('the tests failed. Nothing was pushed.');
   }
   // Split and inspect before the first push, so a bad split leaves both branches untouched.
-  const sha = splitPublic(cwd);
+  const sha = withWebKey(splitPublic(cwd), cwd);
   checkSplit(sha, cwd);
   execFileSync('git', ['push', 'origin', BRANCH], { cwd, env: gitEnv(), stdio: 'inherit' });
   execFileSync('git', ['push', '-f', 'origin', `${sha}:refs/heads/gh-pages`], { cwd, env: gitEnv(), stdio: 'inherit' });
