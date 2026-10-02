@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Airport floor plans</title>
+<meta name="description" content="A look at Mapbox's indoor airport floor plans, before Trailcraft builds an indoor search on them.">
+<link href="https://api.mapbox.com/mapbox-gl-js/v3.32.0/mapbox-gl.css" rel="stylesheet">
+<script src="https://api.mapbox.com/mapbox-gl-js/v3.32.0/mapbox-gl.js"></script>
+<script src="token.js"></script>
+<style>
+  :root {
+    --paper: #F6F7FA; --card: #FFFFFF; --ink: #0F1F3D; --muted: #5B6A85;
+    --border: #D8DEEA; --accent: #14284B; --gold: #B8902E;
+    color-scheme: light dark;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #0B1630; --card: #13223F; --ink: #F1F4F9; --muted: #A3B0C8;
+      --border: #25395E; --accent: #9DB8E8; --gold: #E2BE63;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #0B1630; --card: #13223F; --ink: #F1F4F9; --muted: #A3B0C8;
+    --border: #25395E; --accent: #9DB8E8; --gold: #E2BE63;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body { background: var(--paper); color: var(--ink); font: 16px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  #map { position: fixed; inset: 0; }
+  .panel {
+    position: fixed; left: 12px; right: 12px; top: max(12px, env(safe-area-inset-top));
+    max-width: 420px; background: var(--card); border: 1px solid var(--border);
+    border-radius: 14px; padding: 12px 14px; box-shadow: 0 6px 24px rgba(0,0,0,.18); z-index: 2;
+  }
+  .eyebrow { margin: 0; font-size: 12px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--gold); }
+  h1 { margin: 2px 0 8px; font-size: 20px; line-height: 1.2; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  select, button {
+    font: inherit; font-size: 16px; min-height: 44px; border-radius: 10px;
+    border: 1px solid var(--border); background: var(--paper); color: var(--ink); padding: 0 12px;
+  }
+  select { flex: 1 1 180px; }
+  button[aria-pressed="true"] { background: var(--accent); color: var(--card); border-color: var(--accent); }
+  .note { margin: 8px 0 0; font-size: 14px; color: var(--muted); }
+  .note b { color: var(--ink); }
+  :focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
+</style>
+</head>
+<body>
+<div id="map" aria-label="Map of the chosen airport"></div>
+<div class="panel">
+  <p class="eyebrow">Trailcraft · test</p>
+  <h1>Airport floor plans</h1>
+  <div class="row">
+    <label for="airport" class="note" style="margin:0">Airport</label>
+    <select id="airport"></select>
+    <button type="button" id="sat" aria-pressed="false">Satellite under it</button>
+  </div>
+  <p class="note" id="status" role="status">Loading the map…</p>
+</div>
+<script>
+/* A look before a build. Mapbox now draws the inside of 200-odd airports —
+   terminals, gates, security, shops, floor by floor — and the question for
+   an indoor detection search is whether the parts a K9 team actually works
+   are on it. This page shows exactly what Mapbox has, airport by airport,
+   with its floor switcher, and nothing of Trailcraft's own. */
+const AIRPORTS = [
+  ['JFK', 'New York JFK', -73.7816, 40.6424], ['EWR', 'Newark', -74.1745, 40.6895],
+  ['LGA', 'New York LaGuardia', -73.8740, 40.7769], ['BOS', 'Boston Logan', -71.0096, 42.3656],
+  ['IAD', 'Washington Dulles', -77.4565, 38.9531], ['ATL', 'Atlanta', -84.4277, 33.6407],
+  ['MIA', 'Miami', -80.2870, 25.7959], ['MCO', 'Orlando', -81.3081, 28.4312],
+  ['CLT', 'Charlotte', -80.9431, 35.2140], ['ORD', "Chicago O'Hare", -87.9073, 41.9786],
+  ['DTW', 'Detroit', -83.3534, 42.2124], ['MSP', 'Minneapolis', -93.2218, 44.8848],
+  ['DFW', 'Dallas Fort Worth', -97.0403, 32.8998], ['IAH', 'Houston', -95.3414, 29.9844],
+  ['DEN', 'Denver', -104.6737, 39.8494], ['PHX', 'Phoenix', -112.0116, 33.4352],
+  ['LAS', 'Las Vegas', -115.1523, 36.0840], ['LAX', 'Los Angeles', -118.4085, 33.9416],
+  ['SFO', 'San Francisco', -122.3839, 37.6155], ['SEA', 'Seattle', -122.3088, 47.4436],
+];
+const $ = (id) => document.getElementById(id);
+const say = (t) => { $('status').textContent = t; };
+const PUBLIC_KEY = /^pk\.[A-Za-z0-9._-]+$/;
+
+/* The key: the one beside the page on this Mac, else the website's own,
+   read the same way the app reads it. */
+async function key() {
+  if (PUBLIC_KEY.test(window.MB_TOKEN || '')) return window.MB_TOKEN;
+  try {
+    const kept = localStorage.getItem('trailcraft.webMapKey') || '';
+    if (PUBLIC_KEY.test(kept)) return kept;
+  } catch { /* a private window */ }
+  const res = await fetch('https://firestore.googleapis.com/v1/projects/trailcraft-51b80/databases/(default)/documents/public/web?key=AIzaSyCobn2sfejyN3O8-Cd-oyG2y2cTF_Ol88c', { cache: 'no-store' });
+  const k = res.ok ? (await res.json())?.fields?.mapboxToken?.stringValue ?? '' : '';
+  return PUBLIC_KEY.test(k) ? k : '';
+}
+
+const pick = $('airport');
+pick.innerHTML = AIRPORTS.map(([code, name]) => `<option value="${code}">${code} · ${name}</option>`).join('');
+
+let map, sat = false;
+const STYLE = () => sat ? 'mapbox://styles/mapbox/standard-satellite' : 'mapbox://styles/mapbox/standard';
+const CONFIG = { basemap: { showIndoor: true } };
+const here = () => AIRPORTS.find(a => a[0] === pick.value);
+
+function go() {
+  const [code, name, lon, lat] = here();
+  say(`Flying to ${name}. Zoom in on a terminal: the floor switcher shows when Mapbox has the inside.`);
+  map.flyTo({ center: [lon, lat], zoom: 16.2, pitch: 45, bearing: 0, essential: true });
+}
+
+(async () => {
+  const k = await key().catch(() => '');
+  if (!k) return say('No map key here, so nothing can be shown.');
+  mapboxgl.accessToken = k;
+  const [, , lon, lat] = AIRPORTS[0];
+  map = new mapboxgl.Map({ container: 'map', style: STYLE(), config: CONFIG, center: [lon, lat], zoom: 16.2, pitch: 45 });
+  map.addControl(new mapboxgl.IndoorControl());
+  map.addControl(new mapboxgl.NavigationControl({ visualizePitch: true }), 'bottom-right');
+  map.on('load', go);
+  map.on('error', (e) => say(`Mapbox said: ${e?.error?.message || 'something went wrong'}`));
+})();
+
+pick.addEventListener('change', () => map && go());
+$('sat').addEventListener('click', () => {
+  sat = !sat;
+  $('sat').setAttribute('aria-pressed', String(sat));
+  if (map) map.setStyle(STYLE(), { config: CONFIG });
+});
+</script>
+</body>
+</html>
