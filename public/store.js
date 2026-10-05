@@ -8,7 +8,7 @@
 import { pathLen, densify, simplify, timestampsEndingAt, dist } from './geo.js';
 import { visible, tombstone, pruneTombstones, RUN_FIELDS } from './sync-core.js';
 import { makeBackup, planRestore, BACKUP_FLAGS } from './backup.js';
-import { unwalkedPlan, trailShown, ranBlind } from './debrief.js';
+import { unwalkedPlan, trailShown, ranBlind, noLineYet } from './debrief.js';
 import { windTrusted, feltOf } from './field.js';
 
 export const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
@@ -148,6 +148,103 @@ export function planSession({ id, handlerId, layerId = null, corners, ageMin, no
   if (fromSession) data.fromSession = fromSession;
   return { id, handlerId, dogId: null, layerId, targetId: 'person', startedAt: trail[0].t, summary,
     ...(name ? { name } : {}), data };
+}
+
+/* ── A blind trail, and its line added later ──────────────────────────
+   A trail laid without this phone (on the layer's own phone or watch, or
+   not at all, on a real search) can still be run here: the handler taps
+   Blind trail where they stand and the dog is recorded until Found or
+   Done. Nothing is graded then, because there is no line. The layer's
+   Trail Card or GPX file can be added afterwards, days later if need be,
+   and the run is graded against it then, as a walked card grades a plan. */
+
+/** A blind trail's session: a person trail, for the picked dog, with no
+    line yet (debrief.js noLineYet). Its laid time is not known, so
+    startedAt is only the moment it began until a line brings its own. */
+export function blindSession({ id, handlerId, dogId = null, now, summary = 'Blind trail, not run yet.' }) {
+  return { id, handlerId, dogId, layerId: null, targetId: 'person', startedAt: now, summary,
+    data: { lineLater: true, waypoints: [], weather: null, contamination: [] } };
+}
+
+/* How far a line may sit from where the dog set off before the handler is
+   asked whether it is the right one, and past which it plainly is not:
+   the same 300 m a walked card is asked about against its plan. */
+export const LINE_ASK_M = 300;
+export const LINE_FAR_M = 50000;
+
+/* The nearest a line comes to a point, in metres. */
+const nearestOn = (line, p) => line.reduce((m, q) => Math.min(m, dist(p, q)), Infinity);
+
+/** The part of a timed line laid before the dog set off. The layer is the
+    hidden person on a blind trail, and their phone or watch usually goes on
+    recording while they wait, and often on the walk back after the find:
+    nothing recorded once the dog had set off can be the trail it followed.
+    An untimed line, or a run with no start time, is kept whole. */
+function laidPart(data, line) {
+  const pts = (line?.points || []).filter(onEarth);
+  const ran = data?.trackStarted;
+  if (!line?.timed || !Number.isFinite(ran)) return { pts, cut: 0 };
+  const kept = pts.filter(p => Number.isFinite(p.t) && p.t <= ran);
+  return { pts: kept, cut: pts.length - kept.length };
+}
+
+/** What to say before a line is put on a blind trail's run: `refuse` when
+    it cannot be used at all, else the questions to `ask` first, in order,
+    and how many points at the end were `cut` as recorded after the dog set
+    off. `line` is { points, timed, via, from } as linePatch takes it. */
+export function lineCheck(data, line) {
+  const all = (line?.points || []).filter(onEarth);
+  if (all.length < 2) return { refuse: 'That line has fewer than two points, so there is nothing to follow.', ask: [], cut: 0 };
+  const { pts, cut } = laidPart(data, line);
+  if (pts.length < 2) {
+    /* All of it after the start is most often the wrong file: the dog's own
+       track, from a collar or from this app's own export of the run. */
+    return { refuse: !(all[0].t < data.trackStarted)
+      ? 'That line was recorded after the dog set off, so it can’t be the laid trail. It may be the dog’s own track.'
+      : 'That file has no trail recorded before the dog set off.', ask: [], cut };
+  }
+  const ask = [];
+  const start = (data?.track || []).find(onEarth);
+  if (start) {
+    const off = nearestOn(pts, start);
+    if (off > LINE_FAR_M) return { refuse: 'That trail is nowhere near where the dog ran. Check it is the right one.', ask: [], cut };
+    if (off > LINE_ASK_M) ask.push('That trail is a long way from where the dog set off. Use it anyway?');
+  }
+  /* Refusing it would leave a run on a route from a planner with no grade
+     at all; taken as a drawn line it is graded, and says what it cannot know. */
+  if (!line.timed) {
+    ask.push('That line has no times on it, so the trail’s age can’t be known and this run won’t count towards the dog’s drift record. Use it anyway?');
+  }
+  return { refuse: null, ask, cut };
+}
+
+/** The patch that puts a line on a blind trail's session. A timed line
+    (a Trail Card, a walked card, a GPX file with times) brings the real
+    laid time, so the trail's age is real. A line with no times, or a card
+    drawn on the map, is timed as if walked just before the dog set off, as
+    a drawn plan is, and marked `drawn`, so nothing reads an age from it or
+    banks the run (unwalkedPlan). `lineAdded` records when and from what. */
+export function linePatch(s, line, now) {
+  /* Only what was laid before the dog set off (laidPart): lineCheck has
+     already refused a line with less than two points of that. */
+  const all = (line?.points || []).filter(onEarth);
+  const timed = !!line?.timed && all.every(p => Number.isFinite(p.t));
+  const part = timed ? laidPart(s?.data, line).pts : all;
+  const raw = part.length > 1 ? part : all;
+  const clean = raw.map(p => ({ lat: p.lat, lon: p.lon, ...(Number.isFinite(p.t) ? { t: p.t } : {}),
+    ...(Number.isFinite(p.ele) ? { ele: p.ele } : {}) }));
+  const endAt = Number.isFinite(s?.data?.trackStarted) ? s.data.trackStarted : now;
+  const trail = timed ? clean : timestampsEndingAt(densify(clean.map(latLon), 5), endAt, 1.3);
+  const from = typeof line?.from === 'string' ? line.from.slice(0, 80) : '';
+  return {
+    startedAt: trail[0].t,
+    data: {
+      trail,
+      waypoints: Array.isArray(line?.waypoints) ? line.waypoints : [],
+      lineAdded: { at: now, via: line?.via === 'gpx' ? 'gpx' : 'card', from, timed },
+      ...(timed ? {} : { drawn: true }),
+    },
+  };
 }
 
 /* A walked line carries a fix every couple of metres, wobbling with the GPS.
@@ -809,11 +906,22 @@ export function driftRows(rows, sessions) {
 /* One run into a card's age bands, or counted apart when it has no age: a
    run on a drawn line (`unwalked`), and among those the runs on a drawn
    Trail Card (`drawnCards`), which carries no plan and so has no walked card
-   coming to give it one; or a run with no weather to work an age from. */
+   coming to give it one; a blind trail still waiting for its line
+   (`noLine`), which has no laid time yet, or one whose line came from a
+   GPX file with no times (`untimedLines`, also counted in `unwalked`); or
+   a run with no weather to work
+   an age from. */
 function countAge(out, s) {
   const band = ageBand(runAgeMin(s));
   if (band) out.bands[band.key]++;
-  else if (unwalkedPlan(s.data)) { out.unwalked++; if (!s.data.plan) out.drawnCards++; }
+  else if (noLineYet(s.data)) out.noLine++;
+  else if (unwalkedPlan(s.data)) {
+    out.unwalked++;
+    /* A blind trail's line from a GPX file with no times was walked, just
+       not timed: it is no drawn card, and is not called one. */
+    if (s.data.lineAdded?.via === 'gpx' && s.data.lineAdded.timed === false) out.untimedLines++;
+    else if (!s.data.plan) out.drawnCards++;
+  }
   else out.unknownAge++;
 }
 
@@ -824,12 +932,13 @@ function countAge(out, s) {
 export function handlerStats(handlerId, sessions) {
   const all = (sessions || []).filter(s => s.handlerId === handlerId && s.data);
   const runs = all.filter(s => s.data.track);
-  const laid = all.filter(s => s.data.trail && !s.layerId);
+  /* Not a blind trail's line: whoever laid it, it was not walked from here. */
+  const laid = all.filter(s => s.data.trail && !s.layerId && !s.data.lineLater);
   const out = {
     runs: runs.length, laid: laid.length,
     metres: 0, laidMetres: 0, seconds: 0, longest: 0,
     firstAt: null, lastAt: null,
-    bands: { hot: 0, warm: 0, cold: 0 }, unknownAge: 0, unwalked: 0, drawnCards: 0,
+    bands: { hot: 0, warm: 0, cold: 0 }, unknownAge: 0, unwalked: 0, drawnCards: 0, untimedLines: 0, noLine: 0,
     dogs: {}, assisted: 0, blind: 0, shown: 0, knew: 0, medOff: null,
   };
   for (const s of laid) out.laidMetres += pathLenOf(s.data.trail);
@@ -877,6 +986,8 @@ export function dogStats(dogId, sessions, calibration = []) {
     unknownAge: 0,
     unwalked: 0,
     drawnCards: 0,
+    untimedLines: 0,
+    noLine: 0,
     targets: {},
     graded: 0,
     meanOffset: null,

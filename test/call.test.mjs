@@ -3,7 +3,7 @@ import { CONFIDENCE, CALL_V, MIN_PER_BAND, stampCall, confidenceOf, labelOf,
          callsIn, firstCall, scorable, calibration, calibrationLosses,
          calibrationLine, callVerdict, runsOf, firstCallWasFind, AT_FIND_M, OFF_FIND_M } from '../public/call.js';
 import { project } from '../public/geo.js';
-import { labelOf as outcomeLabel } from '../public/debrief.js';
+import { labelOf as outcomeLabel, noLineYet } from '../public/debrief.js';
 import { readFileSync } from 'node:fs';
 
 let pass = 0;
@@ -160,7 +160,7 @@ t('discarded runs are counted, so a thin curve is explained not hidden', () => {
   assert.equal(l.notBlind, 1);
   assert.equal(l.noDebrief, 1);
   assert.deepEqual(calibrationLosses([]),
-    { total: 0, seen: 0, helped: 0, notBlind: 0, blindUnasked: 0, noDebrief: 0, laterFind: 0 });
+    { total: 0, seen: 0, helped: 0, notBlind: 0, blindUnasked: 0, noDebrief: 0, laterFind: 0, noLine: 0 });
 });
 
 t('a run kept from someone else’s link never counts as your call', () => {
@@ -483,9 +483,9 @@ t('a debrief that does not say who knew is not read as "you knew"', () => {
     const els = {};
     const $ = (id) => (els[id] ??= { hidden: false, textContent: '' });
     new Function('$', 'firstCall', 'confidenceOf', 'labelOf', 'firstCallWasFind', 'callVerdict',
-      'calibrationLine', 'calibration', 'runsOf', 'db', 'S', `${src}\npaintCallBlock(arguments[11]);`)(
+      'calibrationLine', 'calibration', 'runsOf', 'db', 'S', 'noLineYet', `${src}\npaintCallBlock(arguments[12]);`)(
       $, firstCall, confidenceOf, outcomeLabel, firstCallWasFind, callVerdict,
-      calibrationLine, calibration, runsOf, { sessions: () => [] }, { handler: null }, s);
+      calibrationLine, calibration, runsOf, { sessions: () => [] }, { handler: null }, noLineYet, s);
     return els.callSummary.textContent;
   };
   assert.match(said(blank), /the debrief doesn’t say who knew the answer/);

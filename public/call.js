@@ -22,7 +22,7 @@
    - A call on a run the handler knew the answer to proves nothing either.
    Both are excluded from the maths, not quietly folded in. */
 
-import { ownRun, trailShown, unwalkedPlan } from './debrief.js';
+import { ownRun, trailShown, unwalkedPlan, noLineYet } from './debrief.js';
 import { dist } from './geo.js';
 
 export const CALL_V = 1;
@@ -188,6 +188,11 @@ export function callVerdict(session) {
   if (d.blind === 'open') return { ok: false, why: 'notblind' };
   if (d.blind !== 'handler' && d.blind !== 'double') return { ok: false, why: 'blind-unasked' };
   if (d.outcome === 'false') return { ok: true, conf: c.call.conf, right: false, at: c.t };
+  /* A find on a blind trail with no laid line yet has nothing to say where
+     the trail ended, so whether the call was made at it cannot be judged.
+     It can be once the layer's card or GPX file is added. A false
+     indication was wrong whatever the line, and counts now. */
+  if (noLineYet(session?.data)) return { ok: false, why: 'noline' };
   /* A find is only this call's find when it happened where the call was. */
   const found = firstCallWasFind(session);
   if (found == null) return { ok: false, why: 'later-find' };
@@ -268,6 +273,7 @@ export function calibrationLosses(sessions) {
     blindUnasked: count('blind-unasked'),
     noDebrief: count('nodebrief'),
     laterFind: count('later-find'),
+    noLine: count('noline'),
   };
 }
 

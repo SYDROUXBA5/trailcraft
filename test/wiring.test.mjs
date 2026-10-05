@@ -16,7 +16,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import vm from 'node:vm';
 import { fmtShort, fmtDur } from '../public/geo.js';
-import { ranBlind, trailShown, unwalkedPlan } from '../public/debrief.js';
+import { ranBlind, trailShown, unwalkedPlan, noLineYet } from '../public/debrief.js';
 
 let pass = 0;
 const t = (name, fn) => { fn(); pass++; console.log(`  ok  ${name}`); };
@@ -355,7 +355,9 @@ t('a save sends only what it changes, so nothing written meanwhile is lost', () 
      of data rebuilt from a copy taken earlier. */
   const stale = [...js.matchAll(/(?:updateSession|saveSession)\([^;]*?data: \{ \.\.\.[\w.]+\.data\b/g)].map(m => m[0].slice(0, 70));
   assert.deepEqual(stale, [], 'no save rebuilds data from a copy it was holding');
-  const body = (name) => js.slice(js.indexOf(name), js.indexOf(name) + 2400);
+  /* The whole function, to the brace that closes it at the margin: a fixed
+     window stopped short once handleCard learnt to take a blind trail's line. */
+  const body = (name) => { const i = js.indexOf(name); return js.slice(i, js.indexOf('\n}\n', i)); };
   for (const where of ['async function confirmLay', 'function saveDrawPlan', 'async function handleCard']) {
     assert.match(body(where), /keepWeather\((s|sess)\.id, /, `${where}: the late weather goes through keepWeather`);
   }
@@ -388,7 +390,9 @@ t('a re-grade is for the dog that ran, not the one picked on Home', () => {
   assert.ok(!/S\.dog\b/.test(grade), 'grading never reads the Home selection');
   assert.match(grade, /const dogRow = S\.dogs\.find\(d => d\.id === s\.dogId\) \?\? null;/);
   const stop = js.slice(js.indexOf('async function finishRun'), js.indexOf('/* ── The result'));
-  assert.match(stop, /const dogId = S\.dog\?\.id \?\? null;[\s\S]{0,160}computeResult\(\{ \.\.\.s, dogId \}/,
+  /* Further than it was: a blind trail with no line is not graded at all,
+     and that choice sits between the two. */
+  assert.match(stop, /const dogId = S\.dog\?\.id \?\? null;[\s\S]{0,700}computeResult\(\{ \.\.\.s, dogId \}/,
     'a run being recorded now is the picked dog’s, and is graded as that dog');
   assert.match(stop, /const patch = \{\s*\n\s*dogId,/, 'and saved under the same dog it was graded for');
   assert.match(js, /Nothing is banked to \$\{d\?\.name \?\? 'this dog'\}/, 'the provisional note names the run’s dog');
@@ -426,7 +430,8 @@ t('a trail run ends on Found or Done, and Show trail sits up with Coach and Shar
     'Done where Reveal trail was, Found, the big one, where Stop was');
   assert.doesNotMatch(bottom, /btnShowTrail/, 'Show trail is not beside the buttons that end the run');
   const start = js.slice(js.indexOf('\nasync function startRun('), js.indexOf('\nfunction toggleReveal('));
-  assert.match(start, /const onTrail = t\.kind === 'person';\s*\n\s*\$\('btnShowTrail'\)\.hidden = !onTrail;\s*\n\s*\$\('btnRunDone'\)\.hidden = !onTrail;\s*\n\s*\$\('btnReveal'\)\.hidden = onTrail;\s*\n\s*\$\('btnRunStop'\)\.textContent = onTrail \? 'Found' : 'Stop';\s*\n\s*paintReveal\(\);/);
+  /* A blind trail is a trail (Done and Found) with nothing to show. */
+  assert.match(start, /const onTrail = t\.kind === 'person';\s*\n(\s*\/\*[^*]*\*\/)?\s*\$\('btnShowTrail'\)\.hidden = !onTrail \|\| blindTrail;\s*\n\s*\$\('btnRunDone'\)\.hidden = !onTrail;\s*\n\s*\$\('btnReveal'\)\.hidden = onTrail;\s*\n\s*\$\('btnRunStop'\)\.textContent = onTrail \? 'Found' : 'Stop';\s*\n\s*paintReveal\(\);/);
   assert.match(js, /\$\('btnShowTrail'\)\.addEventListener\('click', toggleReveal\);/, 'Show trail does what Reveal did');
   assert.doesNotMatch(js, /'Reveal trail'|revealLabel|Trail shown\. Tap Found/, 'nothing of the rename-only version is left');
   assert.match(js, /rec\.kind === 'run' && !\$\('btnRunDone'\)\.hidden \? 'Still recording\. Tap Found or Done to finish\.'\s*\n\s*: 'Still recording\. Tap Stop to finish\.'/,
@@ -613,7 +618,7 @@ t('the session list deletes from a card without opening it, only once Delete ses
   assert.match(bodyOf('logCard'), /sessionCard\(r\.s, \{ body: r\.body, who: r\.who, del: mode === 'del', replay: true, again: true \}\)/, 'every card in the list, deleting or not');
   assert.ok(!/replay: true/.test(bodyOf('renderHome')), 'home is not where runs are watched again');
   // The replay opened from the list is that run's, and Done goes back to the list.
-  assert.match(bodyOf('replaySession'), /if \(s\.data\.result\) run\.session = s; else pendingSession = s;\s*openReplay\(s\);/);
+  assert.match(bodyOf('replaySession'), /if \(s\.data\.result \|\| noLineYet\(s\.data\)\) run\.session = s; else pendingSession = s;\s*openReplay\(s\);/);
   assert.match(bodyOf('openReplay'), /replay\.back = currentScreen;/);
   assert.match(js, /\$\('repBack'\)\.addEventListener\('click', \(\) => \{ const back = replay\.back; closeReplay\(\); leaveForm\(back \|\| 'scrResult'\); \}\);/);
   // Filters narrow what is built; only a change to the sessions builds it again.
@@ -953,7 +958,8 @@ t('a trail’s route is laid again as a new plan, through the plan flow drawn pl
   assert.match(bodyOf('paintDrawWho'), /\$\('drawConfirm'\)\.disabled = !who\.ok;/);
   assert.match(bodyOf('relayWho'), /`\$\{S\.layer\.name\} lays it, \$\{S\.handler\.name\} runs \$\{S\.dog\.name\}\.`/);
   assert.match(js, /\$\('drawWhoChange'\)\.addEventListener\('click', \(\) => \{[\s\S]{0,80}go\('scrHome'\);/);
-  assert.match(bodyOf('renderResult'), /\$\('resRoute'\)\.hidden = !s\.data\.fromSession;/, 'its result says it is the same route');
+  /* The same line also says where a blind trail's laid trail came from. */
+  assert.match(bodyOf('renderResult'), /\$\('resRoute'\)\.textContent = s\.data\.fromSession \? `\$\{sameRouteWords\(s\.data\.fromSession\)\}\.` : lineAddedWords\(s\.data\);\s*\n\s*\$\('resRoute'\)\.hidden = !\$\('resRoute'\)\.textContent;/, 'its result says it is the same route');
 });
 
 t('a folder is kept on the sessions in it, and an empty one on this phone alone', () => {
@@ -1173,9 +1179,11 @@ t('the run HUD and the replay caption give a drawn line no age either', () => {
     fmtM: String, fmtDur, unwalkedPlan, bandWallNote: () => '', document: { activeElement: null },
     $: (id) => (id === 'repCaption' ? cap : { textContent: '', value: '' }),
     feltPanel: () => null, windWords: () => null, imp: () => false,   // no wind felt on the ground
+    noLineYet,
   };
   vm.createContext(sb);
   vm.runInContext(js.slice(js.indexOf('\nconst ageUnknown = '), js.indexOf(';\n', js.indexOf('\nconst ageUnknown = ')) + 2), sb);
+  vm.runInContext(bodyOf('marksOf'), sb);
   vm.runInContext(bodyOf('paintReplay'), sb);
   sb.ageUnknown = vm.runInContext('ageUnknown', sb);
   sb.paintReplay();

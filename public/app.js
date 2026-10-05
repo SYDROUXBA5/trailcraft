@@ -10,7 +10,7 @@ import {
   pathLen, cardinal, dist, dwellFold, bearing, project, fmtDist, fmtShort, fmtDur, fmtSpeed, fmtTemp, unitShort, fmtWeight, kgToShown, shownToKg, fmtCoord, scentField, plumePolygon, densify, timestamps, signedOffsets, meanSigned, sideOfDrift, sideAgreement, lineCorrect, departure, progressAlong, splitLine, smoothBearing, medianAbs, sideShares, approachToWind,
 } from './geo.js';
 import { stepPoints, contamTimed, trailFrom, walkedOfTrail, gpsTrouble, forecastNote } from './geo.js';
-import { packDraft, unpackDraft, draftAlive, draftStats } from './draft.js';
+import { packDraft, unpackDraft, draftAlive, draftStats, DRAFT_MAX_AGE } from './draft.js';
 import { handlerStats, teachesDrift, runAgeMin } from './store.js';
 import { plumePalette, stepPalette, windPalette, trackPalette, COLOUR_PRESETS, isHex, mix } from './colours.js';
 import { FLAT, buildTerrain, stability, regime, flowAt, normOf, rainRate, RAIN_SUMS_PER_HOUR, windAt,
@@ -32,13 +32,13 @@ import { sync, onSync, initSync, signInWithGoogle, signInWithApple, signOut, del
          startLive, pushLive, endLive, watchLive, resumeLive, dropLive } from './sync.js';
 import { trailModel, encodeShared, decodeShared, sharedUrl, toGpx, fileBase,
          detailSections, headline, notes, liveMeta, liveModel, cleanResult,
-         resultSentence, sessionFromModel, keptSession, peopleOf } from './share.js';
+         resultSentence, sessionFromModel, keptSession, peopleOf, parseGpx, blindSummary, GPX_MAX_BYTES } from './share.js';
 import { buildPdf, jpegSize } from './pdf.js';
 import { coachStep, initialCoach, coachPhrase, coachLine, TOL_OPTIONS, COACH_DEFAULTS,
          rankVoices, pickVoice, voiceQuality, voiceLabel, voiceRate, voiceName, voiceAccent, voiceHint, speaksThroughWebKit, speechLang, SAMPLE_CALL,
          fromNativeVoice } from './coach.js';
 import { DEBRIEF, FLAGS, NOTE_TAGS, blankDebrief, debriefDone, debriefLine, labelOf, ownRun, stickyDebrief,
-         unwalkedPlan, trailShown, ranBlind, tapsLeft } from './debrief.js';
+         unwalkedPlan, noLineYet, trailShown, ranBlind, tapsLeft } from './debrief.js';
 import { CONFIDENCE, stampCall, confidenceOf, firstCall, firstCallWasFind, calibration, calibrationLine, callVerdict, runsOf } from './call.js';
 import { isNative, watchBackground, canHaptic, haptic, watchHeading, shareFile,
          canSpeakNative, nativeVoices, speakNative, stopNativeSpeech, watchNativeVoices } from './native.js';
@@ -47,12 +47,13 @@ import { firebaseConfig } from './firebase-config.js';
 import { checkAuthFields, AUTH_MIN_PASSWORD } from './sync-core.js';
 import { createStore, migrateV1, TARGETS, ODOURS, targetById, targetText, verbs, uid,
          dogStats, ageBand, AGE_BANDS, LEVELS, levelById, dogAge, patchSession, runAgain,
-         planSession, canLayAgain, routeOf, planLine, askDelete, storageWords, APPROACH_V } from './store.js';
+         planSession, canLayAgain, routeOf, planLine, askDelete, storageWords, APPROACH_V,
+         blindSession, lineCheck, linePatch } from './store.js';
 import { searchWords, logRows, recentRuns, runAt, midnight, facets, filterRows, groupRows, foldersOf, inFolder, folderList, folderNamed,
          cleanFolderName, putMany, toggleFolder, renameIn, dropFrom, mergeFolders, emptyHeld, folderPatch } from './log.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-09-29b';
+const BUILD = '2026-10-05a';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true,
@@ -388,7 +389,7 @@ function go(id, { back = false } = {}) {
   /* A scan for one run's walked card ends when its screen does, however it
      is left. Left set by the top arrow, it refused every later Trail Card
      and could file a walked card under the wrong plan. */
-  if (id !== 'scrScan') scanWalkedFor = null;
+  if (id !== 'scrScan') { scanWalkedFor = null; scanLineFor = null; }
   if (id === 'scrHome') navStack.length = 0;
   else if (!back && currentScreen && currentScreen !== id && !TRANSIENT.has(currentScreen)) {
     navStack.push(currentScreen);
@@ -2871,6 +2872,8 @@ function paintCallBlock(s) {
   const d = s?.data?.debrief;
   let tail;
   if (!d?.outcome) tail = '. Write the debrief to find out if you were right.';
+  /* A blind trail with no line has nothing to say where the find was. */
+  else if (d.outcome === 'found' && noLineYet(s.data)) tail = '. The dog found it. Whether that was where you called it, and whether it counts towards your record, is known once the laid trail is added.';
   else if (d.outcome === 'found') {
     /* A find later in the run is not this call's find (firstCallWasFind). */
     const at = firstCallWasFind(s);
@@ -2952,7 +2955,7 @@ function paintDebrief() {
     + (feltChangeable(dbFor) ? `
     <div class="db-field felt-field">
       <span class="label">Wind on the ground</span>
-      <p class="why">Change it and the run is graded again in the wind you felt.</p>
+      <p class="why">${noLineYet(dbFor?.data) ? 'It is kept with the run, and the run is graded in it once the laid trail is added.' : 'Change it and the run is graded again in the wind you felt.'}</p>
       ${feltPickerHtml(dbFor, dbWind)}
     </div>` : '');
   $('dbNoteTags').innerHTML = NOTE_TAGS.map(t =>
@@ -2984,7 +2987,7 @@ function saveDebrief() {
         const el = $('dbFields').querySelector(`[data-field="${f.id}"]`);
         el?.classList.add('todo');
         el?.scrollIntoView({ block: 'center', behavior: 'smooth' });
-        return toast(wind ? `Wind saved, and the run graded again in it. ${f.label}?` : `${f.label}?`);
+        return toast(!wind ? `${f.label}?` : noLineYet(s.data) ? `Wind saved. ${f.label}?` : `Wind saved, and the run graded again in it. ${f.label}?`);
       }
     }
     return;
@@ -2995,8 +2998,11 @@ function saveDebrief() {
   const seen = cleanSeen(dbSeen);
   /* Found's claim is only where the debrief starts. When the handler says
      otherwise it is withdrawn, so the record never says found beside a
-     debrief that says missed. */
-  const unclaim = s.data?.found === true && d.outcome !== 'found' ? { found: false } : {};
+     debrief that says missed. On a blind trail it is also given: Done
+     tapped at the find and put right here would otherwise read "no find"
+     everywhere, and there the track's end is the only record of the find. */
+  const unclaim = s.data?.found === true && d.outcome !== 'found' ? { found: false }
+    : s.data?.lineLater && s.data.found !== true && d.outcome === 'found' ? { found: true } : {};
   const saved = guardSave(s, () => saveSession(s, { data: { debrief: d, ...unclaim,
     ...(seen ? { seen: { ...seen, at: Date.now() } } : {}) } }));
   snap();
@@ -3005,7 +3011,7 @@ function saveDebrief() {
   if (pendingSession?.id === s.id) pendingSession = s2;
   const wind = feltChangeable(s2) && !sameFelt(dbWind, s2.data.windFelt) ? dbWind : undefined;
   dbFor = null; dbDraft = null; dbWind = null;
-  toast(wind === undefined ? 'Saved with the run' : 'Saved. Grading it again in the wind you felt…');
+  toast(wind === undefined ? 'Saved with the run' : noLineYet(s2.data) ? 'Saved' : 'Saved. Grading it again in the wind you felt…');
   renderResult(s2);
   leaveForm('scrResult');
   if (wind !== undefined) regradeShown(s2, wind);
@@ -3019,6 +3025,7 @@ async function regradeShown(s, wind) {
   if (pendingSession?.id === now.id) pendingSession = now;
   if (currentScreen === 'scrResult' && (run.session ?? pendingSession)?.id === now.id) renderResult(now);
   const felt = windWords(now, { imperial: imp(), short: true });
+  if (noLineYet(now.data)) return toast(felt ? `Wind kept with the run. ${felt}` : 'The forecast wind is kept with the run');
   toast(felt ? `Graded again. ${felt}` : 'Graded again in the forecast wind');
 }
 
@@ -3068,6 +3075,8 @@ function openReplay(s) {
   if (targetById(s.targetId).kind === 'hide') {
     // A search has hides and no trail: no start, no plan, no plume to draw.
     setSrc('hides', pointsOf(s.data.hides || []));
+  } else if (noLineYet(s.data)) {
+    /* A blind trail with no line yet: the dog alone, and the find. */
   } else {
     setTrail(trailOf(s));
     setSrc('start', pointsOf([s.data.trail[0]]));
@@ -3084,12 +3093,23 @@ function openReplay(s) {
      to whichever it was. A run the phone never finished grading has no
      result for a debrief to sit beside, so it is only watched. */
   replay.back = currentScreen;
-  $('repDebrief').hidden = !s.data.result;
+  $('repDebrief').hidden = !s.data.result && !noLineYet(s.data);
   $('repSpeed').textContent = `${replay.speed}×`;
 
   go('scrReplay');
   fitTo(s.data.trail || s.data.hides || [], track, s.data.planTrail || []);
   paintReplay();
+}
+
+/** A run's marks as the map shows them. A blind trail's find has no trail
+    end to sit on, so with no line it is marked where the track ends, which
+    is where Found was tapped. */
+function marksOf(s) {
+  const wps = s?.data?.trackWaypoints || [];
+  const tr = s?.data?.track;
+  if (!noLineYet(s?.data) || s.data.found !== true || !(tr?.length)) return wps;
+  const end = tr[tr.length - 1];
+  return [...wps, { kind: 'Found', lat: end.lat, lon: end.lon, t: end.t }];
 }
 
 function closeReplay() {
@@ -3115,7 +3135,7 @@ function paintReplay() {
   setSrc('nose', pointsOf([sofar[sofar.length - 1]]));
 
   // Marks appear when they were pressed, not before.
-  setSrc('wps', pointsOf((s.data.trackWaypoints || []).filter(w => w.t <= at), 'kind'));
+  setSrc('wps', pointsOf(marksOf(s).filter(w => w.t <= at), 'kind'));
 
   /* The scent as it was. plumeFrame reads plume.clock, so setting it and
      painting one frame shows that instant instead of this one. */
@@ -3142,7 +3162,8 @@ function paintReplay() {
   /* A drawn line's clock is made up, so the replay does not age it either. */
   /* The wind the scent is drawn in, when it was felt rather than forecast. */
   const felt = windWords(s, { imperial: imp(), short: true });
-  $('repCaption').textContent = (unwalkedPlan(s.data) ? `${laid} age ${ageUnknown(s.data)}` : `${laid} ${ageMin} min old here`)
+  $('repCaption').textContent = (noLineYet(s.data) ? 'Blind trail, no laid trail added yet'
+    : unwalkedPlan(s.data) ? `${laid} age ${ageUnknown(s.data)}` : `${laid} ${ageMin} min old here`)
     + (off == null ? '' : ` · dog ${fmtM(Math.abs(off))} ${off >= 0 ? 'right' : 'left'} of the line`)
     + (felt ? ` · ${felt}` : '')
     + (plume.bandWalls ? '.' + bandWallNote() : '');
@@ -4360,6 +4381,7 @@ function paintWait() {
 
 /* ── The walked card, back on the handler’s phone ── */
 let scanWalkedFor = null;    // session id waiting for its walked card
+let scanLineFor = null;      // a blind trail's session id waiting for its laid line
 
 /** A walked card, to the plan it belongs to (walkedPlanFor, card.js). */
 function takeWalked(card, asked) {
@@ -4418,10 +4440,98 @@ async function applyWalked(sessionId, card) {
     snap();
     s2 = db.sessions().find(x => x.id === s.id);
   }
+  if (gradedElsewhere('Walked trail added and the run graded. Open it from the log.')) return true;
   run.session = s2;
   renderResult(s2);
   go('scrResult');
   return true;
+}
+
+/** Grading after a card or a file can take seconds on a poor signal, and
+    the handler may have moved on meanwhile — even started the next dog. The
+    grade is kept either way; only the screen is not taken over, and above
+    all run.session is not swapped under a recording, or Found would save
+    the new dog's track onto the old run. */
+function gradedElsewhere(said = 'Laid trail added and the run graded. Open it from the log.') {
+  if (!rec.on && (currentScreen === 'scrResult' || currentScreen === 'scrScan')) return false;
+  toast(said);
+  return true;
+}
+
+/* ── A blind trail's laid line, added afterwards ──────────────────────
+   The run was recorded with no line (Blind trail). The layer's Trail Card,
+   or the GPX file from their phone or watch, becomes the session's trail,
+   with its own laid time, and the run is graded against it then, as a
+   walked card grades a plan (applyWalked): for the dog that ran it, and
+   banked only when teachesDrift allows. lineCheck (store.js) says what to
+   refuse or ask first, and linePatch what the line puts on the session. */
+async function applyLine(sessionId, line) {
+  const s = db.sessions().find(x => x.id === sessionId);
+  if (!s || !ownRun(s)) return false;
+  if (!noLineYet(s.data)) { toast('That run has its laid trail already'); return false; }
+  /* A blind trail whose run was never recorded (the app was closed before a
+     fix) has nothing to grade, and a line on it would turn it into a laid
+     trail nobody ran. */
+  if (!(s.data.track?.length > 1)) { toast('That blind trail has no run recorded, so there is nothing to grade.'); return false; }
+  const check = lineCheck(s.data, line);
+  if (check.refuse) { toast(check.refuse); return false; }
+  for (const q of check.ask) if (!confirm(q)) return false;
+
+  const patch = linePatch(s, line, Date.now());
+  /* The layer's watch left running at the hide, or on the walk back, is
+     common: what it recorded after the dog set off is left out, and said. */
+  const cutWords = check.cut > 0 ? ' Only the part recorded before the dog set off is used.' : '';
+  toast((line.via === 'gpx' ? 'Laid trail added from the file. Grading the run…' : `Laid trail added from ${line.from || 'the layer'}’s card. Grading the run…`) + cutWords);
+  /* Graded on the lined copy in memory first, and the line saved with its
+     grade in one go. Saved apart, a grade that failed or was cut short left
+     a run with a line and no result: no longer waiting for its line, so
+     nothing could ever grade it. Graded for the dog that ran it, and banked
+     only when teachesDrift allows, as a walked card grades a plan. */
+  let graded;
+  try {
+    const lined = patchSession(s, patch);
+    const { runWeather, windFelt, ...result } = await computeResult(lined, lined.data.track, lined.data.trackWaypoints || [],
+      lined.data.trackStarted, { bank: teachesDrift(lined.data) });
+    graded = { summary: result.sentence, data: { result, ...(runWeather ? { runWeather } : {}),
+      ...(lined.data.windFelt !== undefined ? { windFelt } : {}) } };
+  } catch (e) {
+    toast(e?.name === 'SaveError' ? 'The phone could not save the grade, so the laid trail was not added. Free some space and try again.'
+      : 'Grading the run did not work, so the laid trail was not added. Try again.');
+    return false;
+  }
+  /* Read again: a debrief may have been saved while it graded. */
+  const now = sessionById(s.id);
+  if (!now || !noLineYet(now.data)) { toast('That run has its laid trail already'); return false; }
+  const whole = { startedAt: patch.startedAt, summary: graded.summary, data: { ...patch.data, ...graded.data } };
+  const saved = guardSave(patchSession(now, whole), () => saveSession(now, whole));
+  snap();
+  /* The laid time's weather, for the trail's own record, lands when it can.
+     The grade above read the run's own forecast, kept with the run. */
+  if (patch.data.lineAdded.timed) {
+    const p0 = patch.data.trail[0];
+    fetchWeather(p0.lat, p0.lon, patch.startedAt).then(wx => keepWeather(s.id, wx)).catch(() => { /* offline: joins later */ });
+  }
+  if (gradedElsewhere()) return true;
+  const s2 = db.sessions().find(x => x.id === s.id) ?? saved ?? patchSession(now, whole);
+  run.session = s2;
+  renderResult(s2);
+  go('scrResult');
+  return true;
+}
+
+/** A GPX file picked for a blind trail's line: read, checked, and put on
+    the run. Anything that is not a usable track is said plainly. */
+async function takeGpxFile(sessionId, file) {
+  if (!file || !sessionId) return;
+  if (file.size > GPX_MAX_BYTES) return toast('That file is too big to be one trail.');
+  let line;
+  try {
+    const got = parseGpx(await file.text());
+    line = { points: got.points, timed: got.timed, via: 'gpx', from: got.name || file.name || '' };
+  } catch (e) {
+    return toast(e?.plain ? e.message : 'Could not read that file.');
+  }
+  await applyLine(sessionId, line);
 }
 
 /* ── The wind on the ground ───────────────────────────────────────────
@@ -4467,7 +4577,18 @@ function setWindFelt(session, felt) {
     grades one again (applyWalked), and saved with it. */
 async function regradeInWind(id, wf) {
   const s = db.sessions().find(x => x.id === id);
-  if (!s || !ownRun(s) || !(s.data.track?.length > 1) || !s.data.result) return null;
+  if (!s || !ownRun(s) || !(s.data.track?.length > 1)) return null;
+  /* A blind trail with no line has no grade to redo: the wind is kept with
+     the run, and its grade is made in it when the line is added. */
+  if (noLineYet(s.data)) {
+    const patch = { data: { windFelt: wf } };
+    const saved = guardSave(patchSession(s, patch), () => saveSession(s, patch));
+    snap();
+    const now = saved ?? patchSession(s, patch);
+    if (run.session?.id === id) run.session = now;
+    return now;
+  }
+  if (!s.data.result) return null;
   const s2 = patchSession(s, { data: { windFelt: wf } });
   /* A search is timed from when its recording began, which only its first
      grade knew. That time is kept; only the wind is new. */
@@ -4497,7 +4618,7 @@ async function regradeInWind(id, wf) {
     here (debrief.js ownRun), including a run on a trail that came as a Trail
     Card or a link. A whole run kept from someone else's link stays as they
     sent it. */
-const feltChangeable = (s) => !!s && ownRun(s) && !!s.data?.result && s.data?.track?.length > 1;
+const feltChangeable = (s) => !!s && ownRun(s) && (!!s.data?.result || noLineYet(s.data)) && s.data?.track?.length > 1;
 
 /** A session as its felt wind is read and set: the run screen's, before
     Stop has given it a start of its own, set against the run's start, as
@@ -4618,8 +4739,13 @@ function paintPick() {
   const v = verbs(t);
   $('pickTitle').textContent = v.run;
   $('pickLabel').textContent = t.kind === 'hide' ? 'Set on this phone' : 'Laid on this phone';
+  /* A blind trail is a person trail run with no line on this phone. A hide
+     search always has its hides here, so it has no such thing. */
+  $('btnBlind').hidden = t.kind !== 'person';
+  /* Nor is a blind trail one to pick: one with no run is only what is left
+     of a run that never got going, and has no line to run again. */
   const candidates = S.sessions
-    .filter(s => targetById(s.targetId).kind === t.kind && !s.data.track)
+    .filter(s => targetById(s.targetId).kind === t.kind && !s.data.track && !noLineYet(s.data))
     .slice(0, 12);
   $('pickList').innerHTML = candidates.length ? candidates.map(s => {
     const what = t.kind === 'hide'
@@ -4633,7 +4759,26 @@ function paintPick() {
       <div class="meta"><span>${fmtWhen(s.startedAt)}</span><span>${what}</span></div>
       <div class="story">${esc(targetText(s))} · ${age}</div>
     </div>`;
-  }).join('') : `<div class="card"><p class="body muted">Nothing waiting. ${t.kind === 'hide' ? 'Set a hide first.' : 'Lay a trail first, or scan a card.'}</p></div>`;
+  }).join('') : `<div class="card"><p class="body muted">Nothing waiting. ${t.kind === 'hide' ? 'Set a hide first.' : 'Lay a trail first, scan a card, or run a blind trail.'}</p></div>`;
+}
+
+/** A blind trail: no trail on this phone, so the run starts where the
+    handler stands and the dog is recorded until Found or Done. The session
+    is saved before the run starts, as a run's copy is, so a recording cut
+    short by the app dying still has a session to come back to. */
+function startBlind() {
+  if (rec.on) return toast('A run is already going. Finish that one first.');
+  if (!S.dog) return toast('Add a dog first');
+  /* Asked before the session is made: startRun would stop for the waiting
+     recording too, but after this run's session was saved, and nothing would
+     take it away again. */
+  if (recordingWaits()) return;
+  const s = blindSession({ id: uid(), handlerId: S.handler.id, dogId: S.dog.id, now: Date.now() });
+  /* A phone too full to keep it still runs it, as a run's copy does: Stop
+     saves it whole, and the banner has already said why it may not. */
+  guardSave(s, () => db.addSession(s));
+  snap();
+  startRun(db.sessions().find(x => x.id === s.id) ?? s);
 }
 
 const ageWord = (ms) => {
@@ -4646,7 +4791,9 @@ const ageWord = (ms) => {
     walked card is scanned. A drawn Trail Card has no walked card coming. */
 const ageUnknown = (d, short = false) => (d?.plan
   ? (short ? 'not known yet' : 'known once the walk is scanned')
-  : (short ? 'not known' : 'not known — drawn, not walked'));
+  : d?.lineAdded && d.lineAdded.timed === false
+    ? (short ? 'not known' : 'not known — the line had no times')
+    : (short ? 'not known' : 'not known — drawn, not walked'));
 
 /* ── Run / Search ─────────────────────────────────────────────────── */
 /* The run screen shows the wind at the run's start, the moment the dog set
@@ -4664,6 +4811,10 @@ async function startRun(s) {
      would paint the answer onto a blind run. */
   plumeStop();
   const t = targetById(s.targetId);
+  /* A blind trail's session holds its one run, and has no line to run
+     again: a second dog on the same trail starts a blind trail of its own. */
+  const blindTrail = noLineYet(s.data);
+  if (blindTrail && s.data.track) return toast('A blind trail has no laid trail to run again. Start a new blind trail.');
   /* One session holds one run. Running a trail or hide set that has a run
      already (again from the share screen, or with the next dog) records into
      a copy of it, and the run that is there is left exactly as it was. The
@@ -4680,6 +4831,9 @@ async function startRun(s) {
      short keeps nothing, its wind included, but the choice may still be on
      this copy of the trail in memory: whatever was not saved goes. */
   if (!run.copy && s.data && !had.data?.windFelt) delete s.data.windFelt;
+  /* A blind trail's session was made for this run alone, so a run that never
+     gets going, or ends too short to keep, takes it away again (dropRunCopy). */
+  if (blindTrail) run.copy = true;
   run.session = s;
   run.revealed = false;
   /* Once the answer has been seen it stays seen — including on a second run
@@ -4703,7 +4857,10 @@ async function startRun(s) {
   coachStart(s);
   if (storageWords(db.usage().bytes, STORAGE_MB).nearly) toast('Storage nearly full. Delete old sessions from the session list in Settings.');
 
-  if (t.kind === 'person') {
+  if (blindTrail) {
+    /* No start to flag: the run starts where the handler stands, and the
+       map follows them from the first fix (startFollowing below). */
+  } else if (t.kind === 'person') {
     // Only the start of the trail. The line itself stays hidden: run blind.
     setSrc('start', pointsOf([s.data.trail[0]]));
     fitTo([s.data.trail[0]]);
@@ -4719,6 +4876,8 @@ async function startRun(s) {
       droppedAt: rec.droppedAt, blocked: rec.blocked });
     if (trouble) return gpsTroubleText(trouble);
     const dogName = S.dog?.name ?? 'Dog';
+    /* A blind trail's laid time is not known here, so it has no age to say. */
+    if (blindTrail) return `${dogName} · ${fmtDur(Date.now() - rec.started)} · blind trail`;
     /* The same made-up clock the result screen refuses to show. */
     const age = unwalkedPlan(s.data) ? `age ${ageUnknown(s.data, true)}` : `${ageWord(Date.now() - s.startedAt)} old`;
     const base = `${dogName} · ${fmtDur(Date.now() - rec.started)} · ${t.kind === 'person' ? 'trail' : 'hide'} ${age}`;
@@ -4731,7 +4890,8 @@ async function startRun(s) {
      keeps Reveal hides and Stop, because Found would claim every hide had
      been found. */
   const onTrail = t.kind === 'person';
-  $('btnShowTrail').hidden = !onTrail;
+  /* A blind trail has no trail on this phone to show. */
+  $('btnShowTrail').hidden = !onTrail || blindTrail;
   $('btnRunDone').hidden = !onTrail;
   $('btnReveal').hidden = onTrail;
   $('btnRunStop').textContent = onTrail ? 'Found' : 'Stop';
@@ -4751,7 +4911,8 @@ async function startRun(s) {
   $('runHudText').textContent = hudText();
   toast(isNative() && coach.on
     ? (speaksInTheDark() ? 'Coach on. Its voice carries on with the phone locked' : 'Coach on. Its calls only play while the screen is on')
-    : t.kind === 'person' ? 'Running blind — the trail is hidden' : 'Searching');
+    : blindTrail ? 'Blind trail. Tap Found at the find'
+      : t.kind === 'person' ? 'Running blind — the trail is hidden' : 'Searching');
 }
 
 function toggleReveal() {
@@ -4759,6 +4920,8 @@ function toggleReveal() {
      this screen: the result has it, drawn in full. */
   if (run.stopping) return;
   const s = run.session;
+  /* Nothing to show on a blind trail; its button is hidden. */
+  if (!s || noLineYet(s.data)) return;
   run.revealed = !run.revealed;
   /* Hiding it again does not unsee it. Kept with the run, so the record says
      when the answer was shown and which calls came before it. */
@@ -4820,6 +4983,27 @@ function addWaypoint(kind) {
 
 /* A copy made for a run that never got going is not a session: nothing was
    recorded, and the trail it copied is still there to run. */
+/** A blind trail's session is saved before the dog sets off, so a run that
+    never got recorded (the app closed before a fix, or the recording thrown
+    away) leaves one with nothing in it: no line, no track, nothing to add a
+    line to. It is taken away, by id when the recording that named it goes,
+    and in a sweep for those whose recording never got far enough to be
+    offered back. One still within a recording's lifetime is left: it may be
+    another phone's run, still going. */
+function dropEmptyBlind(id) {
+  const s = id ? sessionById(id) : null;
+  if (!s || !noLineYet(s.data) || s.data.track) return false;
+  if (rec.on && run.session?.id === s.id) return false;
+  try { db.deleteSession(s.id); return true; } catch { return false; /* a phone too full to write even that keeps it */ }
+}
+function sweepEmptyBlind(now = Date.now()) {
+  let n = 0;
+  for (const s of db.sessions()) {
+    if (noLineYet(s.data) && !s.data.track && Number.isFinite(s.startedAt) && now - s.startedAt > DRAFT_MAX_AGE && dropEmptyBlind(s.id)) n++;
+  }
+  return n;
+}
+
 function dropRunCopy() {
   if (!run.copy) return;
   run.copy = false;
@@ -4895,18 +5079,28 @@ async function finishRun() {
      session yet, so it is read from here. */
   const bank = teachesDrift({ ...s.data, coach: coachRecord, revealedAt: run.revealedAt || s.data.revealedAt || null });
   const dogId = S.dog?.id ?? null;          // the run being recorded now is the picked dog's
-  const { runWeather: fetched, windFelt, ...result } = await computeResult({ ...s, dogId }, rec.pts, rec.wps, run.startedAt, { bank });
+  /* A blind trail with no line yet has nothing to grade against: it keeps
+     the walk, the marks, the find and its own forecast, and is graded when
+     the layer's line is added (applyLine). No result is made up for it. */
+  const blindTrail = noLineYet(s.data);
+  const graded = blindTrail ? null : await computeResult({ ...s, dogId }, rec.pts, rec.wps, run.startedAt, { bank });
+  const { runWeather: fetched, windFelt, ...rest } = graded
+    ?? { runWeather: await blindRunWeather(s, rec.pts, run.startedAt), windFelt: feltOf(s.data) };
+  const result = graded ? rest : null;
   /* The run's own forecast: fetched by the grade, or taken on the run screen
      from the air here when the trail had none (adoptHere), still marked as
      only standing in. */
   const runWeather = fetched ?? s.data.runWeather ?? null;
   liveEnd(result);
+  const summary = blindTrail
+    ? blindSummary({ track: rec.pts, trackWaypoints: rec.wps, ...found }, S.dogs.find(d => d.id === dogId)?.name, unitsForText()).sentence
+    : result.sentence;
   const patch = {
     dogId,
     handlerId: S.handler.id,
-    summary: result.sentence,
+    summary,
     data: { track: rec.pts, trackStarted: run.startedAt, trackWaypoints: rec.wps,
-      revealedAt: run.revealedAt || s.data.revealedAt || null, result, coach: coachRecord,
+      revealedAt: run.revealedAt || s.data.revealedAt || null, ...(result ? { result } : {}), coach: coachRecord,
       ...(runWeather ? { runWeather } : {}), ...(had ? { windFelt } : {}), ...found },
   };
   /* If the phone refuses the save, the run stays in memory and on screen:
@@ -4918,6 +5112,18 @@ async function finishRun() {
   if (saved) dropDraft();   // graded and kept; a refused save keeps its draft
   renderResult(run.session);
   go('scrResult');
+}
+
+/** A blind trail's own forecast, kept with its run so its wind can be shown
+    now and the run graded in it once its line is added. Air taken here on
+    the run screen (adoptHere) only stood in, so it is asked for again for
+    the run's place and time, as computeResult asks for a graded run's.
+    Null when the session's own already reaches the run, or none came. */
+async function blindRunWeather(s, track, startedAt) {
+  const { wx, exact } = windAt({ ...s, data: { ...s.data, trackStarted: startedAt } }, startedAt);
+  if ((exact && !wx?.standIn) || !track?.length) return null;
+  try { return await fetchWeather(track[0].lat, track[0].lon, startedAt, { within: WX_WAIT }); }
+  catch { return null; }
 }
 
 /* ── The result: one sentence first, numbers second ───────────────── */
@@ -5142,7 +5348,11 @@ function renderResult(s) {
   /* A run kept from someone else's link before links were checked still holds
      whatever the link carried. It is read through the same cleaning a link
      gets now, so a field of the wrong type cannot stop the screen drawing. */
-  const r = s.data.imported ? (cleanResult(s.data.result) ?? {}) : s.data.result;
+  /* A blind trail with no line yet has no result: its card is drawn by
+     paintBlindResult below, over a grid with nothing in it. */
+  const awaiting = noLineYet(s.data);
+  /* And a run with neither (a line added to one never graded) still draws. */
+  const r = (awaiting ? {} : s.data.imported ? (cleanResult(s.data.result) ?? {}) : s.data.result) ?? {};
   const d = peopleFor(s).dog;
   $('resWho').textContent = `${d?.name ?? ''} · ${fmtWhen(s.startedAt)}`;
   /* Said from the numbers in today's units and words: a result saved before
@@ -5199,6 +5409,15 @@ function renderResult(s) {
   $('resModelLabel').hidden = !$('resModel').textContent && !r.stabilityPlain && !felt;
   $('resStability').textContent = r.stabilityPlain ?? '';
   $('resCoach').textContent = coachWords(s.data.coach, s.data);
+  $('resModelLabel').textContent = 'Modelled';
+  /* A blind trail with no line yet has no wind side or scent band to caveat. */
+  $('resCaveat').hidden = awaiting;
+  if (awaiting) paintBlindResult(s, d);
+  /* The way to add the line, on a run of this phone's own only: one kept
+     from someone else's link is theirs, as they sent it. */
+  $('addLineBox').hidden = !(awaiting && ownRun(s) && s.data.track?.length > 1);
+  $('addLineHow').hidden = true;
+  $('btnAddLine').setAttribute('aria-expanded', 'false');
 
   /* A plan-graded run says so. Grading a dog against a line drawn with a
      finger is a sketch of a verdict, and it is not allowed to look like the
@@ -5209,8 +5428,8 @@ function renderResult(s) {
   $('btnLayAgain').hidden = !canLayAgain(s);
   /* A trail laid on an earlier one's route says whose, so two dogs' runs on
      the same ground can be found and set side by side. */
-  $('resRoute').textContent = s.data.fromSession ? `${sameRouteWords(s.data.fromSession)}.` : '';
-  $('resRoute').hidden = !s.data.fromSession;
+  $('resRoute').textContent = s.data.fromSession ? `${sameRouteWords(s.data.fromSession)}.` : lineAddedWords(s.data);
+  $('resRoute').hidden = !$('resRoute').textContent;
   paintCallBlock(s);
   paintDebriefBlock(s);
   closeFolderForm();
@@ -5235,6 +5454,42 @@ function renderResult(s) {
     }
   }
 }
+/** A blind trail's card while it has no line: what the phone recorded, said
+    plainly, and nothing graded. The dog's route and the find are on Show on
+    map and in the replay. */
+function paintBlindResult(s, d) {
+  const sum = blindSummary(s.data, d?.name, unitsForText());
+  $('resSentence').textContent = sum.sentence;
+  const cell = (b, i, sub = '') =>
+    `<div><b>${esc(b)}</b><i>${esc(i)}</i>${sub ? `<span class="sub-line">${esc(sub)}</span>` : ''}</div>`;
+  $('resGrid').innerHTML =
+    cell(sum.ms != null ? fmtDur(sum.ms) : '—', 'run') +
+    cell(fmtKm(sum.metres), 'distance') +
+    cell(sum.found ? 'At the find' : 'Done', 'where the track ends', sum.found ? 'the dog found it there' : 'no find') +
+    cell(String(sum.marks), sum.marks === 1 ? 'mark' : 'marks');
+  /* The wind during the run, as the forecast or the handler gave it. Nothing
+     is modelled: there is no trail for the scent to have come off. */
+  const u = { imperial: imp() };
+  const felt = windWords(s, u);
+  const said = forecastSaid(s, u);
+  $('resModel').textContent = said ? `Forecast wind during the run: ${said}.` : 'No weather was recorded for this run.';
+  $('resWind').textContent = felt ? `${felt}.` : feltChangeable(s) ? 'Felt a different wind on the ground? Say so in the debrief. It is kept with the run.' : '';
+  $('resWind').hidden = !$('resWind').textContent;
+  $('resWind').classList.toggle('muted', !felt);
+  $('resStability').textContent = '';
+  $('resModelLabel').textContent = 'Wind';
+  $('resModelLabel').hidden = false;
+}
+
+/** Where a blind trail's line came from, once it is added. */
+function lineAddedWords(data) {
+  const a = data?.lineAdded;
+  if (!a || typeof a !== 'object') return '';
+  const what = a.via === 'gpx' ? `a GPX file${a.from ? ` (${a.from})` : ''}` : `${a.from ? `${a.from}’s` : 'the layer’s'} Trail Card`;
+  return `Blind trail. The laid trail was added afterwards, from ${what}${Number.isFinite(a.at) ? `, ${fmtWhen(a.at)}` : ''}.`
+    + (a.timed === false ? ' It had no times on it, so the trail’s age is not known and nothing was banked to the dog’s drift record.' : '');
+}
+
 /** How far the layer's walk sat from the line you drew, in metres: the
     median distance, and the worst single point. The same measure used to
     grade the dog against the trail — pointed at the layer instead. */
@@ -5266,7 +5521,10 @@ function showOnMap(from = 'scrResult') {
      wind it was laid in. The panel, the arrow and the streaks take the same
      moment from airMomentFor once go() below puts the screen up. */
   const wx = Number.isFinite(s.data.trackStarted) ? windAt(s, s.data.trackStarted).wx : laidWind(s);
-  if (t.kind === 'person') {
+  const noLine = noLineYet(s.data);
+  if (noLine) {
+    /* A blind trail with no line yet: the dog's route and the find, below. */
+  } else if (t.kind === 'person') {
     setTrail(s.data.trail);
     setSrc('start', pointsOf([s.data.trail[0]]));
     if (s.data.planTrail?.length > 1) setSrc('plan', lineOf(s.data.planTrail));
@@ -5292,11 +5550,13 @@ function showOnMap(from = 'scrResult') {
   }
   if (s.data.track) {
     setDogTrack(s.data.track);
-    setSrc('wps', pointsOf(s.data.trackWaypoints || [], 'kind'));
+    setSrc('wps', pointsOf(marksOf(s), 'kind'));
   }
   fitTo(s.data.trail || s.data.hides || [], s.data.track || [], s.data.planTrail || []);
   const planShown = s.data.planTrail?.length > 1;
-  $('showMapText').textContent = planShown
+  $('showMapText').textContent = noLine
+    ? (s.data.found === true ? 'The dog’s route, ending at the find. No laid trail added yet.' : 'The dog’s route. No laid trail added yet.')
+    : planShown
     ? 'Dashed blue: your plan. Footprints: the real walk, and what the scent is modelled from.'
     : t.kind === 'hide'
     ? 'Hides and the search track'
@@ -5466,6 +5726,8 @@ function peopleFor(s) {
     units, or the summary it was saved with when it has no result to say.
     With no dog's name to hand, the saved words are kept (resultSentence). */
 function storyOf(s) {
+  /* Said from the run as it stands: a debrief can take back Found's claim. */
+  if (noLineYet(s.data)) return blindSummary(s.data, peopleFor(s).dog?.name, unitsForText()).sentence;
   return (s.data?.result && resultSentence(s.data.result, peopleFor(s).dog?.name, unitsForText(), s.summary)) || s.summary || '';
 }
 const unitsForText = () => ({ imperial: imp(), fahrenheit: fahr(), coord: settings.coordFormat, when: fmtWhen });
@@ -5481,12 +5743,18 @@ function openShareOut(s, from) {
     : m.kind === 'search' ? 'The hides' : 'The laid trail';
   $('shareOutMeta').textContent = metaLine(m);
   $('shareLinkOut').hidden = true;
+  /* A link is a trail and a run, and the page it opens refuses a trail with
+     no line. A blind trail's run goes as a GPX file or a report until its
+     laid trail is added, and the screen says so. */
+  $('btnSendLink').hidden = m.lineLater;
+  $('shareOutNoLink').hidden = !m.lineLater;
   go('scrShareOut');
 }
 
 /** The trail as a link: the phone's share sheet if it has one, else the
     clipboard. Sending is the user's tap in the sheet, never this code's. */
 async function sendLink(m) {
+  if (m.lineLater) return toast('Add the laid trail first. Until then, send it as a GPX file or a report.');
   let code;
   try { code = await encodeShared(m); } catch (e) { return toast(e.message); }
   const url = sharedUrl(code, SHARE_BASE);
@@ -6290,7 +6558,9 @@ function closeCoachSheet() {
 function openSession(id) {
   const s = db.sessions().find(x => x.id === id);
   if (!s) return;
-  if (s.data.result) {
+  /* A blind trail's run has no result until its line is added, and its card
+     is where the line is added: it has no laid trail for the share screen. */
+  if (s.data.result || noLineYet(s.data)) {
     run.session = s;
     renderResult(s);
     go('scrResult');
@@ -6621,7 +6891,10 @@ function openSessionList({ deleting = false } = {}) {
 function replaySession(id) {
   const s = db.sessions().find(x => x.id === id);
   if (!s) return;
-  if (s.data.result) run.session = s; else pendingSession = s;
+  /* A blind trail with no line opens on its result card too (openSession),
+     and the debrief from the replay lands there: run.session has to be this
+     run, or Add the laid trail and Share on that card act on the last one. */
+  if (s.data.result || noLineYet(s.data)) run.session = s; else pendingSession = s;
   openReplay(s);
 }
 
@@ -6736,10 +7009,11 @@ let scanCameFrom = 'scrPick';
 
 /* What the scan is for is set by every opening, so no scan inherits the
    last one's purpose. */
-async function openScan(from = 'scrPick', { walkedFor = null } = {}) {
+async function openScan(from = 'scrPick', { walkedFor = null, lineFor = null } = {}) {
   scanCameFrom = from;
   go('scrScan');
   scanWalkedFor = walkedFor;
+  scanLineFor = lineFor;
   const gen = ++scan.gen;
   $('scanState').textContent = 'Point the camera at a Trail Card.';
   if (!window.jsQR) {
@@ -6817,6 +7091,26 @@ async function handleCard(data) {
     return false;
   }
 
+  /* A blind trail's laid line: the layer's Trail Card, or the walked card of
+     a plan they walked. Asked for from the run's own card, so it goes to that
+     run and nowhere else. A plan card is only corners and a guessed clock. */
+  if (scanLineFor) {
+    if (card.kind === 1) {
+      $('scanState').textContent = 'That is a plan, not the laid trail. Still scanning…';
+      return false;
+    }
+    const id = scanLineFor;
+    scanLineFor = null;
+    stopScan();
+    const used = await applyLine(id, { points: card.points, timed: !card.drawn, via: 'card', from: card.from || '',
+      waypoints: card.waypoints || [] });
+    /* Not used (refused, or a question answered no): back to the run's card,
+       not a scanner whose camera has stopped — unless the handler has
+       moved on while it graded. */
+    if (!used && currentScreen === 'scrScan') leaveForm('scrResult');
+    return true;
+  }
+
   /* A walked trail belongs to a plan, and it can arrive either way: from the
      button on the result card, or from the phone's camera with no context at
      all. Find the plan it belongs to rather than quietly filing it as a new
@@ -6876,11 +7170,13 @@ const fmtHours = (sec) => {
     age when the layer's walked card is scanned. A drawn Trail Card has no
     walked card coming, and its runs were told to wait for one all the same. */
 function unwalkedNote(st) {
-  const cards = st.drawnCards || 0, plans = (st.unwalked || 0) - cards;
+  const cards = st.drawnCards || 0, files = st.untimedLines || 0, plans = (st.unwalked || 0) - cards - files;
   const runs = (n) => `${n} run${n === 1 ? '' : 's'}`;
   return [
     plans > 0 ? `${runs(plans)} graded against a drawn plan — no age until the layer’s walked card is scanned.` : '',
     cards > 0 ? `${runs(cards)} on a Trail Card drawn on the map — nobody walked it, so ${cards === 1 ? 'it has' : 'they have'} no age.` : '',
+    files > 0 ? `${runs(files)} on a laid trail added from a file with no times — no age.` : '',
+    st.noLine > 0 ? `${st.noLine === 1 ? '1 blind trail' : `${st.noLine} blind trails`} with no laid trail added yet — no age or grade until it is.` : '',
   ].filter(Boolean).map(line => `<p class="body small muted">${line}</p>`).join('');
 }
 function ringHtml(st) {
@@ -7726,6 +8022,22 @@ function wire() {
     openScan('scrResult', { walkedFor: run.session.id });
   });
   $('btnPickBack').addEventListener('click', () => go('scrHome'));
+  $('btnBlind').addEventListener('click', startBlind);
+  /* A blind trail's laid line, from its card on the result screen. */
+  $('btnAddLine').addEventListener('click', () => {
+    const open = $('addLineHow').hidden;
+    $('addLineHow').hidden = !open;
+    $('btnAddLine').setAttribute('aria-expanded', String(open));
+  });
+  $('btnLineScan').addEventListener('click', () => {
+    if (run.session && noLineYet(run.session.data)) openScan('scrResult', { lineFor: run.session.id });
+  });
+  $('btnLineGpx').addEventListener('click', () => $('lineFile').click());
+  $('lineFile').addEventListener('change', (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (run.session && noLineYet(run.session.data)) takeGpxFile(run.session.id, file);
+  });
   $('btnScanHome').addEventListener('click', () => openScan('scrHome'));
   $('btnScanBack').addEventListener('click', () => {
     stopScan();
@@ -8058,7 +8370,7 @@ function wire() {
   $('repDebrief').addEventListener('click', () => {
     const s = replay.s, back = replay.back;
     closeReplay();
-    if (back && back !== 'scrResult' && s?.data?.result) { renderResult(s); go('scrResult'); }
+    if (back && back !== 'scrResult' && (s?.data?.result || noLineYet(s?.data))) { run.session = s; renderResult(s); go('scrResult'); }
     openDebrief(s);
   });
   $('dbSave').addEventListener('click', saveDebrief);
@@ -8374,7 +8686,10 @@ let recoveryLater = false;   // "not now" to a recovered walk: ask again at the 
 
 function offerRecovery() {
   const d = (() => { try { return unpackDraft(db.draft.read()); } catch { return null; } })();
-  if (!draftAlive(d)) { if (d) dropDraft(); return false; }
+  if (!draftAlive(d)) {
+    if (d) { dropDraft(); if (d.kind === 'run') { dropEmptyBlind(d.sessionId); snap(); } }
+    return false;
+  }
   recovering = d;
   const st = draftStats(d);
   $('recoverWhat').textContent = d.kind === 'hide'
@@ -8474,8 +8789,12 @@ function recoverDrop() {
   const st = draftStats(recovering);
   const what = recovering?.kind === 'hide' ? `${st.hides} hides` : fmtKm(st?.metres ?? 0);
   if (!confirm(`Throw away ${what}? It cannot be got back.`)) return;
+  const thrown = recovering?.kind === 'run' ? recovering.sessionId : null;
   recovering = null;
   dropDraft();
+  /* A blind trail's session held nothing but this run. */
+  dropEmptyBlind(thrown);
+  snap();
   boot();
 }
 
@@ -8508,6 +8827,7 @@ function boot() {
   if (!S.handler) return openHandlerForm({ firstLaunch: true });
   if (!S.team.length && !S.dogs.length && !S.layerOnly) return openDogForm({ firstLaunch: true });
   if (!S.tutorialDone) return openTutorial(false);
+  try { if (sweepEmptyBlind()) snap(); } catch { /* tidying, never in the way */ }
   go('scrHome');
   importFromLink();
 }

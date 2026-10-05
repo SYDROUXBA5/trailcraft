@@ -24,7 +24,7 @@ import {
 import { packDraft, unpackDraft } from '../public/draft.js';
 import { trailModel, encodeShared, decodeShared, sessionFromModel, keptSession, resultSentence, liveMeta, detailSections } from '../public/share.js';
 import { mergeOne, RUN_FIELDS } from '../public/sync-core.js';
-import { unwalkedPlan, ownRun, DEBRIEF, blankDebrief, debriefDone } from '../public/debrief.js';
+import { unwalkedPlan, ownRun, DEBRIEF, blankDebrief, debriefDone, noLineYet } from '../public/debrief.js';
 import { predictedOffsets } from '../public/sim.js';
 import { changed, applyPreset, resetParams } from '../public/params.js';
 import {
@@ -314,7 +314,7 @@ const searchTrack = Array.from({ length: 12 }, (_, i) => ({ lat: 51.2 + i * 1e-4
 function app() {
   const db = createStore(fakeBackend());
   const drawn = { plume: [], coach: [], panel: [], followed: [], field: [] };
-  const sb = {
+  const sb = { noLineYet,
     db, S: { dogs: [{ id: 'bo', name: 'Bo', lineM: 0 }] }, BUILD: 'test',
     rec: { kind: null, on: false, started: RUN }, run: { session: null, stopping: false, revealed: false, startedAt: RUN },
     currentScreen: 'scrResult', coach: { trail: null, field: [] },
@@ -369,10 +369,10 @@ await t('every reader of a run’s wind reads the one the handler felt: plume, c
     followWeather: (w) => drawn.followed.push(w.wind_direction), scentField: (tr, w) => { drawn.field.push(w.wind_direction); return []; },
     plumePolygon: () => ({}), paintBandWalls() {}, EMPTY: {}, trailOf: (s) => s.data.trail, signedOffsets: () => [],
     targetById, fmtM: String, fmtDur, unwalkedPlan, ageUnknown: () => '', bandWallNote: () => '',
-    windWords, feltPanel, imp: () => false,
+    windWords, feltPanel, imp: () => false, noLineYet,
     $: () => ({ textContent: '', style: {}, classList: { toggle() {} }, setAttribute() {} }), document: { activeElement: null } };
   vm.createContext(rp);
-  vm.runInContext(decl('function paintReplay('), rp);
+  vm.runInContext([decl('function marksOf('), decl('function paintReplay(')].join('\n'), rp);
   rp.paintReplay();
   assert.deepEqual([drawn.followed.at(-1), drawn.field.at(-1)], [180, 180], 'the replay’s panel and band');
 
@@ -499,7 +499,10 @@ await t('Stop saves it with the run, a recovered run takes it back, and a new ru
   const stop = js.slice(js.indexOf('async function finishRun'), js.indexOf('/* ── The result'));
   assert.match(stop, /const had = s\.data\.windFelt !== undefined;\s*const felt = had \? \{ windFelt: feltOf\(s\.data\) \} : \{\};/);
   assert.match(stop, /revealedAt: run\.revealedAt \|\| s\.data\.revealedAt \|\| null, \.\.\.felt(, \.\.\.found)? \} \};/, 'with the walk, before the grade');
-  assert.match(stop, /const \{ runWeather: fetched, windFelt, \.\.\.result \} = await computeResult\(/);
+  /* Assigned rather than declared: a blind trail with no line yet keeps its
+     felt wind as said (feltOf), with no grade to measure it against. */
+  assert.match(stop, /const graded = blindTrail \? null : await computeResult\(/);
+  assert.match(stop, /const \{ runWeather: fetched, windFelt, \.\.\.rest \} = graded\s*\?\? \{ runWeather: await blindRunWeather\(s, rec\.pts, run\.startedAt\), windFelt: feltOf\(s\.data\) \};/);
   assert.match(stop, /const runWeather = fetched \?\? s\.data\.runWeather \?\? null;/, 'the run’s own forecast, fetched or taken on the run screen');
   assert.match(stop, /\.\.\.\(runWeather \? \{ runWeather \} : \{\}\), \.\.\.\(had \? \{ windFelt \} : \{\}\)(, \.\.\.found)? \},/, 'and with the result, as the grade measured it');
   assert.match(decl('function keepDraft('), /windFelt: rec\.kind === 'run' \? run\.session\?\.data\?\.windFelt \?\? null : null,/);
@@ -578,7 +581,7 @@ await t('the air panel says a felt wind in words no wider than the forecast’s 
 function picker(extra = {}) {
   const els = new Map();
   const toasts = [], asked = [];
-  const sb = {
+  const sb = { noLineYet,
     $: (id) => {
       if (!els.has(id)) els.set(id, { hidden: true, innerHTML: '', attrs: {}, focused: 0,
         setAttribute(k, v) { this.attrs[k] = v; }, focus() { this.focused++; } });
@@ -710,7 +713,7 @@ await t('in the debrief it is the “Wind on the ground” row, starts from the 
   /* The card is drawn again once the new grade is in, if it is still the one on screen. */
   const drawn = [];
   const kept = { id: 'r', data: { weather: northerly(), trackStarted: RUN, windFelt: felt('calm') } };
-  const sb = { currentScreen: 'scrResult', run: { session: kept }, pendingSession: null, toast() {}, imp: () => false, windWords,
+  const sb = { noLineYet, currentScreen: 'scrResult', run: { session: kept }, pendingSession: null, toast() {}, imp: () => false, windWords,
     setWindFelt: async () => kept, renderResult: (x) => drawn.push(x) };
   vm.createContext(sb);
   vm.runInContext(decl('async function regradeShown('), sb);
@@ -966,7 +969,7 @@ await t('a wind put right in the debrief is kept, answered or not, and by Not no
   db.addSession(trailRun({ result: { kind: 'trail', predSide: 1 } }));
   const graded = [], toasts = [];
   const todo = { classList: { add() {} }, scrollIntoView() {} };
-  const sb = {
+  const sb = { noLineYet,
     db, DEBRIEF, debriefDone, sameFelt, ownRun, toast: (m) => toasts.push(m),
     regradeShown: (s, w) => graded.push([s.id, w]),
     $: () => ({ querySelector: () => todo }), leaveForm: (id) => { sb.left = id; },
@@ -1016,7 +1019,7 @@ await t('the shared page and the PDF name the drift side for the wind the run wa
 await t('Reveal draws the air panel again in the words of the wind felt on the ground', () => {
   const panels = [];
   const s = trailRun({ track: undefined, trackStarted: undefined, windFelt: felt('calm') });
-  const sb = {
+  const sb = { noLineYet,
     run: { session: s, revealed: false, revealedAt: 0, startedAt: RUN }, targetById, trailOf: (x) => x.data.trail, windAt,
     setTrail() {}, plumeStart() {}, plumeStop() {}, setSrc() {}, lineOf: () => ({ features: [] }), pointsOf: () => ({}), EMPTY: {},
     weatherPanelFor: (x, at) => panels.push([x, at]), $: () => ({ textContent: '' }), Date, paintReveal() {},
@@ -1038,7 +1041,7 @@ const revealButtons = () => {
 };
 const revealSandbox = (session) => {
   const btns = revealButtons(), drawn = { trail: [], hides: [], plume: 0 };
-  const sb = {
+  const sb = { noLineYet,
     run: { session, revealed: false, revealedAt: 0, startedAt: RUN }, targetById, trailOf: (x) => x.data.trail, windAt,
     setTrail: (x) => drawn.trail.push(!!x), plumeStart: () => { drawn.plume++; }, plumeStop() {},
     setSrc: (k, v) => { if (k === 'hides') drawn.hides.push(v !== sb.EMPTY); },
@@ -1134,7 +1137,7 @@ await t('a wind picked with the trail revealed blows from where it was picked, o
 
   /* Picked with the trail hidden, then revealed: the same. */
   const plumes = [], panels = [];
-  const rv = {
+  const rv = { noLineYet,
     run: { session: live, revealed: false, revealedAt: 0, startedAt: START }, targetById, trailOf: (x) => x.data.trail, windAt,
     setTrail() {}, plumeStart: (tr, w) => plumes.push(w.wind_direction), plumeStop() {}, setSrc() {},
     lineOf: () => ({ features: [] }), pointsOf: () => ({}), EMPTY: {},

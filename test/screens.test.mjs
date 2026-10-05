@@ -21,7 +21,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import { stepPoints, forecastNote } from '../public/geo.js';
-import { unwalkedPlan } from '../public/debrief.js';
+import { unwalkedPlan, noLineYet } from '../public/debrief.js';
 
 let pass = 0;
 const t = async (name, fn) => { await fn(); pass++; console.log(`  ok  ${name}`); };
@@ -627,10 +627,10 @@ await t('the run picker gives a drawn line no made-up age', () => {
   const now = Date.UTC(2026, 8, 25, 12);
   const rows = (sessions) => {
     new Function('S', '$', 'verbs', 'targetById', 'fmtKm', 'pathLen', 'fmtWhen', 'esc', 'targetText', 'unwalkedPlan', 'Date',
-      `${src}\npaintPick();`)(
+      'noLineYet', `${src}\npaintPick();`)(
       { target: { kind: 'person' }, sessions }, (id) => (els[id] ??= {}), () => ({ run: 'Run a trail' }),
       () => ({ kind: 'person' }), () => '0.3 km', () => 300, () => 'today', (x) => String(x), () => 'A person',
-      unwalkedPlan, { now: () => now });
+      unwalkedPlan, { now: () => now }, noLineYet);
     return els.pickList.innerHTML;
   };
   const trail = (data) => ({ id: 'x', targetId: 'person', startedAt: now - 25 * 60e3, data: { trail: [{}, {}], ...data } });
@@ -638,6 +638,9 @@ await t('the run picker gives a drawn line no made-up age', () => {
   assert.match(rows([trail({ plan: true })]), /A person · age not known yet</);
   assert.match(rows([trail({ drawn: true })]), /A person · age not known</);
   assert.doesNotMatch(rows([trail({ plan: true }), trail({ drawn: true })]), /min old/);
+  /* A blind trail has no line to pick, and Blind trail is offered on a trail. */
+  assert.match(rows([{ id: 'b', targetId: 'person', startedAt: now, data: { lineLater: true } }]), /Nothing waiting/);
+  assert.equal(els.btnBlind.hidden, false);
 });
 
 console.log(`\n${pass} passed total\n`);

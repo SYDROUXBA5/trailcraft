@@ -424,6 +424,7 @@
   <div class="page">
     <h1 class="display" id="pickTitle">Run a trail</h1>
     <button class="btn big moss" id="btnScan"><b>Scan a card</b><i>from the layer's phone</i></button>
+    <button class="btn big" id="btnBlind"><b>Blind trail</b><i>No trail on this phone. Start here, tap Found at the find</i></button>
     <span class="label" id="pickLabel">Laid on this phone</span>
     <div id="pickList" class="recent"></div>
     <div class="page-bottom"><button class="btn ghost" id="btnPickBack">Back</button></div>
@@ -496,6 +497,18 @@
     <h1 class="display" id="resSentence"></h1>
     <p class="body small provisional" id="resProvisional" hidden></p>
     <p class="body small muted" id="resRoute" hidden></p>
+    <!-- A blind trail's run waits here for the layer's line. The file box
+         takes any file: iOS greys out a .gpx it has no app for when asked
+         for that type, and parseGpx says plainly when a file is not one. -->
+    <div class="add-line" id="addLineBox" hidden>
+      <button class="btn ember" id="btnAddLine" aria-expanded="false">Add the laid trail</button>
+      <div id="addLineHow" hidden>
+        <p class="body small">From the layer: scan their Trail Card, or load the GPX file from their phone or watch. The run is then graded against it.</p>
+        <button class="btn moss" id="btnLineScan">Scan their card</button>
+        <button class="btn" id="btnLineGpx">Load a GPX file</button>
+        <input id="lineFile" type="file" hidden>
+      </div>
+    </div>
     <span class="label">Recorded</span>
     <div class="grid2" id="resGrid"></div>
     <p class="body small muted" id="resCoach"></p>
@@ -513,7 +526,7 @@
     <p class="body small" id="resWind" hidden></p>
     <p class="body" id="resModel"></p>
     <p class="body small muted" id="resStability"></p>
-    <p class="body small muted">The wind side and the scent band are estimates from a forecast, not measurements. They suggest an explanation; they do not judge the dog.</p>
+    <p class="body small muted" id="resCaveat">The wind side and the scent band are estimates from a forecast, not measurements. They suggest an explanation; they do not judge the dog.</p>
     <!-- The handler's own folders: a lit one holds this session. -->
     <div id="resFolderBox" hidden>
       <span class="label">Folders</span>
@@ -618,6 +631,7 @@
     <p class="body small muted" id="shareOutMeta"></p>
     <button class="btn big moss" id="btnSendLink"><b>Send a link</b><i>Opens on any phone — no app, no account</i></button>
     <input type="text" id="shareLinkOut" readonly hidden aria-label="The link to copy">
+    <p class="body small muted" id="shareOutNoLink" hidden>A blind trail can go as a link once its laid trail is added. Until then, send it as a GPX file or a report.</p>
     <button class="btn big" id="btnSaveGpx"><b>Save as GPX</b><i>The trail and the run, for any mapping app</i></button>
     <button class="btn big" id="btnSavePdf"><b>Trail report (PDF)</b><i>Every detail on one page, to print or send</i></button>
     <p class="body small muted">The whole trail travels inside the link itself. Nothing is stored anywhere, so it works with no signal on the other end — and it cannot be taken back once sent.</p>
