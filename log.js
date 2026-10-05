@@ -110,7 +110,9 @@ const who = (p) => {
 function wordsOf(s, people) {
   const d = s?.data || {};
   const notes = Array.isArray(d.surfFix) ? d.surfFix.map(f => f?.note) : [];
-  return fold([s?.name, people?.dog?.name, people?.handler?.name, people?.layer?.name, d.debrief?.note, ...notes]
+  /* A blind trail is found by what the handler called it when they ran it. */
+  const kind = d.lineLater ? 'blind trail' : null;
+  return fold([s?.name, people?.dog?.name, people?.handler?.name, people?.layer?.name, d.debrief?.note, kind, ...notes]
     .filter(x => typeof x === 'string').join(' '));
 }
 

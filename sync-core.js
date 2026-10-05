@@ -100,6 +100,19 @@ function withMissing(win, lose) {
      with no list at all (an older build) still takes the other's. */
   const filed = plainObject(win.data) && 'folders' in win.data;
   if (plainObject(lose.data)) fill(data, lose.data, (k) => cloudless(k) || (graded && k === 'windFelt') || (filed && (k === 'folders' || k === 'foldersAt')));
+  /* A blind trail's laid line, added on the older copy (lineAdded) while the
+     newer one, saved on a phone that had not heard of it, still has none.
+     The line, its grade and its marks come across in the fill above, but
+     two things the line changed sit on the record itself and the newer copy
+     has them already: startedAt, which became the line's laid time, and the
+     summary, which became the grade's. Left as they were, the trail read 0
+     minutes old in every report and was graded again as a fresh one. */
+  if (plainObject(lose.data) && lose.data.lineAdded && !(plainObject(win.data) && win.data.lineAdded)) {
+    if (Number.isFinite(lose.startedAt) && out.startedAt !== lose.startedAt) { out.startedAt = lose.startedAt; added++; }
+    if (lose.data.result && !(plainObject(win.data) && win.data.result) && typeof lose.summary === 'string' && out.summary !== lose.summary) {
+      out.summary = lose.summary; added++;
+    }
+  }
   /* When both copies carry a list, the one changed last is the list, however
      new the rest of either copy is. The folders are saved with their own
      time (foldersAt) for this: otherwise a phone that had not heard of a

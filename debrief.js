@@ -186,6 +186,16 @@ export function ownRun(session) {
     rather than `plan`, and no walked card will ever come for it. */
 export const unwalkedPlan = (data) => (!!data?.plan || !!data?.drawn) && !data?.walked;
 
+/** A blind trail still waiting for its laid line. The handler started where
+    they stood, on a trail laid without this phone (or a real search), and
+    the app recorded the dog until Found or Done. There is nothing to grade
+    the dog against, to show, to coach from or to age until the layer's card
+    or GPX file is added (store.js linePatch). `lineLater` stays on the
+    session after that as a record of how it began; this asks whether the
+    line is still missing. It is not the debrief's `blind`, which is who knew
+    the answer: every run here is meant to be blind in that sense. */
+export const noLineYet = (data) => !!data?.lineLater && !(Array.isArray(data.trail) && data.trail.length > 1);
+
 /** Whether the answer was ever on the handler's screen: Show trail pressed, or
     the coach switched on, which stamps the same moment because it reads out
     where the trail is. It stays set on a second run of the same trail — the

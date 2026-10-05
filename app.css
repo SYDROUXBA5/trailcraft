@@ -624,6 +624,14 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.75; cursor: p
   line-height: 1.45;
 }
 
+/* A blind trail's run waiting for its line: the way to add it sits right
+   under the sentence that says it is not graded, full width, so it is the
+   next thing the handler sees, not one more button at the bottom. */
+.add-line { display: flex; flex-direction: column; gap: 10px; margin: 0 0 16px; }
+.add-line > div { display: flex; flex-direction: column; gap: 10px; }
+.add-line[hidden], .add-line > div[hidden] { display: none; }
+.add-line p { margin: 0; line-height: 1.45; }
+
 /* A GPS verdict is either reassurance or an instruction. Colour says which
    before the sentence is read. */
 .gps-good { color: var(--moss); }

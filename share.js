@@ -10,10 +10,10 @@
 import { simplify, pathLen, cardinal, fmtDist, fmtShort, fmtDur, fmtSpeed, fmtTemp, fmtWeight, fmtCoord } from './geo.js';
 import { through, inflate, b64url, unb64url, needStreams } from './card.js';
 import { targetById, ageBand, dogAge, healApproach } from './store.js';
-import { DEBRIEF, FLAGS, NOTE_TAGS, ownRun, toldField, toldOf, trailShown, ranBlind, unwalkedPlan } from './debrief.js';
+import { DEBRIEF, FLAGS, NOTE_TAGS, ownRun, toldField, toldOf, trailShown, ranBlind, unwalkedPlan, noLineYet } from './debrief.js';
 import { CONFIDENCE, labelOf as callLabel } from './call.js';
 import { cleanSeen, seenLine } from './ground.js';
-import { rainRate, cleanWindFelt, feltOf, feltWeather, windWords, windTrusted } from './field.js';
+import { rainRate, cleanWindFelt, feltOf, feltWeather, windWords, windTrusted, wxAt } from './field.js';
 
 const MAGIC = 'TS1.';
 const fin = Number.isFinite;
@@ -56,7 +56,9 @@ export function trailModel(s, { dog = null, handler = null, layer = null, k = nu
     kind: t.kind === 'hide' ? 'search' : 'trail',
     name: str(s?.name),
     target: t.label,
-    laidAt: s?.startedAt ?? null,
+    /* A blind trail with no line yet has no laid time: its startedAt is only
+       when it began, and an age worked from it would be nought. */
+    laidAt: noLineYet(d) ? null : s?.startedAt ?? null,
     runAt: d.trackStarted ?? null,
     dog: dog ? pick(dog, DOG_KEYS) : null,
     handler: handler?.name ?? null,
@@ -67,6 +69,13 @@ export function trailModel(s, { dog = null, handler = null, layer = null, k = nu
        report and a kept copy took the sketch for a laid trail, and worked a
        trail age out of the guessed laid time the phone that ran it refused. */
     drawn: !!d.drawn,
+    /* A blind trail still waiting for its laid line (debrief.js noLineYet):
+       the dog's run and nothing to grade it against. Once a line is added,
+       whether it came with times, as a drawn line's absence of them is
+       said differently from a finger's sketch. */
+    lineLater: noLineYet(d),
+    lineUntimed: !!d.lineAdded && d.lineAdded.timed === false,
+    found: d.found === true,
     trail: d.trail?.length ? d.trail : null,
     hides: d.hides?.length ? d.hides : null,
     contamination: (d.contamination ?? []).filter(c => c?.points?.length > 1).map(c => ({ points: c.points })),
@@ -574,6 +583,10 @@ export function toGpx(m, u = {}) {
   const title = m.kind === 'search' ? `${dogName} — ${m.target.toLowerCase()} search` : `${dogName} — trail`;
 
   const wpts = [];
+  /* A blind trail's find has no trail end to sit on: it is where the track ends. */
+  if (m.lineLater && m.found && m.track?.length) {
+    wpts.push(gpxPoint('wpt', m.track[m.track.length - 1], { name: 'Found', sym: 'Flag, Red' }));
+  }
   if (m.trail) {
     wpts.push(gpxPoint('wpt', m.trail[0], { name: 'Trail start', sym: 'Flag, Green' }));
     wpts.push(gpxPoint('wpt', m.trail[m.trail.length - 1], {
@@ -615,16 +628,103 @@ export function toGpx(m, u = {}) {
   ].filter(v => v != null).join('\n');
 }
 
+/* ── A GPX file read in: a blind trail's laid line ────────────────────
+   The layer laid the trail with their own phone or watch, and its GPX file
+   is the line a blind trail's run is graded against (store.js linePatch).
+   Whatever the file holds is a stranger's input, read with the browser's
+   own XML parser and held to the limits a Trail Card is. */
+
+/** Bigger than any trail a watch records, small enough to read on a phone. */
+export const GPX_MAX_BYTES = 20 * 1024 * 1024;
+/** More fixes than this are thinned (never cut short) until they fit. */
+export const GPX_MAX_POINTS = 5000;
+
+const plainError = (msg) => Object.assign(new Error(msg), { plain: true });
+
+/** A GPX file's line: { points: [{ lat, lon, t?, ele? }], timed, name }.
+    The first track with two points or more, its segments joined, or else the
+    first route. Timed only when every point has a believable time, in order:
+    a line where some are missing has no clock to trust. Throws a plain
+    message for anything else. `Parser` is the DOMParser to read it with. */
+export function parseGpx(text, Parser = globalThis.DOMParser) {
+  if (typeof text !== 'string' || !text.trim()) throw plainError('That file is empty.');
+  if (typeof Parser !== 'function') throw plainError('This phone cannot read GPX files.');
+  let doc = null;
+  try { doc = new Parser().parseFromString(text, 'application/xml'); } catch { doc = null; }
+  const root = doc?.documentElement;
+  if (!root || doc.getElementsByTagName('parsererror').length || (root.localName ?? root.nodeName) !== 'gpx') {
+    throw plainError('That is not a GPX file this app can read.');
+  }
+  const kids = (el, name) => Array.from(el.getElementsByTagNameNS('*', name));
+  const textOf = (el, name) => {
+    const c = kids(el, name)[0];
+    return c ? String(c.textContent ?? '').trim() : '';
+  };
+  const read = (el) => {
+    const lat = Number(el.getAttribute('lat')), lon = Number(el.getAttribute('lon'));
+    if (!fin(lat) || !fin(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) return null;
+    const time = textOf(el, 'time');
+    /* GPX times are UTC, but some apps leave the zone off, and a date-time
+       with no zone is read as the phone's local time: an hour out in summer
+       in the UK, and the trail's age with it. A date alone is UTC already. */
+    const iso = time && /T/.test(time) && !/(?:[zZ]|[+-]\d\d:?\d\d)$/.test(time) ? `${time}Z` : time;
+    const t = iso ? Date.parse(iso) : NaN;
+    const ele = Number(textOf(el, 'ele') || NaN);
+    return { lat, lon, ...(inEra(t) ? { t } : {}), ...(fin(ele) ? { ele } : {}) };
+  };
+  const lineOf = (els) => els.map(read).filter(Boolean);
+  let pts = [], name = '';
+  for (const trk of kids(root, 'trk')) {
+    const got = lineOf(kids(trk, 'trkpt'));
+    if (got.length > 1) { pts = got; name = textOf(trk, 'name'); break; }
+  }
+  if (pts.length < 2) {
+    for (const rte of kids(root, 'rte')) {
+      const got = lineOf(kids(rte, 'rtept'));
+      if (got.length > 1) { pts = got; name = textOf(rte, 'name'); break; }
+    }
+  }
+  if (pts.length < 2) throw plainError('That file has no track in it. It needs at least two points.');
+  if (pathLen(pts) > 200000) throw plainError('That track is far too long for a trail. Check it is the right file.');
+  const timed = pts.every((p, i) => fin(p.t) && (i === 0 || p.t >= pts[i - 1].t));
+  if (!timed) pts = pts.map(({ t, ...p }) => p);
+  for (let tol = 1; pts.length > GPX_MAX_POINTS && tol <= 64; tol *= 2) pts = simplify(pts, tol);
+  if (pts.length > GPX_MAX_POINTS) throw plainError('That track has too many points to use.');
+  return { points: pts, timed, name: name.slice(0, 80) };
+}
+
+/** A blind trail's run said honestly while it has no line: how far, how
+    long, whether it ended at the find, and that it is not graded. `data` is
+    the session's data (or { track, trackWaypoints, found }). */
+export function blindSummary(data, dogName, u = {}) {
+  const tr = Array.isArray(data?.track) ? data.track.filter(p => fin(p?.lat) && fin(p?.lon)) : [];
+  const dog = typeof dogName === 'string' && dogName.trim() ? dogName.trim() : 'The dog';
+  const metres = pathLen(tr);
+  const a = tr[0]?.t, b = tr[tr.length - 1]?.t;
+  const ms = fin(a) && fin(b) && b > a ? b - a : null;
+  /* Three ways: Found, Done, or not known — a live viewer's copy carries no
+     word of which button ended the run. */
+  const found = data?.found === true ? true : data?.found === null ? null : false;
+  const marks = Array.isArray(data?.trackWaypoints) ? data.trackWaypoints.length : 0;
+  const run = `${fmtDist(metres, !!u.imperial)}${ms != null ? ` in ${clock(ms)}` : ''}`;
+  const sentence = tr.length < 2
+    ? (found === null ? 'A blind trail. No run recorded yet.' : 'A blind trail with no run recorded.')
+    : `${dog} ran a blind trail${found ? ' to the find' : found === null ? '' : ', no find'}: ${run}. Not graded until the laid trail is added.`;
+  return { sentence, metres, ms, found, end: tr.length ? tr[tr.length - 1] : null, marks };
+}
+
 /** A file name that sorts by date and survives every file system. */
 export function fileBase(m) {
   const slug = (s) => String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '')
     .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
   let day = '';
-  if (fin(m.laidAt)) {
-    const d = new Date(m.laidAt);
+  /* A blind trail with no line has no laid day: it is named for its run's. */
+  const at = fin(m.laidAt) ? m.laidAt : m.lineLater && fin(m.runAt) ? m.runAt : null;
+  if (at != null) {
+    const d = new Date(at);
     day = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   }
-  return ['trailcraft', day, slug(m.dog?.name), m.kind === 'search' ? 'search' : 'trail'].filter(Boolean).join('-');
+  return ['trailcraft', day, slug(m.dog?.name), m.kind === 'search' ? 'search' : m.lineLater ? 'blind-trail' : 'trail'].filter(Boolean).join('-');
 }
 
 /* ── Every detail, in words ───────────────────────────────────────── */
@@ -707,6 +807,7 @@ export function resultSentence(r, dogName, u = {}, saved = null) {
 export function headline(m, u = {}) {
   const said = m.result ? resultSentence(m.result, m.dog?.name, u) : null;
   if (said) return said;
+  if (m.lineLater) return blindSummary({ track: m.track, trackWaypoints: m.wps, found: m.found }, m.dog?.name, u).sentence;
   const n = m.hides?.length ?? 0;
   if (m.kind === 'search') return `${n} hide${n === 1 ? '' : 's'} set, not yet searched.`;
   /* A drawn card has no walk coming, so it is not said to be waiting for one. */
@@ -745,12 +846,14 @@ export function detailSections(m, u = {}) {
     : fin(m.runAt) && fin(m.laidAt) ? Math.max(0, Math.round((m.runAt - m.laidAt) / 60000)) : null;
   const ageRow = fin(ageMin) ? [m.kind === 'search' ? 'Hide age at start' : 'Trail age at start',
     `${minutes(ageMin)}${ageBand(ageMin) ? ` · ${ageBand(ageMin).label}` : ''}`]
-    : drawn && fin(m.runAt) ? ['Trail age at start', m.plan ? 'not known — drawn, not yet walked' : 'not known — drawn, not walked'] : null;
+    : drawn && fin(m.runAt) ? ['Trail age at start', m.lineUntimed ? 'not known — the line had no times'
+      : m.plan ? 'not known — drawn, not yet walked' : 'not known — drawn, not walked']
+      : m.lineLater && fin(m.runAt) ? ['Trail age at start', 'not known — no laid trail added yet'] : null;
 
   if (m.kind === 'trail' && m.trail) {
     const tr = m.trail, a = tr[0], b = tr[tr.length - 1];
     const rows = [];
-    if (fin(m.laidAt)) rows.push([drawn ? 'Drawn' : 'Laid', when(m.laidAt)]);
+    if (fin(m.laidAt) && !m.lineUntimed) rows.push([drawn ? 'Drawn' : 'Laid', when(m.laidAt)]);
     rows.push(['Length', fmtDist(pathLen(tr), imp)]);
     if (!drawn && fin(a.t) && fin(b.t) && b.t > a.t) rows.push(['Walked in', clock(b.t - a.t)]);
     if (ageRow) rows.push(ageRow);
@@ -759,7 +862,7 @@ export function detailSections(m, u = {}) {
     if (m.contamination?.length) {
       rows.push(['Contamination', `${m.contamination.length} crossing trail${m.contamination.length === 1 ? '' : 's'}`]);
     }
-    out.push({ title: drawn ? 'Drawn plan' : 'Trail', rows });
+    out.push({ title: m.lineUntimed ? 'Trail, with no times' : drawn ? 'Drawn plan' : 'Trail', rows });
   } else if (m.hides) {
     const rows = [];
     if (fin(m.laidAt)) rows.push(['Set', when(m.laidAt)]);
@@ -774,7 +877,12 @@ export function detailSections(m, u = {}) {
     if (fin(m.runAt)) rows.push(['Started', when(m.runAt)]);
     if (fin(a.t) && fin(b.t) && b.t > a.t) rows.push(['Duration', clock(b.t - a.t)]);
     rows.push(['Distance', fmtDist(pathLen(tr), imp)]);
-    if (r?.kind === 'trail') {
+    if (m.lineLater) {
+      if (ageRow) rows.push(ageRow);
+      /* A live viewer is not told which button ended it (found is null). */
+      if (m.found != null) rows.push(['Ended', m.found ? 'at the find, where the track ends' : 'with Done, no find']);
+      rows.push(['Graded', 'not yet — no laid trail to compare with']);
+    } else if (r?.kind === 'trail') {
       /* Recorded first, then the model's suggestion — kept apart, because
          only the first is a measurement. Older results carry only a mean.
          The suggestion is named for the wind the run was graded in: the
@@ -838,8 +946,10 @@ export function detailSections(m, u = {}) {
   }
 
   /* A trail with no graded run shows its laid weather, as felt on the ground
-     when the handler said how it felt. */
-  const wx = m.wx, felt = feltWeather(wx, mFelt);
+     when the handler said how it felt. A blind trail with no line has no
+     laid weather, only the run's own forecast, kept when it ended. */
+  const runOnly = !m.wx && m.lineLater && m.runWx ? wxAt(m.runWx, m.runAt ?? m.track?.[0]?.t) : null;
+  const wx = m.wx ?? runOnly, felt = feltWeather(wx, mFelt);
   const wind = r?.wind ?? (felt ? { speed: felt.wind_speed, from: felt.wind_direction } : null);
   /* A swirl has no steady direction and a calm none at all: the number keeps
      the forecast's direction to draw with, which is not one to print. */
@@ -847,7 +957,7 @@ export function detailSections(m, u = {}) {
   const weather = [];
   if (fin(wx?.temp)) weather.push(['Air', fmtTemp(wx.temp, fahr)]);
   if (fin(wx?.soil_temp)) weather.push(['Ground', fmtTemp(wx.soil_temp, fahr)]);
-  if (fin(wind?.speed)) weather.push([r?.wind ? 'Wind during the run' : 'Wind',
+  if (fin(wind?.speed)) weather.push([r?.wind || runOnly ? 'Wind during the run' : 'Wind',
     `${fmtSpeed(wind.speed, imp)}${dirOk && fin(wind.from) ? ` from ${cardinal(wind.from)}` : ''}`]);
   /* What the handler felt, against what the forecast said. */
   const onGround = windWords(m, { imperial: imp });
@@ -898,7 +1008,9 @@ export function detailSections(m, u = {}) {
 /** Caveats the reader has to see, in the order they matter. */
 export function notes(m) {
   const n = [];
-  if (unwalkedPlan(m) && m.result) n.push('Compared against a line drawn on the map, not the trail as walked.');
+  if (m.lineLater) n.push('A blind trail: no laid trail has been added yet, so the run is not graded.');
+  else if (m.lineUntimed && m.result) n.push('Compared against a line with no times on it, so the trail’s age is not known.');
+  else if (unwalkedPlan(m) && m.result) n.push('Compared against a line drawn on the map, not the trail as walked.');
   if (m.thinnedM > 0) n.push(`Lines thinned by up to ${m.thinnedM} m to fit in the link.`);
   n.push('The wind side and the scent band are estimates from a forecast, not measurements. They suggest an explanation; they do not judge the dog.');
   return n;
@@ -934,15 +1046,21 @@ export function liveModel(meta, chunks = []) {
   const pts = (Array.isArray(chunks) ? chunks : []).flat().filter(p => fin(p?.lat) && fin(p?.lon))
     .sort((a, b) => (a.t ?? 0) - (b.t ?? 0)).slice(-MAX_POINTS);
   const okPts = (a) => (Array.isArray(a) && a.length ? a.slice(0, MAX_POINTS).filter(p => fin(p?.lat) && fin(p?.lon)) : null);
+  const trail = okPts(meta?.trail);
+  /* A person trail live with no line is a blind trail: said so, not "a
+     trail laid, not yet run". Read from what the doc already holds, so the
+     live document gains no key. Whether it ended at the find is not in it. */
+  const lineLater = meta?.kind !== 'search' && !(trail?.length > 1);
   return {
     kind: meta?.kind === 'search' ? 'search' : 'trail',
+    ...(lineLater ? { lineLater: true, found: null } : {}),
     target: str(meta?.target) ?? 'A person',
     laidAt: era(meta?.laidAt),
     runAt: era(meta?.startedAt),
     dog: cleanDog(meta?.dog),
     handler: str(meta?.handler), layer: str(meta?.layer),
     plan: !!meta?.plan, walked: !!meta?.walked,
-    trail: okPts(meta?.trail), hides: okPts(meta?.hides),
+    trail, hides: okPts(meta?.hides),
     contamination: (Array.isArray(meta?.contamination) ? meta.contamination.slice(0, MAX_LINES) : [])
       .map(c => ({ points: okPts(c?.points) })).filter(c => c.points?.length > 1),
     track: pts.length > 1 ? pts : null,
