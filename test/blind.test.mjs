@@ -319,7 +319,7 @@ await t('every screen that drew the laid trail steps round a blind trail with no
   assert.match(bodyOf('openSession'), /if \(s\.data\.result \|\| noLineYet\(s\.data\)\) \{/, 'its card opens the result, where the line is added');
   assert.match(bodyOf('paintPick'), /\$\('btnBlind'\)\.hidden = t\.kind !== 'person';/);
   assert.match(js, /\$\('btnBlind'\)\.addEventListener\('click', startBlind\);/);
-  assert.match(js, /if \(noLineYet\(s\.data\)\) \{\s*\n\s*const patch = \{ data: \{ windFelt: wf \} \};/, 'a wind felt later is kept, with nothing to re-grade');
+  assert.match(js, /if \(noLineYet\(s\.data\)\) \{\s*\n\s*const now = keepPatch\(s, \{ data: \{ windFelt: wf \} \}\);/, 'a wind felt later is kept, with nothing to re-grade');
   assert.match(bodyOf('toggleReveal'), /if \(!s \|\| noLineYet\(s\.data\)\) return;/);
   /* The line goes on and the run is graded as a walked card grades a plan. */
   const apply = js.slice(js.indexOf('\nasync function applyLine('), js.indexOf('\n}\n', js.indexOf('\nasync function applyLine(')));

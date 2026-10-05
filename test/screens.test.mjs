@@ -115,6 +115,8 @@ function app() {
     mapTut: { open: false }, openMapTut() {},
     closeShared() {}, closeLive() {}, closeBench() {}, closeReplay() {}, closeFix() {}, closeDraw() {},
     closeContam() {}, plumeStop() {}, stopCountdownUi() {}, setSrc() {}, EMPTY: {}, onHideTap() {},
+    // Marks placed after a trail and not kept yet hold the back gesture (marks.test.mjs).
+    marksUnkept: () => false,
     CD: { sid: 's1' }, renderShare() {},
     // The real openers draw a screen and then go() to it; that last step is what matters here.
     openDebrief: (s) => { sb.dbFor = s; sb.dbDraft = { flags: [] }; sb.dbSeen = {}; sb.go('scrDebrief'); },

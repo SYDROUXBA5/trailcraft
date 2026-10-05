@@ -1566,6 +1566,20 @@ body:has(#saveTrouble:not([hidden])) .screen.paper .page { padding-bottom: calc(
   min-height: 40px;
 }
 .wp-pill:active { background: rgba(255, 255, 255, 0.34); color: #F4F6FA; }
+/* The marks placed on the replay after a trail: each says when it was, and
+   a tap takes it off again. The same glass as the marks, at full height. */
+.mark-list .mark-chip { min-height: 44px; display: inline-flex; align-items: center; gap: 8px; }
+.mark-chip .x { font-size: 1.2em; line-height: 1; opacity: 0.8; }
+.mark-chip.kept { opacity: 0.75; }
+/* On the replay the marks are the main control, not a strip beside the map,
+   and five in one scrolling row put Reward off a phone's edge with nothing
+   to say it was there. So: three over two, every one in view and 44px tall.
+   The placed marks wrap too, since a chip off the edge could not be taken off. */
+#repMarks { display: grid; grid-template-columns: repeat(6, 1fr); overflow: visible; border-radius: 26px; }
+#repMarks .wp-pill { grid-column: span 2; min-height: 44px; padding: 8px 6px; }
+#repMarks .wp-pill:nth-child(n+4) { grid-column: span 3; }
+#repMarkList { flex-wrap: wrap; justify-content: center; overflow: visible; border-radius: 26px; }
+#repMarkList .mark-chip { padding: 8px 12px; }
 
 /* With transparency reduced, the glass turns near-solid rather than vanishing. */
 @media (prefers-reduced-transparency: reduce) {

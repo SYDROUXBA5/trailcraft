@@ -763,7 +763,8 @@ const fnSrc = (head) => {
 };
 
 t('a back gesture never leaves a recording, and a screen swiped away is tidied up', () => {
-  const pop = js.slice(js.indexOf("window.addEventListener('popstate'"), js.indexOf("window.addEventListener('popstate'") + 800);
+  /* Long enough to reach goBackNow past the marking's own hold (marks.test.mjs). */
+  const pop = js.slice(js.indexOf("window.addEventListener('popstate'"), js.indexOf("window.addEventListener('popstate'") + 1800);
   assert.match(pop, /if \(currentScreen && currentScreen === liveScreen\(\)\) \{\s*\n\s*try \{ history\.pushState\(\{ tc: currentScreen \}, ''\); \}/,
     'while something is recording, the history entry is put back');
   assert.ok(pop.indexOf('liveScreen()') < pop.indexOf('goBackNow()'), 'before anything can leave the screen');
@@ -1177,7 +1178,7 @@ t('the run HUD and the replay caption give a drawn line no age either', () => {
     scentField: () => [], plumePolygon: () => ({}), paintBandWalls() {}, EMPTY: {},
     trailOf: () => [], signedOffsets: () => [], targetById: () => ({ kind: 'person' }),
     fmtM: String, fmtDur, unwalkedPlan, bandWallNote: () => '', document: { activeElement: null },
-    $: (id) => (id === 'repCaption' ? cap : { textContent: '', value: '' }),
+    $: (id) => (id === 'repCaption' ? cap : { textContent: '', value: '', setAttribute() {} }),
     feltPanel: () => null, windWords: () => null, imp: () => false,   // no wind felt on the ground
     noLineYet,
   };

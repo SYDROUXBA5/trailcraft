@@ -106,7 +106,9 @@ export function patchSession(s, patch) {
 /* What belongs to one run rather than to the trail or hides it ran on is
    RUN_FIELDS in sync-core.js, shared with the merge of two copies. When the
    answer was shown is not in it: a handler who has seen the line once knows
-   it on every later run. */
+   it on every later run. When a run's result was first seen (resultSeenAt)
+   is: it dates that run's own marks, and the next dog's run starts unseen,
+   as a run after another's result always has. */
 
 /** A fresh session for running a trail or hide set again. One session holds
     one run, so a second run gets its own copy, the way each scanned Trail

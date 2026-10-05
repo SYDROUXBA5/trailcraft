@@ -324,7 +324,7 @@ function app() {
     unitsForText: () => ({ imperial: false, fahrenheit: false, coord: 'dd', when: String }),
     terrainFor: () => Promise.resolve(FLAT),
     fetchWeather: () => Promise.reject(new Error('offline')), WX_WAIT: 10,
-    guardSave: (s, fn) => fn(), snap() {}, keepDraft() { drawn.draft = (drawn.draft ?? 0) + 1; },
+    guardSave: (s, fn) => fn(), snap() {}, keepDraft() { drawn.draft = (drawn.draft ?? 0) + 1; }, saveTrouble: null,
     trailOf: (s) => s.data.trail, contamSim: () => null,
     plumeStart: (tr, w) => drawn.plume.push(w.wind_direction),
     weatherPanelFor: (s, at) => drawn.panel.push(windAt(s, at).wx.wind_direction),
@@ -339,6 +339,8 @@ function app() {
     between('/* `rebank` is for a run graded again', '\nfunction searchResult('),
     decl('function searchResult('),
     decl('function saveSession('),
+    decl('function foldIntoPending('),
+    decl('function keepPatch('),
     decl('function runAirChanged('),
     between('let feltQueue = ', '\n/* ── Pick what to run'),
   ].join('\n'), sb);
@@ -587,6 +589,8 @@ function picker(extra = {}) {
         setAttribute(k, v) { this.attrs[k] = v; }, focus() { this.focused++; } });
       return els.get(id);
     },
+    /* A hide search: a trail's wind is set afterwards, on the replay (marks.test.mjs). */
+    markedAfter: () => false,
     currentScreen: 'scrRun', run: { session: null }, wxShown: { key: 'shown' },
     airPanel: (id) => asked.push(['airPanel', id]), toast: (m) => toasts.push(m),
     navigator: {}, imp: () => false,
@@ -681,6 +685,15 @@ await t('on the run: the air panel opens it, a choice goes to the run at once, a
   sb.paintWxFelt();
   assert.equal(sb.$('wxFelt').hidden, true);
   assert.equal(sb.$('wxFeltHint').hidden, true);
+  /* On a trail the panel is only read during the run: the wind is set with
+     the marks once it is over, so Found and Done are all there is to touch. */
+  const trail = picker({ markedAfter: () => true });
+  trail.sb.run.session = { id: 'r', targetId: 'person', data: { weather: northerly() } };
+  trail.sb.paintWxFelt();
+  assert.equal(trail.sb.$('wxFelt').hidden, true, 'no button over the panel on a trail');
+  assert.equal(trail.sb.$('wxFeltHint').hidden, true);
+  trail.sb.openFeltSheet();
+  assert.equal(trail.sb.$('feltSheet').hidden, true, 'and the sheet does not open');
 });
 
 await t('the run screen’s picker never touches the recording or leaves the screen', () => {

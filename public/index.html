@@ -483,8 +483,8 @@
        never moves it. Big targets, because this is answered one-handed with a
        dog on the other end of a line. -->
   <div class="call-sheet" id="callSheet" hidden>
-    <span class="label" style="margin-top:0">Before you go and look</span>
-    <p class="call-q">How sure are you?</p>
+    <span class="label" id="callAskLabel" style="margin-top:0">Before you go and look</span>
+    <p class="call-q" id="callAskQ">How sure are you?</p>
     <div class="call-opts" id="callOpts"></div>
     <button class="btn ghost small" id="callSkip">Skip</button>
   </div>
@@ -766,7 +766,26 @@
       <input type="range" id="repScrub" min="0" max="1000" value="1000" step="1" aria-label="Run time">
       <button class="rep-speed" id="repSpeed" aria-label="Playback speed">4&times;</button>
     </div>
-    <div class="row-gap">
+    <!-- Marking the run: a trail's marks are placed here once it is over,
+         at the moment the slider is on, where the dog's route was then.
+         The same marks, in the same order, as a search has on its run screen. -->
+    <div class="wp-row" id="repMarks" hidden>
+      <button class="wp-pill" data-wp="Indication">Indication</button>
+      <button class="wp-pill" data-wp="Lost it">Lost it</button>
+      <button class="wp-pill" data-wp="Re-found">Re-found</button>
+      <button class="wp-pill" data-wp="Article">Article</button>
+      <button class="wp-pill" data-wp="Reward">Reward</button>
+    </div>
+    <div class="wp-row mark-list" id="repMarkList" role="group" aria-label="Marks placed" hidden></div>
+    <div class="row-gap" id="repMarkRow" hidden>
+      <button class="btn ghost" id="repCancel" hidden>Cancel</button>
+      <button class="btn ghost" id="repWind">Wind</button>
+      <button class="btn big ember grow" id="repSee">See the result</button>
+    </div>
+    <div class="row-gap" id="repEditRow" hidden>
+      <button class="btn ghost" id="repEdit">Edit marks</button>
+    </div>
+    <div class="row-gap" id="repRow">
       <button class="btn ghost" id="repDebrief">Write the debrief</button>
       <button class="btn ghost" id="repBack">Done</button>
     </div>

@@ -65,8 +65,11 @@ warning.
 3. Open the session: both lines overlay, with mean offset, trail age, and
    the drift ribbon.
 
-Waypoints (Indication / Lost it / Re-found / Article / Reward / Mark) drop at
-your current position with one tap — sized for cold hands on a long line.
+Marks (Indication / Lost it / Re-found / Article / Reward) on a trail are
+placed after the run: Found or Done opens a replay of the dog's route with
+the laid trail and the grade hidden, you pause at each moment and tap what
+the dog did, set the wind on the ground, then See the result. A hide search
+keeps its marks on the run screen, one tap at your current position.
 
 ## What is real and what is not
 
