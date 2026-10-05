@@ -40,6 +40,7 @@ import { coachStep, initialCoach, coachPhrase, coachLine, TOL_OPTIONS, COACH_DEF
 import { DEBRIEF, FLAGS, NOTE_TAGS, blankDebrief, debriefDone, debriefLine, labelOf, ownRun, stickyDebrief,
          unwalkedPlan, noLineYet, trailShown, ranBlind, tapsLeft } from './debrief.js';
 import { CONFIDENCE, stampCall, confidenceOf, firstCall, firstCallWasFind, calibration, calibrationLine, callVerdict, runsOf } from './call.js';
+import { placeMark, addMark, removeMark, callOwed, callMovedTo, removable, markingSave } from './marks.js';
 import { isNative, watchBackground, canHaptic, haptic, watchHeading, shareFile,
          canSpeakNative, nativeVoices, speakNative, stopNativeSpeech, watchNativeVoices } from './native.js';
 import { readBackup, restoreChanges, restoreQuestion, restoreNothing, BACKUP_MAX_BYTES } from './backup.js';
@@ -53,7 +54,7 @@ import { searchWords, logRows, recentRuns, runAt, midnight, facets, filterRows, 
          cleanFolderName, putMany, toggleFolder, renameIn, dropFrom, mergeFolders, emptyHeld, folderPatch } from './log.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-10-05a';
+const BUILD = '2026-10-05b';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true,
@@ -308,6 +309,15 @@ window.addEventListener('popstate', () => {
            words match the buttons on screen. */
         : rec.kind === 'run' && !$('btnRunDone').hidden ? 'Still recording. Tap Found or Done to finish.'
           : 'Still recording. Tap Stop to finish.');
+    return;
+  }
+  /* Nor marks placed after a trail and not kept yet. The run is safe
+     already, but the marks and the one blind call this run can have would go
+     with a stray swipe, and are never asked for again once the trail has
+     been seen. Leaving with nothing placed still leaves, as designed. */
+  if (currentScreen === 'scrReplay' && marksUnkept()) {
+    try { history.pushState({ tc: currentScreen }, ''); } catch { /* file:// and the like */ }
+    toast('Tap See the result to keep your marks');
     return;
   }
   if (currentScreen && currentScreen !== 'scrHome') goBackNow();
@@ -1401,7 +1411,7 @@ const TUT_CARDS = [
   { k: '01', title: 'Two people, one dog.', body: 'Someone walks a trail and waits at the end. You run the dog along it. Trailcraft records both, and the weather that day.' },
   { k: '02', title: 'Draw the line with your finger.', body: 'Tap the corners from start to finish, then Save plan and pick how long it ages before the dog starts. Now, 5, 10, or any number you type.' },
   { k: '03', title: 'The other phone walks it.', body: 'They scan the code and their phone guides them down your line. The clock starts when they leave, on both phones, and they hand back the trail they really walked. No signal needed.' },
-  { k: '04', title: 'Run blind.', body: 'While the dog works, the trail stays hidden. Mark what you see: an indication, a loss, a re-find, an article. Your line length is already accounted for.' },
+  { k: '04', title: 'Run blind.', body: 'While the dog works, the trail stays hidden. Tap Found or Done at the end, then play the run back and mark what you saw: an indication, a loss, a re-find, an article. Your line length is already accounted for.' },
   { k: '05', title: 'Then read one sentence.', body: '"Bo worked 9 m right of the line. The wind pushed scent right." The model explains what the dog did. It never claims to know where scent is.' },
 ];
 let tut = { i: 0, replay: false };
@@ -2838,6 +2848,10 @@ function openCall(wp) {
      Show trail, hide it again, then indicate used to count as a blind call,
      and a confidence record built from calls made after looking is worthless. */
   callSeen = !!run.revealedAt;
+  /* Placed on the replay after the run, the call is about a moment gone. */
+  const after = currentScreen === 'scrReplay';
+  $('callAskLabel').textContent = after ? 'Before you see the trail' : 'Before you go and look';
+  $('callAskQ').textContent = after ? 'How sure were you?' : 'How sure are you?';
   $('callOpts').innerHTML = CONFIDENCE.map(c =>
     `<button type="button" class="call-opt" data-conf="${c.v}"><b>${esc(c.label)}</b><i>${esc(c.why)}</i></button>`).join('');
   $('callSheet').hidden = false;
@@ -3059,7 +3073,9 @@ function paintDebriefBlock(s) {
    clock, not the real one" since it was written. Nothing had ever passed it
    one. Here that argument finally gets used: plume.clock overrides
    Date.now(), and scrubbing is simply setting it. */
-const replay = { s: null, from: 0, to: 0, at: 0, playing: false, speed: 4, raf: 0, last: 0, back: null };
+/* `mark` is set while the replay is marking the run (openMarking, editMarks):
+   { id, hidden, wps, felt, busy }, `hidden` while the answer is not yet seen. */
+const replay = { s: null, from: 0, to: 0, at: 0, playing: false, speed: 4, raf: 0, last: 0, back: null, mark: null };
 const REPLAY_SPEEDS = [1, 4, 10, 30];
 
 function openReplay(s) {
@@ -3089,12 +3105,15 @@ function openReplay(s) {
   }
   // Only once the map is drawn, so a replay that fails to open is not left half open.
   replay.s = s;
+  /* The trail is on the map from here, so the answer has been seen. */
+  if (!replay.mark?.hidden) noteAnswerSeen(s);
   /* Opened from its result or straight from the session list: Done goes back
      to whichever it was. A run the phone never finished grading has no
      result for a debrief to sit beside, so it is only watched. */
   replay.back = currentScreen;
   $('repDebrief').hidden = !s.data.result && !noLineYet(s.data);
   $('repSpeed').textContent = `${replay.speed}×`;
+  paintMarkTools();
 
   go('scrReplay');
   fitTo(s.data.trail || s.data.hides || [], track, s.data.planTrail || []);
@@ -3114,6 +3133,7 @@ function marksOf(s) {
 
 function closeReplay() {
   replayPause();
+  if (replay.mark) endMarking();
   replay.s = null;
   plume.clock = null;          // hand the plume back to the real clock
   plumeStop();
@@ -3134,8 +3154,8 @@ function paintReplay() {
   setDogTrack(sofar);
   setSrc('nose', pointsOf([sofar[sofar.length - 1]]));
 
-  // Marks appear when they were pressed, not before.
-  setSrc('wps', pointsOf(marksOf(s).filter(w => w.t <= at), 'kind'));
+  // Marks appear when they were pressed, not before. Being placed, all of them show.
+  setSrc('wps', pointsOf(marksOf(s).filter(w => replay.mark || w.t <= at), 'kind'));
 
   /* The scent as it was. plumeFrame reads plume.clock, so setting it and
      painting one frame shows that instant instead of this one. */
@@ -3167,9 +3187,14 @@ function paintReplay() {
     + (off == null ? '' : ` · dog ${fmtM(Math.abs(off))} ${off >= 0 ? 'right' : 'left'} of the line`)
     + (felt ? ` · ${felt}` : '')
     + (plume.bandWalls ? '.' + bandWallNote() : '');
+  /* Marking before the answer is seen: nothing about the trail to say yet. */
+  if (replay.mark?.hidden) $('repCaption').textContent = `Pause where it happened, then tap what the dog did${felt ? ` · ${felt}` : ''}`;
   const f = replay.to > replay.from ? (at - replay.from) / (replay.to - replay.from) : 1;
   const sc = $('repScrub');
   if (document.activeElement !== sc) sc.value = String(Math.round(f * 1000));
+  /* Said as a time into the run, not as a number out of a thousand: on the
+     marking it is what the mark will be placed at. */
+  sc.setAttribute('aria-valuetext', fmtDur(Math.max(0, at - replay.from)));
 }
 
 function replayPlay() {
@@ -3197,6 +3222,264 @@ function replayPause() {
   replay.raf = 0;
   const b = $('repPlay');
   if (b) { b.innerHTML = '&#9654;'; b.setAttribute('aria-label', 'Play'); }
+}
+
+/* ── Marking the run ──────────────────────────────────────────────────
+   A trail's marks are placed once it is over (marks.js). Found or Done
+   grades and keeps the run as always, then opens its replay in this mode
+   with the answer kept off the map: the laid trail, its scent and the grade
+   stay hidden while the handler marks from memory, so a call made here is
+   still a call made blind. See the result ends it and shows the result.
+   Later, Edit marks on the replay opens the same tools with the trail on
+   the map, because by then it has been seen. */
+
+/** A run whose marks are placed afterwards: any trail, a blind trail too.
+    A hide search keeps its marks on the run screen. */
+function markedAfter(s) { return !!s && targetById(s.targetId).kind === 'person'; }
+
+/** The session as the marking shows it before the answer is seen: as a
+    blind trail with no line, whose replay draws the dog alone and the find,
+    with nothing laid, nothing graded and no ground to draw. Only ever drawn:
+    every save goes to the session itself, by its id. */
+const answerHidden = (s) => ({ ...s, data: { ...s.data, trail: null, planTrail: null, contamination: null,
+  surf: null, surfFix: null, result: null, lineLater: true } });
+
+/** Whether a run's marks and wind can be put right from its replay: a trail
+    of this phone's own with its run kept, and not while another run is being
+    recorded, which the grade it starts must not land under. */
+const marksEditable = (s) => !rec.on && markedAfter(s) && ownRun(s) && s?.data?.track?.length > 1
+  && (!!s.data.result || noLineYet(s.data));
+
+/** The first time the answer is on screen after the run: the result, or the
+    replay with the trail drawn. Only a run saved as not seen yet (null)
+    is stamped; a call placed after this moment is not a blind call. */
+function noteAnswerSeen(s) {
+  if (!s?.id || s.data?.resultSeenAt !== null) return;
+  const at = Date.now();
+  s.data.resultSeenAt = at;
+  const patch = { data: { resultSeenAt: at } };
+  /* Into the run's own save when that is still waiting on Try again: written
+     beside it, the stamp went onto the copy from before the run, and the run
+     saved later put "not seen yet" back over it. */
+  if (foldIntoPending(s.id, patch)) return;
+  try {
+    if (db.sessions().some(x => x.id === s.id)) db.updateSession(s.id, patch);
+    if (run.session?.id === s.id && run.session !== s) run.session = patchSession(run.session, patch);
+    snap();
+  } catch { /* a phone too full to write it keeps it in memory: no call can be made here before it */ }
+}
+
+/* The call and the wind sheets live on the run screen and are lent to the
+   replay while it marks: one of each, so the two can never say different things. */
+function lendSheets(to) {
+  const host = $(to);
+  for (const id of ['callSheet', 'feltSheet']) {
+    const el = $(id);
+    if (el.parentNode !== host) host.appendChild(el);
+  }
+}
+
+function openMarking(s, { hidden = false } = {}) {
+  const m = { id: s.id, hidden, wps: (s.data.trackWaypoints || []).map(w => ({ ...w })), felt: feltOf(s.data) ?? null, busy: false };
+  const view = hidden ? answerHidden(s) : s;
+  replay.mark = m;
+  openReplay({ ...view, data: { ...view.data, trackWaypoints: m.wps } });
+  if (replay.s?.id !== s.id) {
+    /* No route to mark on: straight to the result, as before. */
+    replay.mark = null;
+    renderResult(s);
+    return go('scrResult');
+  }
+  lendSheets('scrReplay');
+  if (hidden) toast('Play it back and mark what the dog did');
+}
+
+/** Marks or a wind placed after the run and not kept yet. Only while the
+    answer is still hidden: Edit marks has Cancel, and back is that. */
+function marksUnkept() {
+  const m = replay.mark;
+  const s = m?.hidden && sessionById(m.id);
+  if (!s) return false;
+  const plan = markingSave({ before: s.data.trackWaypoints || [], after: m.wps, feltBefore: feltOf(s.data), feltAfter: m.felt });
+  return plan.marks || plan.wind;
+}
+
+/** Put the marking tools away, keeping nothing that was not saved. */
+function endMarking() {
+  closeCall();
+  closeFeltSheet();
+  lendSheets('scrRun');
+  replay.mark = null;
+  paintMarkTools();
+}
+
+/** The replay's buttons for what it is doing: watching, or marking. */
+function paintMarkTools() {
+  const m = replay.mark, s = replay.s;
+  $('repMarks').hidden = !m;
+  $('repMarkRow').hidden = !m;
+  $('repRow').hidden = !!m;
+  $('repCancel').hidden = !m || m.hidden;
+  /* A row of its own: beside Write the debrief and Done it wrapped to three lines. */
+  $('repEditRow').hidden = !!m || !s || !marksEditable(sessionById(s.id) ?? s);
+  paintMarkList();
+}
+
+/** The marks placed so far, each a button that takes it off again, except
+    an Indication a blind call is scored against once the answer is seen
+    (marks.js removable): that one says why it stays when tapped. */
+function paintMarkList() {
+  const m = replay.mark, list = $('repMarkList');
+  list.hidden = !m?.wps.length;
+  if (!m) return;
+  list.innerHTML = m.wps.map((w, i) => {
+    const when = fmtDur(w.t - replay.from);
+    if (!removable(m.wps, i, m.hidden)) {
+      return `<button type="button" class="wp-pill mark-chip kept" data-mark="${i}" aria-disabled="true" aria-label="${esc(w.kind)} at ${when}, kept: marked before you saw the trail">`
+        + `${esc(w.kind)} ${when}</button>`;
+    }
+    return `<button type="button" class="wp-pill mark-chip" data-mark="${i}" aria-label="Remove ${esc(w.kind)} at ${when}">`
+      + `${esc(w.kind)} ${when}<span class="x" aria-hidden="true">×</span></button>`;
+  }).join('');
+}
+
+/** The marks changed: drawn on the map and listed. */
+function marksMoved() {
+  replay.s = { ...replay.s, data: { ...replay.s.data, trackWaypoints: replay.mark.wps } };
+  paintReplay();
+  paintMarkList();
+}
+
+/** A mark at the moment the replay is on, where the dog's route was then. */
+function placeMarkNow(kind) {
+  const m = replay.mark, s = replay.s;
+  if (!m || !s || m.busy) return;
+  replayPause();
+  /* Placed with the answer in view (Edit marks), a mark is a note on the
+     run, never part of how a blind call is scored. */
+  const wp = placeMark(s.data.track, kind, replay.at, { late: !m.hidden });
+  if (!wp) return;
+  m.wps = addMark(m.wps, wp);
+  /* Asked exactly when the run screen would have asked: the run's first
+     indication in time, with the answer still unseen. Placed before one
+     already asked about, it takes the question over. */
+  const ask = callOwed(m.wps, s.data, !m.hidden) === wp;
+  if (ask) {
+    if (callWp && callWp !== wp) closeCall();
+    m.wps = callMovedTo(m.wps, wp);
+  }
+  marksMoved();
+  navigator.vibrate?.(35);
+  toast(wp.approx ? `${kind}, where the GPS last was, so it may be off` : `${kind} at ${fmtDur(wp.t - replay.from)}`);
+  if (ask) openCall(wp);
+}
+
+function removeMarkAt(i) {
+  const m = replay.mark;
+  const gone = m?.wps[i];
+  if (!gone || m.busy) return;
+  if (!removable(m.wps, i, m.hidden)) return toast('Kept: it was marked before you saw the trail, and holds your call');
+  const s = replay.s;
+  const owedBefore = s && callOwed(m.wps, s.data, !m.hidden);
+  if (callWp === gone) closeCall();
+  m.wps = removeMark(m.wps, i);
+  marksMoved();
+  toast(`${gone.kind} removed`);
+  /* The first indication taken off while the answer is still hidden: the
+     question goes to the one that is now the first. */
+  const owed = gone === owedBefore ? callOwed(m.wps, s.data, !m.hidden) : null;
+  if (owed && !owed.call) return openCall(owed);
+  const next = $('repMarkList').querySelector(`[data-mark="${Math.min(i, m.wps.length - 1)}"]`);
+  (next ?? $('repSee')).focus({ preventScroll: true });
+}
+
+/** The wind on the ground for this run, in the same sheet as on the run
+    screen. One wind for the whole run; it is kept, and the run graded in
+    it, at See the result. */
+function openMarkWind() {
+  if (!replay.mark || !replay.s || replay.mark.busy) return;
+  replayPause();
+  paintFeltSheet(replay.s, { marking: true });
+  $('feltSheet').hidden = false;
+  $('feltTitle').focus({ preventScroll: true });
+}
+
+function pickFeltOnMark(b) {
+  const m = replay.mark, s = replay.s;
+  if (!m || !s || b.disabled) return;
+  const choice = feltChoiceOf(b);
+  const back = feltSame(feltOf(s.data), choice);
+  const felt = back ? null : windFeltFor(s, choice);
+  if (!back && !felt) return toast('No forecast wind yet to turn');
+  m.felt = felt;
+  replay.s = { ...s, data: { ...s.data, windFelt: felt } };
+  navigator.vibrate?.(18);
+  closeFeltSheet();
+  paintReplay();
+  toast(windWords(replay.s, { imperial: imp(), short: true }) ?? 'Back to the forecast wind');
+}
+
+/** Ends the marking: what changed is saved, the run graded again in a new
+    wind (setWindFelt, which puts the dog's drift row right rather than
+    adding one), and the result shown. A blind trail with no line keeps its
+    marks and wind for the grade its line will bring. */
+async function seeResult() {
+  const m = replay.mark;
+  if (!m || m.busy) return;
+  let s = sessionById(m.id);
+  if (!s) { closeReplay(); return go('scrHome'); }   // deleted on another phone meanwhile
+  const plan = markingSave({ before: s.data.trackWaypoints || [], after: m.wps, feltBefore: feltOf(s.data), feltAfter: m.felt });
+  m.busy = true;
+  $('repSee').disabled = true;
+  try {
+    if (plan.marks) {
+      /* With the time they changed (marksAt), so a phone that still has the
+         older list cannot put a removed mark back when the two copies meet
+         (sync-core.js withMissing). */
+      s = keepPatch(s, { data: { trackWaypoints: m.wps, marksAt: Date.now() } });
+      if (run.session?.id === s.id) run.session = s;
+    }
+    if (plan.wind) {
+      $('repHudText').textContent = noLineYet(s.data) ? 'Saving…' : 'Grading it again in the wind you set…';
+      s = (await setWindFelt(s, m.felt)) ?? sessionById(m.id) ?? s;
+    }
+  } finally {
+    m.busy = false;
+    $('repSee').disabled = false;
+  }
+  /* Left while it was grading: the grade is kept, the screen not taken over. */
+  if (replay.mark !== m) return toast('Saved. Open the run from the log.');
+  closeReplay();
+  run.session = s;
+  renderResult(s);
+  /* Back to the result it came from, or on to it after the run. */
+  leaveForm('scrResult');
+}
+
+/** Edit marks, from a kept run's replay: the same tools, trail in view. */
+function editMarks() {
+  const s = replay.s && sessionById(replay.s.id);
+  if (!s || !marksEditable(s)) return;
+  replayPause();
+  replay.mark = { id: s.id, hidden: false, wps: (s.data.trackWaypoints || []).map(w => ({ ...w })), felt: feltOf(s.data) ?? null, busy: false };
+  replay.s = s;
+  lendSheets('scrReplay');
+  paintMarkTools();
+  marksMoved();
+  /* The button that was tapped has gone: focus goes to the tools that came. */
+  $('repMarks').querySelector('.wp-pill')?.focus({ preventScroll: true });
+}
+
+/** Cancel on Edit marks: back to watching, the run as it was kept. */
+function cancelMarking() {
+  const m = replay.mark;
+  if (!m || m.busy) return;
+  const s = sessionById(m.id);
+  endMarking();
+  if (s) replay.s = s;
+  paintMarkTools();
+  paintReplay();
+  ($('repEditRow').hidden ? $('repPlay') : $('repEdit')).focus({ preventScroll: true });
 }
 
 /* ── Wind tracers ─────────────────────────────────────────────────────
@@ -4576,15 +4859,16 @@ function setWindFelt(session, felt) {
 /** A kept run graded again in a wind felt on the ground, as a walked card
     grades one again (applyWalked), and saved with it. */
 async function regradeInWind(id, wf) {
-  const s = db.sessions().find(x => x.id === id);
+  /* A run whose save is waiting on Try again is graded as it is in memory,
+     and the grade goes into that save (keepPatch): the stored copy is still
+     the one from before the run, with no track to grade. */
+  const waiting = saveTrouble?.session?.id === id ? saveTrouble.session : null;
+  const s = waiting ?? db.sessions().find(x => x.id === id);
   if (!s || !ownRun(s) || !(s.data.track?.length > 1)) return null;
   /* A blind trail with no line has no grade to redo: the wind is kept with
      the run, and its grade is made in it when the line is added. */
   if (noLineYet(s.data)) {
-    const patch = { data: { windFelt: wf } };
-    const saved = guardSave(patchSession(s, patch), () => saveSession(s, patch));
-    snap();
-    const now = saved ?? patchSession(s, patch);
+    const now = keepPatch(s, { data: { windFelt: wf } });
     if (run.session?.id === id) run.session = now;
     return now;
   }
@@ -4599,9 +4883,7 @@ async function regradeInWind(id, wf) {
     s2.data.trackStarted, { bank: teachesDrift(s2.data), rebank: true, firstAt });
   /* As the grade measured it against the run's own forecast (anchorFelt). */
   const patch = { summary: result.sentence, data: { windFelt, result, ...(runWeather ? { runWeather } : {}) } };
-  const saved = guardSave(patchSession(s, patch), () => saveSession(s, patch));
-  snap();
-  const now = saved ?? patchSession(s, patch);
+  const now = keepPatch(s, patch);
   if (run.session?.id === id) run.session = now;
   return now;
 }
@@ -4670,7 +4952,7 @@ const feltChoiceOf = (b) => (b.dataset.feltFrom != null ? Number(b.dataset.feltF
    Done or a choice puts them back. */
 function openFeltSheet() {
   const s = run.session;
-  if (currentScreen !== 'scrRun' || !s) return;
+  if (currentScreen !== 'scrRun' || !s || markedAfter(s)) return;
   /* A panel with no forecast on it says "tap to retry", and this tap is it. */
   if (!wxShown.key) airPanel('scrRun');
   paintFeltSheet();
@@ -4680,12 +4962,15 @@ function openFeltSheet() {
 /* Drawn again whole, as when the forecast lands while it is open: focus on
    one of its buttons moves to the one drawn in its place (as repaintFrom
    does in the debrief), or to the sheet's title when that is now greyed. */
-function paintFeltSheet() {
-  const s = feltSubject(run.session);
+function paintFeltSheet(s = feltSubject(run.session), { marking = false } = {}) {
   if (!s) return;
   const had = document.activeElement;
   const was = had?.closest?.('#feltRun') ? had : null;
-  $('feltRun').innerHTML = feltPickerHtml(s, feltOf(s.data));
+  /* On the replay after a run, the slider reads as "the wind at this moment".
+     It is not: one wind for the whole run, kept at See the result. */
+  const note = marking
+    ? '<p class="felt-ask">One wind for the whole run. It is kept when you tap See the result.</p>' : '';
+  $('feltRun').innerHTML = note + feltPickerHtml(s, feltOf(s.data));
   if (!was || was.isConnected) return;
   const key = was.dataset?.feltFrom != null ? `[data-felt-from="${was.dataset.feltFrom}"]`
     : was.dataset?.felt != null ? `[data-felt="${was.dataset.felt}"]` : null;
@@ -4697,6 +4982,7 @@ function closeFeltSheet() {
   const was = !$('feltSheet').hidden;
   $('feltSheet').hidden = true;
   if (was && !$('wxFelt').hidden) $('wxFelt').focus({ preventScroll: true });
+  else if (was && currentScreen === 'scrReplay') $('repWind').focus({ preventScroll: true });   // marking the run
 }
 /** A choice on the run screen: the plume, the panel and the coach move to it
     at once (setWindFelt), and the sheet goes so the ground can be seen. A
@@ -4719,7 +5005,9 @@ async function pickFeltOnRun(b) {
 /** The air panel is the way in on the run screen, and only something to
     read everywhere else. Its name says the wind as it stands. */
 function paintWxFelt() {
-  const s = currentScreen === 'scrRun' ? feltSubject(run.session) : null;
+  /* A trail's wind is set afterwards, with its marks: on the run it is only
+     read, so nothing but Found and Done asks for a hand. */
+  const s = currentScreen === 'scrRun' && !markedAfter(run.session) ? feltSubject(run.session) : null;
   const b = $('wxFelt');
   b.hidden = !s;
   $('wxFeltHint').hidden = !s || !!feltOf(s.data);
@@ -4896,6 +5184,10 @@ async function startRun(s) {
   $('btnReveal').hidden = onTrail;
   $('btnRunStop').textContent = onTrail ? 'Found' : 'Stop';
   paintReveal();
+  /* A trail is marked once it is over, on the replay (openMarking): with a
+     line in one hand, Found and Done are all there is to touch. A search
+     keeps its marks, because they are what its hides are scored on. */
+  $('wpRow').hidden = onTrail;
   go('scrRun');
   /* The coach went on above, for this run. A run that never started must not
      leave it on: the next lay or walk would keep the screen awake and say
@@ -5095,11 +5387,14 @@ async function finishRun() {
   const summary = blindTrail
     ? blindSummary({ track: rec.pts, trackWaypoints: rec.wps, ...found }, S.dogs.find(d => d.id === dogId)?.name, unitsForText()).sentence
     : result.sentence;
+  /* A trail's answer is not seen until its marks are placed (openMarking):
+     null says "not yet", and the result or the replay stamps the moment. */
+  const unseen = markedAfter(s) ? { resultSeenAt: null } : {};
   const patch = {
     dogId,
     handlerId: S.handler.id,
     summary,
-    data: { track: rec.pts, trackStarted: run.startedAt, trackWaypoints: rec.wps,
+    data: { track: rec.pts, trackStarted: run.startedAt, trackWaypoints: rec.wps, ...unseen,
       revealedAt: run.revealedAt || s.data.revealedAt || null, ...(result ? { result } : {}), coach: coachRecord,
       ...(runWeather ? { runWeather } : {}), ...(had ? { windFelt } : {}), ...found },
   };
@@ -5110,6 +5405,9 @@ async function finishRun() {
   snap();
   run.session = saved ?? patchSession(s, patch);
   if (saved) dropDraft();   // graded and kept; a refused save keeps its draft
+  /* Graded and kept already, so leaving the marking any other way (the back
+     gesture, the app closed) leaves a whole run. Only the showing waits. */
+  if (markedAfter(run.session)) return openMarking(run.session, { hidden: true });
   renderResult(run.session);
   go('scrResult');
 }
@@ -5344,6 +5642,7 @@ function searchResult(s, track, wps, startedAt, wx, dogName, ageMin, firstAt = r
 }
 
 function renderResult(s) {
+  noteAnswerSeen(s);
   paintGround('resGround', s);
   /* A run kept from someone else's link before links were checked still holds
      whatever the link carried. It is read through the same cleaning a link
@@ -5641,6 +5940,34 @@ function runAirChanged(live) {
     const w = windAt(live, run.startedAt).wx;
     coach.field = w ? scentField(trailOf(live), w, run.startedAt) : [];
   }
+}
+
+/** A change to a session whose own save is still waiting on Try again (the
+    phone full when the run was kept), put into that save rather than beside
+    it. Saved on its own it went onto the stored copy from before the run,
+    and its refusal took the banner's Try again over, which then wrote the
+    change alone: the track, the grade and the find were never kept, under a
+    toast saying Saved. Folded in, Try again keeps the whole run with the
+    change on top. The session as it now stands in memory, or null when
+    nothing waits for this one. */
+function foldIntoPending(id, patch) {
+  if (!id || saveTrouble?.session?.id !== id) return null;
+  const now = patchSession(saveTrouble.session, patch);
+  const prev = saveTrouble.retry;
+  saveTrouble.session = now;
+  if (prev) saveTrouble.retry = () => { prev(); return saveSession(now, patch); };
+  if (run.session?.id === id) run.session = now;
+  return now;
+}
+
+/** Keep a patch to a session: into its waiting save when there is one, or
+    saved now, with the banner if the phone refuses. What it now is. */
+function keepPatch(s, patch) {
+  const folded = foldIntoPending(s.id, patch);
+  if (folded) return folded;
+  const saved = guardSave(patchSession(s, patch), () => saveSession(s, patch));
+  snap();
+  return saved ?? patchSession(s, patch);
 }
 
 function guardSave(session, fn) {
@@ -8070,7 +8397,7 @@ function wire() {
   $('btnFeltDone').addEventListener('click', closeFeltSheet);
   $('feltSheet').addEventListener('click', (e) => {
     const b = e.target.closest('[data-felt], [data-felt-from]');
-    if (b) pickFeltOnRun(b);
+    if (b) (replay.mark ? pickFeltOnMark(b) : pickFeltOnRun(b));
   });
   $('feltSheet').addEventListener('keydown', (e) => { if (e.key === 'Escape') closeFeltSheet(); });
   $('saveRetry').addEventListener('click', retrySave);
@@ -8413,6 +8740,19 @@ function wire() {
     }
   });
   $('repBack').addEventListener('click', () => { const back = replay.back; closeReplay(); leaveForm(back || 'scrResult'); });
+  /* Marking the run, after it or from Edit marks. */
+  $('repEdit').addEventListener('click', editMarks);
+  $('repMarks').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-wp]');
+    if (b) placeMarkNow(b.dataset.wp);
+  });
+  $('repMarkList').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-mark]');
+    if (b) removeMarkAt(Number(b.dataset.mark));
+  });
+  $('repWind').addEventListener('click', openMarkWind);
+  $('repSee').addEventListener('click', seeResult);
+  $('repCancel').addEventListener('click', cancelMarking);
   $('repPlay').addEventListener('click', () => (replay.playing ? replayPause() : replayPlay()));
   $('repSpeed').addEventListener('click', () => {
     const i = (REPLAY_SPEEDS.indexOf(replay.speed) + 1) % REPLAY_SPEEDS.length;

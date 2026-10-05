@@ -22,7 +22,8 @@
    - A call on a run the handler knew the answer to proves nothing either.
    Both are excluded from the maths, not quietly folded in. */
 
-import { ownRun, trailShown, unwalkedPlan, noLineYet } from './debrief.js';
+import { ownRun, unwalkedPlan, noLineYet } from './debrief.js';
+import { seenWhen } from './marks.js';
 import { dist } from './geo.js';
 
 export const CALL_V = 1;
@@ -139,7 +140,10 @@ export function firstCallWasFind(session) {
   if (!c) return null;
   const d = session?.data ?? {};
   const targets = targetsOf(d);
-  const marks = (d.trackWaypoints ?? []).filter(w => w?.kind === 'Indication');
+  /* Not the marks placed with the answer already seen (marks.js placeMark,
+     `late`): they are notes, and one put at the trail's end afterwards must
+     not decide whether a call made blind was right. */
+  const marks = (d.trackWaypoints ?? []).filter(w => w?.kind === 'Indication' && !w.late);
   if (targets.length && placed(c)) {
     const gapOf = (w) => Math.min(...targets.map(p => dist(w, p)));
     const gap = gapOf(c);
@@ -173,10 +177,12 @@ export function callVerdict(session) {
   /* The coach reads out the distance to the real trail as the dog works: with
      it on, nothing the handler says afterwards is a blind call. */
   if (session?.data?.coach?.assisted) return { ok: false, why: 'helped' };
-  /* Belt and braces against the run screen: the moment the answer was put on
-     screen, against the moment the call was actually given. */
+  /* Belt and braces against the run screen and the marking after it: the
+     moment the answer was first put on screen (Show trail during the run, or
+     the result or the replay afterwards), against the moment the call was
+     actually given. */
   const when = Number.isFinite(c.call?.at) ? c.call.at : c.t;
-  if (trailShown(session?.data) && when >= session.data.revealedAt) return { ok: false, why: 'seen' };
+  if (seenWhen(session?.data, when)) return { ok: false, why: 'seen' };
   const d = session?.data?.debrief;
   if (!d || (d.outcome !== 'found' && d.outcome !== 'false')) return { ok: false, why: 'nodebrief' };
   /* Everything ranBlind (debrief.js) refuses is refused here too, but a

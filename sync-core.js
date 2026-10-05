@@ -59,8 +59,12 @@ const plainObject = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
    which dog ran it, who handled it and what it said, as well as the track.
    The wind the handler felt on the ground (windFelt) is one of them: it was
    felt on the day of that run, and the next dog's day may blow another way.
-   So is a run ended on Found (found): the next dog has found nobody yet. */
-export const RUN_FIELDS = ['track', 'trackStarted', 'trackWaypoints', 'result', 'coach', 'debrief', 'seen', 'runWeather', 'windFelt', 'found'];
+   So is a run ended on Found (found): the next dog has found nobody yet.
+   So are when the answer to a run was first seen (resultSeenAt), which
+   decides whether its call was blind, and when its marks were last changed
+   (marksAt): the next dog's run has neither been seen nor marked. */
+export const RUN_FIELDS = ['track', 'trackStarted', 'trackWaypoints', 'result', 'coach', 'debrief', 'seen', 'runWeather', 'windFelt', 'found',
+  'resultSeenAt', 'marksAt'];
 const RUN_TOP = ['dogId', 'handlerId', 'summary'];
 const hasRun = (r) => (Array.isArray(r?.data?.track) && r.data.track.length > 0) || !!r?.data?.result;
 const empty = (v) => v == null || v === '' || (Array.isArray(v) && v.length === 0);
@@ -99,7 +103,30 @@ function withMissing(win, lose) {
      session went straight back into the folder it was taken out of. A copy
      with no list at all (an older build) still takes the other's. */
   const filed = plainObject(win.data) && 'folders' in win.data;
-  if (plainObject(lose.data)) fill(data, lose.data, (k) => cloudless(k) || (graded && k === 'windFelt') || (filed && (k === 'folders' || k === 'foldersAt')));
+  /* And except two things a run decides for itself. Its marks, once placed
+     after the run (marksAt): taking the last one off leaves an empty list,
+     a decision like an emptied folder list, and filled from the older copy
+     the removed mark came back with its call. Which list stands is settled
+     below by when each was changed. And when its answer was first seen
+     (resultSeenAt): null on a run means "not seen yet", which an older copy
+     of a different run on the same trail must not fill with its own time,
+     turning this run's blind call into a seen one. The same run seen on the
+     other phone is seen, and that time is taken. */
+  const winData = plainObject(win.data) ? win.data : {};
+  const marked = graded && Number.isFinite(winData.marksAt);
+  const sameRun = plainObject(lose.data) && Number.isFinite(winData.trackStarted) && lose.data.trackStarted === winData.trackStarted;
+  const ownSeen = graded && 'resultSeenAt' in winData && !sameRun;
+  if (plainObject(lose.data)) fill(data, lose.data, (k) => cloudless(k) || (graded && k === 'windFelt') || (filed && (k === 'folders' || k === 'foldersAt'))
+    || (marked && (k === 'trackWaypoints' || k === 'marksAt')) || (ownSeen && k === 'resultSeenAt'));
+  /* Two copies of one run: the marks changed last are the marks, however
+     new the rest of either copy is. A copy whose marks were never changed
+     after the run (no marksAt) takes the other's. */
+  const markedAt = (r) => (Number.isFinite(r?.data?.marksAt) ? r.data.marksAt : 0);
+  if (sameRun && Array.isArray(lose.data.trackWaypoints) && markedAt(lose) > markedAt(win)) {
+    data.trackWaypoints = lose.data.trackWaypoints;
+    data.marksAt = lose.data.marksAt;
+    added++;
+  }
   /* A blind trail's laid line, added on the older copy (lineAdded) while the
      newer one, saved on a phone that had not heard of it, still has none.
      The line, its grade and its marks come across in the fill above, but
