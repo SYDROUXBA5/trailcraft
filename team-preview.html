@@ -1,0 +1,937 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>Team levels sample</title>
+<style>
+:root {
+  --paper: #f6f7fa; --card: #ffffff; --ink: #0f1f3d; --muted: #5b6a85; --border: #d8deea;
+  --ember: #b8861b; --gold: #e0a92a; --gold-ink: #8a6210; --hot: #be3f2e; --hot-ink: #b0362a; --warm: #d0821f; --cold: #3b8bd6;
+  --chip: #eef1f6; --shadow: 0 -8px 28px rgba(15,31,61,0.14);
+  --safe-b: env(safe-area-inset-bottom, 0px); --safe-t: env(safe-area-inset-top, 0px);
+  --ease: cubic-bezier(0.23, 1, 0.32, 1);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #0b1730; --card: #14284b; --ink: #f2f4f8; --muted: #9eabc4; --border: #24406b;
+    --ember: #e2b24a; --gold: #f2c14e; --gold-ink: #f2c14e; --chip: #1c3560; --shadow: 0 -8px 28px rgba(0,0,0,0.45); --hot-ink: #ff7a66;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #0b1730; --card: #14284b; --ink: #f2f4f8; --muted: #9eabc4; --border: #24406b;
+  --ember: #e2b24a; --gold: #f2c14e; --gold-ink: #f2c14e; --chip: #1c3560; --shadow: 0 -8px 28px rgba(0,0,0,0.45); --hot-ink: #ff7a66;
+}
+/* A still asked for with ?t= shows the settled state, not a transition mid-way. */
+html.frozen *, html.frozen *::before, html.frozen *::after { transition: none !important; animation: none !important; }
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; background: var(--paper); color: var(--ink);
+  font: 15px/1.4 -apple-system, BlinkMacSystemFont, "Roboto", "Segoe UI", sans-serif;
+  -webkit-tap-highlight-color: transparent; overflow-x: hidden;
+}
+button { font: inherit; color: inherit; }
+.app { max-width: 480px; margin: 0 auto; position: relative; }
+
+/* The team card, pinned at the top. */
+.team {
+  position: sticky; top: 0; z-index: 20; background: var(--card);
+  padding: calc(var(--safe-t) + 12px) 16px 12px; border-bottom: 1px solid var(--border);
+  display: grid; grid-template-columns: auto 1fr auto; gap: 4px 12px; align-items: center;
+}
+.badge {
+  grid-row: span 2; width: 52px; height: 52px; border-radius: 14px; background: var(--hot); color: #fff;
+  display: grid; place-items: center; text-align: center; line-height: 1; position: relative;
+  box-shadow: inset 0 -4px 0 rgba(0,0,0,0.22);
+}
+.badge b { font-size: 22px; font-weight: 800; font-variant-numeric: tabular-nums; display: block; }
+.badge small { font-size: 9px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; opacity: 0.85; }
+.who { min-width: 0; }
+.who h1 { margin: 0; font-size: 17px; font-weight: 700; letter-spacing: -0.2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rank { height: 20px; overflow: hidden; position: relative; font-weight: 600; color: var(--gold-ink); }
+.rank span { display: block; transition: transform 380ms var(--ease), opacity 380ms; }
+.rank .new { position: absolute; left: 0; top: 0; transform: translateY(100%); opacity: 0; }
+.rank.flipped .old { transform: translateY(-100%); opacity: 0; }
+.rank.flipped .new { transform: none; opacity: 1; }
+html[data-motion="off"] .rank span { transition: opacity 400ms; transform: none !important; }
+.sample-btn {
+  grid-row: span 2; align-self: start; border: 1px solid var(--border); background: var(--chip); border-radius: 999px;
+  padding: 7px 12px; font-size: 13px; font-weight: 600; cursor: pointer; min-height: 36px;
+}
+.meter { grid-column: 2 / 4; display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+.bar { flex: 1; display: flex; gap: 3px; height: 8px; }
+.bar i { display: block; border-radius: 3px; background: var(--chip); position: relative; overflow: hidden; }
+.bar i b { position: absolute; inset: 0 auto 0 0; background: var(--hot); width: 0; transition: width 600ms var(--ease); }
+.bar .h { flex: 15; } .bar .w { flex: 30; } .bar .c { flex: 55; }
+.meter strong { color: var(--ink); font-variant-numeric: tabular-nums; }
+
+/* The trail board: art, the locked wood, the hedge, the team, the stones. */
+.board-wrap { position: relative; overflow: hidden; background: #9cc35a; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .board-wrap { background: #5a7a55; } }
+:root[data-theme="dark"] .board-wrap { background: #5a7a55; }
+.board { position: relative; margin: 0 auto; }
+.board canvas { image-rendering: pixelated; }
+.board canvas.art { display: block; }
+.board .layer { position: absolute; left: 0; pointer-events: none; }
+#lock { top: 0; z-index: 1; }
+#hedge { z-index: 2; }
+#hedge.over { z-index: 7; }
+.board .night { position: absolute; inset: 0; background: #1b2c66; opacity: 0; pointer-events: none; transition: opacity 600ms; mix-blend-mode: multiply; z-index: 2; }
+.board.is-night .night { opacity: 0.85; }
+.board.is-night .ring { opacity: 0.55; }
+/* The team stands over the stones' rings and plates; the signs stay on top. */
+#team { position: absolute; left: 0; top: 0; z-index: 6; pointer-events: none; transition: opacity 250ms; }
+.stone {
+  position: absolute; width: 48px; height: 48px; margin: -24px 0 0 -24px; border: 0; padding: 0;
+  background: transparent; border-radius: 50%; cursor: pointer; z-index: 5;
+}
+/* Focus is white over a dark gap, so it never looks like the gold 'next' ring. */
+.stone:focus { outline: none; box-shadow: 0 0 0 2px #0b1730, 0 0 0 5px #fff; }
+.stone:focus:not(:focus-visible) { box-shadow: none; }
+.stone img, .stone .ring, .stone .pointer { position: absolute; pointer-events: none; display: block; }
+.ring.big { opacity: 0; }
+html[data-motion="on"] .ring.cur.big { animation: blink 1.2s steps(1) infinite; }
+html[data-motion="on"] .ring.cur.small { animation: blink 1.2s steps(1) infinite reverse; }
+@keyframes blink { 0% { opacity: 1; } 50% { opacity: 0; } }
+.stone .pointer { left: 50%; top: -14px; width: 12px; height: 10px; margin-left: -6px; display: none; }
+.stone[aria-pressed="true"] .pointer { display: block; }
+html[data-motion="on"] .stone[aria-pressed="true"] .pointer { animation: bob 0.8s steps(2) infinite; }
+@keyframes bob { 0% { transform: translateY(0); } 50% { transform: translateY(-2px); } }
+#stamp { position: absolute; z-index: 7; pointer-events: none; display: none; }
+.ribbon {
+  position: absolute; z-index: 9; pointer-events: none; display: none; white-space: nowrap;
+  font-size: 12px; font-weight: 900; letter-spacing: 0.4px; color: #3a2806; background: #f2c14e;
+  padding: 4px 10px; border: 2px solid #1c1411; box-shadow: 0 3px 0 #1c1411, inset 0 -3px 0 #d39b22;
+  transform-origin: 50% 100%;
+}
+.ribbon::before, .ribbon::after { content: ""; position: absolute; top: 6px; width: 8px; height: 14px; background: #d39b22; border: 2px solid #1c1411; z-index: -1; }
+.ribbon::before { left: -10px; } .ribbon::after { right: -10px; }
+.sign {
+  position: absolute; z-index: 8; transform: translateX(-50%); white-space: nowrap; pointer-events: none;
+  font-size: 11px; font-weight: 800; letter-spacing: 1.4px; text-transform: uppercase; color: #fff;
+  padding: 5px 10px; border-radius: 6px; box-shadow: 0 3px 0 rgba(0,0,0,0.25);
+}
+.sign.hot { background: var(--hot); } .sign.warm { background: #e39a3b; color: #2a1705; }
+.sign.boss { background: #2a1d12; color: #ffd98a; }
+.sign.mist { background: rgba(255,255,255,0.75); color: #5b4a30; box-shadow: none; }
+
+/* The card pinned at the bottom. */
+.next {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 25; max-width: 480px; margin: 0 auto;
+  background: var(--card); border-radius: 22px 22px 0 0; box-shadow: var(--shadow);
+  padding: 10px 16px calc(var(--safe-b) + 14px);
+}
+.card-top { display: block; width: calc(100% + 32px); margin: -10px -16px 0; padding: 8px 16px 6px; min-height: 44px; border: 0; background: none; cursor: pointer; text-align: left; border-radius: 22px 22px 0 0; }
+.card-top::before { content: ""; display: block; width: 36px; height: 4px; border-radius: 2px; background: var(--border); margin: 0 auto 6px; }
+.next.compact .rule, .next.compact .tries { display: none; }
+.next-k { font-size: 11px; font-weight: 800; letter-spacing: 1.5px; text-transform: uppercase; color: var(--muted); display: flex; justify-content: space-between; }
+.next-k .stage { color: var(--hot-ink); }
+.next-k .stage.warm { color: #a8620f; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .next-k .stage.warm { color: #f0a64a; } }
+:root[data-theme="dark"] .next-k .stage.warm { color: #f0a64a; }
+.new-line .shorter { color: var(--muted); font-weight: 600; }
+.next h2 { margin: 1px 0 1px; font-size: 20px; font-weight: 800; letter-spacing: -0.3px; }
+.new-line { color: var(--gold-ink); font-weight: 700; font-size: 14px; }
+.rule { color: var(--muted); font-size: 13px; margin-top: 1px; }
+.checks { display: flex; flex-wrap: wrap; gap: 5px; margin: 8px 0 2px; padding: 0; list-style: none; }
+.checks li {
+  display: inline-flex; align-items: center; gap: 4px; padding: 4px 8px 4px 5px; border-radius: 999px;
+  background: var(--chip); font-size: 12px; font-weight: 600; transition: background 300ms, color 300ms; white-space: nowrap;
+}
+.checks li .m { width: 15px; height: 15px; border-radius: 50%; display: inline-grid; place-items: center; font-size: 11px; border: 2px solid var(--muted); color: transparent; }
+.checks li.ok .m { border-color: var(--ink); background: var(--ink); color: var(--card); }
+.checks li.gold { background: var(--gold); color: #3a2806; }
+.checks li.gold .m { border-color: #3a2806; background: #3a2806; color: var(--gold); }
+html[data-motion="on"] .checks li.gold { animation: pop 380ms var(--ease); }
+@keyframes pop { 0% { transform: scale(0.85); } 60% { transform: scale(1.08); } 100% { transform: scale(1); } }
+.tries-k { display: flex; align-items: center; width: 100%; min-height: 44px; border: 0; background: none; padding: 0; cursor: pointer; font-size: 11px; font-weight: 800; letter-spacing: 1.5px; text-transform: uppercase; color: var(--muted); text-align: left; }
+.next.compact .tries-k::after { content: " ›"; white-space: pre; }
+.tries { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.tries li { display: grid; grid-template-columns: 18px 64px 1fr; column-gap: 8px; align-items: baseline; background: var(--chip); border-radius: 10px; padding: 6px 10px; font-size: 12.5px; line-height: 1.3; }
+.tries li b { font-weight: 700; }
+.tries li em { font-style: normal; font-weight: 600; }
+.tries li > span:last-child { grid-column: 3; color: var(--muted); }
+.tries .i { width: 16px; height: 16px; border-radius: 5px; display: inline-grid; place-items: center; font-weight: 800; font-size: 10px; align-self: center; }
+.tries .yes .i { background: #2f8a4a; color: #fff; }
+.tries .miss .i, .tries .no .i { background: var(--muted); color: var(--card); }
+.back-link { border: 0; background: none; color: var(--ember); font-weight: 700; padding: 0; cursor: pointer; font-size: 13px; min-height: 36px; }
+
+/* The close-up, and the boss moment. */
+.spot { position: fixed; inset: 0; z-index: 40; display: none; background: rgba(5,10,24,0.72); }
+.spot.open { display: block; }
+.spot-card {
+  position: absolute; left: 50%; top: calc(var(--safe-t) + 92px); transform: translateX(-50%);
+  width: min(100% - 24px, 456px); background: #0d1a33; border-radius: 18px; padding: 10px; color: #f2f4f8;
+  box-shadow: 0 18px 50px rgba(0,0,0,0.5);
+}
+.spot canvas { display: block; margin: 0 auto; border-radius: 8px; image-rendering: pixelated; }
+.spot-cap { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 4px 2px; font-size: 13px; }
+.spot-cap b { font-weight: 700; }
+.spot-x { border: 0; background: rgba(255,255,255,0.12); color: #fff; border-radius: 999px; min-width: 44px; min-height: 36px; font-weight: 700; cursor: pointer; }
+.boss-card {
+  position: fixed; left: 50%; top: calc(var(--safe-t) + 100px); z-index: 30; width: min(100% - 32px, 400px);
+  transform: translate(-50%, 12px); opacity: 0; pointer-events: none; text-align: center; color: #fff;
+  border-radius: 16px; padding: 16px 14px 14px; background: linear-gradient(180deg, #3a220e, #1d1208);
+  box-shadow: 0 18px 50px rgba(0,0,0,0.45), inset 0 0 0 2px #8a4a14;
+  /* Hidden cards leave the tab and VoiceOver order once they have faded. */
+  visibility: hidden; transition: opacity 500ms, transform 500ms var(--ease), visibility 0s linear 500ms;
+}
+.boss-card.on { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; visibility: visible; transition-delay: 0s; }
+html[data-motion="off"] .boss-card { transform: translate(-50%, 0); }
+.boss-card small { display: block; font-size: 10px; font-weight: 800; letter-spacing: 2px; text-transform: uppercase; color: #ffd98a; }
+.boss-card strong { display: block; font-size: 30px; font-weight: 900; letter-spacing: -0.5px; text-shadow: 0 3px 0 #8a4a14; margin: 2px 0; }
+.boss-card p { margin: 2px 0 12px; font-size: 13px; color: #f4e6cc; }
+.boss-card .row { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+.boss-card button { border: 0; border-radius: 999px; padding: 8px 14px; font-weight: 700; font-size: 13px; background: #e39a3b; color: #2a1705; min-height: 44px; cursor: pointer; }
+.boss-card button.ghost { background: rgba(255,255,255,0.14); color: #fff; }
+
+/* Sample controls. */
+.sheet {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 50; max-width: 480px; margin: 0 auto; max-height: 52vh; overflow-y: auto;
+  background: var(--card); border-radius: 22px 22px 0 0; box-shadow: var(--shadow); padding: 10px 16px calc(var(--safe-b) + 16px);
+  transform: translateY(105%); -webkit-overflow-scrolling: touch;
+  visibility: hidden; transition: transform 320ms var(--ease), visibility 0s linear 320ms;
+}
+.sheet.open { transform: none; visibility: visible; transition-delay: 0s; }
+html[data-motion="off"] .sheet { transition: visibility 0s; }
+.sheet .grab { width: 36px; height: 4px; border-radius: 2px; background: var(--border); margin: 0 auto 6px; }
+.sheet h3 { margin: 12px 0 6px; font-size: 11px; font-weight: 800; letter-spacing: 1.5px; text-transform: uppercase; color: var(--muted); }
+.sheet-top { display: flex; justify-content: space-between; align-items: center; }
+.sheet-top strong { font-size: 16px; }
+.opts { display: flex; flex-wrap: wrap; gap: 6px; }
+.opt {
+  border: 1px solid var(--border); background: var(--chip); border-radius: 999px; padding: 6px 11px; font-size: 13px; font-weight: 600;
+  min-height: 34px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;
+}
+.opt[aria-pressed="true"] { background: var(--ink); color: var(--card); border-color: var(--ink); }
+.opt.go { background: var(--gold); color: #3a2806; border-color: transparent; }
+.dot { width: 14px; height: 14px; border-radius: 50%; display: inline-block; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.25); }
+.now { font-size: 12px; color: var(--muted); }
+.gallery { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; padding: 16px; }
+.gallery figure { margin: 0; background: #8cbb55; border-radius: 12px; padding: 6px 0 4px; text-align: center; }
+.gallery figcaption { font-size: 12px; font-weight: 700; color: #1f2d12; }
+.gallery canvas { image-rendering: pixelated; }
+</style>
+</head>
+<body>
+<div class="app" id="app">
+  <header class="team" id="team-card">
+    <div class="badge" id="badge"><div><b id="badge-n">7</b><small>Hot</small></div></div>
+    <div class="who">
+      <h1>Rémi &amp; Rex</h1>
+      <div class="rank" id="rank"><span class="old" id="rank-old">Line Puller II</span><span class="new" id="rank-new">Line Puller III</span></div>
+    </div>
+    <button class="sample-btn" id="open-controls" aria-haspopup="dialog">Sample</button>
+    <div class="meter">
+      <span>Level <strong id="lvl">7</strong> of 100</span>
+      <div class="bar" aria-hidden="true"><i class="h"><b id="fill-h"></b></i><i class="w"><b></b></i><i class="c"><b></b></i></div>
+    </div>
+  </header>
+
+  <div class="board-wrap" id="board-wrap">
+    <div class="board" id="board">
+      <canvas class="art" id="board-art" aria-hidden="true"></canvas>
+      <canvas class="layer" id="lock" aria-hidden="true"></canvas>
+      <canvas class="layer" id="hedge" aria-hidden="true"></canvas>
+      <div class="night" aria-hidden="true"></div>
+      <canvas id="team" aria-hidden="true"></canvas>
+      <canvas id="stamp" aria-hidden="true"></canvas>
+    </div>
+  </div>
+
+  <section class="next" id="next" aria-live="polite"></section>
+</div>
+
+<div class="boss-card" id="boss-card" role="dialog" aria-label="Hot stage cleared">
+  <small>Hot stage cleared · level 15</small>
+  <strong>Trail Hound</strong>
+  <p>Rémi &amp; Rex showed the find at the stile. The amber wood is open: Seeker I is next.</p>
+  <div class="row">
+    <button type="button" id="b-share">Share picture</button>
+    <button type="button" class="ghost" data-later>Certificate</button>
+    <button type="button" class="ghost" id="b-done">Done</button>
+  </div>
+</div>
+
+<div class="spot" id="spot" role="dialog" aria-label="Close-up">
+  <div class="spot-card">
+    <canvas id="close"></canvas>
+    <div class="spot-cap"><span id="spot-cap"></span><button class="spot-x" id="spot-x" type="button">Close</button></div>
+  </div>
+</div>
+
+<div class="sheet" id="controls" role="dialog" aria-label="Sample controls">
+  <div class="grab"></div>
+  <div class="sheet-top"><strong>Sample controls</strong><button class="opt" id="close-controls" type="button">Done</button></div>
+  <div class="now" id="now"></div>
+  <h3>Play a state</h3>
+  <div class="opts" id="o-state"></div>
+  <h3>Moments</h3>
+  <div class="opts">
+    <button class="opt go" type="button" id="b-levelup">Level up</button>
+    <button class="opt go" type="button" id="b-boss">Boss: Trail Hound</button>
+    <button class="opt" type="button" id="b-reset">Back to level 7</button>
+  </div>
+  <h3>View</h3>
+  <div class="opts" id="o-scene"></div>
+  <h3>Dog's coat</h3>
+  <div class="opts" id="o-coat"></div>
+  <h3>Handler's jacket</h3>
+  <div class="opts" id="o-jacket"></div>
+  <h3>Hat</h3>
+  <div class="opts" id="o-hat"></div>
+  <h3>Animations</h3>
+  <div class="opts" id="o-motion"></div>
+  <h3>Theme</h3>
+  <div class="opts" id="o-theme"></div>
+</div>
+
+<script type="module">
+import {
+  createTeam, COATS, JACKETS, HATS, ICONS, TEAM, ANCHOR, MOMENTS, CLOSE,
+  boardLayout, drawBoard, drawHedge, hedgeBand, trailPoint, ringArt, stamp,
+  plaqueSize, drawPlaque, lockedWood, unlockWood, gateOpen, duskify, crispURL,
+} from './pixel-team.js';
+
+/* ── The ladder slice (LADDER v1, Hot and the start of Warm) ── */
+const ROMAN = ['I', 'II', 'III', 'IV', 'V'];
+const WAVES = [
+  { rank: 'Puppy Nose', stage: 'hot', from: 1, wave: 'Runaway', icon: 'ruler', len: [20, 40, 60, 90, 120], age: [0, 0, 0, 0, 0], fresh: 'the first trail' },
+  { rank: 'Line Puller', stage: 'hot', from: 6, wave: 'Delayed release', icon: 'clock', len: [60, 90, 120, 150, 200], age: [1, 2, 3, 4, 5], fresh: 'held back, 1 min old' },
+  { rank: 'Scent Reader', stage: 'hot', from: 11, wave: 'Article start', icon: 'article', len: [120, 160, 200, 250, 300], age: [5, 5, 8, 10, 10], fresh: 'scent article' },
+  { rank: 'Seeker', stage: 'warm', from: 16, wave: 'Out of sight', icon: 'blind', len: [150, 200, 250, 300, 300], age: [10, 15, 20, 25, 30], fresh: 'out of sight · coach off · time limit' },
+];
+function info(level) {
+  const w = WAVES.filter(x => x.from <= level).pop();
+  const i = level - w.from;
+  const rule = w.from === 1 ? (level >= 3 ? 'The dog watches the person leave. The person hides at the end.' : 'The dog watches the person leave.')
+    : w.from === 6 ? 'The dog watches the person leave, then is held.'
+    : w.from === 11 ? 'The dog watches, then gets a scent article.'
+    : 'The dog is taken away first. Article start, coach off.';
+  return {
+    level, stage: w.stage, wave: w.wave, icon: w.icon, len: w.len[i], age: w.age[i],
+    name: w.rank + ' ' + ROMAN[i], rule, boss: level === 15, first: i === 0, fresh: w.fresh,
+    // From Warm on, the find has a time limit: 20 min + 1 min per 40 m, at most 60.
+    limit: w.stage === 'hot' ? 0 : Math.min(60, 20 + Math.floor(w.len[i] / 40)),
+  };
+}
+const ageText = (m) => (m ? m + ' min old' : 'fresh');
+
+/* ── Settings from the URL, then from this phone ── */
+const q = new URLSearchParams(location.search);
+const store = {
+  get(k) { try { return localStorage.getItem('tc-sample-' + k); } catch (e) { return null; } },
+  set(k, v) { try { localStorage.setItem('tc-sample-' + k, v); } catch (e) { /* private mode */ } },
+};
+const S = {
+  state: q.get('state') || 'waiting',
+  scene: q.get('scene') || 'board',
+  coat: q.get('coat') || store.get('coat') || 'bloodhound-red',
+  jacket: q.get('jacket') || store.get('jacket') || 'navy',
+  hat: q.get('hat') || store.get('hat') || 'cap',
+  // The sample exists to show the animation, so it plays unless told not to.
+  motion: q.get('motion') || store.get('motion') || 'on',
+  theme: q.get('theme') || store.get('theme') || 'auto',
+  freezeAt: q.has('t') ? Math.max(0, Number(q.get('t')) || 0) : null,
+  level: 7,
+};
+S.shot = S.freezeAt != null && !q.has('motion');
+const reduced = () => !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
+/* A still asked for by ?t= is drawn as that moment, whatever the device says. */
+const motionOn = () => (S.shot || S.motion === 'on' ? true : S.motion === 'off' ? false : !reduced());
+const root = document.documentElement;
+function applyTheme() {
+  if (S.theme === 'auto') root.removeAttribute('data-theme');
+  else root.setAttribute('data-theme', S.theme);
+}
+function applyMotionAttr() { root.setAttribute('data-motion', motionOn() ? 'on' : 'off'); }
+applyTheme(); applyMotionAttr();
+if (S.freezeAt != null) root.classList.add('frozen');
+
+/* ── The board ── */
+const SCALE = 2;
+const DPR = Math.max(1, Math.round(window.devicePixelRatio || 1));
+const wrap = document.getElementById('board-wrap');
+const boardEl = document.getElementById('board');
+const art = document.getElementById('board-art');
+const lockEl = document.getElementById('lock');
+const hedgeEl = document.getElementById('hedge');
+const teamCanvas = document.getElementById('team');
+const stampEl = document.getElementById('stamp');
+const levels = [];
+for (let l = 1; l <= 20; l++) levels.push({ level: l, stage: l <= 15 ? 'hot' : 'warm', boss: l === 15 });
+const icons = {};
+levels.forEach(s => { icons[s.level] = info(s.level).icon; });
+let layout = null, drawnFor = null, locked = null, ringLevel = 8, selected = null, ribbon = null;
+const stoneAt = (lv) => layout.stones[lv - 1];
+
+/** Size a small pixel canvas and show it `SCALE` times bigger, crisp. */
+function pixelCanvas(el, w, h) {
+  el.width = w; el.height = h;
+  el.style.width = w * SCALE + 'px'; el.style.height = h * SCALE + 'px';
+  const c = el.getContext('2d'); c.imageSmoothingEnabled = false;
+  return c;
+}
+
+function buildBoard() {
+  const width = Math.min(window.innerWidth || 390, 480);
+  const W = Math.floor(width / SCALE);
+  layout = boardLayout(W, levels);
+  boardEl.style.width = W * SCALE + 'px';
+  boardEl.style.height = layout.H * SCALE + 'px';
+  boardEl.querySelectorAll('.stone,.sign,.ribbon').forEach(n => n.remove());
+  drawnFor = null; locked = null;
+  paintBoard();
+  const ringS = ringArt(false), ringB = ringArt(true), ringSel = ringArt(true);
+  const sc = ringSel.getContext('2d');
+  sc.globalCompositeOperation = 'source-in'; sc.fillStyle = '#f4f6fa'; sc.fillRect(0, 0, ringSel.width, ringSel.height);
+  // Stone parts are small images, scaled up once to device pixels and shared.
+  const urls = new Map();
+  const urlOf = (src) => { if (!urls.has(src)) urls.set(src, crispURL(src, SCALE * DPR)); return urls.get(src); };
+  const ptr = document.createElement('canvas'); ptr.width = 6; ptr.height = 5;
+  stamp(ptr.getContext('2d'), ['ggggg', '.ggg.', '..g..'], 0, 0, { g: '#f4f6fa' });
+  for (const s of layout.stones) {
+    const b = document.createElement('button');
+    b.className = 'stone';
+    b.type = 'button';
+    // Centre on the stone's middle pixel, so everything inside sits on the grid.
+    b.style.left = (s.x * SCALE + 1) + 'px';
+    b.style.top = (s.y * SCALE + 1) + 'px';
+    b.dataset.level = s.level;
+    const put = (src, cls, ax, ay, url) => {
+      const im = document.createElement('img');
+      im.className = cls; im.alt = '';
+      im.src = url || urlOf(src);
+      im.style.width = src.width * SCALE + 'px'; im.style.height = src.height * SCALE + 'px';
+      im.style.left = (23 - ax * SCALE) + 'px'; im.style.top = (23 - ay * SCALE) + 'px';
+      b.appendChild(im);
+      return im;
+    };
+    if (!s.boss) { put(ringS, 'ring cur small', 12, 8); put(ringB, 'ring cur big', 12, 8); put(ringSel, 'ring sel', 12, 8); }
+    const [pw, ph] = plaqueSize(s.level);
+    const pl = document.createElement('canvas');
+    pl.width = pw; pl.height = ph;
+    put(pl, 'plaque', pw >> 1, s.boss ? -10 : -6, 'data:,');
+    const pointer = put(ptr, 'pointer', 3, 0);
+    pointer.style.left = ''; pointer.style.top = '';
+    b.addEventListener('click', () => preview(s.level));
+    boardEl.appendChild(b);
+  }
+  const st = (lv) => layout.stones[lv - 1];
+  addSign('hot', 'Red meadow · Hot', st(1).y + 30);
+  addSign('boss', 'Boss · First Trail', layout.hedgeY - 62);
+  addSign('warm', 'Amber wood · Warm', layout.hedgeY - 104);
+  addSign('mist', 'The wood goes on to level 45', 16);
+  ribbon = document.createElement('div');
+  ribbon.className = 'ribbon'; ribbon.setAttribute('aria-hidden', 'true');
+  boardEl.appendChild(ribbon);
+  const [b0, b1] = hedgeBand(layout);
+  hedgeEl.style.top = b0 * SCALE + 'px';
+  pixelCanvas(hedgeEl, layout.W, b1 - b0);
+  drawHedgeLayer(S.level >= 15 ? 1 : 0, S.level >= 15);
+  pixelCanvas(stampEl, 36, 36);
+  updateStones();
+}
+function addSign(kind, text, y) {
+  const d = document.createElement('div');
+  d.className = 'sign ' + kind; d.textContent = text;
+  d.style.left = '50%'; d.style.top = y * SCALE + 'px';
+  boardEl.appendChild(d);
+}
+const isDark = () => S.theme === 'dark' || (S.theme === 'auto' && !!(window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches));
+/* The board is drawn at art size and scaled up crisp by CSS: 1 canvas pixel
+   per art pixel, whatever the phone's pixel ratio. */
+function paintBoard() {
+  const key = S.level + '/' + layout.W + '/' + isDark();
+  if (drawnFor === key) return;
+  drawnFor = key;
+  const c = pixelCanvas(art, layout.W, layout.H);
+  drawBoard(c, layout, { current: S.level, icons, prints: [S.level - 1, S.level], hedge: false });
+  if (isDark()) duskify(c, layout.W, layout.H);
+  if (!locked && S.level < 15) locked = lockedWood(c, layout);
+  showLock(S.level < 15 ? 0 : 1);
+}
+/** The Warm wood stays dusky until the boss is beaten. p: how far the lock has lifted. */
+function showLock(p) {
+  if (!locked || p >= 1) { lockEl.style.display = 'none'; return; }
+  lockEl.style.display = '';
+  const c = pixelCanvas(lockEl, locked.width, locked.height);
+  c.putImageData(p > 0 ? unlockWood(locked, layout, p) : locked, 0, 0);
+}
+function drawHedgeLayer(open, passed) {
+  const [b0] = hedgeBand(layout);
+  const c = hedgeEl.getContext('2d');
+  c.setTransform(1, 0, 0, 1, 0, 0);
+  c.clearRect(0, 0, hedgeEl.width, hedgeEl.height);
+  c.setTransform(1, 0, 0, 1, 0, -b0);
+  drawHedge(c, layout, open, passed);
+  c.setTransform(1, 0, 0, 1, 0, 0);
+  if (isDark()) duskify(c, hedgeEl.width, hedgeEl.height);
+}
+function updateStones() {
+  boardEl.querySelectorAll('.stone').forEach(b => {
+    const l = Number(b.dataset.level), i = info(l);
+    const status = l <= S.level ? 'passed' : l === S.level + 1 ? 'next' : 'ahead';
+    b.querySelectorAll('.ring.cur').forEach(r => { r.style.display = l === ringLevel ? '' : 'none'; });
+    const sel = b.querySelector('.ring.sel');
+    if (sel) sel.style.display = l === selected && l !== ringLevel ? '' : 'none';
+    b.setAttribute('aria-pressed', String(l === selected));
+    const pl = b.querySelector('.plaque');
+    const big = document.createElement('canvas');
+    const [pw, ph] = plaqueSize(l); big.width = pw; big.height = ph;
+    drawPlaque(big.getContext('2d'), l, status, i.boss);
+    const src = crispURL(big, SCALE * DPR);
+    if (pl.getAttribute('src') !== src) pl.src = src;
+    b.setAttribute('aria-label', 'Level ' + l + ', ' + i.name + (i.boss ? ', boss: First Trail' : '') + ', ' + i.len + ' metres, ' + ageText(i.age) + ', ' + status);
+  });
+}
+
+/* The handler stands on the team's stone, boots on its top; the dog leads
+   off ahead along the trail towards the next one. */
+function teamBox(pt, faceLeft) {
+  const ax = faceLeft ? TEAM.w - 1 - ANCHOR[0] : ANCHOR[0];
+  return [pt[0] - ax, pt[1] - 1 - TEAM.ground];
+}
+function placeAt(box) {
+  teamCanvas.style.left = box[0] * SCALE + 'px';
+  teamCanvas.style.top = box[1] * SCALE + 'px';
+  // The hedge is in front of the team once its feet are past the hedge line.
+  hedgeEl.classList.toggle('over', box[1] + TEAM.ground < layout.hedgeY + 3);
+}
+const facesLeft = (lv) => layout.faceLeft[lv - 1];
+function homeBox(lv, faceLeft) {
+  const s = stoneAt(lv);
+  if (lv === 15) return teamBox(trailPoint(layout, 14, 0.35), faceLeft);
+  return teamBox([s.x, s.y], faceLeft);
+}
+let teamFlip = null;
+function teamHome() {
+  const left = facesLeft(S.level);
+  teamFlip = left; team.set({ flip: left });
+  placeAt(homeBox(S.level, left));
+}
+function scrollToArt(y, smooth, at = 0.55) {
+  const head = document.getElementById('team-card').offsetHeight;
+  const card = document.getElementById('next').offsetHeight;
+  const view = window.innerHeight - head - card;
+  const top = wrap.offsetTop + y * SCALE - head - view * at;
+  window.scrollTo({ top: Math.max(0, top), behavior: smooth && motionOn() && S.freezeAt == null ? 'smooth' : 'auto' });
+}
+
+/* At rest the board shows the team, the next stone and the one after it,
+   so the trail ahead is in view from the first look. */
+function homeScroll(smooth) { scrollToArt(stoneAt(Math.min(20, S.level + 2)).y - 22, smooth, 0); }
+
+/* ── The card at the bottom ── */
+const nextEl = document.getElementById('next');
+/* On a short phone the card starts folded, so the board keeps room. */
+let compact = (window.innerHeight || 800) < 740;
+const TRIES_L7 = [
+  { k: 'miss', when: 'Today', run: '124 m · not found', why: 'Missed. The next run still counts.' },
+  { k: 'no', when: 'Sat', run: '96 m · found', why: 'Not counted: 96 of 120 m, too short.' },
+  { k: 'yes', when: 'Thu', run: '92 m · found', why: 'Counted: passed level 7.' },
+];
+const TRIES_L8 = [{ k: 'yes', when: 'Just now', run: '122 m · found', why: 'Counted: passed level 8.' }].concat(TRIES_L7.slice(0, 2));
+const TRIES_L14 = [
+  { k: 'yes', when: 'Sun', run: '262 m · found', why: 'Counted: passed level 14.' },
+  { k: 'miss', when: 'Fri', run: '250 m · not found', why: 'Missed. The next run still counts.' },
+  { k: 'yes', when: 'Wed', run: '205 m · found', why: 'Counted: passed level 13.' },
+];
+const TRIES_L15 = [{ k: 'yes', when: 'Just now', run: '310 m · found', why: 'Counted: the dog showed the find.' }].concat(TRIES_L14.slice(0, 2));
+const ALL = { len: 1, age: 1, start: 1, found: 1 };
+function checksFor(level, done) {
+  const i = info(level);
+  return [
+    { t: i.len + ' m', ok: done.len }, { t: ageText(i.age), ok: done.age },
+    { t: level >= 11 ? 'article' : level >= 6 ? 'held' : 'watched', ok: done.start },
+    { t: i.limit ? 'found within ' + i.limit + ' min' : 'found', ok: done.found },
+  ];
+}
+/** What changes at this level: at a wave's first level, the wave's own new
+    thing; otherwise the longer or older trail. A shorter trail is not news. */
+function whatsNew(i, prev) {
+  if (i.boss) return 'Boss: First Trail. The dog shows the find.';
+  const parts = [];
+  if (i.first) parts.push(i.fresh);
+  else {
+    if (i.len > prev.len) parts.push(i.len + ' m');
+    if (i.age !== prev.age) parts.push(ageText(i.age));
+  }
+  let html = 'New: ' + (parts.join(' · ') || 'same as before');
+  if (i.len < prev.len) html += ' <span class="shorter">· Shorter: ' + i.len + ' m</span>';
+  return html;
+}
+function renderCard(level, opts = {}) {
+  const i = info(level), prev = info(Math.max(1, level - 1));
+  const checks = opts.checks || checksFor(level, {});
+  const tries = opts.tries || [];
+  nextEl.className = 'next' + (compact ? ' compact' : '');
+  nextEl.innerHTML =
+    '<button class="card-top" type="button" id="card-top" aria-expanded="' + !compact + '">' +
+    '<span class="next-k"><span>' + (opts.label || 'Next · level ' + level) + '</span><span class="stage ' + i.stage + '">' + (i.stage === 'hot' ? 'Hot' : 'Warm') + '</span></span></button>' +
+    '<h2>' + i.name + (i.boss ? ' · boss' : '') + '</h2>' +
+    '<div class="new-line">' + whatsNew(i, prev) + '</div>' +
+    '<div class="rule">' + i.rule + '</div>' +
+    '<ul class="checks" id="checks">' + checks.map(c => '<li class="' + (c.ok ? 'ok' : '') + '"><span class="m">✓</span>' + c.t + '</li>').join('') + '</ul>' +
+    (opts.back ? '<button class="back-link" type="button" id="back">Back to the next level</button>' : '') +
+    (tries.length ? '<button class="tries-k" type="button" id="tries-k">Last 3 tries</button><ul class="tries">' + tries.map(t =>
+      '<li class="' + t.k + '"><span class="i">' + (t.k === 'yes' ? '✓' : t.k === 'miss' ? '✕' : '–') + '</span><b>' + t.when + '</b><em>' + t.run + '</em><span></span><span></span><span>' + t.why + '</span></li>').join('') + '</ul>' : '');
+  const back = document.getElementById('back');
+  if (back) back.addEventListener('click', () => { selected = null; updateStones(); showNextCard(); });
+  const toggle = () => {
+    compact = !compact; nextEl.classList.toggle('compact', compact);
+    document.getElementById('card-top').setAttribute('aria-expanded', String(!compact)); padBoard();
+  };
+  document.getElementById('card-top').addEventListener('click', toggle);
+  const tk = document.getElementById('tries-k');
+  if (tk) tk.addEventListener('click', toggle);
+  padBoard();
+}
+function showNextCard() {
+  if (S.level === 7) renderCard(8, { checks: checksFor(8, { len: 1, age: 1, start: 1 }), tries: TRIES_L7 });
+  else if (S.level === 8) renderCard(9, { tries: TRIES_L8 });
+  else renderCard(16, { tries: TRIES_L15 });
+}
+function preview(level) {
+  if (busy) return;
+  selected = level === S.level + 1 ? null : level;
+  updateStones();
+  if (level === S.level + 1) { showNextCard(); return; }
+  const st = level <= S.level ? 'Passed · level ' + level : 'Ahead · level ' + level;
+  renderCard(level, { label: st, checks: checksFor(level, level <= S.level ? ALL : {}), back: true });
+}
+function padBoard() { wrap.style.paddingBottom = nextEl.offsetHeight + 'px'; }
+
+/* ── The header ── */
+function setHeader(level, oldName, newName, flipped) {
+  document.getElementById('rank-old').textContent = oldName;
+  document.getElementById('rank-new').textContent = newName;
+  document.getElementById('rank').classList.toggle('flipped', flipped);
+  document.getElementById('lvl').textContent = String(level);
+  document.getElementById('badge-n').textContent = String(level);
+  document.getElementById('fill-h').style.width = Math.min(15, level) / 15 * 100 + '%';
+}
+
+/* ── The team ── */
+const look = () => ({ coat: S.coat, jacket: S.jacket, hat: S.hat, stage: 'hot' });
+const team = createTeam(teamCanvas, { scene: 'team', scale: SCALE, look: look(), motion: motionOn(), state: 'waiting', onFrame: (t) => onTeamFrame(t), onEnd: () => onMomentEnd() });
+let close = null;
+let busy = false, buzzed = false, currentState = 'waiting';
+
+const CAPTIONS = {
+  waiting: 'Waiting: sniffing the start, tail going.',
+  trailing: 'Trailing: nose down, line taut, scent on the ground.',
+  lost: 'Lost it: head up and casting, handler stops, line slack.',
+  find: 'Find: the person pops up with the toy, the dog sits.',
+  missed: 'Missed: a shake off and a pat. The next run still counts.',
+  resting: 'Resting: lying by the water bowl.',
+  night: 'Night: head torch on.',
+  levelup: 'Level up: level 8, Line Puller III.',
+  boss: 'Boss: the First Trail. Hot is cleared.',
+};
+
+function onTeamFrame(t) {
+  if (currentState === 'levelup') levelUpAt(t);
+  else if (currentState === 'boss') bossAt(t);
+}
+function buzz(pattern) {
+  if (motionOn() && S.freezeAt == null && navigator.vibrate) { try { navigator.vibrate(pattern); } catch (e) { /* no buzz here */ } }
+}
+/** A pop as a pure function of time: 0.85, up past 1 to 1.08, then back to 1. */
+function popScale(T) {
+  if (T < 0 || T >= 380) return 1;
+  if (T < 133) return (0.85 + 0.23 * T / 133).toFixed(3);
+  return (1.08 - 0.08 * (T - 133) / 247).toFixed(3);
+}
+const lerpBox = (a, b, u) => [Math.round(a[0] + (b[0] - a[0]) * u), Math.round(a[1] + (b[1] - a[1]) * u)];
+
+/* The stamp: the paw lands at twice size, then a ring of gold steps out. */
+function drawStampAt(T, s) {
+  if (T < 0 || T > 600) { stampEl.style.display = 'none'; return; }
+  stampEl.style.display = 'block';
+  stampEl.style.left = (s.x - 18) * SCALE + 'px'; stampEl.style.top = (s.y - 18) * SCALE + 'px';
+  const c = stampEl.getContext('2d');
+  c.clearRect(0, 0, 36, 36);
+  if (T < 140) {
+    c.fillStyle = '#1c1411';
+    ICONS.paw.forEach((r, y) => { for (let x = 0; x < r.length; x++) if (r[x] !== '.') c.fillRect(11 + x * 2, 10 + y * 2, 4, 4); });
+    c.fillStyle = '#f2c14e';
+    ICONS.paw.forEach((r, y) => { for (let x = 0; x < r.length; x++) if (r[x] !== '.') c.fillRect(12 + x * 2, 11 + y * 2, 2, 2); });
+    return;
+  }
+  const r = [9, 12, 15, 17][Math.min(3, Math.floor((T - 140) / 115))];
+  c.fillStyle = T > 480 ? '#fff3c4' : '#f2c14e';
+  let last = null;
+  for (let a = 0; a < 360; a += 4) {
+    const x = 18 + Math.round(r * Math.cos(a * Math.PI / 180)), y = 18 + Math.round(r * 0.62 * Math.sin(a * Math.PI / 180));
+    if (last && last[0] === x && last[1] === y) continue;
+    last = [x, y];
+    if (T > 480 && (x + y) % 2) continue;
+    c.fillRect(x, y, 1, 1);
+  }
+}
+
+/* Level up, as a pure function of time: running it at any t sets the page to that moment. */
+function levelUpAt(t) {
+  const c = MOMENTS.levelup.cues;
+  const phase = t < c.tick ? 'pre' : t < c.arrive ? 'passed' : 'next';
+  if (nextEl.dataset.showing !== phase) {
+    nextEl.dataset.showing = phase;
+    if (phase === 'pre') renderCard(8, { checks: checksFor(8, { len: 1, age: 1, start: 1 }), tries: TRIES_L7 });
+    else if (phase === 'passed') renderCard(8, { label: 'Passed · level 8', checks: checksFor(8, ALL), tries: TRIES_L8 });
+    else renderCard(9, { tries: TRIES_L8 });
+  }
+  if (phase === 'passed') {
+    document.querySelectorAll('#checks li').forEach((li, i) => li.classList.toggle('gold', t >= c.tick + i * 120));
+  }
+  const passed = t >= c.paw;
+  const ring = t >= c.arrive ? 9 : 8;
+  if (passed !== (S.level === 8) || ring !== ringLevel) {
+    S.level = passed ? 8 : 7; ringLevel = ring;
+    paintBoard(); updateStones();
+  }
+  drawStampAt(t - c.paw, stoneAt(8));
+  setHeader(t >= c.name ? 8 : 7, 'Line Puller II', 'Line Puller III', t >= c.name);
+  // The new name pops up on a ribbon over stone 8, and the badge pops with it.
+  const k = popScale(t - c.name);
+  const s8 = stoneAt(8);
+  ribbon.textContent = 'Line Puller III';
+  // It sits between stones 8 and 9, and leaves before the team gets there.
+  ribbon.style.display = t >= c.name && t < c.trot + 400 ? 'block' : 'none';
+  ribbon.style.left = Math.max(70, Math.min(layout.W * SCALE - 70, s8.x * SCALE)) + 'px';
+  ribbon.style.top = (s8.y - 26) * SCALE + 'px';
+  ribbon.style.transform = 'translateX(-50%) scale(' + k + ')';
+  document.getElementById('badge').style.transform = t >= c.name ? 'scale(' + k + ')' : '';
+  // The team trots facing stone 8, then turns, if it must, to find on the
+  // side of stone 8 that has room.
+  const u = Math.max(0, Math.min(1, (t - c.trot) / (c.arrive - c.trot)));
+  const left = u >= 1 ? facesLeft(8) : facesLeft(7);
+  if (left !== teamFlip) { teamFlip = left; team.set({ flip: left }); }
+  placeAt(u <= 0 ? homeBox(7, left) : u >= 1 ? homeBox(8, left) : teamBox(trailPoint(layout, 6, u), left));
+  if (t >= c.buzz && !buzzed) { buzzed = true; buzz([20, 40, 90]); }
+}
+
+/* The boss, on the board: trot to the stile, the find at the gate, the
+   wood lights up, the gate swings, the team goes through, the title. */
+function bossAt(t) {
+  const c = MOMENTS.boss.cues;
+  const s = stoneAt(15);
+  const left = stoneAt(14).x > s.x;
+  const home = homeBox(14, left);
+  // At the gate: the gap between the dog and the person sits in the stile.
+  const gx = left ? TEAM.w - 1 - 75 : 75;
+  const gate = [s.x - gx + (left ? 2 : 0), layout.hedgeY + 4 - TEAM.ground];
+  const beyond = homeBox(15, left);
+  let box;
+  if (t < c.arrive) box = lerpBox(home, gate, t / c.arrive);
+  else if (t < c.through) box = gate;
+  else box = lerpBox(gate, beyond, Math.min(1, (t - c.through) / (c.title - c.through)));
+  placeAt(box);
+  const open = gateOpen(t);
+  drawHedgeLayer(open, t >= c.gate);
+  const lvl = t >= c.gate ? 15 : 14, ring = t >= c.title ? 16 : 15;
+  if (S.level !== lvl || ringLevel !== ring) {
+    S.level = lvl; ringLevel = ring; paintBoard(); updateStones();
+  }
+  const p = Math.max(0, Math.min(1, (t - c.sweep) / 1300));
+  if (S.level < 15 || p < 1) showLock(t < c.sweep ? 0 : p);
+  else showLock(1);
+  const titled = t >= c.title, found = t >= c.arrive + 300;
+  setHeader(titled ? 15 : 14, 'Scent Reader IV', 'Trail Hound', titled);
+  const phase = titled ? 'after' : found ? 'found' : 'before';
+  if (nextEl.dataset.showing !== phase) {
+    nextEl.dataset.showing = phase;
+    if (titled) renderCard(16, { tries: TRIES_L15 });
+    else renderCard(15, { label: 'Boss · level 15', checks: checksFor(15, { len: 1, age: 1, start: 1 }), tries: found ? TRIES_L15 : TRIES_L14 });
+  }
+  if (!titled) document.querySelectorAll('#checks li').forEach((li, i) => { if (i === 3) li.classList.toggle('gold', t >= c.arrive + 300); });
+  // The title sits under the header; the board is scrolled so the stile shows below it.
+  document.getElementById('boss-card').classList.toggle('on', titled);
+  if (t >= c.buzz && !buzzed) { buzzed = true; buzz([30, 60, 30, 60, 120]); }
+}
+function onMomentEnd() {
+  if (currentState === 'levelup') {
+    // The board stays alive: the team waits at its new stone.
+    busy = false; currentState = 'waiting'; setNow(); renderOpts();
+    teamHome(); team.play('waiting');
+  } else if (currentState === 'boss') {
+    busy = false; currentState = 'waiting'; setNow();
+    teamHome(); team.play('waiting');
+  }
+}
+
+function play(state) {
+  currentState = state;
+  buzzed = false;
+  setNow();
+  document.getElementById('boss-card').classList.remove('on');
+  boardEl.classList.toggle('is-night', state === 'night' && S.scene !== 'close');
+  if (S.scene === 'close') { openClose(state); return; }
+  closeSpot();
+  if (state === 'levelup' || state === 'boss') {
+    resetLevel(false);
+    busy = true;
+    nextEl.dataset.showing = '';
+    if (state === 'boss') { S.level = 14; ringLevel = 15; paintBoard(); updateStones(); }
+    const left = state === 'boss' ? stoneAt(14).x > stoneAt(15).x : facesLeft(7);
+    teamFlip = left; team.set({ flip: left });
+    const end = MOMENTS[state].duration;
+    if (!motionOn()) {
+      // Reduced motion: no trot; the page fades to how the moment ends.
+      soft(() => { team.play(state); onTeamFrame(end); onMomentEnd(); scrollToArt(stoneAt(S.level).y, false); });
+      return;
+    }
+    team.play(state);
+    onTeamFrame(0);
+    if (state === 'boss') scrollToArt(stoneAt(15).y, true, 0.8); else scrollToArt(stoneAt(7).y, true);
+    return;
+  }
+  if (motionOn()) { teamHome(); team.play(state); }
+  else soft(() => { teamHome(); team.play(state); });
+}
+/* A soft fade for when motion is off: out, change, back in. */
+function soft(change) {
+  if (S.freezeAt != null) { change(); return; }
+  teamCanvas.style.opacity = '0';
+  setTimeout(() => { change(); teamCanvas.style.opacity = '1'; }, 250);
+}
+function resetLevel(redraw = true) {
+  S.level = 7; ringLevel = 8; selected = null;
+  if (ribbon) ribbon.style.display = 'none';
+  document.getElementById('badge').style.transform = '';
+  setHeader(7, 'Line Puller II', 'Line Puller III', false);
+  nextEl.dataset.showing = '';
+  showNextCard();
+  drawStampAt(-1);
+  if (redraw) { paintBoard(); updateStones(); drawHedgeLayer(0, false); teamHome(); }
+}
+
+/* ── Close-up: the states up close, and the boss as the share picture ── */
+const spot = document.getElementById('spot');
+const closeCanvas = document.getElementById('close');
+function openClose(state) {
+  spot.classList.add('open');
+  const avail = Math.min(window.innerWidth, 480) - 44;
+  const scale = Math.max(2, Math.floor(avail / CLOSE.w));
+  if (!close) close = createTeam(closeCanvas, { scene: 'close', scale, look: look(), motion: motionOn(), state });
+  else close.set({ scale, look: look(), motion: motionOn() });
+  close.play(state);
+  if (S.freezeAt != null) close.freeze(S.freezeAt);
+  const cap = CAPTIONS[state].split(':');
+  document.getElementById('spot-cap').innerHTML = '<b>' + (state === 'boss' ? 'Share picture' : cap[0]) + '</b>:' + cap.slice(1).join(':');
+  team.set({ motion: false });
+}
+function closeSpot() {
+  if (!spot.classList.contains('open')) return;
+  spot.classList.remove('open');
+  if (close) close.set({ motion: false });
+  team.set({ motion: motionOn() });
+}
+document.getElementById('spot-x').addEventListener('click', () => {
+  const wasBoss = close && currentState === 'boss';
+  closeSpot();
+  if (wasBoss) return;
+  if (S.scene === 'close') { S.scene = 'board'; renderOpts(); }
+  play('waiting');
+});
+spot.addEventListener('click', (e) => { if (e.target === spot) document.getElementById('spot-x').click(); });
+document.querySelectorAll('[data-later]').forEach(b => b.addEventListener('click', () => { b.textContent = 'Comes later'; }));
+document.getElementById('b-share').addEventListener('click', () => openClose('boss'));
+document.getElementById('b-done').addEventListener('click', () => { busy = false; resetLevel(); play('waiting'); renderOpts(); homeScroll(true); });
+
+/* Tap the board during a moment to skip to the end. */
+wrap.addEventListener('click', (e) => {
+  if (busy && !e.target.closest('.stone')) team.skip();
+});
+
+/* ── Sample controls ── */
+const sheet = document.getElementById('controls');
+document.getElementById('open-controls').addEventListener('click', () => { sheet.classList.add('open'); });
+document.getElementById('close-controls').addEventListener('click', () => { sheet.classList.remove('open'); });
+function setNow() { document.getElementById('now').textContent = 'Playing: ' + (CAPTIONS[currentState] || ''); }
+function opts(id, items, current, onPick) {
+  const el = document.getElementById(id);
+  el.innerHTML = '';
+  items.forEach(it => {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'opt';
+    b.setAttribute('aria-pressed', String(it.id === current));
+    b.innerHTML = (it.dot ? '<span class="dot" style="background:' + it.dot + '"></span>' : '') + it.name;
+    b.addEventListener('click', () => onPick(it.id));
+    el.appendChild(b);
+  });
+}
+const STATE_NAMES = [['waiting', 'Waiting'], ['trailing', 'Trailing'], ['lost', 'Lost it'], ['find', 'Find'], ['missed', 'Missed'], ['resting', 'Resting'], ['night', 'Night']];
+function renderOpts() {
+  opts('o-state', STATE_NAMES.map(s => ({ id: s[0], name: s[1] })), currentState, (id) => {
+    if (busy) { busy = false; resetLevel(); }
+    play(id); renderOpts();
+  });
+  opts('o-scene', [{ id: 'board', name: 'Board' }, { id: 'close', name: 'Close-up' }], S.scene, (id) => {
+    S.scene = id; renderOpts();
+    play(currentState === 'levelup' || currentState === 'boss' ? 'waiting' : currentState);
+  });
+  opts('o-coat', COATS.map(c => ({ id: c.id, name: c.name, dot: c.pal.b === c.pal.u ? c.pal.s : c.pal.b })), S.coat, (id) => { S.coat = id; store.set('coat', id); relook(); });
+  opts('o-jacket', JACKETS.map(j => ({ id: j.id, name: j.name, dot: j.colour })), S.jacket, (id) => { S.jacket = id; store.set('jacket', id); relook(); });
+  opts('o-hat', HATS.map(h => ({ id: h.id, name: h.name })), S.hat, (id) => { S.hat = id; store.set('hat', id); relook(); });
+  opts('o-motion', [{ id: 'auto', name: 'Auto' }, { id: 'on', name: 'On' }, { id: 'off', name: 'Off' }], S.motion, (id) => {
+    S.motion = id; store.set('motion', id); applyMotionAttr(); renderOpts();
+    team.set({ motion: motionOn() && !spot.classList.contains('open') });
+    if (close && spot.classList.contains('open')) close.set({ motion: motionOn() });
+  });
+  opts('o-theme', [{ id: 'auto', name: 'Auto' }, { id: 'light', name: 'Light' }, { id: 'dark', name: 'Dark' }], S.theme, (id) => { S.theme = id; store.set('theme', id); applyTheme(); renderOpts(); repaintTheme(); });
+}
+/* Dark theme puts the board at dusk: paint it again when the theme changes. */
+function repaintTheme() {
+  drawnFor = null; locked = null; paintBoard(); updateStones();
+  drawHedgeLayer(S.level >= 15 ? 1 : 0, S.level >= 15);
+}
+if (window.matchMedia) {
+  const dq = matchMedia('(prefers-color-scheme: dark)');
+  const onDq = () => { if (S.theme === 'auto') repaintTheme(); };
+  if (dq.addEventListener) dq.addEventListener('change', onDq); else if (dq.addListener) dq.addListener(onDq);
+}
+function relook() {
+  renderOpts();
+  team.set({ look: look() });
+  if (close) close.set({ look: look() });
+}
+document.getElementById('b-levelup').addEventListener('click', () => { sheet.classList.remove('open'); S.scene = 'board'; renderOpts(); play('levelup'); });
+document.getElementById('b-boss').addEventListener('click', () => { sheet.classList.remove('open'); S.scene = 'board'; renderOpts(); play('boss'); });
+document.getElementById('b-reset').addEventListener('click', () => { busy = false; resetLevel(); play('waiting'); renderOpts(); homeScroll(true); });
+if (window.matchMedia) {
+  const mq = matchMedia('(prefers-reduced-motion: reduce)');
+  const onMq = () => { if (S.motion === 'auto') { applyMotionAttr(); team.set({ motion: motionOn() }); } };
+  if (mq.addEventListener) mq.addEventListener('change', onMq); else if (mq.addListener) mq.addListener(onMq);
+}
+
+/* ── Start ── */
+buildBoard();
+resetLevel(false);
+teamHome();
+renderOpts();
+let resizeT = 0;
+window.addEventListener('resize', () => {
+  clearTimeout(resizeT);
+  resizeT = setTimeout(() => {
+    const keep = S.level; buildBoard(); S.level = keep; drawnFor = null; paintBoard(); updateStones();
+    if (!busy) teamHome(); padBoard();
+  }, 150);
+});
+
+const startState = Object.prototype.hasOwnProperty.call(CAPTIONS, S.state) ? S.state : 'waiting';
+play(startState);
+renderOpts();
+const onBoard = S.scene !== 'close';
+if (S.freezeAt != null && onBoard) team.freeze(S.freezeAt);
+requestAnimationFrame(() => {
+  padBoard();
+  if (startState === 'boss') scrollToArt(stoneAt(15).y, false, 0.8);
+  else homeScroll(false);
+});
+if (q.get('controls') === 'open') sheet.classList.add('open');
+</script>
+</body>
+</html>
