@@ -23,8 +23,8 @@ const stamp = (r) => (Number.isFinite(r?.updatedAt) ? r.updatedAt : 0);
 
     `partial`: the cloud side is only what changed there lately (a pull on
     coming back to the app), so a record missing from it is not missing from
-    the cloud, and is not sent again. `union`: see mergeOne. */
-export function mergeRecords(local = [], remote = [], { partial = false, union = false } = {}) {
+    the cloud, and is not sent again. `union` and `gone`: see mergeOne. */
+export function mergeRecords(local = [], remote = [], { partial = false, union = false, gone = null } = {}) {
   const L = new Map((local || []).filter(r => r?.id).map(r => [r.id, r]));
   const R = new Map((remote || []).filter(r => r?.id).map(r => [r.id, r]));
   const merged = [], toUpload = [];
@@ -32,7 +32,7 @@ export function mergeRecords(local = [], remote = [], { partial = false, union =
   for (const id of new Set([...L.keys(), ...R.keys()])) {
     const l = L.get(id), r = R.get(id);
     if (partial && !r) { merged.push(l); continue; }
-    const { keep, up } = mergeOne(l, r, { union });
+    const { keep, up } = mergeOne(l, r, { union, gone });
     merged.push(keep);
     if (up) toUpload.push(keep);
   }
@@ -62,9 +62,12 @@ const plainObject = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
    So is a run ended on Found (found): the next dog has found nobody yet.
    So are when the answer to a run was first seen (resultSeenAt), which
    decides whether its call was blind, and when its marks were last changed
-   (marksAt): the next dog's run has neither been seen nor marked. */
+   (marksAt): the next dog's run has neither been seen nor marked.
+   And what a team's run was a try at (levelTry), the clock it ran by
+   (tzMin) and how long a runaway's person had been gone (leftAgoMin): the
+   next team on the trail is on its own level, on its own day. */
 export const RUN_FIELDS = ['track', 'trackStarted', 'trackWaypoints', 'result', 'coach', 'debrief', 'seen', 'runWeather', 'windFelt', 'found',
-  'resultSeenAt', 'marksAt'];
+  'resultSeenAt', 'marksAt', 'levelTry', 'tzMin', 'leftAgoMin'];
 const RUN_TOP = ['dogId', 'handlerId', 'summary'];
 const hasRun = (r) => (Array.isArray(r?.data?.track) && r.data.track.length > 0) || !!r?.data?.result;
 const empty = (v) => v == null || v === '' || (Array.isArray(v) && v.length === 0);
@@ -165,13 +168,74 @@ function withMissing(win, lose) {
     it, the newer copy wins every field both have, and a field only the older
     one has is kept. What comes out differs from both copies, so it is
     stamped newer than both: every phone then takes it, and a save made from
-    either old copy is refused by the rules as out of date. */
-export function mergeOne(l, r, { union = false } = {}) {
+    either old copy is refused by the rules as out of date.
+
+    A dog's teams are merged the same way whatever `union` says: see
+    mergeTeams. `gone` is the ids of deleted handlers, when the caller knows. */
+export function mergeOne(l, r, { union = false, gone = null } = {}) {
   if (!l || !r) return { keep: l || r || null, up: !!l };
   const mine = stamp(l) > stamp(r);
-  const extra = union ? withMissing(mine ? l : r, mine ? r : l) : null;
+  const win = mine ? l : r, lose = mine ? r : l;
+  const extra = union ? withMissing(win, lose) : null;
   if (extra) return { keep: { ...extra, updatedAt: Math.max(stamp(l), stamp(r)) + 1 }, up: true };
+  const teams = mergeTeams(win, lose, gone);
+  if (teams) return { keep: { ...win, teams, updatedAt: Math.max(stamp(l), stamp(r)) + 1 }, up: true };
   return mine ? { keep: l, up: true } : { keep: r, up: false };   // a tie goes to the cloud: nothing to send
+}
+
+/* ── A dog's teams, across two copies ──────────────────────────────────
+   A dog keeps one row for each handler who runs it (dog.teams), and each row
+   carries that team's level: where it was placed, the highest level passed
+   (best) and the last level-up it was shown (shown). Dogs merge whole,
+   newest copy wins, which was right while a dog was only written by someone
+   editing it. Now the app writes the dog by itself whenever a team passes a
+   level, so a phone that had not heard of the owner's new team could pass a
+   level and throw that team away on every phone; and a phone still on a
+   build from before teams, editing the dog's weight, dropped them all.
+
+   So the rows are merged one handler at a time. A row only one copy has is
+   kept. For a row both have, whoever placed the team last holds where it
+   starts and what it wears; the level is the higher of the two, unless one
+   copy took a level back on purpose (resetAt, a debrief put right), and
+   then the later of those is the one to believe.
+
+   A row is only ever removed by deleting its handler, so `gone`, the ids of
+   deleted handlers, keeps those from coming back with the older copy. */
+const fin = (v) => Number.isFinite(v);
+const teamRows = (rec) => (Array.isArray(rec?.teams) ? rec.teams.filter(t => t && t.handlerId != null) : null);
+const bestOf = (a, b) => {
+  const lvl = (x) => (x && fin(x.level) ? x.level : -1);
+  if (lvl(a) !== lvl(b)) return lvl(a) > lvl(b) ? a : b;
+  return (fin(b?.at) ? b.at : 0) > (fin(a?.at) ? a.at : 0) ? b : a;
+};
+function mergeTeamRow(w, o) {
+  const placed = (t) => (fin(t.placedAt) ? t.placedAt : 0);
+  const reset = (t) => (fin(t.resetAt) ? t.resetAt : 0);
+  const out = { ...(placed(o) > placed(w) ? o : w) };
+  const lead = reset(w) === reset(o) ? null : reset(w) > reset(o) ? w : o;
+  const best = lead ? lead.best : bestOf(w.best, o.best);
+  const shown = lead ? lead.shown : (fin(w.shown) || fin(o.shown) ? Math.max(fin(w.shown) ? w.shown : 0, fin(o.shown) ? o.shown : 0) : undefined);
+  const resetAt = Math.max(reset(w), reset(o));
+  /* A field neither copy had is not added, so two copies that agree come
+     out as they went in and nothing is sent up for it. */
+  for (const [k, v] of [['best', best], ['shown', shown], ['resetAt', resetAt || undefined]]) {
+    if (v === undefined) delete out[k]; else out[k] = v;
+  }
+  return out;
+}
+
+/** The teams both copies of a dog should hold, or null when the newer
+    copy's own list is already that. */
+export function mergeTeams(win, lose, gone = null) {
+  if (!win || !lose || win.deleted || lose.deleted) return null;
+  const theirs = teamRows(lose);
+  if (!theirs || !theirs.length) return null;
+  const here = (t) => !(gone && gone.has(t.handlerId));
+  const mine = (teamRows(win) ?? []).filter(here);
+  const out = mine.map(w => { const o = theirs.find(t => t.handlerId === w.handlerId); return o ? mergeTeamRow(w, o) : w; });
+  for (const o of theirs) if (here(o) && !mine.some(w => w.handlerId === o.handlerId)) out.push(o);
+  if (Array.isArray(win.teams)) return JSON.stringify(out) === JSON.stringify(win.teams) ? null : out;
+  return out.length ? out : null;
 }
 
 /** A record as the cloud holds it, without the two fields that are only the

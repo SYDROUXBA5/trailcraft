@@ -1628,6 +1628,271 @@ body:has(#saveTrouble:not([hidden])) .screen.paper .page { padding-bottom: calc(
 .screen.tutorial .back-btn { background: rgba(255, 255, 255, 0.12); color: #fff; border-color: rgba(255, 255, 255, 0.22); box-shadow: none; }
 :root[data-theme="dark"] .back-btn { box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 2px 6px rgba(0, 0, 0, 0.4); }
 
+/* ── Teams and the trail board ────────────────────────────────────────
+   A team is one handler with one dog. Its stage colours are the trail-age
+   colours the app already uses for Hot, Warm and Cold; where one is a fill
+   behind white words it is a shade darker, so the words can be read. */
+:root { --hot: #BE3F2E; --warm: #D0821F; --cold: #3B8BD6; --hot-fill: #B0362A; --warm-fill: #A8620F; --cold-fill: #2A6DB0;
+  --gold-ink: #8A6210; --well: #EEF1F6; }
+:root[data-theme="dark"] { --gold-ink: #F2C14E; --well: #1C3560; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --gold-ink: #F2C14E; --well: #1C3560; } }
+
+/* Words for a screen reader only: what a tick or a ring says to the eye. */
+.sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
+.lvl-chip {
+  flex: 0 0 auto; padding: 5px 10px; border-radius: 999px; color: #fff; background: var(--muted);
+  font-size: calc(12.5 * var(--px)); font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.lvl-chip.hot { background: var(--hot-fill); }
+.lvl-chip.warm { background: var(--warm-fill); }
+.lvl-chip.cold { background: var(--cold-fill); }
+
+/* Home: the picked handler and dog as a team, and the way to its board. */
+.team-row {
+  display: flex; align-items: center; gap: 12px; width: 100%; min-height: 56px; padding: 10px 14px;
+  background: var(--card); color: var(--ink); border: 1.5px solid var(--rim); border-radius: 16px;
+  text-align: left; font: inherit; cursor: pointer; transition: transform 130ms var(--ease-out);
+}
+.team-row:active { transform: scale(0.98); }
+.team-row .who { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.25; }
+.team-row .who b { font-size: calc(16 * var(--px)); font-weight: 700; overflow-wrap: anywhere; }
+.team-row .who i { font-style: normal; font-size: calc(13.5 * var(--px)); font-weight: 700; color: var(--gold-ink); overflow-wrap: anywhere; }
+.team-row.none .who i { color: var(--muted); font-weight: 500; }
+.team-row .go { flex: 0 0 auto; color: var(--muted); display: grid; }
+.team-row:focus-visible { outline: 2px solid var(--ember); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { .team-row:active { transform: none; } }
+
+/* The board screen: three rows, and only the board in the middle scrolls. */
+.screen.team-screen { display: flex; flex-direction: column; overflow: hidden; }
+/* The card is before the board in the page, so a screen reader and the Tab
+   key reach the next level before the hundred stones; on screen it stays
+   pinned underneath. */
+.team-screen > .tb-scroll { order: 1; }
+.team-screen > .team-card { order: 2; }
+.team-head {
+  flex: 0 0 auto; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px 12px; align-items: center;
+  padding: calc(var(--safe-t) + 12px) max(16px, calc((100% - 480px) / 2)) 12px;
+  background: var(--card); border-bottom: 1px solid var(--border);
+}
+.team-head .back-btn { margin: 0; align-self: center; }
+.team-who { min-width: 0; }
+.team-who .display { font-size: calc(21 * var(--px)); letter-spacing: -0.2px; line-height: 1.15; overflow-wrap: anywhere; }
+.team-name { margin: 2px 0 0; font-size: calc(15 * var(--px)); font-weight: 700; color: var(--gold-ink); overflow-wrap: anywhere; }
+.team-name .team-title {
+  display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: 999px; vertical-align: 1px;
+  background: var(--ember); color: #fff; font-size: calc(11.5 * var(--px)); font-weight: 800; letter-spacing: 0.04em;
+}
+.team-meter { grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; font-size: calc(12.5 * var(--px)); color: var(--muted); }
+.team-meter > span { white-space: nowrap; }
+.team-meter strong { color: var(--ink); font-variant-numeric: tabular-nums; }
+.stage-bar { flex: 1; display: flex; gap: 3px; height: 8px; min-width: 60px; }
+.stage-bar i { display: block; position: relative; overflow: hidden; border-radius: 3px; background: var(--well); }
+.stage-bar i b { position: absolute; top: 0; bottom: 0; left: 0; }
+.stage-bar .hot b { background: var(--hot); }
+.stage-bar .warm b { background: var(--warm); }
+.stage-bar .cold b { background: var(--cold); }
+/* A team that has passed nothing of its own yet: the stages below its start
+   are drawn faint, stepped over and not earned. */
+.stage-bar.unproven b { opacity: 0.35; }
+
+/* The trail board. Every size inside it is a whole number of art pixels, so
+   nothing here grows with the text size: it is a picture, drawn to fit. */
+.tb-scroll {
+  flex: 1 1 auto; min-height: 0; position: relative; overflow-x: hidden; overflow-y: auto; -webkit-overflow-scrolling: touch;
+  /* The meadow's green until the board says which land is on screen
+     (board.js sets it), so its sides and a pull past its ends match. */
+  background: #9cc35a; padding-bottom: 18px;
+  /* No scrollbar taking a strip off the side: the board is drawn to the
+     width it is given, in whole art pixels, and must be given the same
+     width before it has anything to scroll as after. */
+  scrollbar-width: none;
+}
+.tb-scroll::-webkit-scrollbar { display: none; }
+:root[data-theme="dark"] .tb-scroll { background: #5a7a55; }
+.tb-board { position: relative; margin: 0 auto; }
+.tb-board canvas, .tb-stone img { image-rendering: pixelated; }
+/* The picture is cut into tiles down the board, each made when it nears the screen. */
+.tb-art { position: absolute; left: 0; display: block; }
+.tb-layer { position: absolute; left: 0; pointer-events: none; }
+/* A land lighting up when its boss is beaten, and the paw landing on a stone. */
+.tb-sweep { z-index: 1; }
+.tb-stamp { z-index: 5; }
+/* A boss's landmark: behind the team until the team is through it. */
+.tb-gate { z-index: 2; }
+.tb-gate.over { z-index: 7; }
+/* The team stands over the stones' rings and plates, and over the signs: a
+   sign names a place, and must never hide who is standing in it. */
+.tb-team { position: absolute; left: 0; top: 0; z-index: 6; pointer-events: none; }
+.tb-stone {
+  position: absolute; z-index: 5; width: 48px; height: 48px; margin: -24px 0 0 -24px; padding: 0;
+  border: 0; border-radius: 50%; background: transparent; cursor: pointer;
+}
+/* Focus is white over a dark gap, so it never looks like the gold ring on the next stone. */
+.tb-stone:focus { outline: none; }
+.tb-stone:focus-visible { box-shadow: 0 0 0 2px #0b1730, 0 0 0 5px #fff; }
+.tb-stone img { position: absolute; display: block; pointer-events: none; }
+.tb-ring.big { opacity: 0; }
+html[data-motion="on"] .tb-ring.cur.big { animation: tb-blink 1.2s steps(1) infinite; }
+html[data-motion="on"] .tb-ring.cur.small { animation: tb-blink 1.2s steps(1) infinite reverse; }
+@keyframes tb-blink { 0% { opacity: 1; } 50% { opacity: 0; } }
+.tb-stone .tb-pointer { left: 50%; top: -14px; width: 12px; height: 10px; margin-left: -6px; display: none; }
+.tb-stone[aria-pressed="true"] .tb-pointer { display: block; }
+html[data-motion="on"] .tb-stone[aria-pressed="true"] .tb-pointer { animation: tb-bob 0.8s steps(2) infinite; }
+@keyframes tb-bob { 0% { transform: translateY(0); } 50% { transform: translateY(-2px); } }
+.tb-sign {
+  position: absolute; left: 50%; z-index: 4; transform: translateX(-50%); white-space: nowrap; pointer-events: none;
+  padding: 5px 10px; border-radius: 6px; box-shadow: 0 3px 0 rgba(0, 0, 0, 0.25);
+  font-size: calc(11 * var(--px)); font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; color: #fff;
+}
+.tb-sign.left { left: 6px; transform: none; }
+.tb-sign.right { left: auto; right: 6px; transform: none; }
+.tb-sign.hot { background: var(--hot-fill); }
+.tb-sign.cold { background: var(--cold-fill); }
+.tb-sign.warm { background: #E39A3B; color: #2A1705; }
+.tb-sign.boss { background: #2A1D12; color: #FFD98A; }
+/* The name a level-up earns, popping up over its stone. */
+.tb-ribbon {
+  position: absolute; z-index: 8; white-space: nowrap; pointer-events: none; transform-origin: 50% 100%;
+  padding: 5px 12px; border-radius: 8px; background: #2A1D12; color: #FFD98A; box-shadow: 0 3px 0 rgba(0, 0, 0, 0.3);
+  font-size: calc(14 * var(--px)); font-weight: 800; letter-spacing: 0.02em;
+}
+.tb-ribbon.boss { background: #F2C14E; color: #2A1705; font-size: calc(17 * var(--px)); padding: 7px 16px; }
+
+/* A level passed, played over the result. The scrim takes the tap that
+   skips it; the board inside is a picture, never scrolled by hand. */
+.lu {
+  position: fixed; inset: 0; z-index: 70; display: grid; place-items: center;
+  padding: calc(var(--safe-t) + 16px) 16px 24px; background: rgba(11, 22, 48, 0.72);
+  opacity: 0; transition: opacity 250ms ease;
+}
+.lu[hidden] { display: none; }
+.lu.show { opacity: 1; }
+.lu-card {
+  width: min(100%, 420px); background: var(--card); color: var(--ink); border-radius: 24px; overflow: hidden;
+  padding: 18px 0 16px; box-shadow: 0 24px 60px -20px rgba(0, 0, 0, 0.6); text-align: center;
+}
+.lu-card .label { display: block; margin: 0 16px; color: var(--gold-ink); }
+.lu-name { margin: 4px 16px 0; font-family: var(--display); font-size: calc(26 * var(--px)); line-height: 1.15; letter-spacing: -0.3px; overflow-wrap: anywhere; }
+.lu-title {
+  display: inline-block; margin: 8px 16px 0; padding: 3px 14px; border-radius: 999px;
+  background: var(--ember); color: #fff; font-size: calc(14 * var(--px)); font-weight: 800; letter-spacing: 0.04em;
+}
+.lu-title[hidden] { display: none; }
+.lu-board { flex: none; height: min(320px, 46vh); margin: 14px 0 16px; padding: 0; overflow: hidden; pointer-events: none; }
+.lu-card .btn { width: calc(100% - 32px); margin: 0 16px; min-height: 48px; }
+.lu-hint { margin: -6px 16px 12px; font-size: calc(13 * var(--px)); line-height: 1.4; color: var(--muted); }
+.lu-hint[hidden] { display: none; }
+/* Its signs would only crowd so small a picture. */
+.lu-board .tb-sign { display: none; }
+html[data-motion="on"] .lu-name.pop { animation: lu-pop 380ms var(--ease-out); }
+@keyframes lu-pop { 0% { transform: scale(0.85); } 35% { transform: scale(1.08); } 100% { transform: scale(1); } }
+
+/* The run's line on its result: what it did for the team's level. */
+.res-level {
+  display: flex; align-items: center; gap: 10px; width: 100%; min-height: 48px; margin: 12px 0 0; padding: 10px 12px;
+  border: 1px solid var(--border); border-radius: 14px; background: var(--card); color: var(--ink);
+  font: 600 calc(14.5 * var(--px)) var(--body); line-height: 1.35; text-align: left; cursor: pointer;
+}
+.res-level[hidden] { display: none; }
+.res-level .i { flex: 0 0 26px; height: 26px; display: grid; place-items: center; border-radius: 8px; background: var(--muted); color: var(--card); font-weight: 800; }
+.res-level .t { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.res-level .go { flex: 0 0 auto; color: var(--muted); display: grid; }
+.res-level.up { border-color: var(--gold-ink); }
+.res-level.up .i { background: #F2C14E; color: #2A1705; }
+.res-level.yes .i { background: #2F8A4A; color: #fff; }
+.res-level:focus-visible { outline: 2px solid var(--ember); outline-offset: 2px; }
+
+/* The card pinned under the board: the next level, or the stone tapped. */
+.team-card {
+  flex: 0 0 auto; position: relative; z-index: 9; max-height: 60%; margin-top: -18px;
+  overflow-y: auto; -webkit-overflow-scrolling: touch;
+  padding: 0 max(16px, calc((100% - 480px) / 2)) calc(var(--safe-b) + 14px);
+  background: var(--card); border-radius: 22px 22px 0 0; box-shadow: 0 -8px 28px rgba(15, 31, 61, 0.16);
+}
+:root[data-theme="dark"] .team-card { box-shadow: 0 -8px 28px rgba(0, 0, 0, 0.45); }
+.tc-top {
+  display: block; width: 100%; min-height: 44px; padding: 8px 0 4px; border: 0; background: none;
+  font: inherit; color: inherit; text-align: left; cursor: pointer;
+}
+.tc-top::before { content: ""; display: block; width: 36px; height: 4px; margin: 0 auto 8px; border-radius: 2px; background: var(--border); }
+.tc-top:focus-visible { outline: 2px solid var(--ember); outline-offset: -2px; border-radius: 12px; }
+.tc-k {
+  display: flex; justify-content: space-between; gap: 8px;
+  font-size: calc(11.5 * var(--px)); font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted);
+}
+.tc-stage.hot { color: var(--hot-fill); }
+.tc-stage.warm { color: var(--warm-fill); }
+.tc-stage.cold { color: var(--cold-fill); }
+:root[data-theme="dark"] .tc-stage.hot { color: #FF7A66; }
+:root[data-theme="dark"] .tc-stage.warm { color: #F0A64A; }
+:root[data-theme="dark"] .tc-stage.cold { color: #7DB8EE; }
+.tc-name { margin: 0; font-size: calc(21 * var(--px)); font-weight: 800; letter-spacing: -0.3px; line-height: 1.2; overflow-wrap: anywhere; }
+.tc-new { margin: 3px 0 0; font-size: calc(14 * var(--px)); font-weight: 700; color: var(--gold-ink); }
+.tc-also { margin: 2px 0 0; font-size: calc(13 * var(--px)); color: var(--muted); }
+.tc-body { margin: 6px 0 0; font-size: calc(14.5 * var(--px)); line-height: 1.45; }
+.tc-checks { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 2px; padding: 0; list-style: none; }
+.tc-checks li {
+  display: inline-flex; align-items: center; gap: 6px; padding: 5px 11px 5px 6px; border-radius: 999px;
+  background: var(--well); font-size: calc(13 * var(--px)); font-weight: 600;
+}
+.tc-checks .m {
+  flex: 0 0 auto; width: 17px; height: 17px; display: inline-grid; place-items: center; border-radius: 50%;
+  border: 2px solid var(--muted); color: transparent; font-size: calc(11 * var(--px)); line-height: 1;
+}
+.tc-checks li.ok .m { border-color: var(--ink); background: var(--ink); color: var(--card); }
+/* What this level adds is ringed in gold, whether or not it is ticked yet. */
+.tc-checks li.new { box-shadow: inset 0 0 0 1.5px var(--ember); color: var(--gold-ink); }
+.tc-checks li i { font-style: normal; font-weight: 500; color: var(--muted); }
+.tc-states { display: grid; gap: 8px; margin-top: 10px; }
+.tc-state { padding: 10px 12px; border-radius: 14px; background: var(--well); border-left: 4px solid var(--muted); }
+.tc-state.warn { border-left-color: var(--ember); }
+.tc-state.gold { border-left-color: var(--ember); background: rgba(184, 134, 27, 0.14); }
+.tc-state b { display: block; font-size: calc(14 * var(--px)); font-weight: 800; }
+.tc-state p { margin: 2px 0 0; font-size: calc(13.5 * var(--px)); line-height: 1.4; }
+.tc-state .btn { margin-top: 8px; }
+.tc-state.quiet { padding: 0; background: none; border: 0; color: var(--muted); }
+.tc-state.quiet b { display: inline; font-size: calc(13 * var(--px)); font-weight: 700; }
+.tc-state.quiet p { display: inline; font-size: calc(13 * var(--px)); }
+.tc-tries-k { margin-top: 12px; }
+.tc-tries { display: grid; gap: 5px; margin: 6px 0 0; padding: 0; list-style: none; }
+.tc-tries li {
+  display: grid; grid-template-columns: 20px minmax(0, 1fr); column-gap: 8px; align-items: start;
+  padding: 8px 10px; border-radius: 12px; background: var(--well); font-size: calc(13 * var(--px)); line-height: 1.35;
+}
+.tc-tries .i {
+  width: 18px; height: 18px; margin-top: 1px; display: inline-grid; place-items: center; border-radius: 5px;
+  background: var(--muted); color: var(--card); font-size: calc(11 * var(--px)); font-weight: 800;
+}
+.tc-tries .yes .i { background: #2F8A4A; color: #fff; }
+.tc-tries b { font-weight: 700; }
+.tc-tries .why { display: block; color: var(--muted); overflow-wrap: anywhere; }
+.tc-back { min-height: 44px; padding: 0; border: 0; background: none; font: inherit; font-size: calc(14 * var(--px)); font-weight: 700; color: var(--gold-ink); cursor: pointer; }
+.tc-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+/* Folded, the card is the level's name, its checklist and whatever the
+   handler must not miss: the placement offer with its button, Ease off, the
+   dog's age, the heat, the day's limit. Only the quiet line, the small print
+   and the tries fold away, and the word at the top right says there is more. */
+.team-card.folded .tc-also, .team-card.folded .tc-state.quiet, .team-card.folded .tc-tries-k, .team-card.folded .tc-tries { display: none; }
+.tc-r { display: inline-flex; gap: 12px; align-items: baseline; }
+.tc-more { color: var(--gold-ink); }
+.tc-notes { display: none; }
+/* A very short phone (320 by 568): the board was a strip one stone high.
+   The card takes less, and folded it is the level's name alone, with the
+   notes it has folded away counted beside "More". */
+@media (max-height: 620px) {
+  .team-card { max-height: 45%; }
+  .team-card.folded .tc-new, .team-card.folded .tc-checks, .team-card.folded .tc-states { display: none; }
+  .team-card.folded .tc-notes { display: inline; }
+}
+
+/* A new team: the look, tried on before it is kept. */
+.tn-stage { display: grid; place-items: center; padding: 16px 0 6px; border-radius: 16px; background: #9cc35a; overflow: hidden; }
+.tn-stage canvas { display: block; max-width: 100%; image-rendering: pixelated; }
+.chip .dot { flex: 0 0 auto; width: 18px; height: 18px; margin-left: 6px; border-radius: 50%; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.25); }
+.chip.look { min-height: 48px; padding: 8px 16px 8px 10px; }
+.chip.look.bare { padding-left: 16px; }
+
 /* ── A light gold rim on every button ────────────────────────────────
    Rémi's call, 21 Sept 2026. One token and one rule, last in the file, so
    no variant (filled, ghost, selected, on the map) can lose it by being
