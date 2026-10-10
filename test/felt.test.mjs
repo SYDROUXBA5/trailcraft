@@ -984,6 +984,8 @@ await t('a wind put right in the debrief is kept, answered or not, and by Not no
   const todo = { classList: { add() {} }, scrollIntoView() {} };
   const sb = { noLineYet,
     db, DEBRIEF, debriefDone, sameFelt, ownRun, toast: (m) => toasts.push(m),
+    /* The rows still to answer (app.js debriefTodo): here, a run that is nobody's try, so only the required ones. */
+    debriefTodo: (d) => DEBRIEF.filter(f => f.required && !d?.[f.id]),
     regradeShown: (s, w) => graded.push([s.id, w]),
     $: () => ({ querySelector: () => todo }), leaveForm: (id) => { sb.left = id; },
     dbFor: db.sessions()[0], dbDraft: blankDebrief(), dbWind: makeWindFelt('opposite', 0, RUN + 9e5),

@@ -108,6 +108,8 @@ function app() {
     scan: { gen: 0 }, stopScan() {}, scanWalkedFor: null, scanCameFrom: 'scrPick',
     renderHome() {}, renderSessions() {}, renderSettings() {}, renderResult() {}, paintPick() {},
     handlerCardId: null, dogCardId: null, paintHandlerCard() {}, paintDogCard() {},
+    /* The team board and its form paint themselves; a kept run's level is worked out by levels.js. */
+    paintTeam() {}, closeTeamForm() {}, runLevelled() {}, debriefLevelRows: () => [], stickyLevel: () => ({}),
     map: { resize() {}, off() {}, getCanvas: () => ({ style: {} }) },
     weatherPanelFor: (s, at) => { air.push(s); airAt.push(at); },
     mapChromeShow() {}, stepsRun() {}, airStop() {}, hideWeather() {},
@@ -122,7 +124,7 @@ function app() {
     openDebrief: (s) => { sb.dbFor = s; sb.dbDraft = { flags: [] }; sb.dbSeen = {}; sb.go('scrDebrief'); },
     openPick: () => sb.go('scrPick'),
     dbFor: null, dbDraft: null, dbSeen: null, shareOutFrom: 'scrResult', signInFirstLaunch: false,
-    S: { handler: null }, DEBRIEF: [], debriefDone: () => true, cleanSeen: () => null,
+    S: { handler: null }, DEBRIEF: [], debriefTodo: () => [], cleanSeen: () => null,
     guardSave: (s, f) => f(), saveSession: (s) => s, paintDebrief() {},
     // The wind felt on the ground: a run with none to change grades nothing again.
     dbWind: null, feltChangeable: () => false, sameFelt: () => true, regradeShown() {}, debriefWind: () => false,
@@ -628,11 +630,12 @@ await t('the run picker gives a drawn line no made-up age', () => {
   const els = {};
   const now = Date.UTC(2026, 8, 25, 12);
   const rows = (sessions) => {
+    /* paintLeftAgo is the Blind trail's own row (a Hot team's "the person left"), not part of the list. */
     new Function('S', '$', 'verbs', 'targetById', 'fmtKm', 'pathLen', 'fmtWhen', 'esc', 'targetText', 'unwalkedPlan', 'Date',
-      'noLineYet', `${src}\npaintPick();`)(
+      'noLineYet', 'paintLeftAgo', `${src}\npaintPick();`)(
       { target: { kind: 'person' }, sessions }, (id) => (els[id] ??= {}), () => ({ run: 'Run a trail' }),
       () => ({ kind: 'person' }), () => '0.3 km', () => 300, () => 'today', (x) => String(x), () => 'A person',
-      unwalkedPlan, { now: () => now }, noLineYet);
+      unwalkedPlan, { now: () => now }, noLineYet, () => {});
     return els.pickList.innerHTML;
   };
   const trail = (data) => ({ id: 'x', targetId: 'person', startedAt: now - 25 * 60e3, data: { trail: [{}, {}], ...data } });

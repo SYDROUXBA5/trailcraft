@@ -1,6 +1,6 @@
 /* Offline shell. Trails happen where there is no signal, so the app itself must
    survive with none. Map tiles cache opportunistically as you pan an area. */
-const V = 'trailcraft-v121';
+const V = 'trailcraft-v122';
 /* Every module the app cannot start without. app.js is an ES module and its
    imports are separate requests — listing only app.js precaches a shell that
    cannot boot, which shows up as a working app that dies the first time it is
@@ -13,6 +13,7 @@ const SHELL = [
   './', 'index.html', 'app.css',
   'app.js', 'geo.js', 'colours.js', 'draft.js', 'mvt.js', 'ground.js', 'params.js', 'debrief.js', 'call.js', 'marks.js', 'field.js', 'walls.js', 'sim.js', 'card.js', 'store.js', 'log.js',
   'sync-core.js', 'sync.js', 'firebase-config.js', 'share.js', 'pdf.js', 'coach.js', 'native.js', 'backup.js',
+  'levels.js', 'teams.js', 'pixel-team.js', 'board.js',
   'vendor/qrcode.js', 'vendor/jsQR.js',
 ];
 /* Wanted, but not worth failing an update over, and none of them stops the app

@@ -33,6 +33,20 @@
 <div id="map"></div>
 
 <div id="toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
+<!-- A level passed, played over the result that earned it. It never has to
+     be answered: a tap skips it, and a plain level-up leaves by itself. A
+     boss's title card stays until it is closed, and so does the still card
+     shown where animations are off: each is shown once only. -->
+<div class="lu" id="levelUp" hidden role="dialog" aria-modal="true" tabindex="-1" aria-labelledby="luName" aria-describedby="luKicker">
+  <div class="lu-card">
+    <span class="label" id="luKicker"></span>
+    <h2 class="lu-name" id="luName" aria-live="polite"></h2>
+    <p class="lu-title" id="luTitle" hidden></p>
+    <div class="tb-scroll lu-board" id="luBoard"></div>
+    <p class="lu-hint" id="luHint" hidden>Animations are off with Reduce Motion. Turn them on in Settings.</p>
+    <button type="button" class="btn moss" id="luDone">Carry on</button>
+  </div>
+</div>
 <!-- The one message that must never be a toast that fades: a save that
      failed. It stays until the handler has done something about it. -->
 <div id="saveTrouble" class="save-trouble" role="alert" hidden>
@@ -240,6 +254,9 @@
          not say: read by a screen reader after its name, never shown. -->
     <span id="handlerOpensHint" hidden>Tap again to open this handler’s card.</span>
     <span id="dogOpensHint" hidden>Tap again to open this dog’s record.</span>
+    <!-- The picked handler and the picked dog are the team in play: its level,
+         the name it has earned, and the way to its board. -->
+    <button type="button" class="team-row" id="homeTeam" hidden></button>
 
     <span class="label">Looking for</span>
     <div class="chip-row" id="rowTargets"></div>
@@ -424,6 +441,14 @@
   <div class="page">
     <h1 class="display" id="pickTitle">Run a trail</h1>
     <button class="btn big moss" id="btnScan"><b>Scan a card</b><i>from the layer's phone</i></button>
+    <!-- A runaway nobody recorded has no laid time, so a Hot team can say how
+         long the person has been gone before it starts the blind trail below.
+         Optional up to level 5; from level 6 the level needs an age, and the
+         tag says so (paintLeftAgo). It can also be given on the debrief. -->
+    <div id="leftAgoBox" hidden>
+      <span class="label" id="leftAgoLabel">Blind trail: the person left <i class="opt" id="leftAgoTag">optional</i></span>
+      <div class="chip-row" id="leftAgoRow" role="group" aria-labelledby="leftAgoLabel"></div>
+    </div>
     <button class="btn big" id="btnBlind"><b>Blind trail</b><i>No trail on this phone. Start here, tap Found at the find</i></button>
     <span class="label" id="pickLabel">Laid on this phone</span>
     <div id="pickList" class="recent"></div>
@@ -496,6 +521,8 @@
     <span class="label" id="resWho"></span>
     <h1 class="display" id="resSentence"></h1>
     <p class="body small provisional" id="resProvisional" hidden></p>
+    <!-- What the run did for its team's level: it opens the team board. -->
+    <button type="button" class="res-level" id="resLevel" hidden></button>
     <p class="body small muted" id="resRoute" hidden></p>
     <!-- A blind trail's run waits here for the layer's line. The file box
          takes any file: iOS greys out a .gpx it has no app for when asked
@@ -576,6 +603,10 @@
     <span class="label">About</span>
     <div class="card" id="dogAbout"></div>
 
+    <span class="label">Teams</span>
+    <div id="dogTeams" class="recent"></div>
+    <button class="btn ghost small" id="dogNewTeam">New team</button>
+
     <span class="label">Work so far</span>
     <div class="grid2" id="dogGrid"></div>
 
@@ -592,6 +623,65 @@
       <button class="btn moss" id="dogEdit">Edit this dog</button>
       <button class="btn ghost" id="dogBack">Done</button>
       <button class="btn ghost small del-link" id="dogDelete">Delete this dog</button>
+    </div>
+  </div>
+</section>
+
+<!-- ── The team board: where a team stands and what the next level asks ──
+     Three rows, and only the middle one scrolls: the team at the top, the
+     trail board, and the card about the next level pinned at the bottom. -->
+<section id="scrTeam" class="screen paper team-screen" hidden>
+  <header class="team-head">
+    <button type="button" class="back-btn" id="teamBack" aria-label="Back"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M14.5 5.5 8 12l6.5 6.5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+    <div class="team-who">
+      <h1 class="display" id="teamTitle"></h1>
+      <p class="team-name" id="teamName"></p>
+    </div>
+    <button type="button" class="btn ghost small" id="teamEdit" hidden>Edit team</button>
+    <div class="team-meter" id="teamMeter"></div>
+  </header>
+  <!-- The card comes first in the page and second on the screen (CSS order):
+       read in page order, a hundred stones sat between the team's name and
+       its next level. -->
+  <div class="team-card" id="teamCard"></div>
+  <div class="tb-scroll" id="teamBoard" role="group" aria-label="Trail board, 100 levels"></div>
+  <p class="sr-only" id="teamSay" aria-live="polite"></p>
+</section>
+
+<!-- ── A new team, or an existing one edited: who, where it starts, the look ── -->
+<section id="scrTeamNew" class="screen paper" hidden>
+  <div class="page">
+    <span class="label" id="tnKicker">New team</span>
+    <h1 class="display" id="tnTitle"></h1>
+    <p class="body small muted" id="tnSub">A team is one handler with one dog. It climbs 100 levels of person trails, and one good run passes a level.</p>
+
+    <div id="tnWho">
+      <span class="label" id="tnHandlerLabel">Handler</span>
+      <div class="chip-row" id="tnHandlers" role="group" aria-labelledby="tnHandlerLabel"></div>
+      <span class="label" id="tnDogLabel">Dog</span>
+      <div class="chip-row" id="tnDogs" role="group" aria-labelledby="tnDogLabel"></div>
+    </div>
+    <p class="body small provisional" id="tnExists" hidden></p>
+
+    <!-- Editing a team: where it starts is behind this button (paintTeamForm). -->
+    <button type="button" class="btn ghost small" id="tnMove" hidden>Start from another level</button>
+    <span class="label" id="tnPresetLabel">What the dog can do today</span>
+    <p class="body small muted" id="tnPresetWhy">It sets the level the team starts at. Start too high and the board will offer a lower one.</p>
+    <div class="check-list" id="tnPresets" role="group" aria-labelledby="tnPresetLabel"></div>
+
+    <span class="label">The look</span>
+    <div class="tn-stage"><canvas id="tnPreview" aria-hidden="true"></canvas></div>
+    <span class="field-label" id="tnCoatLabel">Dog’s coat</span>
+    <div class="chip-row" id="tnCoats" role="group" aria-labelledby="tnCoatLabel"></div>
+    <span class="field-label" id="tnJacketLabel">Handler’s jacket</span>
+    <div class="chip-row" id="tnJackets" role="group" aria-labelledby="tnJacketLabel"></div>
+    <span class="field-label" id="tnHatLabel">Hat</span>
+    <div class="chip-row" id="tnHats" role="group" aria-labelledby="tnHatLabel"></div>
+    <p class="body small muted">The harness takes the colour of the stage: red in Hot, amber in Warm, blue in Cold.</p>
+
+    <div class="page-bottom">
+      <button class="btn moss" id="tnSave">New team</button>
+      <button class="btn ghost" id="tnCancel">Cancel</button>
     </div>
   </div>
 </section>
@@ -998,6 +1088,15 @@
       <button type="button" class="check-row" data-value="system"><span class="check-text"><b>Device default</b><i data-theme-example="system"></i></span><span class="check-mark" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span></button>
       <button type="button" class="check-row" data-value="light"><span class="check-text"><b>Light</b><i data-theme-example="light"></i></span><span class="check-mark" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span></button>
       <button type="button" class="check-row" data-value="dark"><span class="check-text"><b>Dark</b><i data-theme-example="dark"></i></span><span class="check-mark" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span></button>
+    </div>
+
+    <!-- The pixel team on the board. On is its own choice because a phone can
+         keep Reduce Motion on for everything else and still show the dog trot. -->
+    <span class="label" id="motionLabel">Animations</span>
+    <div class="check-list" id="motionSettings" data-setting="motion" role="group" aria-labelledby="motionLabel">
+      <button type="button" class="check-row" data-value="auto"><span class="check-text"><b>Auto</b><i data-motion-example="auto"></i></span><span class="check-mark" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span></button>
+      <button type="button" class="check-row" data-value="on"><span class="check-text"><b>On</b><i data-motion-example="on"></i></span><span class="check-mark" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span></button>
+      <button type="button" class="check-row" data-value="off"><span class="check-text"><b>Off</b><i data-motion-example="off"></i></span><span class="check-mark" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span></button>
     </div>
 
     <span class="label">Units</span>

@@ -406,4 +406,73 @@ t('a second run starts without the first run’s fetched weather', () => {
   assert.ok(RUN_FIELDS.includes('found'), 'so does a run ended on Found: the next dog on the trail has found nobody yet');
 });
 
+/* ── A dog's teams, two copies ────────────────────────────────────── */
+const row = (handlerId, more = {}) => ({ id: `t-${handlerId}`, handlerId, preset: 'new', startLevel: 1, placedAt: 50, look: { coat: 'malinois' }, ...more });
+const rex = (updatedAt, teams, more = {}) => ({ id: 'd1', name: 'Rex', updatedAt, ...(teams ? { teams } : {}), ...more });
+
+t('a team made on one phone survives a later write of the same dog from the other, both ways', () => {
+  /* The owner's team was made on the iPad and is in the cloud; the trainer's
+     phone had not heard of it and passed a level, writing its own copy. */
+  const cloud = rex(900, [row('trainer'), row('owner')]);
+  const phone = rex(1000, [row('trainer', { best: { v: 1, level: 3, at: 990 }, shown: 3 })]);
+  const a = mergeRecords([phone], [cloud]);
+  assert.deepEqual(a.merged[0].teams.map(x => x.handlerId), ['trainer', 'owner'], 'the owner\'s team is still there');
+  assert.equal(a.merged[0].teams[0].best.level, 3, 'and the trainer\'s level is the one just passed');
+  assert.equal(a.merged[0].updatedAt, 1001, 'newer than both, so every phone takes it');
+  assert.equal(a.toUpload.length, 1);
+  /* The other way round: the phone's copy is the older one. */
+  const b = mergeRecords([rex(900, [row('trainer'), row('owner')])], [rex(1000, [row('trainer')], { weightKg: 31 })]);
+  assert.deepEqual(b.merged[0].teams.map(x => x.handlerId), ['trainer', 'owner']);
+  assert.equal(b.merged[0].weightKg, 31, 'the rest of the dog is the newer copy\'s');
+  assert.equal(b.toUpload.length, 1, 'and the cloud is told');
+});
+
+t('a phone on a build from before teams cannot wipe them by editing the dog', () => {
+  const old = rex(1000, null, { weightKg: 31 });            // no `teams` key at all
+  const { keep, up } = mergeOne(rex(900, [row('trainer', { best: { v: 1, level: 7, at: 800 }, shown: 7 })]), old);
+  assert.equal(keep.teams.length, 1);
+  assert.equal(keep.teams[0].best.level, 7);
+  assert.equal(keep.weightKg, 31);
+  assert.ok(up && keep.updatedAt === 1001, 'sent back up, newer than both, so the old phone gets it too');
+});
+
+t('one team on both copies: the higher level and the later level-up shown are kept', () => {
+  const mine = rex(1000, [row('trainer', { best: { v: 1, level: 4, at: 700 }, shown: 6 })]);
+  const theirs = rex(900, [row('trainer', { best: { v: 1, level: 6, at: 800 }, shown: 4 })]);
+  const { keep } = mergeOne(mine, theirs);
+  assert.deepEqual(keep.teams[0].best, { v: 1, level: 6, at: 800 });
+  assert.equal(keep.teams[0].shown, 6);
+  /* Whoever placed the team last holds where it starts and what it wears. */
+  const moved = mergeOne(rex(1000, [row('trainer', { look: { coat: 'beagle' } })]), rex(900, [row('trainer', { startLevel: 11, placedAt: 80, best: { v: 1, level: 2, at: 60 } })])).keep.teams[0];
+  assert.equal(moved.startLevel, 11);
+  assert.equal(moved.placedAt, 80);
+  assert.equal(moved.best.level, 2);
+});
+
+t('a level taken back on purpose is not put back by an older copy', () => {
+  const corrected = rex(1000, [row('trainer', { best: { v: 1, level: 0, at: null }, shown: 0, resetAt: 990 })]);
+  const stale = rex(900, [row('trainer', { best: { v: 1, level: 1, at: 800 }, shown: 1 })]);
+  for (const [l, r] of [[corrected, stale], [stale, corrected]]) {
+    const { keep } = mergeOne(l, r);
+    assert.equal(keep.teams[0].best.level, 0);
+    assert.equal(keep.teams[0].shown, 0);
+  }
+  assert.deepEqual(mergeOne(corrected, stale), { keep: corrected, up: true }, 'nothing to merge: the newer copy as it is');
+});
+
+t('two copies that agree are left alone, and a deleted handler\'s team does not come back', () => {
+  const same = rex(1000, [row('trainer', { best: { v: 1, level: 2, at: 60 } })]);
+  assert.deepEqual(mergeOne(same, { ...same, updatedAt: 900 }), { keep: same, up: true }, 'no new stamp for nothing');
+  /* The owner was deleted here: their row went from the dog with them. */
+  const here = rex(1000, [row('trainer')]);
+  const there = rex(900, [row('trainer'), row('owner')]);
+  const gone = new Set(['owner']);
+  assert.equal(mergeOne(here, there, { gone }).keep, here);
+  assert.equal(mergeRecords([here], [there], { gone }).merged[0], here);
+  assert.equal(mergeOne(there, { ...here, updatedAt: 800 }, { gone }).keep.teams.length, 1, 'nor does it stay on a newer copy that had not heard');
+  /* A deleted dog stays deleted, teams or no teams. */
+  assert.equal(mergeOne(tombstone('d1', 2000), there).keep.deleted, true);
+  assert.equal(mergeOne(there, tombstone('d1', 100)).keep, there);
+});
+
 console.log(`\n${pass} passed total\n`);

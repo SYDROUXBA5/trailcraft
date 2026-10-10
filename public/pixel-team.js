@@ -461,12 +461,22 @@ export const ICONS = {
   article: ['.w.w.w.', '.w.w.w.', '.wwwww.', 'wwwwww.', '.wwwww.', '..www..', '..ddd..'],
   turn: ['....w..', '....ww.', 'wwwwwww', 'w...ww.', 'w...w..', 'w......', 'w......'],
   blind: ['......d', '..wwwd.', '.wwwdw.', 'wwwddww', '.wdwww.', '.dwww..', 'd......'],
-  cross: ['w.....w', '.w...w.', '..w.w..', '...w...', '..w.w..', '.w...w.', 'w.....w'],
+  cross: ['ww...ww', 'www.www', '.wwwww.', '..www..', '.wwwww.', 'www.www', 'ww...ww'],
   cobbles: ['.......', 'ww.www.', 'ww.www.', '.......', 'www.ww.', 'www.ww.', '.......'],
   moon: ['..www..', '.ww....', 'ww.....', 'ww.....', 'ww.....', '.ww....', '..www..'],
   compass: ['...w...', '..www..', '.wwdww.', 'wwdddww', '.wwdww.', '..www..', '...w...'],
   paw: ['..g.g..', '.gg.gg.', 'g.....g', 'g.ggg.g', '.ggggg.', '.ggggg.', '..ggg..'],
   flag: ['.wgggg.', '.wggg..', '.wgggg.', '.w.....', '.w.....', '.w.....', 'ww.....'],
+  pin: ['..www..', '.wwdww.', '.wdddw.', '.wwdww.', '..www..', '...w...', '...w...'],
+  hourglass: ['wwwwwww', '.wdddw.', '..wdw..', '...w...', '..wdw..', '.wdddw.', 'wwwwwww'],
+  fork: ['w.....w', 'ww...ww', '.ww.ww.', '..www..', '...w...', '...w...', '...w...'],
+  blindfold: ['..www..', '.wwwww.', 'ddddddd', 'ddddddd', '.wwwww.', '.wwwww.', '..www..'],
+  query: ['.wwww..', 'ww..ww.', '....ww.', '...ww..', '..ww...', '.......', '..ww...'],
+  empty: ['..www..', '.w...w.', 'w.....w', 'w.....w', 'w.....w', '.w...w.', '..www..'],
+  far: ['.......', '.w...w.', 'ww...ww', 'wwwwwww', 'ww...ww', '.w...w.', '.......'],
+  road: ['w..d..w', 'w.....w', 'w..d..w', 'w.....w', 'w..d..w', 'w.....w', 'w..d..w'],
+  car: ['.......', '..www..', '.wdwdw.', 'wwwwwww', 'wwwwwww', '.d...d.', '.......'],
+  torch: ['g.g.g..', '.ggg...', 'ggwwg..', '.wwww..', '..wwww.', '...wwd.', '....dd.'],
 };
 
 const DIGITS = {
@@ -1586,7 +1596,17 @@ function bayer(x, y) {
   return (m[(y & 3) * 4 + (x & 3)] + 0.5) / 16;
 }
 
-/* ───────────────────────── 8. Board scenery ───────────────────────── */
+/* ───────────────────────── 8. Board scenery ─────────────────────────
+   One trail climbing four lands: the red meadow (Hot), the amber wood at
+   dusk (Warm), then Cold's two, a blue town at night and the climb to a
+   snowy summit. A boss stands where a land ends: the stile in the hedge,
+   the footbridge over the stream, the gate in the town wall, and the cairn
+   on the summit.
+
+   The whole ladder is some 4,000 art pixels tall, more than an old iPhone
+   will give one canvas, so nothing here needs the whole board at once:
+   drawBoard paints any band of rows, and the same band is always painted
+   the same way, whichever tile asks for it. */
 
 export const BOARD_LANDS = {
   hot: {
@@ -1603,7 +1623,30 @@ export const BOARD_LANDS = {
     pine: '#2f4a2a', pineHi: '#476a36', pineRim: '#d08a2a',
     leaves: ['#d9822a', '#b8521c', '#f0b048'],
   },
+  /* The town at night: blue ground, a cobbled street, lit windows. */
+  town: {
+    g: '#263c66', gHi: '#2f4877', gLo: '#1f3157', tuft: '#35517f', dirt: '#8792b3', dirtHi: '#aab3cd', dirtLo: '#141d3a',
+    fl: '#ffd36a', flHi: '#fff0b0', fl2: '#8fb0e8', eye: '#141d3a',
+    tree: '#2c5a6a', treeHi: '#3f7a88', treeLo: '#1c3d4e', trunk: '#231c2c', print: '#55618a',
+    haw: '#2f6078', hawHi: '#44809a', hawLo: '#1f4258', berry: '#ffd36a',
+    pine: '#1f3f48', pineHi: '#2c5a60', pineRim: '#6a86b8',
+    lit: '#ffd36a', litHi: '#fff0b0', dark: '#121a36', cobble: '#5d6990',
+  },
+  /* The climb: moonlit rock low down, snow from half way, then the sky. */
+  alp: {
+    g: '#56658a', gHi: '#67769c', gLo: '#475478', tuft: '#3d4a6b', dirt: '#aab8d2', dirtHi: '#d0daea', dirtLo: '#566489',
+    snow: '#e4ecf7', snowHi: '#ffffff', snowLo: '#bccbe3',
+    fl: '#ffffff', flHi: '#ffffff', fl2: '#bccbe3', eye: '#3d4a6b',
+    tree: '#2a4a48', treeHi: '#3b6460', treeLo: '#1c3534', trunk: '#3a2e2a', print: '#8496ba',
+    pine: '#28504a', pineHi: '#3a6c62', pineRim: '#e4ecf7', capped: true,
+    lit: '#ffd36a', litHi: '#fff0b0',
+    sky: ['#0a0f2c', '#0f1740', '#172254', '#22306a'], star: '#fff3c4', starLo: '#93a8de', far: '#2a3768', farSnow: '#aebfe2',
+    aurora: '#5fe0a8', auroraLo: '#2f9aa8',
+  },
 };
+/* The lands in the order the trail climbs them, and the boss that closes each. */
+const LAND_ORDER = ['hot', 'warm', 'town', 'alp'];
+const BOSS_KINDS = ['stile', 'bridge', 'wall', 'cairn'];
 const STONE = { base: '#aab0b4', hi: '#d3d8db', lo: '#7e858b', dim: '#8d978c', dimHi: '#a5ae9f', dimLo: '#6f786c' };
 
 /** Digits in a 3 × 5 pixel font, with a dark rim. */
@@ -1636,32 +1679,96 @@ export function drawPlaque(c, text, status, boss) {
   });
 }
 
+/* The trail is a curve through the stones, 40 points to each stretch. */
+const PATH_N = 40;
+
 /**
  * Lay the board out: the first level at the bottom, climbing upward on a
  * winding trail. levels: [{ level, stage, boss }]. W in art pixels.
+ * opts: { spacing, top, bottom, summit }. With `summit` the trail ends at the
+ * last stone, under a night sky; otherwise it runs on off the top.
+ *
+ * Besides the stones and the path it says where each boss stands
+ * (`bosses`, bottom to top, each { level, x, y, lock, kind }: y is the line
+ * the land changes on), which land a row is in (`landAt`), and how far a point
+ * is from the trail (`pathDist`).
  */
 export function boardLayout(W, levels, opts = {}) {
   const spacing = opts.spacing || 40, top = opts.top || 70, bottom = opts.bottom || 50;
-  const H = top + bottom + (levels.length - 1) * spacing;
+  /* Room beyond each boss's gate, on top of the usual step to the next
+     stone. A gate is as tall as that step, so a team that had just come
+     through one had nowhere to stand: it was drawn waist-deep behind the
+     arch, or on top of the next stone. With `gateRoom` there is clear ground
+     between the two. Nothing lies beyond the last boss, so it gets none. */
+  const gateRoom = opts.gateRoom || 0;
+  const lifts = [];
+  let lift = 0;
+  levels.forEach((lv, i) => { lifts.push(lift); if (lv.boss && i < levels.length - 1) lift += gateRoom; });
+  const H = top + bottom + (levels.length - 1) * spacing + lift;
   const amp = Math.round(W * 0.25), cx = Math.round(W / 2);
   const stones = levels.map((lv, i) => ({
     ...lv,
     x: lv.boss ? cx : R(cx + amp * Math.sin(i * 0.95 + 0.4)),
-    y: H - bottom - i * spacing,
+    y: H - bottom - i * spacing - lifts[i],
   }));
-  const ctrl = [[stones[0].x - 6, H + 6]].concat(stones.map(s => [s.x, s.y]), [[cx, -8]]);
+  const last = stones[stones.length - 1];
+  const ctrl = [[stones[0].x - 6, H + 6]].concat(stones.map(s => [s.x, s.y]), opts.summit ? [] : [[cx, -8]]);
   const path = [];
   for (let i = 0; i < ctrl.length - 1; i++) {
     const p0 = ctrl[Math.max(0, i - 1)], p1 = ctrl[i], p2 = ctrl[i + 1], p3 = ctrl[Math.min(ctrl.length - 1, i + 2)];
-    const n = 40;
-    for (let k = 0; k < n; k++) {
-      const u = k / n, u2 = u * u, u3 = u2 * u;
+    for (let k = 0; k < PATH_N; k++) {
+      const u = k / PATH_N, u2 = u * u, u3 = u2 * u;
       const f = (a, b, cc, d) => 0.5 * ((2 * b) + (-a + cc) * u + (2 * a - 5 * b + 4 * cc - d) * u2 + (-a + 3 * b - 3 * cc + d) * u3);
       path.push({ x: f(p0[0], p1[0], p2[0], p3[0]), y: f(p0[1], p1[1], p2[1], p3[1]), seg: i - 1 + u });
     }
   }
-  const bossStone = stones.find(s => s.boss);
-  const layout = { W, H, stones, path, hedgeY: bossStone ? bossStone.y + 3 : -100 };
+  if (opts.summit) path.push({ x: last.x, y: last.y, seg: stones.length - 1 });
+
+  /* Where the trail is on each row: it only ever climbs, so one x a row
+     answers "how far is this from the trail" without walking the path. */
+  const xAt = new Float32Array(H + 1).fill(NaN);
+  for (let i = 0; i < path.length - 1; i++) {
+    const p = path[i], q = path[i + 1];
+    const ya = Math.min(p.y, q.y), yb = Math.max(p.y, q.y);
+    for (let y = Math.max(0, Math.ceil(ya)); y <= Math.min(H, Math.floor(yb)); y++) {
+      xAt[y] = yb === ya ? p.x : p.x + (q.x - p.x) * (y - p.y) / (q.y - p.y);
+    }
+  }
+  const pathDist = (x, y) => {
+    let best = 1e9;
+    y = R(y);
+    for (let yy = Math.max(0, y - 14); yy <= Math.min(H, y + 14); yy += 2) {
+      const px = xAt[yy];
+      if (px !== px) continue;
+      const d = Math.hypot(px - x, yy - y);
+      if (d < best) best = d;
+    }
+    return best;
+  };
+
+  /* A boss's line is where its land ends: just under its stone, and a little
+     lower at the footbridge, whose stream lies between the gate and the far
+     bank. `lock` is the row the land beyond is dimmed from until the boss is
+     beaten: the far bank, so the stream itself is never under the mist. */
+  const bosses = stones.filter(s => s.boss).map((s, k) => {
+    const kind = BOSS_KINDS[Math.min(k, BOSS_KINDS.length - 1)];
+    const y = s.y + (kind === 'bridge' ? 7 : 3);
+    return { level: s.level, x: s.x, y, lock: y - (kind === 'bridge' ? 15 : 0), kind, index: k };
+  });
+  /* The rows above boss k's line are the next land, up to the last one. */
+  const landAt = (y) => {
+    let k = 0;
+    while (k < bosses.length && k < LAND_ORDER.length - 1 && y < bosses[k].y) k++;
+    return LAND_ORDER[k];
+  };
+  /* The summit: a peak under the last stone, and sky over it. */
+  /* The top is flat for as far as the team reaches when it stands there,
+     so the dog has snow under it, and falls away outside that. */
+  const sky = opts.summit ? { x: last.x, y: last.y - 16, drop: 44, flat: 30 } : null;
+  const skyAt = (x) => (sky ? sky.y + sky.drop * Math.pow(Math.max(0, Math.abs(x - sky.x) - sky.flat) / (W / 2 - sky.flat), 1.5) : -1e9);
+
+  const layout = { W, H, stones, path, xAt, pathDist, bosses, landAt, sky, skyAt, spacing, bottom,
+    hedgeY: bosses.length ? bosses[0].y : -100 };
   // Where the team stands at each stone (facing the next one): scenery keeps out.
   // The team faces the next stone, unless the board's edge is in the way:
   // its art runs about 71 px ahead of the handler's feet.
@@ -1672,8 +1779,25 @@ export function boardLayout(W, levels, opts = {}) {
     return left;
   });
   layout.clear = stones.map((s, i) => teamRect(s, layout.faceLeft[i]));
+  /* And just through each gate, where a team that has beaten the boss waits. */
+  for (const b of bosses) {
+    if (b.level >= stones.length) continue;
+    const pt = trailPoint(layout, b.level - 1, throughGate(b.kind));
+    layout.clear.push(teamRect({ x: pt[0], y: pt[1] }, layout.faceLeft[b.level - 1]));
+  }
+  /* A mountain road crosses the trail in the wave that works beside traffic. */
+  const roadAt = stones.find(s => s.level === 88);
+  layout.roadY = roadAt && landAt(roadAt.y) === 'alp' ? roadAt.y + 20 : null;
   return layout;
 }
+/** How far past a boss's stone the team stands once it is through, as a
+    share of the way to the next stone. Half-way, on a board laid out with
+    `gateRoom`, puts its feet above the top of the stile's arch, the bridge's
+    rails and the town wall, and still a body's height short of the next
+    stone. (0.35 of an ordinary step left it behind the arch from the chest
+    down, which is the picture a team keeps until its next pass.) */
+export const throughGate = () => 0.5;
+
 /** The box the team's pixels fill when it stands on stone s. */
 export function teamRect(s, faceLeft) {
   const a = faceLeft ? TEAM.w - 1 - ANCHOR[0] : ANCHOR[0];
@@ -1682,12 +1806,37 @@ export function teamRect(s, faceLeft) {
   return [x0, s.y - 32, x0 + 74, s.y + 5];
 }
 
-/** A point on the trail between stone i and stone i+1 (u 0..1), for the trot. */
+/** A point on the trail between stone i and stone i+1 (u 0..1), for the trot.
+    i is the stone's index (its level less one); -1 is the lead-in to stone 1. */
 export function trailPoint(layout, i, u) {
-  const seg = i + u;
-  let best = layout.path[0];
-  for (const p of layout.path) if (Math.abs(p.seg - seg) < Math.abs(best.seg - seg)) best = p;
-  return [R(best.x), R(best.y)];
+  const p = layout.path[clamp(R((i + u + 1) * PATH_N), 0, layout.path.length - 1)];
+  return [R(p.x), R(p.y)];
+}
+/* The path's points that fall in a band of rows (the trail only climbs). */
+function pathRange(layout, y0, y1) {
+  /* Found by halving, not worked out from the step between stones: the
+     step is longer just past a boss's gate (gateRoom). */
+  const p = layout.path;
+  const at = (y) => {
+    let lo = 0, hi = p.length - 1;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (p[mid].y > y) lo = mid + 1; else hi = mid; }
+    return lo;
+  };
+  return [Math.max(0, at(y1) - PATH_N), Math.min(p.length - 1, at(y0) + PATH_N)];
+}
+
+/** The board in tiles: bands of rows, each small enough for any phone's
+    canvas. Returns [{ y0, y1 }] from the top down. */
+export function boardTiles(H, tile = 256) {
+  const out = [];
+  for (let y = 0; y < H; y += tile) out.push({ y0: y, y1: Math.min(H, y + tile) });
+  return out;
+}
+/** Which tiles a window of rows needs, with a margin so a scroll never shows a bare one. */
+export function tilesNear(tiles, top, bottom, margin = 0) {
+  const out = [];
+  tiles.forEach((t, i) => { if (t.y1 > top - margin && t.y0 < bottom + margin) out.push(i); });
+  return out;
 }
 
 function stoneArt(c, x, y, status) {
@@ -1702,8 +1851,8 @@ function stoneArt(c, x, y, status) {
 }
 
 /* Scenery: big trees (taller than the people, as on a map), flower clumps
-   and a landmark for each wave, all kept off the trail, the stones and the
-   places the team stands. */
+   and landmarks, all kept off the trail, the stones and the places the
+   team stands. */
 function tree(c, x, base, L, r, kind) {
   const trunkH = kind === 'haw' ? 5 : 7;
   c.fillStyle = 'rgba(20,24,12,0.25)'; c.fillRect(x - r + 2, base, r * 2 - 1, 2);
@@ -1712,7 +1861,8 @@ function tree(c, x, base, L, r, kind) {
   c.fillStyle = darker(L.trunk, 0.35); c.fillRect(x + 1, base - trunkH, 1, trunkH);
   const cy = base - trunkH - r + 2;
   if (kind === 'pine') {
-    // Three filled tiers, dark green with an amber rim where the low sun catches.
+    // Three filled tiers, dark green with a rim where the low light catches:
+    // amber in the wood at dusk, snow on the mountain.
     for (let k = 0; k < 3; k++) {
       const ty = cy - r + 1 + k * 5, w = 2 + k * 2 + R(r / 4);
       for (let j = 0; j < 7; j++) {
@@ -1725,6 +1875,8 @@ function tree(c, x, base, L, r, kind) {
         c.fillStyle = j > 4 ? darker(L.pine, 0.3) : L.pine; c.fillRect(x - half, ty + j, half * 2 + 1, 1);
         c.fillStyle = L.pineRim; c.fillRect(x - half, ty + j, 1, 1);
         if (j < 3) { c.fillStyle = L.pineHi; c.fillRect(x - half + 1, ty + j, Math.max(0, half), 1); }
+        // Snow lies on the top of each tier.
+        if (L.capped && j < 2 + (k === 0 ? 1 : 0)) { c.fillStyle = L.pineRim; c.fillRect(x - half, ty + j, half * 2 + 1 - (j ? 1 : 0), 1); }
       }
     }
     return;
@@ -1761,12 +1913,60 @@ function flowerClump(c, x, y, L, rnd) {
 const LANDMARKS = {
   sheep: ['..wwww...', '.wwwwwwdd', 'wwwwwwwdd', '.wwwwww..', '.d.d..d..'],
   log: ['.bbbbbbbbbbbB.', 'bBbbbbBbbbbbww', 'bbbbbbbbbbbbwd', '.BBBBBBBBBBBB.'],
+  mushroom: ['.rrr.', 'rwrrw', 'rrrrr', '..s..', '..s..'],
+  mushroomS: ['.rr.', 'rwrr', '.s..'],
+  stump: ['.bbbb.', 'bwwwwb', 'bwbbwb', 'bBBBBb', 'bBbBBb'],
+  deer: [
+    '.........a.a.',
+    '..........a..',
+    '.........bbb.',
+    '.........bbbe',
+    '..bbbbbbbbb..',
+    '.wbbbbbbbbb..',
+    '.bbbbbbbbb...',
+    '.bBbb...bBb..',
+    '.b.b....b.b..',
+    '.b.b....b.b..',
+  ],
+  signpost: [
+    '.....p.....',
+    'wwwwwpwwww.',
+    'wddddpdddww',
+    'wwwwwpwwww.',
+    '.....p.....',
+    '.wwwwpwwwww',
+    'wwdddpddddw',
+    '.wwwwpwwwww',
+    '.....p.....',
+    '.....p.....',
+    '.....p.....',
+  ],
+  car: [
+    '....cccccc....',
+    '...cwwcwwwc...',
+    '.cccccccccccc.',
+    'ycccccccccccCr',
+    '.CdddCCCCdddC.',
+    '..ddd....ddd..',
+  ],
+  tent: [
+    '......t......',
+    '.....ttt.....',
+    '....ttTtt....',
+    '...tttTttt...',
+    '..tttdddttt..',
+    '.ttttdddtttt.',
+    'tttttdddttttt',
+  ],
+  snowman: ['..www..', '.wdwdw.', '.wwgww.', '..www..', '.wwwww.', 'wwwdwww', 'wwwwwww', '.wwwww.'],
+  bench: ['bbbbbbbbb', 'b.......b', 'bbbbbbbbb', '.b.....b.'],
 };
-function pond(c, x, y) {
+function pond(c, x, y, ice) {
   ellipse(c, x, y, 13, 5, OUTLINE);
-  ellipse(c, x, y, 12, 4, '#4f9bc8');
-  ellipse(c, x + 1, y + 1, 9, 2, '#3c84b4');
-  c.fillStyle = '#9fd2ee'; c.fillRect(x - 6, y - 2, 4, 1); c.fillRect(x + 3, y, 3, 1);
+  ellipse(c, x, y, 12, 4, ice ? '#9cc4e4' : '#4f9bc8');
+  ellipse(c, x + 1, y + 1, 9, 2, ice ? '#c2dcf0' : '#3c84b4');
+  c.fillStyle = ice ? '#ffffff' : '#9fd2ee'; c.fillRect(x - 6, y - 2, 4, 1); c.fillRect(x + 3, y, 3, 1);
+  if (ice) { c.fillStyle = '#7fa8cc'; c.fillRect(x - 3, y + 1, 5, 1); c.fillRect(x + 1, y + 2, 1, 1); return; }
   // Reeds at one end.
   for (let k = 0; k < 4; k++) {
     const rx = x + 9 + k * 2, top = y - 6 + (k % 2);
@@ -1777,6 +1977,8 @@ function pond(c, x, y) {
 }
 function landmark(c, name, x, y) {
   if (name === 'pond') return pond(c, x, y);
+  if (name === 'tarn') return pond(c, x, y, true);
+  if (name === 'fountain') return fountain(c, x, y);
   if (name === 'sheep') {
     stamp(c, LANDMARKS.sheep, x - 4, y - 4, { w: '#f4efe2', d: '#3a302a' });
     stamp(c, LANDMARKS.sheep, x + 9, y + 2, { w: '#e8e2d2', d: '#3a302a' });
@@ -1785,18 +1987,570 @@ function landmark(c, name, x, y) {
   if (name === 'log') {
     stamp(c, LANDMARKS.log, x - 7, y - 2, { b: '#7a5232', w: '#d9b07a', d: '#8a5a32' });
     c.fillStyle = '#e8d45a'; c.fillRect(x - 3, y - 3, 1, 1); c.fillRect(x + 2, y - 3, 1, 1);
+    return;
   }
+  if (name === 'mushrooms') {
+    stamp(c, LANDMARKS.mushroom, x - 5, y - 4, { r: '#d9412b', w: '#fff4e0', s: '#f0e2c4' });
+    stamp(c, LANDMARKS.mushroomS, x + 2, y - 1, { r: '#c2521e', w: '#fff4e0', s: '#f0e2c4' });
+    return;
+  }
+  if (name === 'stump') return stamp(c, LANDMARKS.stump, x - 3, y - 4, { b: '#7a5232', w: '#d9b07a' });
+  if (name === 'deer') return stamp(c, LANDMARKS.deer, x - 6, y - 9, { b: '#a8703a', a: '#ecd8ae', w: '#fff4e0' });
+  if (name === 'signpost') return stamp(c, LANDMARKS.signpost, x - 5, y - 10, { p: '#5e3a1e', w: '#d9b07a', d: '#5e3a1e' });
+  if (name === 'bench') return stamp(c, LANDMARKS.bench, x - 4, y - 3, { b: '#6b5a70' });
+  if (name === 'snowman') return stamp(c, LANDMARKS.snowman, x - 3, y - 7, { w: '#f4f8ff', d: '#2a2f40', g: '#e8743a' });
+  if (name === 'tent') {
+    stamp(c, LANDMARKS.tent, x - 6, y - 6, { t: '#e8743a', d: '#3a2030' });
+    // A lantern by the door.
+    c.fillStyle = OUTLINE; c.fillRect(x + 7, y - 3, 3, 4);
+    c.fillStyle = '#fff0b0'; c.fillRect(x + 8, y - 2, 1, 2);
+    return;
+  }
+}
+/** A car, parked side on. `left` turns it the other way. */
+function car(c, x, y, colour, left) {
+  const rows = left ? LANDMARKS.car.map(r => r.split('').reverse().join('')) : LANDMARKS.car;
+  c.fillStyle = 'rgba(8,10,24,0.35)'; c.fillRect(x - 6, y, 13, 1);
+  stamp(c, rows, x - 7, y - 5, { c: colour, w: '#bcd8f0', y: '#fff0b0', r: '#d9412b', d: '#1a1a22' });
+}
+/** A pool of lamplight on the ground: stepped rings, dithered at the edge. */
+function lightPool(c, x, y, rx, ry) {
+  for (let dy = -ry; dy <= ry; dy++) {
+    for (let dx = -rx; dx <= rx; dx++) {
+      const d = (dx * dx) / (rx * rx) + (dy * dy) / (ry * ry);
+      if (d > 1) continue;
+      if (d > 0.5 && bayer(x + dx, y + dy) < (d - 0.5) * 2) continue;
+      c.fillStyle = d < 0.25 ? 'rgba(255,224,140,0.42)' : 'rgba(255,224,140,0.22)';
+      c.fillRect(x + dx, y + dy, 1, 1);
+    }
+  }
+}
+/** A street lamp with its pool of light. */
+function lamp(c, x, base, L) {
+  lightPool(c, x, base + 1, 11, 5);
+  c.fillStyle = OUTLINE; c.fillRect(x - 1, base - 12, 3, 13); c.fillRect(x - 2, base - 16, 5, 5);
+  c.fillStyle = '#3a4468'; c.fillRect(x, base - 11, 1, 11);
+  c.fillStyle = L.lit; c.fillRect(x - 1, base - 15, 3, 3);
+  c.fillStyle = L.litHi; c.fillRect(x, base - 14, 1, 1);
+}
+/* House walls and roofs for the town: a few of each, picked by the seed. */
+const HOUSE_WALLS = ['#4a5788', '#5a5584', '#40607c', '#6a5a78'];
+const HOUSE_ROOFS = ['#1b2445', '#3a2748', '#152a3e'];
+/** A house seen from the street: pitched roof, a chimney, lit windows.
+    `snowy` is the mountain hut: timber, with snow on the roof. */
+function house(c, x, base, w, h, seed, L, snowy) {
+  const x0 = x - (w >> 1), top = base - h, rh = 6 + (w > 22 ? 1 : 0);
+  const wall = snowy ? '#7a5232' : HOUSE_WALLS[R(hash(seed) * 3)];
+  const roof = snowy ? L.snow : HOUSE_ROOFS[R(hash(seed + 5) * 2)];
+  c.fillStyle = 'rgba(8,10,24,0.3)'; c.fillRect(x0 + 1, base, w, 2);
+  // The chimney first, so the roof's rim crosses it.
+  const chx = x0 + (hash(seed + 2) > 0.5 ? 3 : w - 6);
+  c.fillStyle = OUTLINE; c.fillRect(chx - 1, top - rh - 3, 5, 6);
+  c.fillStyle = darker(wall, 0.2); c.fillRect(chx, top - rh - 2, 3, 5);
+  // Smoke from one chimney in three, and always from the hut.
+  if (snowy || hash(seed + 9) > 0.66) {
+    c.fillStyle = snowy ? '#ffffff' : '#7f8db5';
+    c.fillRect(chx + 1, top - rh - 5, 1, 1); c.fillRect(chx + 2, top - rh - 7, 2, 1); c.fillRect(chx + 1, top - rh - 10, 2, 1);
+  }
+  c.fillStyle = OUTLINE; c.fillRect(x0 - 1, top - 1, w + 2, h + 2);
+  c.fillStyle = wall; c.fillRect(x0, top, w, h);
+  c.fillStyle = darker(wall, 0.25); c.fillRect(x0 + w - 2, top, 2, h); c.fillRect(x0, base - 1, w, 1);
+  // The roof: wider than the walls at the eaves, narrowing to the ridge.
+  for (let j = 0; j <= rh; j++) {
+    const inset = R((rh - j) * 0.9);
+    c.fillStyle = OUTLINE; c.fillRect(x0 - 3 + inset, top - rh + j - 1, w + 6 - inset * 2, 2);
+  }
+  for (let j = 0; j < rh; j++) {
+    const inset = R((rh - j) * 0.9);
+    c.fillStyle = j === 0 ? lighter(roof, snowy ? 0 : 0.18) : j === rh - 1 ? darker(roof, snowy ? 0.12 : 0.3) : roof;
+    c.fillRect(x0 - 2 + inset, top - rh + j, w + 4 - inset * 2, 1);
+  }
+  // Windows, most of them lit, and a door.
+  const n = Math.max(2, Math.floor((w - 4) / 6));
+  const door = R(hash(seed + 3) * (n - 1));
+  for (let k = 0; k < n; k++) {
+    const wx = x0 + R((w - (n - 1) * 6 - 3) / 2) + k * 6;
+    if (k === door && h >= 11) {
+      c.fillStyle = OUTLINE; c.fillRect(wx - 1, base - 7, 5, 7);
+      c.fillStyle = snowy ? '#4a2e1a' : '#2a2038'; c.fillRect(wx, base - 6, 3, 6);
+      c.fillStyle = L.lit; c.fillRect(wx + 2, base - 3, 1, 1);
+      continue;
+    }
+    const lit = snowy || hash(seed * 7 + k) > 0.22;
+    c.fillStyle = OUTLINE; c.fillRect(wx - 1, top + 2, 5, 6);
+    c.fillStyle = lit ? L.lit : L.dark; c.fillRect(wx, top + 3, 3, 4);
+    if (lit) { c.fillStyle = L.litHi; c.fillRect(wx, top + 3, 1, 2); }
+    c.fillStyle = OUTLINE; c.fillRect(wx + 1, top + 3, 1, 4);
+    // A lit window throws a little light on the ground below it.
+    if (lit) { c.fillStyle = 'rgba(255,224,140,0.22)'; c.fillRect(wx - 1, base + 1, 5, 1); c.fillRect(wx, base + 2, 3, 1); }
+  }
+}
+/** A boulder; snow lies on it on the mountain. */
+function boulder(c, x, y, r, L) {
+  ellipse(c, x + 1, y + 1, r, R(r * 0.6), 'rgba(8,10,24,0.3)');
+  ellipse(c, x, y - 1, r, R(r * 0.7), OUTLINE);
+  ellipse(c, x, y - 1, r - 1, R(r * 0.7) - 1, '#7c88a6');
+  c.fillStyle = '#5c6888'; c.fillRect(x - r + 2, y, r * 2 - 4, 1); c.fillRect(x + 1, y - 1, r - 2, 1);
+  c.fillStyle = L.snow; c.fillRect(x - r + 2, y - R(r * 0.7), r * 2 - 4, 1); c.fillRect(x - r + 3, y - R(r * 0.7) + 1, r - 1, 1);
+}
+/** A fountain in the square. */
+function fountain(c, x, y) {
+  lightPool(c, x, y + 2, 15, 6);
+  ellipse(c, x, y, 10, 4, OUTLINE);
+  ellipse(c, x, y, 9, 3, '#7c88a6');
+  ellipse(c, x, y, 7, 2, '#4f9bc8');
+  c.fillStyle = OUTLINE; c.fillRect(x - 1, y - 8, 3, 8);
+  c.fillStyle = '#aab3cd'; c.fillRect(x, y - 7, 1, 7);
+  c.fillStyle = '#d6ecff'; c.fillRect(x - 2, y - 9, 1, 2); c.fillRect(x + 2, y - 9, 1, 2); c.fillRect(x, y - 10, 1, 2); c.fillRect(x - 3, y - 6, 1, 2); c.fillRect(x + 3, y - 6, 1, 2);
+}
+/** A snow pole: the markers that show a mountain path under snow. */
+function snowPole(c, x, base) {
+  c.fillStyle = OUTLINE; c.fillRect(x - 1, base - 9, 3, 10);
+  c.fillStyle = '#e8c070'; c.fillRect(x, base - 8, 1, 8);
+  c.fillStyle = '#d9412b'; c.fillRect(x, base - 8, 1, 3);
 }
 const overlaps = (a, b) => a[0] < b[2] && a[2] > b[0] && a[1] < b[3] && a[3] > b[1];
 
-/** The hedgerow that closes the Hot stage: two rows deep, with an arch
-    over the gate, the stile and the boss banner. Drawn on its own so the
-    page can put it over the team. */
-export function drawHedge(c, layout, gate, passed) {
-  const { W, stones, hedgeY } = layout;
-  const boss = stones.find(s => s.boss);
-  if (!boss) return;
-  const cx = boss.x, g = hedgeY + 3;
+/* Where everything stands is worked out once for a layout, and kept. Each
+   item is { box, base, draw(c) }, sorted so the nearer ones overlap the
+   further. */
+const scenes = new WeakMap();
+function sceneOf(layout) {
+  let s = scenes.get(layout);
+  if (!s) { s = buildScene(layout); scenes.set(layout, s); }
+  return s;
+}
+function buildScene(layout) {
+  const { W, H, stones, clear, bosses, pathDist, landAt, skyAt } = layout;
+  const rnd = seeded(7);
+  const placed = [], items = [];
+  const L = (key) => BOARD_LANDS[key];
+  /* Keep out of the band a boss's own art fills. */
+  const inBand = (box) => bosses.some(b => box[1] < b.y + 8 && box[3] > b.y - (b.kind === 'wall' ? 62 : 40));
+  const onRoad = (box) => layout.roadY != null && box[3] > layout.roadY - 7 && box[3] < layout.roadY + 10;
+  const free = (box, gap = 5) => box[0] >= 0 && box[2] <= W && box[1] > skyAt((box[0] + box[2]) / 2) + 4 && !inBand(box) && !onRoad(box) &&
+    !clear.some(r => overlaps(r, box)) && !placed.some(r => overlaps(r, box)) &&
+    pathDist((box[0] + box[2]) / 2, (box[1] + box[3]) / 2) > Math.max(box[2] - box[0], box[3] - box[1]) / 2 + gap;
+  const put = (box, base, draw) => { placed.push(box); items.push({ box, base, draw }); };
+  /* The rows of each land, top and bottom. */
+  const rows = {};
+  LAND_ORDER.forEach((key, k) => {
+    const y1 = k === 0 ? H : bosses[k - 1] ? bosses[k - 1].y : null;
+    if (y1 == null) return;
+    const y0 = k < LAND_ORDER.length - 1 && bosses[k] ? bosses[k].y : 0;
+    rows[key] = [y0, y1];
+  });
+  /* A landmark near a level's stone, wherever there is room. */
+  const near = (level, name, ext) => {
+    const s = stones[level - 1];
+    if (!s) return;
+    for (let k = 0; k < 40; k++) {
+      const x = R(rnd() * W), y = R(s.y - 20 + rnd() * 40);
+      const box = [x + ext[0], y + ext[1], x + ext[2], y + ext[3]];
+      if (!free(box)) continue;
+      put(box, y, (c) => landmark(c, name, x, y));
+      return;
+    }
+  };
+
+  /* The meadow: a pond, sheep and a log, then big trees down both sides. */
+  near(3, 'pond', [-16, -6, 16, 7]); near(8, 'sheep', [-7, -6, 19, 8]); near(12, 'log', [-9, -4, 9, 3]);
+  if (rows.hot) {
+    const [y0, y1] = rows.hot;
+    for (let k = 0; k < (y1 - y0 + 40) / 4; k++) {
+      const r = 10 + R(rnd() * 4), side = rnd() < 0.5;
+      const x = side ? R(rnd() * W * 0.24) : R(W - rnd() * W * 0.24);
+      const base = R(y0 + 20 + rnd() * (y1 - y0));
+      const box = [x - r - 1, base - 7 - r * 2 - 1, x + r + 2, base + 2];
+      const kind = rnd() < 0.35 ? 'haw' : 'round';
+      if (!free(box)) continue;
+      put(box, base, (c) => tree(c, x, base, L('hot'), r, kind));
+    }
+  }
+  /* The wood is a wood: many trees, three sizes, three kinds, both sides.
+     Under them, what a walk in one turns up. */
+  if (rows.warm) {
+    const [y0, y1] = rows.warm;
+    near(19, 'mushrooms', [-6, -5, 7, 3]); near(22, 'signpost', [-6, -11, 7, 2]); near(25, 'stump', [-4, -5, 4, 2]);
+    near(28, 'deer', [-7, -10, 8, 2]); near(31, 'mushrooms', [-6, -5, 7, 3]); near(34, 'log', [-9, -4, 9, 3]);
+    near(37, 'pond', [-16, -6, 16, 7]); near(40, 'deer', [-7, -10, 8, 2]); near(43, 'signpost', [-6, -11, 7, 2]);
+    for (let k = 0; k < (y1 - y0) / 1.5; k++) {
+      const r = [6, 8, 11][R(rnd() * 2)], x = R(rnd() * W);
+      const base = R(y0 + 8 + rnd() * (y1 - y0 - 30));
+      const box = [x - r, base - 7 - r * 2, x + r + 1, base + 1];
+      const pick = rnd();
+      if (!free(box)) continue;
+      const kind = pick < 0.35 ? 'pine' : pick < 0.6 ? 'haw' : 'round';
+      put(box, base, (c) => tree(c, x, base, L('warm'), r, kind));
+    }
+    for (let k = 0; k < (y1 - y0) / 40; k++) {
+      const x = R(8 + rnd() * (W - 16)), y = R(y0 + 10 + rnd() * (y1 - y0 - 50));
+      const box = [x - 6, y - 5, x + 7, y + 3];
+      if (!free(box, 2)) continue;
+      const name = rnd() < 0.7 ? 'mushrooms' : 'stump';
+      put(box, y, (c) => landmark(c, name, x, y));
+    }
+  }
+  /* The town: lamps along the street, houses behind them, a square. */
+  if (rows.town) {
+    const [y0, y1] = rows.town;
+    const T = L('town');
+    for (const s of stones) {
+      if (s.y <= y0 + 30 || s.y >= y1 - 30) continue;
+      // A lamp half way to the next stone, on the outside of the bend.
+      const p = trailPoint(layout, s.level - 1, 0.5);
+      const side = p[0] < W / 2 ? -1 : 1;
+      const x = clamp(p[0] + side * 12, 4, W - 5), base = p[1] + 2;
+      const box = [x - 2, base - 16, x + 3, base + 1];
+      if (inBand(box)) continue;
+      put(box, base, (c) => lamp(c, x, base, T));
+    }
+    near(60, 'fountain', [-16, -11, 16, 8]);
+    near(52, 'bench', [-5, -4, 6, 2]); near(64, 'bench', [-5, -4, 6, 2]);
+    for (let k = 0; k < (y1 - y0) / 2.2; k++) {
+      const w = [20, 26, 26, 32][R(rnd() * 3)], h = 11 + R(rnd() * 4), side = rnd() < 0.5;
+      const x = side ? R(w / 2 + 2 + rnd() * W * 0.3) : R(W - w / 2 - 3 - rnd() * W * 0.3);
+      const base = R(y0 + 30 + rnd() * (y1 - y0 - 40));
+      const seed = k * 31 + 7;
+      const box = [x - (w >> 1) - 3, base - h - 14, x + (w >> 1) + 4, base + 3];
+      if (!free(box, 3)) continue;
+      put(box, base, (c) => house(c, x, base, w, h, seed, T, false));
+    }
+    for (let k = 0; k < 3; k++) {
+      const s = stones[[49, 67, 71][k] - 1];
+      if (!s) continue;
+      for (let j = 0; j < 30; j++) {
+        const x = R(10 + rnd() * (W - 20)), y = R(s.y - 20 + rnd() * 40), left = rnd() < 0.5;
+        const box = [x - 8, y - 6, x + 8, y + 2];
+        if (!free(box, 3)) continue;
+        const col = ['#c8443a', '#3f9a8a', '#d9b23a'][k];
+        put(box, y, (c) => car(c, x, y, col, left));
+        break;
+      }
+    }
+    for (let k = 0; k < (y1 - y0) / 7; k++) {
+      const r = [6, 8][R(rnd())], x = R(rnd() * W);
+      const base = R(y0 + 30 + rnd() * (y1 - y0 - 40));
+      const box = [x - r, base - 7 - r * 2, x + r + 1, base + 1];
+      if (!free(box)) continue;
+      put(box, base, (c) => tree(c, x, base, T, r, 'round'));
+    }
+  }
+  /* The climb: a hut, a frozen tarn, then pines thinning out to rock and
+     snow, with poles marking the path near the top. */
+  if (rows.alp) {
+    const [, y1] = rows.alp;
+    const A = L('alp');
+    const y0 = layout.sky ? layout.sky.y : 0;
+    const high = (y) => clamp((y1 - y) / Math.max(1, y1 - y0), 0, 1);
+    {
+      const s = stones[78];
+      for (let j = 0; s && j < 40; j++) {
+        const x = R(16 + rnd() * (W - 32)), base = R(s.y - 16 + rnd() * 40);
+        const box = [x - 14, base - 26, x + 15, base + 3];
+        if (!free(box, 3)) continue;
+        put(box, base, (c) => house(c, x, base, 20, 12, 3, A, true));
+        break;
+      }
+    }
+    near(83, 'tarn', [-16, -6, 16, 7]); near(92, 'snowman', [-4, -8, 5, 2]); near(96, 'tent', [-7, -7, 11, 2]);
+    if (layout.roadY != null) {
+      const x = pathDist(W * 0.22, layout.roadY) > 26 ? R(W * 0.22) : R(W * 0.78), y = layout.roadY + 2;
+      const box = [x - 8, y - 6, x + 8, y + 2];
+      placed.push(box);
+      items.push({ box, base: y, draw: (c) => car(c, x, y, '#d9412b', x < W / 2) });
+    }
+    for (const s of stones) {
+      if (s.level < 84 || s.level >= stones.length || landAt(s.y) !== 'alp') continue;
+      const p = trailPoint(layout, s.level - 1, 0.5);
+      const x = clamp(p[0] + (s.level % 2 ? 9 : -9), 3, W - 4), base = p[1] + 1;
+      const box = [x - 1, base - 9, x + 2, base + 1];
+      put(box, base, (c) => snowPole(c, x, base));
+    }
+    for (let k = 0; k < (y1 - y0) / 1.6; k++) {
+      const r = [6, 8, 11][R(rnd() * 2)], x = R(rnd() * W);
+      const base = R(y0 + 30 + rnd() * (y1 - y0 - 40));
+      const box = [x - r, base - 7 - r * 2, x + r + 1, base + 1];
+      // Fewer trees the higher the trail climbs, and none near the top.
+      const keep = rnd() > high(base) * 1.25;
+      if (!keep || !free(box)) continue;
+      put(box, base, (c) => tree(c, x, base, A, r, 'pine'));
+    }
+    for (let k = 0; k < (y1 - y0) / 9; k++) {
+      const r = 4 + R(rnd() * 4), x = R(rnd() * W), y = R(y0 + 24 + rnd() * (y1 - y0 - 30));
+      const box = [x - r - 1, y - r, x + r + 2, y + 2];
+      if (!free(box, 3)) continue;
+      put(box, y, (c) => boulder(c, x, y, r, A));
+    }
+  }
+  items.sort((a, b) => a.base - b.base);
+  return items;
+}
+
+/* ── The ground ── */
+
+/* Ground cover is scattered band by band, each band from its own seed, so
+   a tile paints the same rows the same way whatever is painted around it. */
+const BAND = 64;
+function eachBand(y0, y1, seed, fn) {
+  for (let b = Math.floor((y0 - 8) / BAND); b <= Math.floor((y1 + 8) / BAND); b++) fn(b * BAND, seeded((b + 3) * 7919 + seed));
+}
+/* Where the stream under a footbridge runs: its middle row at each x. */
+const streamY = (b, x) => b.y - 7 + R(2 * Math.sin(x / 11 + 1));
+const STREAM_HALF = 5;
+/* Smooth noise from a lattice of repeatable numbers: where snow lies in
+   patches, it lies in soft-edged ones, never in a pattern. */
+function valueNoise(x, y, cell) {
+  const gx = Math.floor(x / cell), gy = Math.floor(y / cell);
+  const fx = smooth(x / cell - gx), fy = smooth(y / cell - gy);
+  const h = (i, j) => hash(i * 374761 + j * 668265 + cell);
+  const a = h(gx, gy), b = h(gx + 1, gy), c = h(gx, gy + 1), d = h(gx + 1, gy + 1);
+  return (a + (b - a) * fx) * (1 - fy) + (c + (d - c) * fx) * fy;
+}
+/* The summit's sky, the far peaks and the mountain itself, pixel by pixel. */
+function alpPixels(layout, y0, y1) {
+  const { W, sky, skyAt } = layout;
+  const A = BOARD_LANDS.alp;
+  const wall = layout.bosses[2] ? layout.bosses[2].y : layout.H;
+  const topY = sky ? sky.y : 0;
+  const h = y1 - y0;
+  const img = new ImageData(W, h);
+  const d = img.data;
+  const rgb = {};
+  const col = (hex) => rgb[hex] || (rgb[hex] = hexToRgb(hex));
+  const peaks = sky ? [[W * 0.13, sky.y + 10], [W * 0.88, sky.y + 22], [W * 0.31, sky.y + 34], [W * 0.7, sky.y + 40]] : [];
+  /* How much snow lies at a row: none by the town wall, all of it from
+     four tenths of the way up. */
+  const snowAt = (y) => smooth(((wall - y) / Math.max(1, wall - topY) - 0.04) / 0.36);
+  const isSnow = (x, y) => {
+    const a = snowAt(y);
+    if (a >= 1) return true;
+    if (a <= 0) return false;
+    const n = 0.7 * valueNoise(x, y, 14) + 0.3 * valueNoise(x + 40, y, 5);
+    return a * 1.1 + 0.9 * (n - 0.5) > 0.5 + 0.12 * (bayer(x, y) - 0.5);
+  };
+  for (let r = 0; r < h; r++) {
+    const y = y0 + r;
+    for (let x = 0; x < W; x++) {
+      let hex;
+      if (sky && y < skyAt(x)) {
+        // Far peaks stand in front of the sky, snow on their tops.
+        let far = 1e9;
+        for (const p of peaks) far = Math.min(far, p[1] + Math.abs(x - p[0]) * 0.85);
+        if (y >= far) hex = y < far + 5 + R(hash(x * 3) * 3) ? A.farSnow : A.far;
+        else {
+          const f = clamp(y / (sky.y + sky.drop), 0, 0.999) * A.sky.length;
+          const i = Math.floor(f), frac = f - i;
+          hex = A.sky[i < A.sky.length - 1 && frac > 0.45 && bayer(x, y) < (frac - 0.45) / 0.55 ? i + 1 : i];
+          // The northern lights: two ribbons, dithered thin at their edges.
+          const wave = 34 + 9 * Math.sin(x / 21) + 4 * Math.sin(x / 8 + 2);
+          const da = Math.abs(y - wave), db = Math.abs(y - (wave - 13 + 3 * Math.sin(x / 13 + 1)));
+          if (da < 6 && bayer(x, y) < 0.7 - da / 7) hex = A.aurora;
+          else if (db < 5 && bayer(x + 1, y) < 0.5 - db / 9) hex = A.auroraLo;
+          const st = hash(x * 7919 + y * 104729);
+          if (st < 0.007) hex = st < 0.003 ? A.star : A.starLo;
+        }
+      } else if (isSnow(x, y)) {
+        const k = hash(x * 131 + y * 7919);
+        // A blue edge where snow meets rock or the sky, and soft drifts.
+        const edge = (sky && y - 1 < skyAt(x)) ? false : !isSnow(x, y + 1);
+        hex = edge ? A.snowLo : k < 0.012 ? A.snowHi : k < 0.04 ? A.snowLo : A.snow;
+      } else {
+        const k = hash(x * 131 + y * 7919);
+        hex = k < 0.08 ? A.gHi : k < 0.17 ? A.gLo : A.g;
+      }
+      const c3 = col(hex), i = (r * W + x) * 4;
+      d[i] = c3[0]; d[i + 1] = c3[1]; d[i + 2] = c3[2]; d[i + 3] = 255;
+    }
+  }
+  return img;
+}
+function paintGround(c, layout, y0, y1) {
+  const { W, H, bosses, landAt, pathDist } = layout;
+  /* The base colour of each land's rows. */
+  const lines = [H].concat(bosses.slice(0, LAND_ORDER.length - 1).map(b => b.y), [0]);
+  for (let k = 0; k < lines.length - 1; k++) {
+    const a = Math.max(y0, lines[k + 1]), b = Math.min(y1, lines[k]);
+    if (b <= a) continue;
+    const key = LAND_ORDER[k];
+    if (key === 'alp') { c.putImageData(alpPixels(layout, a, b), 0, a - y0); continue; }
+    c.fillStyle = BOARD_LANDS[key].g; c.fillRect(0, a, W, b - a);
+  }
+  const nearStone = (x, y, d) => layout.stones.some(s => Math.abs(s.x - x) < d && Math.abs(s.y - y) < d);
+  const WL = BOARD_LANDS.warm;
+  eachBand(y0, y1, 11, (by, rnd) => {
+    // Mottled ground.
+    for (let i = 0; i < (W * BAND) / 60; i++) {
+      const x = R(rnd() * W), y = by + R(rnd() * BAND), w = 2 + R(rnd() * 3), hi = rnd() < 0.5;
+      const key = landAt(y);
+      if (key === 'alp') continue;
+      c.fillStyle = hi ? BOARD_LANDS[key].gHi : BOARD_LANDS[key].gLo;
+      c.fillRect(x, y, w, 1);
+    }
+    for (let i = 0; i < (W * BAND) / 90; i++) {
+      const x = R(rnd() * W), y = by + R(rnd() * BAND);
+      const key = landAt(y);
+      if (key === 'alp' || (key === 'town' && i % 3)) continue;
+      c.fillStyle = BOARD_LANDS[key].tuft; c.fillRect(x, y, 1, 1); c.fillRect(x + 1, y - 1, 1, 1); c.fillRect(x + 2, y, 1, 1);
+    }
+    // In the wood: fallen leaves in drifts, three ambers.
+    for (let i = 0; i < (W * BAND) / 90; i++) {
+      const x = R(rnd() * W), y = by + R(rnd() * BAND), wood = landAt(y) === 'warm';
+      for (let k = 0; k < 6; k++) {
+        const lx = x + R(rnd() * 8) - 4, ly = y + R(rnd() * 4) - 2;
+        if (!wood) continue;
+        c.fillStyle = WL.leaves[k % 3];
+        c.fillRect(lx, ly, 2 - (k % 2), 1);
+      }
+    }
+    // Flowers in the meadow: a few clumps, never on the trail or by a stone.
+    for (let i = 0; i < (W * BAND) / 1500; i++) {
+      const x = R(rnd() * W), y = by + R(rnd() * BAND);
+      const clump = seeded(x * 977 + y * 131 + 5);
+      if (landAt(y - 6) !== 'hot' || pathDist(x, y) < 9 || nearStone(x, y, 16)) continue;
+      flowerClump(c, x, y, BOARD_LANDS.hot, clump);
+    }
+  });
+  // Poppies in drifts along both edges of the trail through the meadow.
+  const { path } = layout;
+  const [i0, i1] = pathRange(layout, y0 - 16, y1 + 16);
+  for (let i = i0 - (i0 % 3); i <= i1; i += 3) {
+    const p = path[i], q = path[Math.min(path.length - 1, i + 1)];
+    if (!p || landAt(p.y - 8) !== 'hot') continue;
+    const tx = q.x - p.x, ty = q.y - p.y, n = Math.hypot(tx, ty) || 1;
+    const drift = Math.sin(p.seg * 2.3) + Math.sin(p.seg * 5.1) * 0.5;
+    if (drift < 0.15) continue;
+    for (const side of [-1, 1]) {
+      if (hash(i * 31 + side) > 0.55) continue;
+      const dd = 7 + R(hash(i * 17 + side * 3) * 6);
+      const x = R(p.x - ty / n * dd * side), y = R(p.y + tx / n * dd * side);
+      if (pathDist(x, y) < 6 || nearStone(x, y, 13)) continue;
+      poppy(c, x, y, BOARD_LANDS.hot);
+    }
+  }
+  // The stream that closes the wood: banks, water, a glint or two.
+  for (const b of bosses) {
+    if (b.kind !== 'bridge' || b.y - 20 > y1 || b.y + 4 < y0) continue;
+    for (let x = 0; x < W; x++) {
+      const m = streamY(b, x);
+      c.fillStyle = '#3a2a1a'; c.fillRect(x, m - STREAM_HALF - 1, 1, STREAM_HALF * 2 + 3);
+      c.fillStyle = '#4f9bc8'; c.fillRect(x, m - STREAM_HALF, 1, STREAM_HALF * 2 + 1);
+      c.fillStyle = '#3c84b4'; c.fillRect(x, m + 1, 1, STREAM_HALF);
+      c.fillStyle = '#2f6e9c'; c.fillRect(x, m + STREAM_HALF, 1, 1);
+      if (hash(x * 13 + b.y) > 0.8) { c.fillStyle = '#b9e0f4'; c.fillRect(x, m - STREAM_HALF + 1 + R(hash(x * 7) * 6), 2, 1); }
+    }
+    // Stepping rocks and reeds along the banks.
+    for (let k = 0; k < W / 22; k++) {
+      const x = R(hash(k * 41 + 3) * W), m = streamY(b, x);
+      if (Math.abs(x - b.x) < 18) continue;
+      c.fillStyle = OUTLINE; c.fillRect(x - 1, m - 1, 5, 4);
+      c.fillStyle = '#9aa4ac'; c.fillRect(x, m, 3, 2);
+      c.fillStyle = '#d3d8db'; c.fillRect(x, m, 2, 1);
+      const rx = R(hash(k * 13 + 9) * W);
+      if (Math.abs(rx - b.x) < 18) continue;
+      const rm = streamY(b, rx) + STREAM_HALF;
+      for (let j = 0; j < 3; j++) {
+        c.fillStyle = OUTLINE; c.fillRect(rx + j * 2 - 1, rm - 6 + (j % 2), 3, 7 - (j % 2));
+        c.fillStyle = '#6a7a2c'; c.fillRect(rx + j * 2, rm - 5 + (j % 2), 1, 5 - (j % 2));
+        c.fillStyle = '#7a4a22'; c.fillRect(rx + j * 2, rm - 5 + (j % 2), 1, 2);
+      }
+    }
+  }
+  // Wind drifts on the open snow: a short blue shadow under a bright crest.
+  if (bosses[2] && y0 < bosses[2].y) {
+    const A = BOARD_LANDS.alp, wall = bosses[2].y, topY = layout.sky ? layout.sky.y : 0;
+    eachBand(y0, Math.min(y1, wall), 23, (by, rnd) => {
+      for (let i = 0; i < (W * BAND) / 420; i++) {
+        const x = R(rnd() * W), y = by + R(rnd() * BAND), w = 5 + R(rnd() * 7);
+        if (y > wall - (wall - topY) * 0.42 || y < layout.skyAt(x) + 6 || y < layout.skyAt(x + w) + 6) continue;
+        c.fillStyle = A.snowLo; c.fillRect(x, y, w, 1); c.fillRect(x + 1, y + 1, w - 3, 1);
+        c.fillStyle = A.snowHi; c.fillRect(x + 1, y - 1, w - 2, 1);
+      }
+    });
+  }
+  // The mountain road: tarmac across the slope, a broken white line down it.
+  if (layout.roadY != null && layout.roadY + 8 > y0 && layout.roadY - 8 < y1) {
+    const ry = layout.roadY;
+    c.fillStyle = '#1e2740'; c.fillRect(0, ry - 5, W, 11);
+    c.fillStyle = '#3a4460'; c.fillRect(0, ry - 4, W, 9);
+    c.fillStyle = '#4a5674'; c.fillRect(0, ry - 4, W, 1);
+    c.fillStyle = '#e4ecf7';
+    for (let x = 3; x < W; x += 12) c.fillRect(x, ry, 6, 1);
+  }
+}
+function paintTrail(c, layout, y0, y1) {
+  const { path, landAt } = layout;
+  const [i0, i1] = pathRange(layout, y0 - 8, y1 + 8);
+  const land = (p) => BOARD_LANDS[landAt(p.y)];
+  // The trail: a dark edge, then the dirt, then a lighter middle.
+  for (const [r, key] of [[4, 'dirtLo'], [3, 'dirt']]) {
+    for (let i = i0; i <= i1; i++) { const p = path[i]; disc(c, R(p.x), R(p.y), r, land(p)[key]); }
+  }
+  for (let i = i0 - (i0 % 2); i <= i1; i += 2) {
+    const p = path[i]; const L = land(p);
+    if (hash(i) > 0.55) { c.fillStyle = L.dirtHi; c.fillRect(R(p.x) + (hash(i + 1) > 0.5 ? 1 : -1), R(p.y), 1, 1); }
+    // The town's street is cobbled: joints between the setts.
+    if (L.cobble) {
+      c.fillStyle = L.cobble;
+      c.fillRect(R(p.x) - 2 + R(hash(i * 3) * 4), R(p.y), 1, 1);
+      if (i % 4 === 0) c.fillRect(R(p.x) - 2, R(p.y) + 1, 2, 1);
+    }
+  }
+  // The footbridge's deck lies over the water and the trail.
+  for (const b of layout.bosses) {
+    if (b.kind !== 'bridge' || b.y - 22 > y1 || b.y + 6 < y0) continue;
+    const bx = gateX(layout, b), top = b.y - 15, h = 17;
+    c.fillStyle = 'rgba(8,10,24,0.35)'; c.fillRect(bx - 7, top + 2, 16, h);
+    c.fillStyle = OUTLINE; c.fillRect(bx - 8, top - 1, 17, h + 2);
+    for (let j = 0; j < h; j++) {
+      c.fillStyle = j % 3 === 2 ? WOOD.lo : j % 3 === 0 ? WOOD.hi : WOOD.wood;
+      c.fillRect(bx - 7, top + j, 15, 1);
+    }
+    // Hand rails down both sides, on posts.
+    for (const side of [-8, 8]) {
+      c.fillStyle = OUTLINE; c.fillRect(bx + side - 1, top - 4, 3, h + 5);
+      c.fillStyle = WOOD.wood; c.fillRect(bx + side, top - 3, 1, h + 3);
+      c.fillStyle = WOOD.hi; c.fillRect(bx + side, top - 3, 1, 1); c.fillRect(bx + side, top + 8, 1, 1);
+    }
+  }
+}
+/** Where a boss's gateway is, across the board: on its stone, or, for the
+    footbridge, where the trail meets the stream. */
+export function gateX(layout, b) {
+  if (b.kind !== 'bridge') return b.x;
+  const x = layout.xAt[clamp(b.y - 7, 0, layout.H)];
+  return R(x === x ? x : b.x);
+}
+
+/* ── The bosses' landmarks ──
+   Each is drawn on its own, in board rows, so the page can put it over the
+   team when the team is beyond it, and open its gate a step at a time. */
+
+/** Which way round a boss's landmark is: its tall part goes on the far side
+    of the gate from the way the trail comes in. */
+function mirrored(c, layout, b, draw) {
+  const prev = layout.stones[b.level - 2];
+  if (prev && prev.x > b.x) {
+    c.save(); c.translate(2 * b.x + 1, 0); c.scale(-1, 1);
+    draw();
+    c.restore();
+  } else draw();
+}
+/** A banner on a pole: the stage's colour until the boss is beaten, gold after. */
+function banner(c, fx, ground, colour, light, passed) {
+  c.fillStyle = OUTLINE; c.fillRect(fx - 1, ground - 31, 3, 32);
+  c.fillStyle = '#d8c9a8'; c.fillRect(fx, ground - 30, 1, 30);
+  c.fillStyle = OUTLINE; c.fillRect(fx - 12, ground - 31, 12, 10);
+  c.fillStyle = passed ? '#f2c14e' : colour; c.fillRect(fx - 11, ground - 30, 11, 8);
+  c.fillStyle = passed ? '#fff0b0' : light; c.fillRect(fx - 11, ground - 30, 11, 1);
+  c.fillStyle = OUTLINE; c.fillRect(fx - 12, ground - 22, 3, 1); c.fillRect(fx - 11, ground - 21, 1, 1);
+  stamp(c, ['.w.w.', 'w...w', '.www.', '.www.'], fx - 8, ground - 28, { w: passed ? '#7a4a10' : '#ffe4bd' }, 'rgba(0,0,0,0)');
+}
+/* The hedgerow that closes the Hot stage: two rows deep, with an arch over
+   the gate, the stile and the boss banner. */
+function hedgeArt(c, layout, b, gate, passed) {
+  const { W } = layout;
+  const cx = b.x, hedgeY = b.y, g = hedgeY + 3;
   const gap = (x) => x > cx - 22 && x < cx + 27;
   const bumps = [];
   for (let x = -3; x < W + 4; x += 3) {
@@ -1819,175 +2573,245 @@ export function drawHedge(c, layout, gate, passed) {
   // Ivy down the arch's legs to the gate posts.
   c.fillStyle = '#3f6e2e';
   for (let y = g - 22; y < g - 12; y += 2) { c.fillRect(cx - 9, y, 2, 1); c.fillRect(cx + 9, y + 1, 2, 1); }
-  // The stile goes on the far side of the gate from the way the trail comes in.
-  const prev = stones[boss.level - 2];
-  if (prev && prev.x > cx) {
-    c.save(); c.translate(2 * cx + 1, 0); c.scale(-1, 1);
-    bossGate(c, cx, g, gate, passed);
-    c.restore();
-  } else bossGate(c, cx, g, gate, passed);
+  mirrored(c, layout, b, () => bossGate(c, cx, g, gate, passed));
 }
+/* The footbridge that closes the wood: a gate at its near end, the Warm
+   banner beside it. The deck and the stream are part of the ground. */
+function bridgeArt(c, layout, b, gate, passed) {
+  const g = b.y + 3, bx = gateX(layout, b);
+  mirrored(c, layout, { ...b, x: bx }, () => {
+    banner(c, bx - 14, g, STAGES.warm.colour, STAGES.warm.light, passed);
+    const h = 15, gw = 12, hinge = bx - 8;
+    post(c, hinge, g, h); post(c, hinge + gw + 3, g, h);
+    c.fillStyle = OUTLINE; c.fillRect(hinge - 2, g - h - 3, 6, 3); c.fillRect(hinge + gw + 1, g - h - 3, 6, 3);
+    c.fillStyle = WOOD.hi; c.fillRect(hinge - 1, g - h - 2, 4, 1); c.fillRect(hinge + gw + 2, g - h - 2, 4, 1);
+    gateLeaf(c, hinge, g - h, gw, h, [3, 7, 11], gate);
+    // A lantern on the far post: lit once the way is open.
+    c.fillStyle = OUTLINE; c.fillRect(hinge + gw + 2, g - h - 8, 4, 5);
+    c.fillStyle = passed ? '#fff0b0' : '#7a5a2a'; c.fillRect(hinge + gw + 3, g - h - 7, 2, 3);
+  });
+}
+/* The town wall that closes the town: battlements across the board, an
+   arched gate, and a clock tower beside it. */
+function wallArt(c, layout, b, gate, passed) {
+  const { W } = layout;
+  const cx = b.x, g = b.y + 3, wh = 15;
+  const stone = '#5a668f', hi = '#7785b0', lo = '#3d4870', joint = '#465280';
+  const arch = (x) => x >= cx - 9 && x <= cx + 9;
+  // The wall, with a walk along the top and merlons on it.
+  c.fillStyle = 'rgba(8,10,24,0.35)'; c.fillRect(0, g, W, 2);
+  c.fillStyle = OUTLINE; c.fillRect(-1, g - wh - 1, W + 2, wh + 2);
+  c.fillStyle = stone; c.fillRect(0, g - wh, W, wh);
+  c.fillStyle = hi; c.fillRect(0, g - wh, W, 1);
+  c.fillStyle = lo; c.fillRect(0, g - 2, W, 2);
+  c.fillStyle = joint;
+  for (let j = 3; j < wh - 2; j += 4) {
+    c.fillRect(0, g - wh + j, W, 1);
+    for (let x = (j % 8 === 3 ? 2 : 6); x < W; x += 8) c.fillRect(x, g - wh + j + 1, 1, 3);
+  }
+  for (let x = 1; x < W; x += 6) {
+    if (arch(x) || arch(x + 3)) continue;
+    c.fillStyle = OUTLINE; c.fillRect(x - 1, g - wh - 5, 5, 5);
+    c.fillStyle = stone; c.fillRect(x, g - wh - 4, 3, 4);
+    c.fillStyle = hi; c.fillRect(x, g - wh - 4, 3, 1);
+  }
+  // The arch: a dark way through, round at the top.
+  c.fillStyle = OUTLINE; c.fillRect(cx - 8, g - 13, 17, 14); c.fillRect(cx - 6, g - 15, 13, 2);
+  c.fillStyle = passed || gate > 0.5 ? BOARD_LANDS.alp.g : '#10162e'; c.fillRect(cx - 7, g - 12, 15, 13); c.fillRect(cx - 5, g - 14, 11, 2);
+  c.fillStyle = hi; c.fillRect(cx - 9, g - wh - 3, 19, 1);
+  c.fillStyle = OUTLINE; c.fillRect(cx - 10, g - wh - 4, 21, 1); c.fillRect(cx - 10, g - wh - 3, 1, 3); c.fillRect(cx + 10, g - wh - 3, 1, 3);
+  c.fillStyle = stone; c.fillRect(cx - 9, g - wh - 2, 19, 2);
+  // Torches either side of it.
+  for (const tx of [cx - 13, cx + 13]) {
+    c.fillStyle = OUTLINE; c.fillRect(tx - 1, g - 11, 3, 6);
+    c.fillStyle = '#ffd36a'; c.fillRect(tx, g - 10, 1, 2);
+    c.fillStyle = '#fff0b0'; c.fillRect(tx, g - 11, 1, 1);
+    c.fillStyle = '#5e3a1e'; c.fillRect(tx, g - 8, 1, 2);
+  }
+  mirrored(c, layout, b, () => {
+    // The clock tower, tall enough to be seen from the street below.
+    const tx = cx + 14, tw = 15, th = 40;
+    c.fillStyle = OUTLINE; c.fillRect(tx - 1, g - th - 1, tw + 2, th + 2);
+    c.fillStyle = stone; c.fillRect(tx, g - th, tw, th);
+    c.fillStyle = hi; c.fillRect(tx, g - th, 2, th);
+    c.fillStyle = lo; c.fillRect(tx + tw - 3, g - th, 3, th);
+    c.fillStyle = joint;
+    for (let j = 6; j < th - 2; j += 5) c.fillRect(tx + 2, g - th + j, tw - 5, 1);
+    // A pointed roof.
+    for (let j = 0; j < 10; j++) {
+      const half = R((j + 1) * 0.95);
+      c.fillStyle = OUTLINE; c.fillRect(tx + 7 - half - 1, g - th - 11 + j, half * 2 + 3, 2);
+    }
+    for (let j = 0; j < 10; j++) {
+      const half = R((j + 1) * 0.95);
+      c.fillStyle = j < 2 ? '#34406e' : '#1b2445'; c.fillRect(tx + 7 - half, g - th - 10 + j, half * 2 + 1, 1);
+    }
+    c.fillStyle = OUTLINE; c.fillRect(tx + 7, g - th - 15, 1, 5);
+    c.fillStyle = passed ? '#f2c14e' : STAGES.cold.colour; c.fillRect(tx + 8, g - th - 15, 4, 3);
+    // The clock, and a lit window under it.
+    disc(c, tx + 7, g - th + 8, 5, OUTLINE);
+    disc(c, tx + 7, g - th + 8, 4, '#fff0b0');
+    c.fillStyle = OUTLINE; c.fillRect(tx + 7, g - th + 5, 1, 4); c.fillRect(tx + 7, g - th + 8, 3, 1);
+    c.fillStyle = OUTLINE; c.fillRect(tx + 5, g - th + 19, 5, 8);
+    c.fillStyle = '#ffd36a'; c.fillRect(tx + 6, g - th + 20, 3, 6);
+    c.fillStyle = '#fff0b0'; c.fillRect(tx + 6, g - th + 20, 1, 3);
+    // The gate in the arch: timber, swinging open.
+    if (gate < 1.2) {
+      c.save();
+      c.beginPath(); c.rect(cx - 7, g - 14, 15, 15); c.clip();
+      gateLeaf(c, cx - 9, g - 13, 13, 13, [2, 6, 10], gate);
+      c.restore();
+    }
+    // The banner flies from the wall beyond the tower, clear of the gateway.
+    banner(c, tx + tw + 15, g - wh, STAGES.cold.colour, STAGES.cold.light, passed);
+  });
+}
+/* The summit cairn: stones piled by everyone who got here, and a flag. */
+function cairnArt(c, layout, b, passed) {
+  const left = layout.faceLeft[b.level - 1];
+  const x = b.x + (left ? 18 : -18), g = b.y + 2;
+  const tiers = [15, 13, 11, 9, 7, 5, 3];
+  c.fillStyle = 'rgba(8,10,24,0.25)'; c.fillRect(x - 7, g, 17, 2);
+  tiers.forEach((w, k) => {
+    const y = g - 3 - k * 3, x0 = x - (w >> 1) + (k % 2 ? 1 : 0);
+    c.fillStyle = OUTLINE; c.fillRect(x0 - 1, y - 1, w + 2, 5);
+    c.fillStyle = k % 2 ? '#8792ac' : '#9ca6bc'; c.fillRect(x0, y, w, 3);
+    c.fillStyle = '#c3cbdb'; c.fillRect(x0, y, w - 1, 1);
+    c.fillStyle = '#66718f'; c.fillRect(x0 + 1, y + 2, w - 1, 1);
+    if (w > 6) { c.fillStyle = OUTLINE; c.fillRect(x0 + R(w * (k % 2 ? 0.4 : 0.6)), y, 1, 3); }
+  });
+  // Snow on the top stones.
+  c.fillStyle = '#ffffff'; c.fillRect(x - 1, g - 3 - 6 * 3, 3, 1); c.fillRect(x - 3, g - 3 - 4 * 3, 4, 1);
+  // The flag: Cold's blue until the last boss is beaten, gold after.
+  const top = g - 3 - 6 * 3;
+  c.fillStyle = OUTLINE; c.fillRect(x, top - 14, 3, 14);
+  c.fillStyle = '#d8c9a8'; c.fillRect(x + 1, top - 13, 1, 13);
+  c.fillStyle = OUTLINE; c.fillRect(x + 2, top - 15, 11, 9);
+  c.fillStyle = passed ? '#f2c14e' : STAGES.cold.colour; c.fillRect(x + 3, top - 14, 9, 7);
+  c.fillStyle = passed ? '#fff0b0' : STAGES.cold.light; c.fillRect(x + 3, top - 14, 9, 1);
+  stamp(c, ['.w.w.', 'w...w', '.www.', '.www.'], x + 5, top - 12, { w: passed ? '#7a4a10' : '#ffffff' }, 'rgba(0,0,0,0)');
+}
+
+/**
+ * Draw boss k's landmark (k counts from the bottom: the stile, the
+ * footbridge, the town wall, the cairn). gate: 0 shut … 1 open.
+ */
+export function drawBarrier(c, layout, k, gate, passed) {
+  const b = layout.bosses[k];
+  if (!b) return;
+  if (b.kind === 'stile') hedgeArt(c, layout, b, gate, passed);
+  else if (b.kind === 'bridge') bridgeArt(c, layout, b, gate, passed);
+  else if (b.kind === 'wall') wallArt(c, layout, b, gate, passed);
+  else cairnArt(c, layout, b, passed);
+}
+/** The rows boss k's landmark covers. */
+export function barrierBand(layout, k) {
+  const b = layout.bosses[k];
+  if (!b) return [0, 0];
+  return [Math.max(0, b.y - (b.kind === 'wall' ? 62 : 40)), b.y + 8];
+}
+/** The hedgerow that closes the Hot stage, drawn on its own so the page can
+    put it over the team. */
+export function drawHedge(c, layout, gate, passed) { drawBarrier(c, layout, 0, gate, passed); }
 /** The rows the hedge layer covers. */
 export function hedgeBand(layout) { return [layout.hedgeY - 40, layout.hedgeY + 8]; }
 
 /**
- * Paint the board. state: { current, icons: {level: iconName}, prints: [from, to], hedge: false }.
- * Stones up to `current` are passed and carry a gold paw; numbers live on
- * plaques the page draws (see drawPlaque), so they stay readable at night.
+ * Paint the board, or a band of its rows.
+ * state: { current, start, next, icons: {level: iconName}, prints: [from, to], hedge: false }.
+ *   Stones up to `current` are behind the team: those from `start` on were
+ *   passed and carry a gold paw, those before it a preset stepped over.
+ *   `next` wears the ring (the page draws it) and the rest are dimmed.
+ *   Numbers live on plaques the page draws (see drawPlaque), so they stay
+ *   readable at night.
+ * view: { y0, y1 } paints only those rows, with row y0 at the top of `c`.
  */
-export function drawBoard(c, layout, state) {
-  const { W, H, stones, path, hedgeY, clear } = layout;
-  const rnd = seeded(7);
-  const landAt = (y) => (y < hedgeY ? BOARD_LANDS.warm : BOARD_LANDS.hot);
-  c.fillStyle = BOARD_LANDS.hot.g; c.fillRect(0, Math.max(0, hedgeY), W, H);
-  c.fillStyle = BOARD_LANDS.warm.g; c.fillRect(0, 0, W, Math.max(0, hedgeY));
-  const pathDist = (x, y) => {
-    let best = 1e9;
-    for (let i = 0; i < path.length; i += 2) { const p = path[i]; const d = Math.hypot(p.x - x, p.y - y); if (d < best) best = d; }
-    return best;
-  };
-  const nearStone = (x, y, d) => stones.some(s => Math.abs(s.x - x) < d && Math.abs(s.y - y) < d);
-  // Mottled ground.
-  for (let i = 0; i < (W * H) / 60; i++) {
-    const x = R(rnd() * W), y = R(rnd() * H), L = landAt(y);
-    c.fillStyle = rnd() < 0.5 ? L.gHi : L.gLo;
-    c.fillRect(x, y, 2 + R(rnd() * 3), 1);
-  }
-  for (let i = 0; i < (W * H) / 90; i++) {
-    const x = R(rnd() * W), y = R(rnd() * H), L = landAt(y);
-    c.fillStyle = L.tuft; c.fillRect(x, y, 1, 1); c.fillRect(x + 1, y - 1, 1, 1); c.fillRect(x + 2, y, 1, 1);
-  }
-  // In the wood: fallen leaves in drifts, three ambers.
-  const WL = BOARD_LANDS.warm;
-  for (let i = 0; i < (W * Math.max(0, hedgeY)) / 90; i++) {
-    const x = R(rnd() * W), y = R(rnd() * hedgeY);
-    for (let k = 0; k < 6; k++) {
-      c.fillStyle = WL.leaves[k % 3];
-      c.fillRect(x + R(rnd() * 8) - 4, y + R(rnd() * 4) - 2, 2 - (k % 2), 1);
-    }
-  }
-  // Flowers: a few clumps, never on the trail or by a stone.
-  for (let i = 0; i < (W * H) / 1500; i++) {
-    const x = R(rnd() * W), y = R(rnd() * H);
-    if (y < hedgeY + 6 || pathDist(x, y) < 9 || nearStone(x, y, 16)) continue;
-    flowerClump(c, x, y, landAt(y), rnd);
-  }
-  // Poppies in drifts along both edges of the trail through the meadow.
-  for (let i = 0; i < path.length; i += 3) {
-    const p = path[i], q = path[Math.min(path.length - 1, i + 1)];
-    if (p.y < hedgeY + 8) continue;
-    const tx = q.x - p.x, ty = q.y - p.y, n = Math.hypot(tx, ty) || 1;
-    const drift = Math.sin(p.seg * 2.3) + Math.sin(p.seg * 5.1) * 0.5;
-    if (drift < 0.15) continue;
-    for (const side of [-1, 1]) {
-      if (rnd() > 0.55) continue;
-      const d = 7 + R(rnd() * 6);
-      const x = R(p.x - ty / n * d * side), y = R(p.y + tx / n * d * side);
-      if (pathDist(x, y) < 6 || nearStone(x, y, 13)) continue;
-      poppy(c, x, y, BOARD_LANDS.hot);
-    }
-  }
-  // The trail: a dark edge, then the dirt, then a lighter middle.
-  for (const [r, key] of [[4, 'dirtLo'], [3, 'dirt']]) {
-    for (const p of path) disc(c, R(p.x), R(p.y), r, landAt(p.y)[key]);
-  }
-  for (let i = 0; i < path.length; i += 2) {
-    const p = path[i]; const L = landAt(p.y);
-    if (hash(i) > 0.55) { c.fillStyle = L.dirtHi; c.fillRect(R(p.x) + (hash(i + 1) > 0.5 ? 1 : -1), R(p.y), 1, 1); }
-  }
-  // Landmarks, one per Hot wave, then trees: placed, then drawn top to bottom.
-  const placed = [];
-  const free = (box) => box[0] >= 0 && box[2] <= W && !clear.some(r => overlaps(r, box)) && !placed.some(r => overlaps(r, box)) &&
-    pathDist((box[0] + box[2]) / 2, (box[1] + box[3]) / 2) > Math.max(box[2] - box[0], box[3] - box[1]) / 2 + 5 &&
-    !(box[1] < hedgeY + 8 && box[3] > hedgeY - 40);
-  const marks = [['pond', 3, [-16, -6, 16, 7]], ['sheep', 8, [-7, -6, 19, 8]], ['log', 12, [-9, -4, 9, 3]]];
-  for (const [name, lv, ext] of marks) {
-    const s = stones[lv - 1];
-    if (!s) continue;
-    for (let k = 0; k < 40; k++) {
-      const x = R(rnd() * W), y = R(s.y - 20 + rnd() * 40);
-      const box = [x + ext[0], y + ext[1], x + ext[2], y + ext[3]];
-      if (!free(box)) continue;
-      placed.push(box);
-      landmark(c, name, x, y);
-      break;
-    }
-  }
-  const trees = [];
-  for (let k = 0; k < H / 4; k++) {
-    const r = 10 + R(rnd() * 4), side = rnd() < 0.5;
-    const x = side ? R(rnd() * W * 0.24) : R(W - rnd() * W * 0.24);
-    const base = R(hedgeY + 20 + rnd() * (H - hedgeY));
-    const box = [x - r - 1, base - 7 - r * 2 - 1, x + r + 2, base + 2];
-    if (!free(box)) continue;
-    placed.push(box);
-    trees.push([x, base, r, rnd() < 0.35 ? 'haw' : 'round']);
-  }
-  // The wood is a wood: many trees, three sizes, two kinds, both sides.
-  for (let k = 0; k < hedgeY / 1.5; k++) {
-    const r = [6, 8, 11][R(rnd() * 2)], x = R(rnd() * W);
-    const base = R(8 + rnd() * (hedgeY - 30));
-    const box = [x - r, base - 7 - r * 2, x + r + 1, base + 1];
-    if (!free(box)) continue;
-    placed.push(box);
-    const pick = rnd();
-    trees.push([x, base, r, pick < 0.35 ? 'pine' : pick < 0.6 ? 'haw' : 'round']);
-  }
-  trees.sort((a, b) => a[1] - b[1]);
-  for (const [x, base, r, kind] of trees) tree(c, x, base, landAt(base), r, kind);
-  if (state.hedge !== false) drawHedge(c, layout, state.current >= 15 ? 1 : 0, state.current >= 15);
+export function drawBoard(c, layout, state = {}, view = null) {
+  const { W, H, stones } = layout;
+  const y0 = view ? Math.max(0, view.y0) : 0, y1 = view ? Math.min(H, view.y1) : H;
+  const current = state.current || 0, start = state.start || 1;
+  const next = state.next === undefined ? current + 1 : state.next;
+  c.save();
+  c.translate(0, -y0);
+  paintGround(c, layout, y0, y1);
+  paintTrail(c, layout, y0, y1);
+  for (const it of sceneOf(layout)) if (it.box[3] >= y0 - 3 && it.box[1] <= y1 + 3) it.draw(c);
+  if (state.hedge !== false) layout.bosses.forEach((b, k) => drawBarrier(c, layout, k, current >= b.level ? 1 : 0, current >= b.level && start <= b.level));
   // Footprints lead on from the dog's nose into the next stone's ring: a
   // boot sole, then a paw, at even steps along the trail.
   if (state.prints) {
     const a = state.prints[0];
-    const ink = landAt(stones[a] ? stones[a].y : H).print;
-    c.fillStyle = ink;
-    for (let k = 0; k < 5; k++) {
-      const u = 0.45 + k * 0.12;
-      const pt = trailPoint(layout, a, u), nx = trailPoint(layout, a, u + 0.04);
-      const tx = nx[0] - pt[0], ty = nx[1] - pt[1], n = Math.hypot(tx, ty) || 1;
-      const side = k % 2 ? 2 : -2;
-      const x = R(pt[0] - ty / n * side), y = R(pt[1] + tx / n * side);
-      if (k % 2) {
-        c.fillRect(x - 1, y, 3, 2); c.fillRect(x - 1, y - 2, 1, 1); c.fillRect(x + 1, y - 2, 1, 1);
-      } else {
-        c.fillRect(x - 1, y - 2, 3, 3); c.fillRect(x - 1, y + 2, 3, 1);
+    const at = trailPoint(layout, a, 0.7);
+    if (at[1] > y0 - 30 && at[1] < y1 + 30) {
+      c.fillStyle = BOARD_LANDS[layout.landAt(at[1])].print;
+      for (let k = 0; k < 5; k++) {
+        const u = 0.45 + k * 0.12;
+        const pt = trailPoint(layout, a, u), nx = trailPoint(layout, a, u + 0.04);
+        const tx = nx[0] - pt[0], ty = nx[1] - pt[1], n = Math.hypot(tx, ty) || 1;
+        const side = k % 2 ? 2 : -2;
+        const x = R(pt[0] - ty / n * side), y = R(pt[1] + tx / n * side);
+        if (k % 2) {
+          c.fillRect(x - 1, y, 3, 2); c.fillRect(x - 1, y - 2, 1, 1); c.fillRect(x + 1, y - 2, 1, 1);
+        } else {
+          c.fillRect(x - 1, y - 2, 3, 3); c.fillRect(x - 1, y + 2, 3, 1);
+        }
       }
     }
   }
   // Stones and their icons: a gold paw once passed, dimmed when ahead.
   for (const s of stones) {
-    const status = s.level <= state.current ? 'passed' : s.level === state.current + 1 ? 'next' : 'ahead';
+    const status = s.level <= current ? (s.level >= start ? 'passed' : 'skipped') : s.level === next ? 'next' : 'ahead';
     s.status = status;
-    if (s.boss) continue;
+    if (s.boss || s.y < y0 - 12 || s.y > y1 + 12) continue;
     stoneArt(c, s.x, s.y, status);
     const icon = status === 'passed' ? ICONS.paw : ICONS[(state.icons || {})[s.level]] || ICONS.ruler;
     const pal = status === 'ahead' ? { w: '#4f5848', d: '#8d978c', g: '#4f5848' } : status === 'passed' ? {} : { d: '#5b4636' };
     stamp(c, icon, s.x - 3, s.y - 4, pal, status === 'ahead' ? 'rgba(0,0,0,0)' : OUTLINE);
   }
-  // Mist at the top: the trail goes on.
-  for (let y = 0; y < 44; y++) {
-    const k = 1 - y / 44;
-    for (let x = 0; x < W; x++) if (bayer(x, y) < k * k) { c.fillStyle = '#e9dcc4'; c.fillRect(x, y, 1, 1); }
+  if (layout.sky) {
+    // The moon over the far peaks: a crescent, cut by a disc of sky.
+    if (y0 < 60) {
+      const mx = layout.sky.x > W / 2 ? 30 : W - 30;
+      disc(c, mx, 22, 7, '#fff3c4');
+      disc(c, mx + 4, 20, 6, BOARD_LANDS.alp.sky[0]);
+    }
+  } else {
+    // Mist at the top: the trail goes on.
+    for (let y = Math.max(0, y0); y < Math.min(44, y1); y++) {
+      const k = 1 - y / 44;
+      for (let x = 0; x < W; x++) if (bayer(x, y) < k * k) { c.fillStyle = '#e9dcc4'; c.fillRect(x, y, 1, 1); }
+    }
   }
+  c.restore();
 }
 
-/** The Warm wood before the boss: the same wood, its ambers sunk towards a
-    dusk violet (still amber, just not lit yet), with mist lying above the
-    hedge. Returns ImageData for the rows above the hedge, from the painted board. */
-export function lockedWood(c, layout) {
-  const h = Math.max(1, layout.hedgeY);
-  const img = c.getImageData(0, 0, layout.W, h);
-  const d = img.data, dusk = [74, 58, 92], mist = [214, 204, 222];
-  for (let y = 0; y < h; y++) {
-    // Mist: thick just above the hedge, thinning upward.
-    const m = clamp((y - (h - 26)) / 14, 0, 1) * 0.75;
-    for (let x = 0; x < layout.W; x++) {
-      const i = (y * layout.W + x) * 4;
+/** A land not reached yet: its colours sunk towards a dusk violet (still
+    itself, just not lit), with mist lying just above the line it starts on.
+    Works on raw pixels, whose first row is board row y0; rows from `line`
+    down are left alone. */
+export function lockPixels(d, W, y0, line) {
+  const h = d.length / 4 / W;
+  const dusk = [74, 58, 92], mist = [214, 204, 222];
+  for (let r = 0; r < h; r++) {
+    const y = y0 + r;
+    if (y >= line) break;
+    // Mist: thick just above the line, thinning upward.
+    const m = clamp((y - (line - 26)) / 14, 0, 1) * 0.75;
+    for (let x = 0; x < W; x++) {
+      const i = (r * W + x) * 4;
+      if (!d[i + 3]) continue;
       for (let k = 0; k < 3; k++) d[i + k] = R(d[i + k] * 0.62 + dusk[k] * 0.38);
       if (m > 0 && bayer(x, y) < m) for (let k = 0; k < 3; k++) d[i + k] = R(d[i + k] * 0.35 + mist[k] * 0.65);
     }
   }
+  return d;
+}
+/** The Warm wood before the boss, from the painted board: ImageData for the
+    rows above the hedge. */
+export function lockedWood(c, layout) {
+  const h = Math.max(1, layout.hedgeY);
+  const img = c.getImageData(0, 0, layout.W, h);
+  lockPixels(img.data, layout.W, 0, h);
   return img;
 }
 /** The lock lifting as a front climbing from the hedge: rows below it are
@@ -2004,14 +2828,15 @@ export function unlockWood(locked, layout, p) {
   return out;
 }
 /** Dark theme: the board at dusk. Every colour is moved by the same table
-    (cooler and about a fifth darker), so the pixels stay crisp. */
-export function duskify(c, w, h) {
-  const img = c.getImageData(0, 0, w, h), d = img.data, tint = [26, 36, 70];
+    (cooler and about a fifth darker), so the pixels stay crisp. `y` and `h`
+    pick the rows of the canvas to move. */
+export function duskify(c, w, h, y = 0) {
+  const img = c.getImageData(0, y, w, h), d = img.data, tint = [26, 36, 70];
   for (let i = 0; i < d.length; i += 4) {
     if (!d[i + 3]) continue;
     for (let k = 0; k < 3; k++) d[i + k] = R((d[i + k] * 0.74 + tint[k] * 0.26) * 0.94);
   }
-  c.putImageData(img, 0, 0);
+  c.putImageData(img, 0, y);
 }
 
 /** A small pixel image, copied up `scale` times with no smoothing: a crisp data URL. */
@@ -2044,6 +2869,7 @@ export function createTeam(canvas, opts = {}) {
   const o = Object.assign({ scene: 'team', scale: 3, state: 'waiting', look: {}, motion: true, flip: false }, opts);
   let W = 0, H = 0, buf = null, bctx = null, out = null;
   let raf = 0, last = 0, startAt = 0, pausedAt = null, frozen = null, onScreen = true, ended = false;
+  let dead = false;               // destroyed: nothing asks for another frame
   let mixA = null, mixB = null;
 
   function size() {
@@ -2165,9 +2991,15 @@ export function createTeam(canvas, opts = {}) {
       if (m && t >= m.duration) { t = m.duration; if (!ended) { ended = true; draw(t); if (o.onFrame) o.onFrame(t); if (o.onEnd) o.onEnd(); } }
       if (!ended) { draw(t); if (o.onFrame) o.onFrame(t); }
     }
-    raf = requestAnimationFrame(tick);
+    /* Only when nothing is waiting already. onFrame and onEnd above can call
+       set() (the board turns the team round, and puts it back to waiting
+       when a moment ends), and set() asks for a frame of its own: asking
+       again here started a second loop beside it, whose handle was lost.
+       destroy() could then stop only one, and the other went on redrawing
+       a canvas that was no longer on the page for as long as the app ran. */
+    if (!raf && running()) raf = requestAnimationFrame(tick);
   }
-  const running = () => o.motion && frozen == null && onScreen && !document.hidden && !ended;
+  const running = () => !dead && o.motion && frozen == null && onScreen && !document.hidden && !ended;
   function kick() { if (!raf && running()) raf = requestAnimationFrame(tick); }
   function pause() { if (pausedAt == null) pausedAt = now() - startAt; }
   function resume() { if (pausedAt != null) { startAt = now() - pausedAt; pausedAt = null; } }
@@ -2180,7 +3012,10 @@ export function createTeam(canvas, opts = {}) {
       onScreen = es[es.length - 1].isIntersecting;
       if (onScreen) { resume(); kick(); } else pause();
     });
-    io.observe(canvas);
+    /* `watch` is what has to be in view for the clock to run, when that is
+       not the sprite itself: a moment played on a board that scrolls must
+       not stop because the team is, for a frame, off the edge of it. */
+    io.observe(o.watch || canvas);
   }
 
   size();
@@ -2208,6 +3043,7 @@ export function createTeam(canvas, opts = {}) {
     get time() { return time(); },
     get size() { return { w: W, h: H, scale: o.scale }; },
     destroy() {
+      dead = true;
       if (raf) cancelAnimationFrame(raf);
       raf = 0;
       document.removeEventListener('visibilitychange', onVis);

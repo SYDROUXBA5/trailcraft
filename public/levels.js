@@ -1090,6 +1090,10 @@ export function teamLevel(sessions, team, opts = {}) {
   let missStreak = 0, rusty = false, lastCounted = null;
   let placedCounted = 0;
   const dayCount = new Map();
+  /* A team placed again today (the placement suggestion taken) has already
+     run today: the runs before `placedAt` are skipped below, so the count
+     they made is handed on, or the dog would get a second day's allowance. */
+  if (fin(team?.capCarry?.day) && team.capCarry.used > 0) dayCount.set(team.capCarry.day, team.capCarry.used);
   let waiting = [];                // good halves of a pair, waiting for the other
   const recs = [], events = [];
   const places = placeIndex(), layers = new Set();

@@ -196,7 +196,7 @@ const block = js.slice(js.indexOf('/* ── Marking the run'), js.indexOf('/* �
 /** The marking code with everything it calls replaced by a note of it. */
 function marking({ session, screen = 'scrReplay' } = {}) {
   const els = new Map();
-  const did = [], toasts = [], saved = new Map([[session.id, session]]);
+  const did = [], toasts = [], levelled = [], saved = new Map([[session.id, session]]);
   const sb = {
     $: (id) => {
       if (!els.has(id)) els.set(id, { id, hidden: false, innerHTML: '', textContent: '', disabled: false, focused: 0, parentNode: null,
@@ -219,6 +219,8 @@ function marking({ session, screen = 'scrReplay' } = {}) {
     closeReplay: () => { did.push(['closeReplay']); if (sb.replay.mark) sb.endMarking(); sb.replay.s = null; },
     renderResult: (s) => { did.push(['renderResult', s]); sb.noteAnswerSeen(s); },
     leaveForm: (to) => did.push(['leaveForm', to]), go: (to) => did.push(['go', to]),
+    /* The team's level is worked out again once the marks are kept (levels.test and teams.test cover what it says). */
+    runLevelled: (x) => { levelled.push(x.id); },
     paintReplay() {}, replayPause() {}, closeCall: () => did.push(['closeCall']), openCall: (wp) => did.push(['openCall', wp]),
     closeFeltSheet() {}, paintFeltSheet() {}, feltOf: (d) => d?.windFelt ?? null, feltSame: () => false,
     windFeltFor: (s, c) => ({ v: 1, mode: 'from', from: Number(c), ref: 0, at: T }), feltChoiceOf: (b) => b.dataset.feltFrom,
@@ -226,7 +228,7 @@ function marking({ session, screen = 'scrReplay' } = {}) {
   };
   vm.createContext(sb);
   vm.runInContext(`${block}\nthis.answerHidden = answerHidden; this.marksEditable = marksEditable; this.marksUnkept = marksUnkept;`, sb);
-  return { sb, did, toasts, saved, els };
+  return { sb, did, toasts, saved, els, levelled };
 }
 
 const kept = (over = {}) => ({
@@ -274,7 +276,7 @@ await t('marks go where the dog was at that moment, the first indication asks th
 });
 
 await t('See the result: marks saved, the wind graded in, then the result, which stamps the answer seen', async () => {
-  const { sb, did, saved } = marking({ session: kept() });
+  const { sb, did, saved, levelled } = marking({ session: kept() });
   sb.openMarking(sb.run.session, { hidden: true });
   sb.replay.at = T + 4000;
   sb.placeMarkNow('Reward');
@@ -290,6 +292,7 @@ await t('See the result: marks saved, the wind graded in, then the result, which
   assert.equal(now.data.result.regraded, true, 'graded again in the wind set');
   assert.ok(Number.isFinite(now.data.resultSeenAt), 'the moment the answer was seen');
   assert.equal(did.at(-1)[1], 'scrResult');
+  assert.deepEqual(levelled, ['r1'], 'and its team’s level is worked out again, now the marks are in');
   assert.equal(sb.replay.mark, null);
   assert.equal(sb.$('callSheet').parentNode, sb.$('scrRun'), 'the sheets go home to the run screen');
 });

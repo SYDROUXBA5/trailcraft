@@ -23,7 +23,9 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const pub = (f) => readFileSync(join(root, 'public', f), 'utf8');
 
 /* Dependency order: roots first, then their dependents, app last. */
-const MODULES = ['native', 'params', 'geo', 'colours', 'mvt', 'ground', 'debrief', 'marks', 'call', 'coach', 'field', 'walls', 'sim', 'card', 'sync-core', 'backup', 'firebase-config', 'sync', 'store', 'log', 'draft', 'share', 'pdf'];
+const MODULES = ['native', 'params', 'geo', 'colours', 'mvt', 'ground', 'debrief', 'marks', 'call', 'coach', 'field', 'walls', 'sim', 'card', 'sync-core', 'backup', 'firebase-config', 'sync', 'store', 'log', 'draft', 'share', 'pdf',
+  /* The team levels: the engine, its words, the pixel art, then the board that draws with all three. */
+  'levels', 'teams', 'pixel-team', 'board'];
 
 /** Inline-script safety: a literal "</script>" inside JS would end the tag.
     The escape is invisible at runtime (identical string value). */

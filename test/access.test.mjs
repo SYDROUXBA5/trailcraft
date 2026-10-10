@@ -240,7 +240,8 @@ t('a new screen puts focus on its heading, without scrolling or a ring', () => {
   assert.match(f, /querySelector\('h1, h2, \.hud-pill, \.nav-banner'\)/);
   const go = fnSrc('function go(id, { back = false } = {})');
   assert.match(go, /const from = currentScreen;/);
-  assert.match(go, /if \(id !== from && !mapTut\.open\) focusScreen\(id\);\n\}$/, 'last, and only when the screen changes');
+  assert.match(go, /if \(id !== from && !mapTut\.open && \$\('levelUp'\)\.hidden\) focusScreen\(id\);\n\}$/,
+    'last, and only when the screen changes; never from under a level-up, which is a dialog and holds the focus');
   assert.match(css, /\.screen \[tabindex="-1"\]:focus \{ outline: none; \}/);
 
   // Run for real against a small fake of a screen.

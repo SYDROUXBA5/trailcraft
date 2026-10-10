@@ -37,8 +37,8 @@ import { buildPdf, jpegSize } from './pdf.js';
 import { coachStep, initialCoach, coachPhrase, coachLine, TOL_OPTIONS, COACH_DEFAULTS,
          rankVoices, pickVoice, voiceQuality, voiceLabel, voiceRate, voiceName, voiceAccent, voiceHint, speaksThroughWebKit, speechLang, SAMPLE_CALL,
          fromNativeVoice } from './coach.js';
-import { DEBRIEF, FLAGS, NOTE_TAGS, blankDebrief, debriefDone, debriefLine, labelOf, ownRun, stickyDebrief,
-         unwalkedPlan, noLineYet, trailShown, ranBlind, tapsLeft } from './debrief.js';
+import { DEBRIEF, FLAGS, NOTE_TAGS, blankDebrief, debriefLine, labelOf, ownRun, stickyDebrief,
+         unwalkedPlan, noLineYet, trailShown, ranBlind } from './debrief.js';
 import { CONFIDENCE, stampCall, confidenceOf, firstCall, firstCallWasFind, calibration, calibrationLine, callVerdict, runsOf } from './call.js';
 import { placeMark, addMark, removeMark, callOwed, callMovedTo, removable, markingSave } from './marks.js';
 import { isNative, watchBackground, canHaptic, haptic, watchHeading, shareFile,
@@ -50,15 +50,22 @@ import { createStore, migrateV1, TARGETS, ODOURS, targetById, targetText, verbs,
          dogStats, ageBand, AGE_BANDS, LEVELS, levelById, dogAge, patchSession, runAgain,
          planSession, canLayAgain, routeOf, planLine, askDelete, storageWords, APPROACH_V,
          blindSession, lineCheck, linePatch } from './store.js';
+import { LADDER_V1, PRESETS as TEAM_PRESETS, presetById, newTeam, teamsOf, teamOf, teamLevel, levelSpec, runFacts, dayKey } from './levels.js';
+import { MOTIONS, motionChoice, motionOn, COAT_IDS, teamLook, makeTeam, putTeam, withBest, restartTeam,
+         levelChip, chipStage, proven, meterWords, teamTitle, earnedName, pairName, stageBar, levelCard, tryRows, teamStates,
+         levelFields, levelNeeds, stickyLevel, stickyLevelFrom, tryStamp, LEFT_AGO, leftAgoLabel,
+         shownLevel, withShown, momentFor, takenBack, beforeMoment, resultLine, levelsSaid, debriefWouldFix } from './teams.js';
+import { createTeam, COATS, JACKETS, HATS, MOMENTS } from './pixel-team.js';
+import { mountBoard } from './board.js';
 import { searchWords, logRows, recentRuns, runAt, midnight, facets, filterRows, groupRows, foldersOf, inFolder, folderList, folderNamed,
          cleanFolderName, putMany, toggleFolder, renameIn, dropFrom, mergeFolders, emptyHeld, folderPatch } from './log.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-10-09a';
+const BUILD = '2026-10-10a';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true,
-  distUnits: 'metric', tempUnits: 'c', coordFormat: 'dd', theme: 'system', mapStyle: 'satellite', plumeColor: '#F5D14A', stepColor: '#0B1630', windColor: '#DCE9FF', dogColor: '#FFFFFF', trailStyle: 'steps', dogStyle: 'line', mbToken: (window.MB_TOKEN || '') };
+  distUnits: 'metric', tempUnits: 'c', coordFormat: 'dd', theme: 'system', mapStyle: 'satellite', plumeColor: '#F5D14A', stepColor: '#0B1630', windColor: '#DCE9FF', dogColor: '#FFFFFF', trailStyle: 'steps', dogStyle: 'line', motion: 'auto', mbToken: (window.MB_TOKEN || '') };
 const loadJson = (k, f) => { try { return JSON.parse(localStorage.getItem(k)) ?? f; } catch { return f; } };
 let settings = { ...DEFAULTS, ...loadJson('tc.settings', {}) };
 /* One "imperial" switch became three separate choices. A phone that already
@@ -237,7 +244,7 @@ const SCREENS = ['scrOnboardHandler', 'scrOnboardDog', 'scrTutorial', 'scrHome',
   'scrConfirm', 'scrShare', 'scrContam', 'scrPick', 'scrScan', 'scrRun', 'scrResult',
   'scrShowMap', 'scrSessions', 'scrSettings', 'scrDraw', 'scrCountdown', 'scrWalk', 'scrWait', 'scrDog',
   'scrSignIn', 'scrShareOut', 'scrShared', 'scrLive', 'scrBench', 'scrReplay', 'scrDebrief', 'scrFix',
-  'scrDelete', 'scrRecover'];
+  'scrDelete', 'scrRecover', 'scrTeam', 'scrTeamNew'];
 
 /* The screens that are transparent chrome over the live map. */
 const MAP_SCREENS = ['scrLay', 'scrConfirm', 'scrContam', 'scrRun', 'scrShowMap', 'scrDraw', 'scrWalk', 'scrLive', 'scrBench', 'scrReplay', 'scrFix'];
@@ -257,7 +264,7 @@ const MAP_SCREENS = ['scrLay', 'scrConfirm', 'scrContam', 'scrRun', 'scrShowMap'
 const TRANSIENT = new Set(['scrLay', 'scrConfirm', 'scrContam', 'scrRun', 'scrWalk', 'scrDraw', 'scrScan',
   'scrLive', 'scrShowMap', 'scrOnboardHandler', 'scrOnboardDog', 'scrTutorial', 'scrSignIn', 'scrReplay']);
 const BACKABLE = ['scrShare', 'scrPick', 'scrScan', 'scrResult', 'scrSessions', 'scrSettings', 'scrDog',
-  'scrShareOut', 'scrShared', 'scrCountdown', 'scrWait', 'scrOnboardHandler', 'scrOnboardDog', 'scrHandler'];
+  'scrShareOut', 'scrShared', 'scrCountdown', 'scrWait', 'scrOnboardHandler', 'scrOnboardDog', 'scrHandler', 'scrTeamNew'];
 let currentScreen = null;
 const navStack = [];
 
@@ -273,6 +280,7 @@ const LEAVE = {
   scrDraw: () => closeDraw(),
   scrCountdown: () => stopCountdownUi(),
   scrLay: () => { map.off('click', onHideTap); map.getCanvas().style.cursor = ''; },
+  scrTeamNew: () => closeTeamForm(),
 };
 
 /** The screen something is being recorded on right now, or null. A hide
@@ -413,6 +421,9 @@ function go(id, { back = false } = {}) {
   if (id === 'scrHandler' && handlerCardId) paintHandlerCard(handlerCardId);   // fresh after an edit
   /* And after a delete: going back to a list must not show what just went. */
   if (id === 'scrDog' && dogCardId) paintDogCard(dogCardId);
+  /* The board is measured as it is drawn, so it is painted once it is on
+     screen, and again on the way back from the form that edits its team. */
+  if (id === 'scrTeam') paintTeam();
   if (id === 'scrSessions') renderSessions();
   // The map only needs to be right when something transparent sits over it.
   if (MAP_SCREENS.includes(id)) {
@@ -432,7 +443,8 @@ function go(id, { back = false } = {}) {
     mapChromeShow(false);
   }
   // Last, once the screen has drawn its heading; the map gestures card, when it opens, speaks first.
-  if (id !== from && !mapTut.open) focusScreen(id);
+  // Nor while a level-up is up: it is a dialog, and has the focus until it is closed.
+  if (id !== from && !mapTut.open && $('levelUp').hidden) focusScreen(id);
 }
 
 /* ── Map ──────────────────────────────────────────────────────────── */
@@ -1399,6 +1411,9 @@ function saveDogForm() {
     dob: dobStr ? Date.parse(`${dobStr}T12:00:00`) : null,
     weightKg,
     chip: (obMode.id ? db.dogs.byId(obMode.id)?.chip : null) ?? null,   // no longer asked for; kept if it was ever entered
+    /* The form writes the whole dog, so what it does not ask about is carried
+       across by hand: without this, editing a dog's weight ended its teams. */
+    ...(obMode.id && db.dogs.byId(obMode.id)?.teams ? { teams: db.dogs.byId(obMode.id).teams } : {}),
   });
   db.kv.set('lastDogId', id);
   snap();
@@ -1521,8 +1536,9 @@ function renderHome() {
 
   $('lblDogs').textContent = `${handler.name}'s dogs`;
   $('rowDogs').innerHTML = team.map(d =>
-    `<button class="chip${d.id === dog?.id ? ' selected' : ''}" data-dog="${esc(d.id)}" aria-pressed="${d.id === dog?.id}"${d.id === dog?.id ? ' aria-describedby="dogOpensHint"' : ''}>${avaHtml(d)}<span class="who">${esc(d.name)}<i class="sub">${esc(d.level)}</i></span></button>`).join('')
+    `<button class="chip${d.id === dog?.id ? ' selected' : ''}" data-dog="${esc(d.id)}" aria-pressed="${d.id === dog?.id}"${d.id === dog?.id ? ' aria-describedby="dogOpensHint"' : ''}>${avaHtml(d)}<span class="who">${esc(d.name)}<i class="sub">${esc(dogSub(d, handler.id))}</i></span></button>`).join('')
     + `<button class="chip ghost" data-add-dog>+ Add dog</button>`;
+  paintHomeTeam();
 
   $('rowTargets').innerHTML = TARGETS.map(t =>
     `<button class="chip plain${t.id === target.id ? ' selected' : ''}" data-target="${t.id}" aria-pressed="${t.id === target.id}" aria-label="${esc(t.label)}: ${esc(t.sub)}"><b>${esc(t.label)}</b></button>`).join('');
@@ -2816,6 +2832,7 @@ function saveFix() {
   closeFix();
   backToResult(s2);
   toast('Correction saved. The map’s own reading is still there.');
+  runLevelled(s2);        // where the map could not say, a correction is what lets a surface level count
 }
 
 function removeFix(s, fixId) {
@@ -2828,6 +2845,7 @@ function removeFix(s, fixId) {
   if (pendingSession?.id === s.id) pendingSession = s2;
   paintGround('resGround', s2);
   toast('Correction removed. Back to the map’s reading.');
+  runLevelled(s2);        // and taking it away can undo that: the result's level line is said again
 }
 
 /* ── The call ─────────────────────────────────────────────────────────
@@ -2929,6 +2947,44 @@ let dbSeen = null;      // what they saw: kept apart from what they judged
 /* The wind they felt on the ground, as the debrief has it so far: a windFelt,
    or null. Put on the run at Save, which grades it again when it changed. */
 let dbWind = null;
+/* The rows a team's level asks on top of the usual ones (Start, Setting from
+   level 66, and a runaway's age): none when the run's handler and dog are
+   not a team. */
+let dbLevelRows = [];
+/* The ids of the rows this run must have answered to count for its level
+   (teams.js levelNeeds). Empty when it is nobody's try. */
+let dbNeeds = [];
+
+/** Which level rows this run's debrief asks, and which answers its level
+    needs. The level is the one the run was a try at when it carries a stamp,
+    else the one its team is on now. */
+function debriefLevelRows(s) {
+  dbNeeds = [];
+  if (targetById(s.targetId).kind !== 'person') return [];
+  const dog = S.dogs.find(x => x.id === s.dogId);
+  const lv = dog ? levelOf(dog, s.handlerId) : null;
+  const stamped = s.data?.levelTry?.level;
+  const level = !lv ? null : Number.isInteger(stamped) ? stamped : lv.level;
+  const noLine = noLineYet(s.data);
+  /* A run from before the team was placed is its history, not a try: its
+     rows are offered, and Save does not wait for them. */
+  const team = lv ? teamOf(dog, s.handlerId) : null;
+  const isTry = !!team && !(Number.isFinite(team.placedAt) && (s.data?.trackStarted ?? s.startedAt) < team.placedAt);
+  if (level !== null && isTry) dbNeeds = levelNeeds(level, { noLine });
+  return levelFields(level, s.data?.debrief, { noLine });
+}
+
+/** The debrief's rows in the order they are asked: the two every run needs,
+    then what this run's level needs (Start first), then the rest. The level
+    refuses a run without its rows, so they are asked as plainly as the
+    outcome is, and not sixth down under three marked optional. */
+function debriefRows() {
+  const all = [...DEBRIEF, ...dbLevelRows];
+  const need = dbNeeds.map(id => all.find(f => f.id === id)).filter(f => f && !f.required);
+  return [...all.filter(f => f.required), ...need, ...all.filter(f => !f.required && !need.includes(f))];
+}
+/** The rows still to answer before Save: the required, then the level's. */
+const debriefTodo = (d) => debriefRows().filter(f => (f.required || dbNeeds.includes(f.id)) && !d?.[f.id]);
 
 function openDebrief(s) {
   if (!s) return;
@@ -2936,7 +2992,17 @@ function openDebrief(s) {
   /* Sticky fields carry over from this handler's own last debrief: they run
      handler-blind all morning and nobody wants to say so eleven times. */
   const last = stickyDebrief(db.sessions(), s);
+  dbLevelRows = debriefLevelRows(s);
   dbDraft = s.data.debrief ? { ...s.data.debrief } : blankDebrief(last, { found: s.data.found === true });
+  /* A fresh debrief starts the level's rows from the handler's last answers
+     too, looked for further back than the last debrief: a hide search in
+     between has no Start to hand on. One already written is opened as it
+     was written. */
+  if (!s.data.debrief) Object.assign(dbDraft, stickyLevel(dbLevelRows, last), stickyLevelFrom(db.sessions(), s, dbLevelRows.filter(f => !last?.[f.id])));
+  /* A runaway's age is kept on the run, not in the debrief: it is shown in
+     the row here and put back on the run at Save. */
+  delete dbDraft.leftAgo;
+  if (Number.isFinite(s.data.leftAgoMin) && dbLevelRows.some(f => f.id === 'leftAgo')) dbDraft.leftAgo = String(s.data.leftAgoMin);
   dbSeen = s.data.seen ? { ...s.data.seen } : blankSeen();
   /* Whatever was set before or during the run is where it starts. */
   dbWind = feltOf(s.data);
@@ -2949,9 +3015,11 @@ function openDebrief(s) {
 
 function paintDebrief() {
   const d = dbDraft;
-  $('dbFields').innerHTML = DEBRIEF.map(f => `
+  /* One template for the debrief's own rows and the level's two (teams.js),
+     so they are drawn, pressed and saved the same way. */
+  $('dbFields').innerHTML = debriefRows().map(f => `
     <div class="db-field" data-field="${f.id}">
-      <span class="label">${esc(f.label)}${f.required ? '' : ' <i class="opt">optional</i>'}</span>
+      <span class="label">${esc(f.label)}${f.required ? '' : ` <i class="opt">${esc(dbNeeds.includes(f.id) ? 'for the level' : f.tag ?? 'optional')}</i>`}</span>
       <p class="why">${esc(f.why)}</p>
       <div class="db-opts">${f.options.map(o =>
         `<button type="button" class="db-opt${d[f.id] === o.v ? ' on' : ''}" data-pick="${f.id}" data-v="${o.v}" aria-pressed="${d[f.id] === o.v}">${esc(o.label)}</button>`).join('')}</div>
@@ -2974,8 +3042,13 @@ function paintDebrief() {
     </div>` : '');
   $('dbNoteTags').innerHTML = NOTE_TAGS.map(t =>
     `<button type="button" class="chip${d.noteTag === t.v ? ' selected' : ''}" data-notetag="${t.v}" aria-pressed="${d.noteTag === t.v}">${esc(t.label)}</button>`).join('');
-  /* Counted, not fixed: a run ended on Found has its first answer given. */
-  $('dbSave').textContent = debriefDone(d) ? 'Save' : tapsLeft(d) === 1 ? 'One tap to go' : 'Two taps to go';
+  paintDebriefSave();
+}
+/** Counted, not fixed: a run ended on Found has its first answer given, and
+    a team's run has its level's rows to answer too. */
+function paintDebriefSave() {
+  const n = debriefTodo(dbDraft).length;
+  $('dbSave').textContent = n === 0 ? 'Save' : `${['', 'One tap', 'Two taps', 'Three taps', 'Four taps', 'Five taps', 'Six taps'][n] ?? `${n} taps`} to go`;
 }
 
 /** The wind on the ground, put on the run when the debrief is left, and the
@@ -2993,19 +3066,20 @@ function debriefWind(s) {
 function saveDebrief() {
   const d = dbDraft, s = dbFor;
   if (!d || !s) return;
-  if (!debriefDone(d)) {
+  const todo = debriefTodo(d);
+  if (todo.length) {
     const wind = debriefWind(s);
-    /* Point at what is missing rather than refusing silently. */
-    for (const f of DEBRIEF) {
-      if (f.required && !d[f.id]) {
-        const el = $('dbFields').querySelector(`[data-field="${f.id}"]`);
-        el?.classList.add('todo');
-        el?.scrollIntoView({ block: 'center', behavior: 'smooth' });
-        return toast(!wind ? `${f.label}?` : noLineYet(s.data) ? `Wind saved. ${f.label}?` : `Wind saved, and the run graded again in it. ${f.label}?`);
-      }
-    }
-    return;
+    /* Point at what is missing rather than refusing silently: the two every
+       run needs first, then what this run's level will not count without. */
+    const f = todo[0];
+    const el = $('dbFields').querySelector(`[data-field="${f.id}"]`);
+    el?.classList.add('todo');
+    el?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    return toast(!wind ? `${f.label}?` : noLineYet(s.data) ? `Wind saved. ${f.label}?` : `Wind saved, and the run graded again in it. ${f.label}?`);
   }
+  /* The runaway's age goes on the run itself, where the engine reads it. */
+  const left = d.leftAgo == null ? null : Number(d.leftAgo);
+  delete d.leftAgo;
   d.note = $('dbNote').value.trim().slice(0, 140);
   d.by = S.handler?.name ?? null;
   d.at = Date.now();
@@ -3018,6 +3092,7 @@ function saveDebrief() {
   const unclaim = s.data?.found === true && d.outcome !== 'found' ? { found: false }
     : s.data?.lineLater && s.data.found !== true && d.outcome === 'found' ? { found: true } : {};
   const saved = guardSave(s, () => saveSession(s, { data: { debrief: d, ...unclaim,
+    ...(Number.isFinite(left) ? { leftAgoMin: left } : {}),
     ...(seen ? { seen: { ...seen, at: Date.now() } } : {}) } }));
   snap();
   const s2 = saved ?? db.sessions().find(x => x.id === s.id) ?? s;
@@ -3029,6 +3104,7 @@ function saveDebrief() {
   renderResult(s2);
   leaveForm('scrResult');
   if (wind !== undefined) regradeShown(s2, wind);
+  runLevelled(s2);        // the debrief's answers can change what the run counts as
 }
 
 /** A kept run graded again in a wind felt on the ground (setWindFelt), and
@@ -3288,7 +3364,9 @@ function openMarking(s, { hidden = false } = {}) {
     /* No route to mark on: straight to the result, as before. */
     replay.mark = null;
     renderResult(s);
-    return go('scrResult');
+    go('scrResult');
+    runLevelled(s);
+    return;
   }
   lendSheets('scrReplay');
   if (hidden) toast('Play it back and mark what the dog did');
@@ -3454,6 +3532,7 @@ async function seeResult() {
   renderResult(s);
   /* Back to the result it came from, or on to it after the run. */
   leaveForm('scrResult');
+  runLevelled(s);         // the marks are in: an Indication can be what the level asked for
 }
 
 /** Edit marks, from a kept run's replay: the same tools, trail in view. */
@@ -3867,7 +3946,7 @@ function dropDraft() {
 
 /* Screens that exist to make one change, kept only when their button is
    pressed. Until then what is on them lives in memory and nowhere else. */
-const EDITING = new Set(['scrOnboardHandler', 'scrOnboardDog', 'scrSignIn', 'scrDelete', 'scrFix', 'scrDebrief']);
+const EDITING = new Set(['scrOnboardHandler', 'scrOnboardDog', 'scrSignIn', 'scrDelete', 'scrFix', 'scrDebrief', 'scrTeamNew']);
 
 /** Is there work on this phone that has not been saved yet? Not only a
     recording: corners tapped for a plan or a contamination trail, a debrief
@@ -4727,6 +4806,7 @@ async function applyWalked(sessionId, card) {
   run.session = s2;
   renderResult(s2);
   go('scrResult');
+  runLevelled(s2);        // a laid trail to check the run against changes what it counts as
   return true;
 }
 
@@ -4799,6 +4879,7 @@ async function applyLine(sessionId, line) {
   run.session = s2;
   renderResult(s2);
   go('scrResult');
+  runLevelled(s2);        // a laid trail to check the run against changes what it counts as
   return true;
 }
 
@@ -5019,8 +5100,32 @@ function paintWxFelt() {
 
 /* ── Pick what to run ─────────────────────────────────────────────── */
 function openPick() {
+  leftAgo = null;
   paintPick();
   go('scrPick');
+}
+
+/* A runaway nobody recorded is run as a Blind trail, and has no laid time
+   to take its age from. A team in Hot can say how long the person has been
+   gone; left unanswered the age is simply unknown. Asked only there: from
+   Warm on, a level needs a laid trail to check. */
+let leftAgo = null;
+function leftAgoAsked() {
+  if (S.target.kind !== 'person' || !S.dog || !S.handler) return false;
+  const lv = levelOf(S.dog, S.handler.id);
+  return !!lv && !lv.done && lv.stage === 'hot';
+}
+function paintLeftAgo() {
+  const asked = leftAgoAsked();
+  $('leftAgoBox').hidden = !asked;
+  if (!asked) return;
+  /* "Optional" was untrue from level 6: there the level asks for an age, a
+     runaway's only age is this answer, and a run without it is not counted.
+     It can still be given afterwards, on the run's debrief. */
+  const level = levelOf(S.dog, S.handler.id).level;
+  $('leftAgoTag').textContent = levelSpec(level).ageMin > 0 ? `needed for level ${level}` : 'optional';
+  $('leftAgoRow').innerHTML = LEFT_AGO.map(m =>
+    `<button type="button" class="chip plain${m === leftAgo ? ' selected' : ''}" data-left-ago="${m}" aria-pressed="${m === leftAgo}"><b>${esc(leftAgoLabel(m))}</b></button>`).join('');
 }
 function paintPick() {
   const t = S.target;
@@ -5030,6 +5135,7 @@ function paintPick() {
   /* A blind trail is a person trail run with no line on this phone. A hide
      search always has its hides here, so it has no such thing. */
   $('btnBlind').hidden = t.kind !== 'person';
+  paintLeftAgo();
   /* Nor is a blind trail one to pick: one with no run is only what is left
      of a run that never got going, and has no line to run again. */
   const candidates = S.sessions
@@ -5062,6 +5168,7 @@ function startBlind() {
      take it away again. */
   if (recordingWaits()) return;
   const s = blindSession({ id: uid(), handlerId: S.handler.id, dogId: S.dog.id, now: Date.now() });
+  if (leftAgo !== null && leftAgoAsked()) s.data.leftAgoMin = leftAgo;
   /* A phone too full to keep it still runs it, as a run's copy does: Stop
      saves it whole, and the banner has already said why it may not. */
   guardSave(s, () => db.addSession(s));
@@ -5091,6 +5198,22 @@ const ageUnknown = (d, short = false) => (d?.plan
    the moment it was shown instead, a forecast that had
    swung since the start put the scent on another side from the one picked. */
 const run = { session: null, revealed: false, startedAt: 0, copy: false, stopping: false, found: false };
+
+/** A person trail run by a team is a try at the level the team is on, and
+    says so from its first moment (data.levelTry): a properly laid trail that
+    is then not solved is a miss at THAT level, whatever the team does later.
+    It is written to the session at once, so a run cut short and recovered
+    still carries it. Null when the handler and dog picked are not a team,
+    which also clears a stamp left by an earlier run of the same trail.
+    data.tzMin is the phone's clock against UTC, so "today" for the daily cap
+    is the day where the team ran. */
+function stampTry(s, t) {
+  if (t.kind !== 'person' || !s.data) return;
+  const lv = S.dog && S.handler ? levelOf(S.dog, S.handler.id) : null;
+  const stamp = { levelTry: tryStamp(lv), tzMin: -new Date().getTimezoneOffset() };
+  Object.assign(s.data, stamp);
+  if (db.sessions().some(x => x.id === s.id)) guardSave(s, () => db.updateSession(s.id, { data: stamp }));
+}
 
 async function startRun(s) {
   if (rec.on) return toast('A run is already going. Finish that one first.');
@@ -5123,6 +5246,7 @@ async function startRun(s) {
      gets going, or ends too short to keep, takes it away again (dropRunCopy). */
   if (blindTrail) run.copy = true;
   run.session = s;
+  stampTry(s, t);
   run.revealed = false;
   /* Once the answer has been seen it stays seen — including on a second run
      of the same trail, which is why this is read back off the session. */
@@ -5361,7 +5485,10 @@ async function finishRun() {
   /* A run ended on Found says so, with the walk and again with the grade.
      It marks no place: the find is where the track ends, as it always was. */
   const found = run.found ? { found: true } : {};
-  const raw = { data: { track: rec.pts, trackStarted: run.startedAt, trackWaypoints: rec.wps,
+  /* What the run was a try at, said again with both saves: the write at the
+     run's start may have been refused by a full phone (stampTry). */
+  const stamp = s.data.levelTry !== undefined ? { levelTry: s.data.levelTry, tzMin: s.data.tzMin } : {};
+  const raw = { data: { ...stamp, track: rec.pts, trackStarted: run.startedAt, trackWaypoints: rec.wps,
     revealedAt: run.revealedAt || s.data.revealedAt || null, ...felt, ...found } };
   guardSave(patchSession(s, raw), () => saveSession(s, raw));
   /* Only a run where nothing was steering banks towards the dog's drift
@@ -5394,7 +5521,7 @@ async function finishRun() {
     dogId,
     handlerId: S.handler.id,
     summary,
-    data: { track: rec.pts, trackStarted: run.startedAt, trackWaypoints: rec.wps, ...unseen,
+    data: { ...stamp, track: rec.pts, trackStarted: run.startedAt, trackWaypoints: rec.wps, ...unseen,
       revealedAt: run.revealedAt || s.data.revealedAt || null, ...(result ? { result } : {}), coach: coachRecord,
       ...(runWeather ? { runWeather } : {}), ...(had ? { windFelt } : {}), ...found },
   };
@@ -5410,6 +5537,7 @@ async function finishRun() {
   if (markedAfter(run.session)) return openMarking(run.session, { hidden: true });
   renderResult(run.session);
   go('scrResult');
+  runLevelled(run.session);
 }
 
 /** A blind trail's own forecast, kept with its run so its wind can be shown
@@ -5643,6 +5771,7 @@ function searchResult(s, track, wps, startedAt, wx, dogName, ageMin, firstAt = r
 
 function renderResult(s) {
   noteAnswerSeen(s);
+  paintResultLevel(s);
   paintGround('resGround', s);
   /* A run kept from someone else's link before links were checked still holds
      whatever the link carried. It is read through the same cleaning a link
@@ -7536,7 +7665,8 @@ function paintHandlerCard(id) {
   if (!h) return;
   snap();
   const st = handlerStats(id, S.sessions);
-  const dogs = S.dogs.filter(d => d.handlerId === id);
+  /* Their own dogs, and any they are in a team with. */
+  const dogs = S.dogs.filter(d => d.handlerId === id || teamOf(d, id));
   $('hAva').innerHTML = avaHtml(h, 'big');
   $('hName').textContent = h.name;
   $('hSub').textContent = [
@@ -7559,7 +7689,7 @@ function paintHandlerCard(id) {
   $('hDogsLabel').textContent = dogs.length ? `Dogs \u00b7 ${dogs.length}` : 'Dogs';
   $('hDogs').innerHTML = dogs.length ? dogs.map(d => {
     const n = st.dogs[d.id] || 0;
-    return `<div class="card person-row" data-dog-card="${esc(d.id)}">${avaHtml(d)}<span class="who"><b>${esc(d.name)}</b><i class="sub">${n} run${n === 1 ? '' : 's'} \u00b7 ${esc(d.level)}</i></span></div>`;
+    return `<div class="card person-row" data-dog-card="${esc(d.id)}">${avaHtml(d)}<span class="who"><b>${esc(d.name)}</b><i class="sub">${n} run${n === 1 ? '' : 's'} \u00b7 ${esc(dogSub(d, id))}</i></span></div>`;
   }).join('') : `<div class="card"><p class="body muted">No dog on this handler yet. Add one from the home screen.</p></div>`;
   const runs = S.sessions.filter(x => x.handlerId === id && x.data?.track);
   $('hRunsLabel').textContent = runs.length ? `Every trail \u00b7 ${runs.length}` : 'Every trail';
@@ -7613,6 +7743,8 @@ function paintDogCard(id) {
     + fact('First ran', st.firstAt ? new Date(st.firstAt).toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' }) : null)
     || `<p class="body muted">Nothing recorded yet. Tap <b>Edit this dog</b> to add breed, age and weight.</p>`;
 
+  paintDogTeams(d);
+
   const cell = (big, small) => `<div class="cell"><b>${big}</b><span>${esc(small)}</span></div>`;
   $('dogGrid').innerHTML = st.runs
     ? cell(st.runs, st.runs === 1 ? 'trail run' : 'trails run')
@@ -7664,6 +7796,641 @@ function paintDogCard(id) {
       <div class="story">${esc(storyOf(x))}</div>
     </div>`;
   }).join('') : `<div class="card"><p class="body muted">Nothing run yet.</p></div>`;
+}
+
+/* ── Teams and their levels ───────────────────────────────────────────
+   A team is one handler with one dog, kept on the dog (dog.teams). The
+   handler and the dog picked on Home ARE the team in play. Its level is
+   never typed in: levels.js works it out from the team's own runs every
+   time, and all that is written back is the high-water mark (best). */
+
+/* Whether the pixel team moves: the Animations setting, or ?motion= in the
+   address, over the phone's own Reduce Motion (teams.js). */
+const reducedQuery = matchMedia('(prefers-reduced-motion: reduce)');
+const motionAsked = new URLSearchParams(location.search).get('motion');
+const teamMotion = () => motionOn(motionChoice(settings.motion, motionAsked), reducedQuery.matches);
+
+const teamView = { handlerId: null, dogId: null, board: null, picked: null, folded: null, shown: null };
+const teamForm = { edit: false, handlerId: null, dogId: null, preset: 'new', coat: null, jacket: null, hat: null,
+  coatPicked: false, player: null, returnTo: 'scrHome', moving: false };
+
+/** The attribute the board's own little loops read (the gold ring, the
+    pointer), and the two pixel players told the same. */
+function applyMotion() {
+  const on = teamMotion();
+  document.documentElement.dataset.motion = on ? 'on' : 'off';
+  paintMotion();
+  teamView.board?.update({ motion: on });
+  teamForm.player?.set({ motion: on });
+}
+reducedQuery.addEventListener?.('change', applyMotion);
+/* The board is drawn to the width it has, in whole art pixels: a phone
+   turned on its side, or a window dragged wider, draws it again. */
+window.addEventListener('resize', () => { if (currentScreen === 'scrTeam') teamView.board?.update(); });
+
+function paintMotion() {
+  const list = $('motionSettings');
+  if (!list) return;
+  const saved = motionChoice(settings.motion);
+  list.querySelectorAll('.check-row').forEach(row => {
+    const on = row.dataset.value === saved;
+    row.classList.toggle('on', on);
+    row.setAttribute('aria-pressed', String(on));
+    const m = MOTIONS.find(x => x.id === row.dataset.value);
+    const ex = row.querySelector('[data-motion-example]');
+    if (ex && m) ex.textContent = m.id === 'auto' ? `${m.sub}: ${reducedQuery.matches ? 'still' : 'moving'} right now` : m.sub;
+  });
+}
+
+/* A team's level, worked out once and kept until something it depends on
+   changes: one of the team's own runs, the dog (its teams, its birth date),
+   or the day (the daily cap, Rusty). Home asks on every repaint. */
+const levelCache = new Map();
+function levelOf(dog, handlerId) {
+  const team = teamOf(dog, handlerId);
+  if (!team) return null;
+  /* Every one of the team's runs is in the signature, as the sum of their
+     stamps beside their count. The newest stamp alone missed a run changed
+     on another phone and pulled in here with a stamp older than this
+     phone's last save: nothing moved, and Home, the card, the cap and the
+     stamp on the next run all came from the level as it had been. */
+  let n = 0, sum = 0;
+  for (const s of S.sessions) {
+    if (s.dogId !== dog.id || s.handlerId !== handlerId) continue;
+    n++;
+    sum += s.updatedAt || 0;
+  }
+  const sig = [dog.updatedAt, n, sum, new Date().toDateString()].join('|');
+  const hit = levelCache.get(team.id);
+  if (hit && hit.sig === sig) return hit.lv;
+  const lv = teamLevel(S.sessions, team, { now: Date.now(), dog, tzMin: tzNow() });
+  levelCache.set(team.id, { sig, lv });
+  if (lv.bestChanged) keepBest(dog.id, handlerId, lv.best);
+  return lv;
+}
+/* The phone's clock as minutes ahead of UTC: what the engine counts "today" by. */
+const tzNow = () => -new Date().getTimezoneOffset();
+
+/** A level the run in hand had earned and no longer does is taken back
+    (teams.js takenBack says when, and why only then). Deleting a run does
+    not come through here: the engine keeps a level whose run was deleted,
+    on purpose, so that clearing old runs off a full phone costs nothing. */
+function takeBack(s) {
+  const dog = db.dogs.byId(s.dogId);
+  const team = dog && teamOf(dog, s.handlerId);
+  if (!team?.best || !(team.best.level > 0)) return;
+  const f = runFacts(s);
+  const end = f.endAt ?? f.at;
+  if (team.best.at !== end) return;
+  const free = teamLevel(S.sessions, { ...team, best: null }, { now: Date.now(), dog, tzMin: tzNow() });
+  const row = takenBack(team, free, end, Date.now());
+  if (!row) return;
+  try { db.dogs.upsert({ ...dog, teams: putTeam(dog, row) }); } catch (e) { if (e?.name !== 'SaveError') throw e; return; }
+  levelCache.delete(team.id);
+  snap();
+}
+
+/** The high-water mark, written back to the dog so a level once earned is
+    never lost to a later change of the ladder. It can always be worked out
+    again from the runs, so a phone too full to take it is not told. */
+function keepBest(dogId, handlerId, best) {
+  const dog = db.dogs.byId(dogId);
+  const teams = dog && withBest(dog, handlerId, best);
+  if (!teams) return;
+  try { db.dogs.upsert({ ...dog, teams }); } catch (e) { if (e?.name !== 'SaveError') throw e; }
+}
+
+/** Under a dog's name: its team's level with this handler, or, when they
+    are not a team, the trail age the dog usually runs. */
+function dogSub(d, handlerId) {
+  const lv = levelOf(d, handlerId);
+  return lv ? levelChip(lv) : d.level;
+}
+
+const TEAM_GO = '<span class="go" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20"><path d="M9.5 5.5 16 12l-6.5 6.5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>';
+/** What a team's row says: who, the name they have earned, the level chip. */
+const teamRowHtml = (h, d, lv) =>
+  `<span class="who"><b>${esc(pairName(h.name, d.name))}</b><i>${esc(earnedName(lv))}</i></span><span class="lvl-chip ${esc(chipStage(lv))}">${esc(levelChip(lv))}</span>${TEAM_GO}`;
+const teamRowLabel = (h, d, lv) => `${pairName(h.name, d.name)}, ${earnedName(lv)}, ${levelChip(lv)}. Open the team board`;
+
+/** Home: the picked handler and dog as a team, or the offer to make them one. */
+function paintHomeTeam() {
+  const row = $('homeTeam');
+  const { handler, dog } = S;
+  row.hidden = !handler || !dog;
+  if (row.hidden) return;
+  const lv = levelOf(dog, handler.id);
+  row.classList.toggle('none', !lv);
+  row.innerHTML = lv ? teamRowHtml(handler, dog, lv)
+    : `<span class="who"><b>${esc(pairName(handler.name, dog.name))}</b><i>Not a team yet. Tap for a new team</i></span>${TEAM_GO}`;
+  row.setAttribute('aria-label', lv ? teamRowLabel(handler, dog, lv) : `${pairName(handler.name, dog.name)}. Not a team yet. Open the team board`);
+}
+
+/** The dog's page: each team it is in, one per handler who runs it. */
+function paintDogTeams(d) {
+  const rows = teamsOf(d).map(t => {
+    const h = S.handlers.find(x => x.id === t.handlerId);
+    const lv = h ? levelOf(d, h.id) : null;
+    return lv ? `<button type="button" class="team-row" data-team-open="${esc(h.id)}" aria-label="${esc(teamRowLabel(h, d, lv))}">${teamRowHtml(h, d, lv)}</button>` : '';
+  }).join('');
+  $('dogTeams').innerHTML = rows
+    || `<div class="card"><p class="body muted">No team yet. A team is ${esc(d.name)} with one handler, climbing the levels together.</p></div>`;
+  /* Nobody left to make a team with: the button would only open the form
+     on a pair that is one already. */
+  $('dogNewTeam').hidden = S.handlers.every(h => teamOf(d, h.id));
+}
+
+/* ── The team board ── */
+
+function openTeam(handlerId, dogId) {
+  if (!handlerId || !dogId || !db.handlers.byId(handlerId) || !db.dogs.byId(dogId)) return;
+  if (teamView.handlerId !== handlerId || teamView.dogId !== dogId) teamView.shown = null;
+  teamView.handlerId = handlerId;
+  teamView.dogId = dogId;
+  teamView.picked = null;
+  go('scrTeam');   // go() paints it
+}
+
+/** Who the board is showing, read fresh. With no team yet, `lv` is what a
+    new team would see, so the board has somewhere to stand: nothing is made
+    until the handler says what the dog can do. */
+function teamNow() {
+  const h = S.handlers.find(x => x.id === teamView.handlerId) ?? null;
+  const d = S.dogs.find(x => x.id === teamView.dogId) ?? null;
+  if (!h || !d) return null;
+  const team = teamOf(d, h.id);
+  const lv = team ? levelOf(d, h.id)
+    : teamLevel([], { ...newTeam({ handlerId: h.id, dogId: d.id, preset: 'new', now: Date.now() }), dogId: d.id }, { now: Date.now(), dog: d });
+  return { h, d, team, lv };
+}
+
+function paintTeam() {
+  snap();
+  const now = teamNow();
+  if (!now) return;
+  const { h, d, team, lv } = now;
+  $('teamTitle').textContent = pairName(h.name, d.name);
+  /* Read aloud, the name and the title ran together ("Turn Finder ITrail
+     Hound"): the words between them are for a screen reader only. */
+  const title = team ? teamTitle(lv, team) : null;
+  $('teamName').innerHTML = team
+    ? `${esc(earnedName(lv))}${title ? `<span class="sr-only">, title: </span><span class="team-title">${esc(title)}</span>` : ''}`
+    : 'Not a team yet';
+  $('teamEdit').hidden = !team;
+  /* A team that has passed nothing of its own since it was placed has no
+     level to its name yet: the meter says where it starts, and the bar up to
+     there is drawn faint. A pair that is not a team has the bar alone. */
+  const own = proven(lv);
+  $('teamMeter').innerHTML = `${team ? `<span>${esc(meterWords(lv)).replace(/\d+/, '<strong>$&</strong>')}</span>` : ''}
+    <span class="stage-bar${own ? '' : ' unproven'}" aria-hidden="true">${stageBar(team ? lv.passed : 0).map(b =>
+      `<i class="${b.key}" style="flex:${b.span}"><b style="width:${Math.round(b.fill * 100)}%"></b></i>`).join('')}</span>`;
+  mountTeamBoard($('teamBoard'), { lv, look: teamLook(team, d, lv.stage) });
+  paintTeamCard();
+  /* Opened, or back on another team: the board goes to where the team
+     stands. Painted again for the same team, it stays where it was left. */
+  const key = `${h.id}~${d.id}`;
+  if (teamView.shown !== key) { teamView.shown = key; teamView.board.home(); }
+}
+
+/** SEAM (part D): the one place the trail board is put on the page. `lv` is
+    what teamLevel() returned for the team and `look` what its pixel team
+    wears. It makes the board the first time and repaints it after, and
+    leaves it on teamView.board (board.js says what that handle can do). */
+function mountTeamBoard(host, { lv, look }) {
+  const opts = { lv, look, motion: teamMotion(), dark: resolvedTheme() === 'dark', imperial: imp(), onPick: pickStone };
+  if (teamView.board) teamView.board.update(opts);
+  else teamView.board = mountBoard(host, opts);
+  teamView.board.select(teamView.picked);
+  return teamView.board;
+}
+
+/** A stone was tapped: the card shows that level. The next level's own
+    stone, or the same stone again, puts the card back. */
+function pickStone(level) {
+  const now = teamNow();
+  if (!now) return;
+  const next = now.team && !now.lv.done ? now.lv.level : null;
+  teamView.picked = level === next || level === teamView.picked ? null : level;
+  teamView.board?.select(teamView.picked);
+  paintTeamCard();
+  /* The card changed without a word: said for a screen reader, whose focus
+     is still on the stone. */
+  const c = levelCard(teamView.picked ?? next ?? level, now.team ? now.lv : null, { imperial: imp() });
+  if (c) $('teamSay').textContent = `${c.kicker}: ${c.name}${c.boss ? `, boss: ${c.bossName}` : ''}. ${c.rows.map(r => r.text).join(', ')}.`;
+}
+
+/** The word at the right of the card's top that says it folds: "More"
+    while something is folded away, "Less" once it is all out. The grab bar
+    alone did not say so, and on a short phone the card starts folded with
+    the welfare notes inside it. `notes` are the notes a very short screen
+    folds away too, counted so they are not missed. */
+const foldWord = (folded, notes = 0) =>
+  `<span class="tc-more">${folded ? `More${notes ? `<span class="tc-notes"> · ${notes} note${notes === 1 ? '' : 's'}</span>` : ''}` : 'Less'}</span>`;
+
+function levelCardHtml(c, folded, { more = true, notes = 0 } = {}) {
+  return `<button type="button" class="tc-top" id="tcTop" aria-expanded="${!folded}"><span class="tc-k"><span>${esc(c.kicker)}</span><span class="tc-r"><span class="tc-stage ${esc(c.stage)}">${esc(c.stageLabel)}</span>${more ? foldWord(folded, notes) : ''}</span></span></button>
+    <h2 class="tc-name">${esc(c.name)}${c.boss ? ` · boss: ${esc(c.bossName)}` : ''}</h2>
+    ${c.news.length ? `<p class="tc-new">New: ${esc(c.news.join(' · '))}</p>` : ''}
+    ${c.also.map(a => `<p class="tc-also">${esc(a)}</p>`).join('')}
+    <ul class="tc-checks" aria-label="What this level asks">${c.rows.map(r =>
+      `<li class="${r.ok ? 'ok' : ''}${r.isNew ? ' new' : ''}"><span class="m" aria-hidden="true">✓</span><span>${esc(r.text)}${r.got ? ` <i>${esc(r.got)} so far</i>` : ''}<span class="sr-only">${r.ok ? ', done' : ', to do'}</span></span></li>`).join('')}</ul>`;
+}
+
+/** The card pinned under the board: the next level with its checklist, the
+    engine's states in plain words and the last three tries; or the stone
+    that was tapped; or, with no team yet, the offer to make one. */
+function paintTeamCard() {
+  const now = teamNow();
+  if (!now) return;
+  const { h, d, team, lv } = now;
+  const card = $('teamCard');
+  const units = { imperial: imp(), fahrenheit: fahr() };
+  /* On a short phone the card starts folded, so the board keeps its room. */
+  if (teamView.folded === null) teamView.folded = (window.innerHeight || 800) < 700;
+  const folded = teamView.folded;
+  card.classList.toggle('folded', folded);
+  const picked = teamView.picked;
+  let html = '';
+  if (picked != null) {
+    /* A stone seen from a pair that is not a team yet is simply what it asks. */
+    html = levelCardHtml(levelCard(picked, team ? lv : null, units), folded)
+      + `<button type="button" class="tc-back" data-team-act="next">${team ? 'Back to the next level' : 'Back'}</button>`;
+  } else if (!team) {
+    html = `<div class="tc-top"><span class="tc-k"><span>Not a team yet</span></span></div>
+      <h2 class="tc-name">${esc(pairName(h.name, d.name))} as a team</h2>
+      <p class="tc-body">A team climbs 100 levels of person trails, and one good run passes a level. Say what ${esc(d.name)} can do today and the board starts you at the right stone.</p>
+      <div class="tc-actions"><button type="button" class="btn moss" data-team-act="make">New team</button></div>`;
+  } else {
+    const states = teamStates(lv, { ...units, dogName: d.name });
+    const tries = tryRows(lv.tries, { ...units, when: fmtDay, noLine: runNoLine });
+    const notes = states.filter(st => st.tone !== 'quiet').length;
+    html = (lv.done
+      ? `<button type="button" class="tc-top" id="tcTop" aria-expanded="${!folded}"><span class="tc-k"><span>Level ${lv.passed} of ${LADDER_V1.levels.length}</span><span class="tc-r"><span class="tc-stage cold">Cold</span>${foldWord(folded, notes)}</span></span></button>
+         <h2 class="tc-name">${esc(earnedName(lv))}</h2>`
+      : levelCardHtml(levelCard(lv.level, lv, units), folded, { notes }))
+      + (states.length ? `<div class="tc-states">${states.map(st =>
+        `<div class="tc-state ${st.tone}">${st.tone === 'quiet' ? '' : `<b>${esc(st.title)}</b>`}<p>${esc(st.text)}</p>${st.action
+          ? `<button type="button" class="btn small ember" data-team-act="${esc(st.action.id)}" data-level="${st.action.level}">${esc(st.action.label)}</button>` : ''}</div>`).join('')}</div>` : '')
+      + (tries.length ? `<span class="label tc-tries-k">${tries.length === 1 ? 'Last try' : `Last ${tries.length} tries`}</span>
+        <ul class="tc-tries">${tries.map(t =>
+          `<li class="${t.kind}"><span class="i" aria-hidden="true">${t.mark}</span><span><b>${esc(t.when)}</b> · level ${t.level}<span class="why">${esc(t.why)}</span></span></li>`).join('')}</ul>` : '');
+  }
+  card.innerHTML = html;
+  card.scrollTop = 0;
+}
+const fmtDay = (t) => new Date(t).toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' });
+
+/** A tap on the card: fold it, go back to the next level, make the team, or
+    take the engine's suggestion to start lower. */
+function teamCardTap(e) {
+  if (e.target.closest('#tcTop')) {
+    teamView.folded = !teamView.folded;
+    paintTeamCard();                       // the word on it changes with it: More, Less
+    $('tcTop')?.focus({ preventScroll: true });
+    return;
+  }
+  const act = e.target.closest('[data-team-act]');
+  if (!act) return;
+  const what = act.dataset.teamAct;
+  if (what === 'next') { teamView.picked = null; teamView.board?.select(null); return paintTeamCard(); }
+  if (what === 'make') return openTeamForm({ handlerId: teamView.handlerId, dogId: teamView.dogId });
+  if (what === 'placeLower') return moveTeam(teamView.handlerId, teamView.dogId, { level: Number(act.dataset.level) });
+}
+
+/** Start a team again from another level: nothing earned is lost, and the
+    placement check starts afresh from now (restartTeam). */
+function moveTeam(handlerId, dogId, to) {
+  const dog = db.dogs.byId(dogId);
+  const team = dog && teamOf(dog, handlerId);
+  if (!team) return;
+  const moved = restartTeam(team, { ...to, now: Date.now(), lv: levelOf(dog, handlerId), day: dayKey(Date.now(), tzNow()) });
+  if (!guardSave(null, () => db.dogs.upsert({ ...dog, teams: putTeam(dog, moved) }))) return;
+  toast(`Starting at level ${moved.startLevel}`);
+  teamView.shown = null;          // the team has moved: the board goes to it
+  if (currentScreen === 'scrTeam') paintTeam();
+}
+
+/** A run was kept, or what is known about one has changed (its debrief, its
+    marks, its laid trail, a surface put right): its team's level is worked
+    out again, and what that did is handed on. Returns the team's level, or
+    null when the run is nobody's try: not a person trail, or its handler
+    and dog are not a team. */
+function runLevelled(s) {
+  if (!s?.id || targetById(s.targetId).kind !== 'person') return null;
+  snap();
+  takeBack(s);
+  const dog = S.dogs.find(d => d.id === s.dogId);
+  const lv = dog ? levelOf(dog, s.handlerId) : null;
+  if (!lv) return null;
+  levelMoment({ session: s, dog, handlerId: s.handlerId, lv, events: lv.events });
+  return lv;
+}
+
+/** A kept run's level events, once its result is on screen: the result's
+    line is said again (the verdict may have just changed), and a level
+    passed is played, once. `events` are all the team's: the change to this
+    run can be what lets another run pass the next level (momentFor). This
+    is called every time the run's debrief, marks or laid trail change, so
+    "once" is kept on the team's row before anything plays (withShown): a
+    moment cut short by the app closing is not played again either. A phone
+    too full to keep that plays nothing. */
+function levelMoment({ session, dog, handlerId, lv, events }) {
+  paintResultLevel(session);
+  const kept = db.dogs.byId(dog.id);
+  const team = kept && teamOf(kept, handlerId);
+  const m = team ? momentFor(events, lv, shownLevel(team)) : null;
+  if (!m) return;
+  try { db.dogs.upsert({ ...kept, teams: withShown(kept, handlerId, m.level) }); }
+  catch (e) { if (e?.name !== 'SaveError') throw e; return; }
+  snap();
+  playMoment(m, { handlerId, dogId: dog.id });
+}
+
+/** Has this run no laid trail (a runaway nobody recorded)? Its only age is
+    then what the handler says. */
+const runNoLine = (id) => { const x = S.sessions.find(q => q.id === id); return !!x && noLineYet(x.data); };
+
+/** The line on a run's result that says what it did for its team: passed a
+    level, counts, was missed, or was not counted and why. Nothing for a run
+    that is nobody's try. It opens the team board, or the debrief when an
+    answer missing there is all that stops the run counting. */
+function paintResultLevel(s) {
+  const row = $('resLevel');
+  const dog = s?.id && targetById(s.targetId).kind === 'person' ? S.dogs.find(d => d.id === s.dogId) : null;
+  const lv = dog ? levelOf(dog, s.handlerId) : null;
+  const tryRec = lv ? lv.tries.find(t => t.id === s.id) ?? null : null;
+  const noLine = !!s && noLineYet(s.data);
+  const line = lv ? resultLine(tryRec, lv.events.filter(e => e.sessionId === s.id), { imperial: imp(), noLine }) : null;
+  row.hidden = !line;
+  if (!line) return;
+  const toDebrief = line.kind !== 'up' && debriefWouldFix(tryRec, { noLine });
+  row.className = `res-level ${line.kind}`;
+  row.dataset.handler = s.handlerId;
+  row.dataset.dog = s.dogId;
+  row.dataset.session = s.id;
+  row.dataset.opens = toDebrief ? 'debrief' : 'team';
+  row.innerHTML = `<span class="i" aria-hidden="true">${line.mark}</span><span class="t">${esc(line.text)}</span>${TEAM_GO}`;
+  row.setAttribute('aria-label', `${line.text}. ${toDebrief ? 'Open the debrief' : 'Open the team board'}`);
+}
+
+/* ── The level-up, played over the result ── */
+
+const moment = { board: null, timer: 0, ended: false };
+/* How long the end of a level-up stays up before it leaves by itself. A
+   boss's title card does not leave: it is shown once only, and a handler
+   seeing to the dog as it came up would never have seen it. Nor does the
+   still card, shown where animations are off, for the same reason. */
+const MOMENT_HOLD = 2400;
+/* If a moment has not ended by this long after it should have, it is ended
+   for it: whatever stops a frame coming, the overlay must not be left up
+   with nothing happening on it. */
+const MOMENT_GRACE = 1500;
+
+/** The phone's own tap for a level passed: the iOS app's haptics, or the
+    browser's where it has one (an iPhone's web page has neither). */
+function momentBuzz(kind) {
+  if (canHaptic()) {
+    haptic('back');
+    if (kind === 'boss') setTimeout(() => haptic('back'), 320);
+    return;
+  }
+  try { navigator.vibrate?.(kind === 'boss' ? [30, 60, 30, 60, 120] : [20, 40, 90]); } catch { /* no buzz here */ }
+}
+
+/** Play a moment (momentFor) on a small board of its own, over whatever is
+    on screen. It is put as the team stood before the run and played to how
+    it stands now; with Animations off it shows the end, still. */
+function playMoment(m, { handlerId, dogId }) {
+  closeMoment();
+  const h = S.handlers.find(x => x.id === handlerId), d = S.dogs.find(x => x.id === dogId);
+  const team = d && teamOf(d, handlerId);
+  const lv = team ? levelOf(d, handlerId) : null;
+  if (!h || !lv) return;
+  const box = $('levelUp'), name = $('luName'), title = $('luTitle');
+  const boss = m.kind === 'boss';
+  $('luKicker').textContent = boss ? `Boss beaten · ${m.bossName}`
+    : `${levelsSaid(m.passed)} passed`;   // said as the result's own line says it (teams.js)
+  /* The name the team came in with, until the new one lands. */
+  name.textContent = pairName(h.name, d.name);
+  name.classList.remove('pop');
+  title.hidden = true;
+  title.textContent = m.title ?? '';
+  const on = teamMotion();
+  /* Once, where the phone's Reduce Motion has made the moment a still card:
+     there is an animation, and where to turn it on. */
+  const hint = $('luHint');
+  hint.hidden = on || motionChoice(settings.motion, motionAsked) !== 'auto' || !!db.kv.get('motionHintSeen');
+  if (!hint.hidden) { try { db.kv.set('motionHintSeen', true); } catch { /* a full phone is told again next time */ } }
+  box.hidden = false;
+  behindMoment(true);
+  requestAnimationFrame(() => box.classList.add('show'));
+  moment.ended = false;
+  moment.board = mountBoard($('luBoard'), {
+    lv: beforeMoment(lv, m), look: teamLook(team, d, levelSpec(m.from)?.stage ?? lv.stage),
+    motion: on, dark: resolvedTheme() === 'dark', imperial: imp(), still: true,
+  });
+  /* Set before play(): with motion off the moment ends inside it. */
+  if (on) moment.timer = setTimeout(() => { if (moment.board?.playing) moment.board.skip(); }, MOMENTS[m.kind].duration + MOMENT_GRACE);
+  moment.board.play({
+    before: beforeMoment(lv, m), after: lv, kind: m.kind, name: m.name, title: m.title,
+    onCue: (cue) => {
+      if (cue === 'name' || (boss && cue === 'title')) {
+        name.textContent = m.name;
+        name.classList.remove('pop'); void name.offsetWidth; name.classList.add('pop');
+      }
+      if (boss && (cue === 'title' || !on)) title.hidden = false;
+      if (cue === 'buzz') momentBuzz(m.kind);
+    },
+    onEnd: () => {
+      moment.ended = true;
+      name.textContent = m.name;
+      title.hidden = !boss;
+      moment.board?.update({ look: teamLook(team, d, lv.stage) });
+      clearTimeout(moment.timer);
+      if (on && !boss) moment.timer = setTimeout(closeMoment, MOMENT_HOLD);
+    },
+  });
+  teamView.shown = null;          // the team has moved: its own board goes to it next time
+  $('luDone').focus({ preventScroll: true });
+}
+
+/** A moment is a dialog: what is behind it is out of reach until it is
+    closed. `inert` does that where there is one; aria-hidden is for iOS 15,
+    which has not. Every screen, not only the one showing: the moment comes
+    up while the debrief is still handing over to the result. */
+function behindMoment(on) {
+  for (const id of SCREENS) {
+    const el = $(id);
+    el.inert = on;
+    if (on) el.setAttribute('aria-hidden', 'true'); else el.removeAttribute('aria-hidden');
+  }
+}
+
+/** A tap on the moment: while it plays, skip to how it ends; after, close it. */
+function momentTap() {
+  if (moment.board?.playing) moment.board.skip();
+  else closeMoment();
+}
+
+function closeMoment() {
+  clearTimeout(moment.timer);
+  const box = $('levelUp');
+  if (box.hidden) return;
+  box.classList.remove('show');
+  box.hidden = true;
+  moment.board?.destroy();
+  moment.board = null;
+  behindMoment(false);
+  /* Focus goes back to the page: the line that says what the run did, when
+     it is there, else the screen's own heading. */
+  const line = $('resLevel');
+  if (currentScreen === 'scrResult' && !line.hidden) line.focus({ preventScroll: true });
+  else if (currentScreen) focusScreen(currentScreen);
+}
+
+/* ── A new team, and an existing one edited ── */
+
+/** The stage whose colour the harness wears while the look is tried on. */
+function formStage() {
+  if (teamForm.edit) {
+    const d = db.dogs.byId(teamForm.dogId);
+    const lv = d ? levelOf(d, teamForm.handlerId) : null;
+    if (lv) return lv.stage;
+  }
+  return levelSpec(presetById(teamForm.preset ?? 'new').startLevel).stage;
+}
+
+/** Where an existing team can be started from instead: the presets above
+    what it has passed itself, less the one it is on now. One below would do
+    nothing (levels passed are kept), and the form used to offer it and say
+    the team would start again from there. */
+function teamMoves(lv) {
+  return lv ? TEAM_PRESETS.filter(p => p.startLevel > lv.earned && p.startLevel !== lv.level) : [];
+}
+/** The dog's age in whole months today, as the engine counts it, or null
+    when no birth date is kept. */
+const dogMonths = (d) => (Number.isFinite(d?.dob) ? dogAge(d.dob)?.totalMonths ?? null : null);
+
+function openTeamForm({ handlerId = null, dogId = null, edit = false } = {}) {
+  snap();
+  const h = S.handlers.find(x => x.id === handlerId) ?? S.handler;
+  const d = S.dogs.find(x => x.id === dogId) ?? S.dog;
+  if (!h || !d) return toast('Add a dog first');
+  const team = teamOf(d, h.id);
+  const look = teamLook(team, d);
+  /* Editing, no start is picked: the look can be changed without the team
+     being moved (teamMoves says where it may be moved to, if asked). */
+  Object.assign(teamForm, { edit: edit && !!team, handlerId: h.id, dogId: d.id, preset: edit && team ? null : team?.preset ?? 'new',
+    coat: look.coat, jacket: look.jacket, hat: look.hat, coatPicked: !!team?.look?.coat,
+    returnTo: currentScreen ?? 'scrHome', moving: false });
+  go('scrTeamNew');
+  paintTeamForm();      // once the screen is up, so the chosen chips can be brought into view
+  /* And the pixel team after that, so its canvas has a size to be drawn at. */
+  const player = { look: { ...look, stage: formStage() }, motion: teamMotion(), state: 'waiting' };
+  if (teamForm.player) teamForm.player.set(player);
+  else teamForm.player = createTeam($('tnPreview'), { scene: 'team', scale: 3, ...player });
+}
+function closeTeamForm() { teamForm.player?.set({ motion: false }); }
+
+function paintTeamForm() {
+  const f = teamForm;
+  const h = S.handlers.find(x => x.id === f.handlerId), d = S.dogs.find(x => x.id === f.dogId);
+  if (!h || !d) return;
+  const team = teamOf(d, h.id);
+  const taken = !f.edit && !!team;      // this pair is a team already
+  $('tnKicker').textContent = f.edit ? 'Team' : 'New team';
+  $('tnTitle').textContent = pairName(h.name, d.name);
+  $('tnSub').hidden = f.edit;
+  $('tnWho').hidden = f.edit;
+  if (!f.edit) {
+    $('tnHandlers').innerHTML = S.handlers.map(x =>
+      `<button type="button" class="chip${x.id === h.id ? ' selected' : ''}" data-tn-handler="${esc(x.id)}" aria-pressed="${x.id === h.id}">${avaHtml(x)}${esc(x.name)}</button>`).join('');
+    $('tnDogs').innerHTML = S.dogs.map(x =>
+      `<button type="button" class="chip${x.id === d.id ? ' selected' : ''}" data-tn-dog="${esc(x.id)}" aria-pressed="${x.id === d.id}">${avaHtml(x)}${esc(x.name)}</button>`).join('');
+  }
+  $('tnExists').hidden = !taken;
+  if (taken) $('tnExists').textContent = `${pairName(h.name, d.name)} are a team already. Pick another handler or another dog.`;
+  /* An existing team's start is behind a button of its own: someone who
+     came to change the hat must not move the team thirty levels by a slip. */
+  const moves = f.edit ? teamMoves(levelOf(d, h.id)) : TEAM_PRESETS;
+  $('tnMove').hidden = !f.edit || f.moving || !moves.length;
+  for (const id of ['tnPresetLabel', 'tnPresetWhy', 'tnPresets']) $(id).hidden = f.edit && !f.moving;
+  $('tnPresetLabel').textContent = f.edit ? 'Start from another level' : 'What the dog can do today';
+  $('tnPresetWhy').textContent = f.edit
+    ? 'Pick where the team starts from now. Levels already passed are kept.'
+    : 'It sets the level the team starts at. Start too high and the board will offer a lower one.';
+  /* A level the dog is too young for can still be picked (the board says
+     "not yet" and why), but the form says so first. */
+  const months = dogMonths(d);
+  const young = (p) => { const need = levelSpec(p.startLevel).minDogMonths; return months !== null && need > months ? ` · from ${need} months` : ''; };
+  $('tnPresets').innerHTML = moves.map(p =>
+    `<button type="button" class="check-row${p.id === f.preset ? ' on' : ''}" data-tn-preset="${p.id}" aria-pressed="${p.id === f.preset}"><span class="check-text"><b>${esc(p.label)}</b><i>Starts at level ${p.startLevel} · ${esc(levelSpec(p.startLevel).waveName)}${young(p)}</i></span>${CHECK_MARK}</button>`).join('');
+  $('tnCoats').innerHTML = COATS.filter(c => COAT_IDS.includes(c.id)).map(c =>
+    `<button type="button" class="chip look bare${c.id === f.coat ? ' selected' : ''}" data-tn-coat="${c.id}" aria-pressed="${c.id === f.coat}">${esc(c.name)}</button>`).join('');
+  $('tnJackets').innerHTML = JACKETS.map(j =>
+    `<button type="button" class="chip look${j.id === f.jacket ? ' selected' : ''}" data-tn-jacket="${j.id}" aria-pressed="${j.id === f.jacket}"><span class="dot" style="background:${j.colour}"></span>${esc(j.name)}</button>`).join('');
+  $('tnHats').innerHTML = HATS.map(x =>
+    `<button type="button" class="chip look bare${x.id === f.hat ? ' selected' : ''}" data-tn-hat="${x.id}" aria-pressed="${x.id === f.hat}">${esc(x.name)}</button>`).join('');
+  $('tnSave').textContent = f.edit ? 'Save' : 'New team';
+  $('tnSave').disabled = taken;
+  for (const id of ['tnHandlers', 'tnDogs', 'tnCoats', 'tnJackets', 'tnHats']) showSelectedChip($(id));
+  teamForm.player?.set({ look: { coat: f.coat, jacket: f.jacket, hat: f.hat, stage: formStage() } });
+}
+const CHECK_MARK = '<span class="check-mark" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span>';
+
+/** A tap on the form: who, where it starts, the look. */
+function teamFormTap(e) {
+  const f = teamForm;
+  const pick = (sel) => e.target.closest(sel);
+  const hd = pick('[data-tn-handler]'), dg = pick('[data-tn-dog]'), pr = pick('[data-tn-preset]');
+  const co = pick('[data-tn-coat]'), ja = pick('[data-tn-jacket]'), ha = pick('[data-tn-hat]');
+  const chip = hd || dg || pr || co || ja || ha;
+  if (!chip) return;
+  if (hd) f.handlerId = hd.dataset.tnHandler;
+  if (dg) {
+    f.dogId = dg.dataset.tnDog;
+    /* Another dog, another coat: guessed from its breed until one is picked. */
+    if (!f.coatPicked) f.coat = teamLook(null, db.dogs.byId(f.dogId)).coat;
+  }
+  /* Editing, the start picked again is taken back: no move after all. */
+  if (pr) f.preset = f.edit && f.preset === pr.dataset.tnPreset ? null : pr.dataset.tnPreset;
+  if (co) { f.coat = co.dataset.tnCoat; f.coatPicked = true; }
+  if (ja) f.jacket = ja.dataset.tnJacket;
+  if (ha) f.hat = ha.dataset.tnHat;
+  return repaintFrom(chip, paintTeamForm);
+}
+
+function saveTeamForm() {
+  const f = teamForm;
+  const dog = db.dogs.byId(f.dogId);
+  if (!dog || !db.handlers.byId(f.handlerId)) return;
+  const had = teamOf(dog, f.handlerId);
+  const look = { coat: f.coat, jacket: f.jacket, hat: f.hat };
+  /* A pair is a team once: a second one would start its levels over. */
+  if (had && !f.edit) return toast(`${pairName(db.handlers.byId(f.handlerId).name, dog.name)} are a team already`);
+  let team;
+  const moved = !!had && f.preset != null && teamMoves(levelOf(dog, f.handlerId)).some(p => p.id === f.preset);
+  if (had) {
+    team = { ...had, look: { ...had.look, ...look } };
+    if (moved) {
+      const pair = pairName(db.handlers.byId(f.handlerId).name, dog.name);
+      if (!confirm(`${pair} will start at level ${presetById(f.preset).startLevel}. Levels already passed are kept.`)) return;
+      team = restartTeam(team, { preset: f.preset, now: Date.now(), lv: levelOf(dog, f.handlerId), day: dayKey(Date.now(), tzNow()) });
+    }
+  } else {
+    team = makeTeam({ handlerId: f.handlerId, dogId: f.dogId, preset: f.preset, now: Date.now(), look });
+  }
+  if (!guardSave(null, () => db.dogs.upsert({ ...dog, teams: putTeam(dog, team) }))) return;
+  snap();
+  toast(had ? 'Saved' : `${pairName(db.handlers.byId(f.handlerId).name, dog.name)} are a team`);
+  closeTeamForm();
+  /* The board it was opened from shows the team just made or changed, and
+     goes to where it now stands. */
+  if (teamView.handlerId !== f.handlerId || teamView.dogId !== f.dogId || moved || !had) teamView.shown = null;
+  teamView.handlerId = f.handlerId;
+  teamView.dogId = f.dogId;
+  teamView.picked = null;
+  leaveForm(f.returnTo);
 }
 
 /* ── Settings ─────────────────────────────────────────────────────── */
@@ -8350,6 +9117,13 @@ function wire() {
   });
   $('btnPickBack').addEventListener('click', () => go('scrHome'));
   $('btnBlind').addEventListener('click', startBlind);
+  $('leftAgoRow').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-left-ago]');
+    if (!b) return;
+    const m = Number(b.dataset.leftAgo);
+    leftAgo = m === leftAgo ? null : m;      // the chosen one again takes the answer back
+    repaintFrom(b, paintLeftAgo);
+  });
   /* A blind trail's laid line, from its card on the result screen. */
   $('btnAddLine').addEventListener('click', () => {
     const open = $('addLineHow').hidden;
@@ -8583,6 +9357,43 @@ function wire() {
 
   // Sessions
   $('dogBack').addEventListener('click', () => go('scrHome'));
+  $('homeTeam').addEventListener('click', () => openTeam(S.handler?.id, S.dog?.id));
+  $('dogTeams').addEventListener('click', (e) => {
+    const row = e.target.closest('[data-team-open]');
+    if (row && dogCardId) openTeam(row.dataset.teamOpen, dogCardId);
+  });
+  /* A new team for this dog: with the handler picked on Home when the two
+     are not one yet, otherwise with whoever has no team with it. */
+  $('dogNewTeam').addEventListener('click', () => {
+    const d = dogCardId && db.dogs.byId(dogCardId);
+    if (!d) return;
+    const free = (h) => h && !teamOf(d, h.id);
+    const h = [S.handler, S.handlers.find(x => x.id === d.handlerId), ...S.handlers].find(free) ?? S.handler;
+    openTeamForm({ handlerId: h?.id, dogId: d.id });
+  });
+  $('teamBack').addEventListener('click', goBack);
+  $('teamEdit').addEventListener('click', () => openTeamForm({ handlerId: teamView.handlerId, dogId: teamView.dogId, edit: true }));
+  $('tnMove').addEventListener('click', () => { teamForm.moving = true; paintTeamForm(); $('tnPresets').querySelector('button')?.focus(); });
+  $('levelUp').addEventListener('click', momentTap);
+  $('levelUp').addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); closeMoment(); } });
+  $('resLevel').addEventListener('click', (e) => {
+    const b = e.currentTarget;
+    /* Not counted for want of an answer: straight to where it is given. */
+    const s = b.dataset.opens === 'debrief' ? sessionById(b.dataset.session) : null;
+    if (s) return openDebrief(s);
+    openTeam(b.dataset.handler, b.dataset.dog);
+  });
+  $('teamCard').addEventListener('click', teamCardTap);
+  $('scrTeamNew').addEventListener('click', teamFormTap);
+  $('tnSave').addEventListener('click', saveTeamForm);
+  $('tnCancel').addEventListener('click', () => { closeTeamForm(); leaveForm(teamForm.returnTo); });
+  $('motionSettings').addEventListener('click', (e) => {
+    const row = e.target.closest('.check-row');
+    if (!row) return;
+    settings.motion = row.dataset.value;
+    saveSettings();
+    applyMotion();
+  });
   $('hBack').addEventListener('click', () => go('scrHome'));
   $('hEdit').addEventListener('click', () => { if (handlerCardId) openHandlerForm({ id: handlerCardId, returnTo: 'scrHandler' }); });
   $('hDogs').addEventListener('click', (e) => { const dc = e.target.closest('[data-dog-card]'); if (dc) openDogCard(dc.dataset.dogCard); });
@@ -9151,6 +9962,7 @@ function restampCalls() {
 
 function boot() {
   applyTheme();          // the head script already painted it; this keeps it in step
+  applyMotion();
   try { restampCalls(); } catch { /* a full phone: the calls are still on it */ }
   snap();
   if (openFromHash()) return;   // a trail someone sent: that first, the app's own business after

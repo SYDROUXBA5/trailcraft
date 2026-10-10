@@ -1384,4 +1384,28 @@ t('two thousand sessions are no trouble', () => {
   assert.ok(warm < 1000, `a second pass, with each run already read, took ${Math.round(warm)} ms`);
 });
 
+t('a team placed again today keeps the runs it has already counted today', () => {
+  /* Placed at 46, two counted misses this morning: one more can count. */
+  const team = TEAM({ startLevel: 46, placedAt: T0 - DAY });
+  const misses = [meets(46, { day: 0, hour: 9, found: false }), meets(46, { day: 0, hour: 10, found: false })];
+  const now = T0 - 30 * MIN;
+  const before = teamLevel(misses, team, { now, tzMin: 0 });
+  assert.deepEqual([before.counted.today, before.counted.left, before.placement.state], [2, 1, 'suggest']);
+  /* The suggestion taken: placedAt is now, so both misses are history. On
+     their own that read 0 of 3, and the dog could run three more. */
+  const moved = { ...team, startLevel: 41, placedAt: now };
+  assert.equal(teamLevel(misses, moved, { now, tzMin: 0 }).counted.today, 0, 'the gap this closes');
+  const carried = { ...moved, capCarry: { day: dayKey(now, 0), used: before.counted.today } };
+  const after = teamLevel(misses, carried, { now, tzMin: 0 });
+  assert.deepEqual([after.counted.today, after.counted.left, after.level], [2, 1, 41]);
+  /* One more run counts, and the one after it does not. */
+  const third = meets(41, { day: 0, hour: 11, minute: 40, found: false });
+  const fourth = meets(41, { day: 0, hour: 11, minute: 50 });
+  const full = teamLevel([...misses, third, fourth], carried, { now: T0, tzMin: 0 });
+  assert.equal(full.counted.today, 3);
+  assert.match(full.tries[0].why, /already counted today/);
+  /* Tomorrow it is forgotten. */
+  assert.equal(teamLevel(misses, carried, { now: now + DAY, tzMin: 0 }).counted.today, 0);
+});
+
 console.log(`\nlevels: ${pass} checks passed`);

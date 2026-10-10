@@ -379,6 +379,16 @@ export function healSession(s) {
 /** The dogs a handler owns, and so the dogs that go when the handler does. */
 export const dogsOf = (dogs, handlerId) => (dogs || []).filter(d => d?.handlerId === handlerId);
 
+/** Is this handler in a team with the dog (dog.teams, one row per handler
+    who runs it)? */
+const teamedWith = (dog, handlerId) => Array.isArray(dog?.teams) && dog.teams.some(t => t?.handlerId === handlerId);
+/** The dogs a handler works: their own, and any they are in a team with. A
+    trainer running a client's dog during board-and-train sees it in their
+    own list without the dog changing hands. dogsOf stays the dogs that are
+    THEIRS, because that is what goes when the handler is deleted. */
+export const dogsWorkedBy = (dogs, handlerId) =>
+  (dogs || []).filter(d => d && (d.handlerId === handlerId || teamedWith(d, handlerId)));
+
 const andList = (xs) => xs.length < 2 ? (xs[0] ?? '') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`;
 const firstUp = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 
@@ -412,12 +422,18 @@ export function askDelete(kind, { row, dog = null, dogs = [], sessions = [], whe
   const who = name || 'this handler';
   const team = dogsOf(dogs, row?.id).map(d => d.name);
   const n = sessions.filter(s => s.handlerId === row?.id).length;
+  /* Someone else's dog they run as a team stays, but that team and its
+     level go with them (deleteHandler), and adding the handler again does
+     not bring it back. The question says so: a delete names what goes. */
+  const lent = (dogs || []).filter(d => d && d.handlerId !== row?.id && teamedWith(d, row?.id)).map(d => d.name);
+  const teams = !lent.length ? ''
+    : lent.length === 1 ? ` Their team with ${lent[0]} and its level go too.` : ` Their teams with ${andList(lent)} and their levels go too.`;
   if (!team.length) {
-    return `Delete ${who}? ${firstUp(who)}’s profile goes, and cannot be got back.${backup(false)}${stay(n, 'Their')}`;
+    return `Delete ${who}? ${firstUp(who)}’s profile goes, and cannot be got back.${teams}${backup(false)}${stay(n, 'Their')}`;
   }
   const withDogs = team.length === 1 ? `their dog ${team[0]}` : `their ${team.length} dogs, ${andList(team)}`;
   const profiles = team.length === 1 ? 'Both profiles go' : `All ${team.length + 1} profiles go`;
-  return `Delete ${who} and ${withDogs}? ${profiles}, and cannot be got back.${backup(true)}${stay(n, 'Their')}`;
+  return `Delete ${who} and ${withDogs}? ${profiles}, and cannot be got back.${teams}${backup(true)}${stay(n, 'Their')}`;
 }
 
 /** The storage line in Settings. Nearly full, it says where room is made: the
@@ -523,6 +539,11 @@ export function createStore(backend) {
     deleteHandler(id) {
       handlers.remove(id);
       for (const d of dogsOf(dogs.all(), id)) dogs.remove(d.id);
+      /* Someone else's dog they were in a team with stays, less that team:
+         a team with nobody holding the line is not a team. */
+      for (const d of dogs.all()) {
+        if (teamedWith(d, id)) dogs.upsert({ ...d, teams: d.teams.filter(t => t?.handlerId !== id) });
+      }
     },
 
     /* Sessions, newest first. {id, handlerId, dogId, layerId|null, targetId,
@@ -597,7 +618,7 @@ export function createStore(backend) {
     snapshot() {
       const hs = handlers.all();
       const handler = hs.find(h => h.id === kv.get('lastHandlerId')) ?? hs[0] ?? null;
-      const team = handler ? dogs.all().filter(d => d.handlerId === handler.id) : [];
+      const team = handler ? dogsWorkedBy(dogs.all(), handler.id) : [];
       const dog = team.find(d => d.id === kv.get('lastDogId')) ?? team[0] ?? null;
       const layer = layers.all().find(l => l.id === kv.get('lastLayerId')) ?? null;
       return {

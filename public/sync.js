@@ -486,6 +486,16 @@ async function readTable(uid, name, partial) {
   return { rows, mark, whole: since === undefined };
 }
 
+/** The handlers deleted on this phone or heard of as deleted, for a dog's
+    merge: their team rows on other people's dogs went with them, and must
+    not ride back in on an older copy of the dog (sync-core.js mergeTeams).
+    Handlers are merged before dogs (TABLES), so a delete made on another
+    phone is already known here. */
+function goneHandlers(table) {
+  if (table !== 'dogs') return null;
+  return new Set(db.handlers.raw().filter(h => h?.deleted).map(h => h.id));
+}
+
 /** Bring the phone and the account into agreement, both directions.
     `partial`: only what other phones changed since the last pull. */
 async function fullSync(uid, { partial = false } = {}) {
@@ -501,7 +511,7 @@ async function fullSync(uid, { partial = false } = {}) {
     // Rows from before sync existed have no stamp. Give them the oldest real
     // one on both sides at once, so the two copies agree from here on.
     const stamped = local.map(r => (Number.isFinite(r.updatedAt) ? r : { ...r, updatedAt: 1 }));
-    const { merged, toUpload } = mergeRecords(stamped, remote, { partial: !whole, union: name === 'sessions' });
+    const { merged, toUpload } = mergeRecords(stamped, remote, { partial: !whole, union: name === 'sessions', gone: goneHandlers(name) });
     if (name === 'sessions') db.replaceSessions(merged); else db[name].replaceAll(merged);
     skipped.push(...await uploadAll(uid, name, toUpload));
   }
@@ -618,7 +628,7 @@ async function mendNow(uid, table, id) {
     keep = { id, rows, updatedAt: Date.now() };
     up = calibrationDiffers(rows, cloud?.rows || []);
   } else {
-    ({ keep, up } = mergeOne(mine, cloud, { union: table === 'sessions' }));
+    ({ keep, up } = mergeOne(mine, cloud, { union: table === 'sessions', gone: goneHandlers(table) }));
   }
   if (!keep) return;
   keepHere(table, keep);
