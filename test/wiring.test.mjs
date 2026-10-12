@@ -13,13 +13,23 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync, mkdtempSync, copyFileSync, rmSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, posix } from 'node:path';
 import vm from 'node:vm';
 import { fmtShort, fmtDur } from '../public/geo.js';
 import { ranBlind, trailShown, unwalkedPlan, noLineYet } from '../public/debrief.js';
 
 let pass = 0;
 const t = (name, fn) => { fn(); pass++; console.log(`  ok  ${name}`); };
+
+/** Every script the app is made of, as a path under public/: the modules at
+    the top and the ones in a folder of their own (pixel/). vendor/ is other
+    people's code and is not held to the app's rules. A check that read only
+    the top folder would pass for ever over a module it never opened. */
+const PUB = new URL('../public/', import.meta.url);
+const appScripts = () => [
+  ...readdirSync(PUB).filter(n => n.endsWith('.js')),
+  ...readdirSync(new URL('pixel/', PUB)).filter(n => n.endsWith('.js')).map(n => `pixel/${n}`),
+];
 
 const html = readFileSync(new URL('../public/index.html', import.meta.url), 'utf8');
 const js = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8');
@@ -87,12 +97,14 @@ t('every module the app imports is cached for offline use', () => {
   assert.match(sw, /e\.request\.mode === 'navigate' \? openPage\(e\) : shellFile\(e\)/,
     'only a page falls back to the page: a missing script must not come back as HTML');
 
-  const pub = new URL('../public/', import.meta.url);
+  /* An import is named from where the importing file is: './core.js' asked
+     for by pixel/dog.js is pixel/core.js, and that is the request made. */
   const imported = new Set(['app.js']);
-  for (const f of readdirSync(pub).filter(n => n.endsWith('.js'))) {
-    const src = readFileSync(new URL(f, pub), 'utf8');
-    for (const m of src.matchAll(/from '\.\/([\w-]+\.js)'/g)) imported.add(m[1]);
+  for (const f of appScripts()) {
+    const src = readFileSync(new URL(f, PUB), 'utf8');
+    for (const m of src.matchAll(/from '(\.\.?\/[\w/-]+\.js)'/g)) imported.add(posix.normalize(posix.join(posix.dirname(f), m[1])));
   }
+  assert.ok(imported.has('pixel/core.js') && imported.has('pixel/player.js'), 'the modules in pixel/ are read too');
   const missing = [...imported].filter(m => !cached.has(m));
   assert.deepEqual(missing, [], `imported but not cached offline: ${missing.join(', ')}`);
 
@@ -100,7 +112,7 @@ t('every module the app imports is cached for offline use', () => {
      app.js imports but the list forgets is a ReferenceError on open — which
      is how the Desktop copy shipped broken for a day after sign-in landed. */
   const build = readFileSync(new URL('../scripts/build-single.mjs', import.meta.url), 'utf8');
-  const bundled = new Set([...build.match(/const MODULES = \[([^\]]+)\]/)[1].matchAll(/'([\w-]+)'/g)].map(m => `${m[1]}.js`));
+  const bundled = new Set([...build.match(/const MODULES = \[([^\]]+)\]/)[1].matchAll(/'([\w/-]+)'/g)].map(m => `${m[1]}.js`));
   const forgotten = [...imported].filter(m => m !== 'app.js' && !bundled.has(m));
   assert.deepEqual(forgotten, [], `imported but left out of the single-file build: ${forgotten.join(', ')}`);
 });
@@ -132,7 +144,7 @@ t('a ::before or ::after placed absolutely stays inside its own element', () => 
 /* Debug probes (window.__something) are how the map gets inspected from the
    preview; they must never ship. */
 t('no debug probe is left in the app', () => {
-  for (const f of readdirSync(new URL('../public/', import.meta.url)).filter(x => x.endsWith('.js') && x !== 'token.js')) {
+  for (const f of appScripts().filter(x => x !== 'token.js')) {
     const src = readFileSync(new URL(`../public/${f}`, import.meta.url), 'utf8');
     assert.ok(!/TEMP PROBE|window\.__[a-zA-Z]/.test(src), `${f} still has a debug probe`);
   }
@@ -143,7 +155,7 @@ t('no debug probe is left in the app', () => {
    it loaded, app.js could not import it, and the app started blank. The
    map's own view.at(point) is not an array, so only a number is caught. */
 t('nothing in the app leans on Array .at or findLast', () => {
-  for (const f of readdirSync(new URL('../public/', import.meta.url)).filter(x => x.endsWith('.js') && x !== 'token.js')) {
+  for (const f of appScripts().filter(x => x !== 'token.js')) {
     const src = readFileSync(new URL(`../public/${f}`, import.meta.url), 'utf8');
     assert.ok(!/\.at\(\s*-?\d/.test(src), `${f} indexes an array with .at(), missing before iOS 15.4`);
     assert.ok(!/\.findLast(Index)?\s*\(/.test(src), `${f} uses findLast, missing before iOS 15.4`);
@@ -155,8 +167,8 @@ t('nothing in the app leans on Array .at or findLast', () => {
 t('every script in public/ parses as a module', () => {
   const dir = mkdtempSync(join(tmpdir(), 'tc-syntax-'));
   try {
-    for (const f of readdirSync(new URL('../public/', import.meta.url)).filter(x => x.endsWith('.js') && x !== 'sw.js' && x !== 'token.js')) {
-      const tmp = join(dir, f.replace(/\.js$/, '.mjs'));
+    for (const f of appScripts().filter(x => x !== 'sw.js' && x !== 'token.js')) {
+      const tmp = join(dir, f.replace(/\//g, '~').replace(/\.js$/, '.mjs'));
       copyFileSync(new URL(`../public/${f}`, import.meta.url), tmp);
       try { execFileSync(process.execPath, ['--check', tmp], { stdio: 'pipe' }); }
       catch (e) { assert.fail(`${f} does not parse: ${String(e.stderr || e.message).split('\n').slice(0, 6).join(' | ')}`); }

@@ -39,10 +39,12 @@
      shown where animations are off: each is shown once only. -->
 <div class="lu" id="levelUp" hidden role="dialog" aria-modal="true" tabindex="-1" aria-labelledby="luName" aria-describedby="luKicker">
   <div class="lu-card">
+    <!-- The board first: it is the top two thirds of the card, and the words
+         under it are what it has just shown. -->
+    <div class="lu-stage"><div class="tb-scroll lu-board" id="luBoard"></div></div>
     <span class="label" id="luKicker"></span>
     <h2 class="lu-name" id="luName" aria-live="polite"></h2>
     <p class="lu-title" id="luTitle" hidden></p>
-    <div class="tb-scroll lu-board" id="luBoard"></div>
     <p class="lu-hint" id="luHint" hidden>Animations are off with Reduce Motion. Turn them on in Settings.</p>
     <button type="button" class="btn moss" id="luDone">Carry on</button>
   </div>
@@ -633,6 +635,9 @@
 <section id="scrTeam" class="screen paper team-screen" hidden>
   <header class="team-head">
     <button type="button" class="back-btn" id="teamBack" aria-label="Back"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M14.5 5.5 8 12l6.5 6.5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+    <!-- The level the team stands on, as a stone in its stage's colour. The
+         meter under it says the same in words, so this is for the eye only. -->
+    <span class="lvl-badge" id="teamBadge" aria-hidden="true"></span>
     <div class="team-who">
       <h1 class="display" id="teamTitle"></h1>
       <p class="team-name" id="teamName"></p>
@@ -643,14 +648,14 @@
   <!-- The card comes first in the page and second on the screen (CSS order):
        read in page order, a hundred stones sat between the team's name and
        its next level. -->
-  <div class="team-card" id="teamCard"></div>
+  <div class="team-sheet"><div class="team-card" id="teamCard"></div></div>
   <div class="tb-scroll" id="teamBoard" role="group" aria-label="Trail board, 100 levels"></div>
   <p class="sr-only" id="teamSay" aria-live="polite"></p>
 </section>
 
 <!-- ── A new team, or an existing one edited: who, where it starts, the look ── -->
 <section id="scrTeamNew" class="screen paper" hidden>
-  <div class="page">
+  <div class="page tn-page">
     <span class="label" id="tnKicker">New team</span>
     <h1 class="display" id="tnTitle"></h1>
     <p class="body small muted" id="tnSub">A team is one handler with one dog. It climbs 100 levels of person trails, and one good run passes a level.</p>
@@ -667,7 +672,7 @@
     <button type="button" class="btn ghost small" id="tnMove" hidden>Start from another level</button>
     <span class="label" id="tnPresetLabel">What the dog can do today</span>
     <p class="body small muted" id="tnPresetWhy">It sets the level the team starts at. Start too high and the board will offer a lower one.</p>
-    <div class="check-list" id="tnPresets" role="group" aria-labelledby="tnPresetLabel"></div>
+    <div class="tn-presets" id="tnPresets" role="group" aria-labelledby="tnPresetLabel"></div>
 
     <span class="label">The look</span>
     <div class="tn-stage"><canvas id="tnPreview" aria-hidden="true"></canvas></div>

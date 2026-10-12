@@ -12,8 +12,9 @@
    and a tile is only made and painted once it is near the part of the
    board on screen. */
 
-import { createTeam, TEAM, ANCHOR, MOMENTS, ICONS, gateOpen, boardLayout, boardTiles, tilesNear, drawBoard, drawBarrier, barrierBand,
-         trailPoint, throughGate, gateX, ringArt, stamp, plaqueSize, drawPlaque, lockPixels, unlockWood, duskify, crispURL, BOARD_LANDS } from './pixel-team.js';
+import { createTeam, TEAM, ANCHOR, REACH, MOMENTS, ICONS, gateOpen, boardLayout, boardTiles, tilesNear, drawBoard, drawBarrier, barrierBand,
+         trailPoint, throughGate, gateX, ringArt, stamp, plaqueSize, drawPlaque, lockPixels, unlockWood, duskify, crispURL, BOARD_LANDS, RAMPS, CAST,
+         SPEED, STAGE_GLOW, burst, confetti, flash, trailGlow, stampPaw, skyFlare } from './pixel-team.js';
 import { LADDER_V1, levelSpec } from './levels.js';
 import { standing, stoneStatus, stoneLabel, stageLabel } from './teams.js';
 
@@ -44,10 +45,10 @@ export const WAVE_ICON = Object.freeze({
 
 /* What each land is called on its sign. */
 const LAND_SIGNS = [
-  { kind: 'hot', text: `Red meadow · ${stageLabel('hot')}` },
-  { kind: 'warm', text: `Amber wood · ${stageLabel('warm')}` },
-  { kind: 'cold', text: `Blue town · ${stageLabel('cold')}` },
-  { kind: 'cold', text: `The climb · ${stageLabel('cold')}` },
+  { kind: 'hot', land: 'meadow', text: `Red meadow · ${stageLabel('hot')}` },
+  { kind: 'warm', land: 'wood', text: `Amber wood · ${stageLabel('warm')}` },
+  { kind: 'cold', land: 'town', text: `Blue town · ${stageLabel('cold')}` },
+  { kind: 'cold', land: 'climb', text: `The climb · ${stageLabel('cold')}` },
 ];
 
 /* A stone's number plate and what it says aloud are the same on every board
@@ -87,6 +88,8 @@ export function boardView(lv) {
     from 0 (stone 1), so 6 is on stone 7, 6.35 a little past it and -0.5 the
     trailhead. A team that has beaten a boss waits just through its gate; a
     team placed by a preset, on the path short of its first stone. */
+const TRAILHEAD = -0.62;
+
 export function teamSeat(lv, layout) {
   const N = layout.stones.length;
   const bossAt = (n) => layout.bosses.find(b => b.level === n) ?? null;
@@ -97,7 +100,10 @@ export function teamSeat(lv, layout) {
     seg = n - 1 + (b && n < N ? throughGate(b.kind) : 0);
   } else {
     const n = clamp(at.before, 1, N), b = bossAt(n - 1);
-    seg = n === 1 ? -0.5 : n - 2 + (b ? throughGate(b.kind) : 0.35);
+    /* A team that has passed nothing waits at the trailhead, a full body's
+       height short of the first stone: nearer, the handler's head covered
+       the very stone and number the screen is about. */
+    seg = n === 1 ? TRAILHEAD : n - 2 + (b ? throughGate(b.kind) : 0.35);
   }
   const pt = trailPoint(layout, 0, seg);
   let left = layout.faceLeft[clamp(Math.floor(seg + 1e-6), 0, N - 1)];
@@ -106,8 +112,9 @@ export function teamSeat(lv, layout) {
        towards it, would stand on its ring. The team turns the other way
        when that keeps the stone in sight and there is room. */
     const nx = layout.stones[Math.floor(seg) + 1];
-    const covers = (l) => !!nx && Math.abs(nx.y - pt[1]) < 30 && (l ? nx.x < pt[0] - 12 && nx.x > pt[0] - 66 : nx.x > pt[0] + 12 && nx.x < pt[0] + 66);
-    const fits = (l) => (l ? pt[0] - 71 >= 0 : pt[0] + 71 <= layout.W);
+    const [a0, a1] = REACH.ahead;
+    const covers = (l) => !!nx && Math.abs(nx.y - pt[1]) < 30 && (l ? nx.x < pt[0] - a0 && nx.x > pt[0] - a1 : nx.x > pt[0] + a0 && nx.x < pt[0] + a1);
+    const fits = (l) => (l ? pt[0] - REACH.nose >= 0 : pt[0] + REACH.nose <= layout.W);
     if (covers(left) && !covers(!left) && fits(!left)) left = !left;
   }
   return { seg, left, pt };
@@ -119,6 +126,11 @@ export function teamBox(pt, left) {
   const ax = left ? TEAM.w - 1 - ANCHOR[0] : ANCHOR[0];
   return [pt[0] - ax, pt[1] - 1 - TEAM.ground];
 }
+
+/* How far in front of the handler's feet the find reaches: the dog, then
+   the bush with the person behind it. */
+const FIND_REACH = 118;
+const GOLD_SPARK = '#f2c14e';
 
 /** Size a small pixel canvas and show it SCALE times bigger, crisp. */
 function pixelCanvas(c, w, h) {
@@ -141,14 +153,17 @@ function pixelCanvas(c, w, h) {
  *         imperial  the app's distance units, for the stones' spoken labels,
  *         onPick(level)  a stone was tapped,
  *         still     true where the board is only a picture (a level-up
- *                   played over the result): its stones cannot be tapped }
+ *                   played over the result): its stones cannot be tapped,
+ *         ambient(ctx, layout, view, t)  what moves on the land by itself
+ *                   (grass, water, smoke, snow), drawn on a layer of its own
+ *                   under the team; the board is complete without it }
  *
  * Returns { update(opts), select(level | null), home(smooth), play(moment),
  * skip(), playing, team, layout, teamSpot(), destroy() }. `team` is the
  * pixel-team player; `teamSpot()` is where it stands, in art pixels.
  */
 export function mountBoard(host, opts = {}) {
-  const o = Object.assign({ lv: null, look: {}, motion: true, dark: false, imperial: false, onPick: null, still: false }, opts);
+  const o = Object.assign({ lv: null, look: {}, motion: true, dark: false, imperial: false, onPick: null, still: false, ambient: null }, opts);
   const dpr = Math.max(1, Math.round(window.devicePixelRatio || 1));
   const icons = {};
   for (const l of LADDER_V1.levels) icons[l.level] = WAVE_ICON[l.waveKey] || 'ruler';
@@ -157,14 +172,17 @@ export function mountBoard(host, opts = {}) {
   const board = el('div', 'tb-board');
   const teamCanvas = el('canvas', 'tb-team');
   const sweepCanvas = el('canvas', 'tb-layer tb-sweep');
-  const stampCanvas = el('canvas', 'tb-layer tb-stamp');
+  /* One layer for everything a moment throws about (the paw, its sparks,
+     the lit trail, the confetti): as tall as the part of the board on
+     screen and no taller, moved to wherever that is. */
+  const fxCanvas = el('canvas', 'tb-layer tb-fx');
   const ribbon = el('div', 'tb-ribbon');
-  for (const c of [teamCanvas, sweepCanvas, stampCanvas]) c.setAttribute('aria-hidden', 'true');
+  const ambientCanvas = el('canvas', 'tb-layer tb-ambient');
+  ambientCanvas.style.display = 'none';
+  for (const c of [teamCanvas, sweepCanvas, fxCanvas, ambientCanvas]) c.setAttribute('aria-hidden', 'true');
   ribbon.setAttribute('aria-hidden', 'true');
-  sweepCanvas.style.display = 'none'; stampCanvas.style.display = 'none'; ribbon.style.display = 'none';
-  stampCanvas.width = 36; stampCanvas.height = 36;
-  stampCanvas.style.width = 36 * SCALE + 'px'; stampCanvas.style.height = 36 * SCALE + 'px';
-  board.append(sweepCanvas, stampCanvas, teamCanvas, ribbon);
+  sweepCanvas.style.display = 'none'; fxCanvas.style.display = 'none'; ribbon.style.display = 'none';
+  board.append(ambientCanvas, sweepCanvas, teamCanvas, fxCanvas, ribbon);
   if (o.still) board.setAttribute('aria-hidden', 'true');
   host.appendChild(board);
 
@@ -217,9 +235,9 @@ export function mountBoard(host, opts = {}) {
       return { c, y0, y1, key: '' };
     });
 
-    const ringS = ringArt(false), ringB = ringArt(true), ringSel = ringArt(true);
-    const sc = ringSel.getContext('2d');
-    sc.globalCompositeOperation = 'source-in'; sc.fillStyle = '#f4f6fa'; sc.fillRect(0, 0, ringSel.width, ringSel.height);
+    /* The stone being read wears the gold ring too, steady and one pixel
+       proud (app.css); the arrow over it is what says it is not the next. */
+    const ringS = ringArt(false), ringB = ringArt(true), ringSel = ringArt(true, true);
     const ptr = el('canvas'); ptr.width = 6; ptr.height = 5;
     stamp(ptr.getContext('2d'), ['ggggg', '.ggg.', '..g..'], 0, 0, { g: '#f4f6fa' });
     /* A stone's parts are small images, scaled up once to device pixels.
@@ -235,7 +253,7 @@ export function mountBoard(host, opts = {}) {
     };
     const pointer = img(ptr, 'tb-pointer', 3, 0);
     pointer.style.left = ''; pointer.style.top = '';
-    ring = { small: img(ringS, 'tb-ring cur small', 12, 8), big: img(ringB, 'tb-ring cur big', 12, 8), sel: img(ringSel, 'tb-ring sel', 12, 8), pointer };
+    ring = { small: img(ringS, 'tb-ring cur small', ringS.ax, ringS.ay), big: img(ringB, 'tb-ring cur big', ringB.ax, ringB.ay), sel: img(ringSel, 'tb-ring sel', ringSel.ax, ringSel.ay), pointer };
 
     plaqueEls = [];
     buttons = layout.stones.map((s) => {
@@ -247,7 +265,7 @@ export function mountBoard(host, opts = {}) {
       b.dataset.level = s.level;
       if (o.still) b.tabIndex = -1;
       const [pw, ph] = plaqueSize(s.level);
-      const pl = img({ width: pw, height: ph }, 'tb-plaque', pw >> 1, s.boss ? -10 : -6);
+      const pl = img({ width: pw, height: ph }, 'tb-plaque', pw >> 1, s.boss ? -10 : -11);
       b.appendChild(pl);
       plaqueEls.push(pl);
       b.addEventListener('click', () => { rover = s.level; if (o.onPick && !moment) o.onPick(s.level); });
@@ -256,23 +274,54 @@ export function mountBoard(host, opts = {}) {
     });
 
     /* Signs: each land's name where it starts, each boss's by its gate. A
-       sign keeps to the side the trail and the team are not on. */
-    const sign = (kind, text, y, side) => {
+       sign is a plank on a post in the wood of the land it stands in (the
+       five tones of that land's tree trunks, and its own cast shadow), set
+       beside the trail on the side the team is not on. The words are real
+       text, so they stay sharp and can be read. */
+    const sign = (kind, land, text, y, side) => {
       const d = el('div', `tb-sign ${kind} ${side}`);
-      d.textContent = text;
+      const wood = RAMPS && RAMPS[land] && RAMPS[land].trunk, cast = CAST && CAST[land];
+      if (wood) wood.forEach((c, i) => d.style.setProperty('--w' + i, c));
+      if (cast) { const [r, g, b] = [1, 3, 5].map(i => parseInt(cast[0].slice(i, i + 2), 16)); d.style.setProperty('--cast', `rgba(${r}, ${g}, ${b}, ${cast[1]})`); }
+      const plank = el('b'), words = el('span');
+      words.textContent = text;
+      plank.appendChild(words);
+      d.appendChild(plank);
       d.style.top = y * SCALE + 'px';
+      d.dataset.y = y;
       board.appendChild(d);
+      /* Beside the trail and clear of it: clear of every row of path the
+         sign is level with, and of any stone and its number plate there.
+         Never off the board. */
+      const w = d.offsetWidth, rows = Math.ceil(d.offsetHeight / SCALE), left = side === 'left';
+      let edge = left ? Infinity : -Infinity;
+      const reach = (x, half) => { edge = left ? Math.min(edge, x - half) : Math.max(edge, x + half); };
+      for (let r = y - 2; r <= y + rows + 2; r++) reach(layout.xAt[clamp(Math.round(r), 0, layout.H)], 6);
+      /* A stone's number plate hangs under it, a boss's lower still: a stone
+         up to 24 rows above the sign is still in its way. */
+      for (const st of layout.stones) if (st.y > y - 24 && st.y < y + rows + 12) reach(st.x, 14);
+      const x = (left ? edge - 5 : edge + 5) * SCALE - (left ? w : 0);
+      d.style.left = clamp(Math.round(x / SCALE) * SCALE, 4, Math.max(4, layout.W * SCALE - w - 4)) + 'px';
+      return d;
     };
     const away = (y) => (layout.xAt[clamp(Math.round(y), 0, layout.H)] > layout.W / 2 ? 'left' : 'right');
-    sign(LAND_SIGNS[0].kind, LAND_SIGNS[0].text, stoneAt(1).y + 72, 'mid');
-    layout.bosses.forEach((b, k) => {
-      const last = k === layout.bosses.length - 1;
+    /* The stones may be set closer or wider apart than the forty rows these
+       distances were measured at. */
+    const k = (layout.spacing || 40) / 40, up = (n) => Math.round(n * k);
+    /* The first land's sign stands in its own grass at the foot of the
+       board, not on a strip of flat colour under it. */
+    { const y = Math.min(stoneAt(1).y + up(72) - 6, layout.H - 20); sign(LAND_SIGNS[0].kind, LAND_SIGNS[0].land, LAND_SIGNS[0].text, y, away(y + 6)); }
+    layout.bosses.forEach((b, i) => {
+      const last = i === layout.bosses.length - 1;
       const name = `Boss · ${levelSpec(b.level).bossName}`;
-      if (last) { sign('boss', name, b.y - 64, 'mid'); return; }
+      const here = LAND_SIGNS[Math.min(i, LAND_SIGNS.length - 1)].land;
+      /* The summit has only sky above it: its sign stands on the snow just
+         below the last stone. */
+      if (last) { const y = b.y + 30; sign('boss', here, name, y, away(y + 6)).dataset.boss = b.level; return; }
       /* The team waits just through the gate, facing on: the sign goes behind it. */
-      sign('boss', name, b.y - (b.kind === 'wall' ? 80 : 60), layout.faceLeft[b.level - 1] ? 'right' : 'left');
-      const land = LAND_SIGNS[k + 1], y = b.y - (b.kind === 'wall' ? 122 : 102);
-      if (land) sign(land.kind, land.text, y, away(y + 6));
+      sign('boss', here, name, b.y - up(b.kind === 'wall' ? 80 : 60) - 6, layout.faceLeft[b.level - 1] ? 'right' : 'left').dataset.boss = b.level;
+      const land = LAND_SIGNS[i + 1], y = b.y - up(b.kind === 'wall' ? 122 : 102) - 6;
+      if (land) sign(land.kind, land.land, land.text, y, away(y + 6));
     });
   }
 
@@ -284,7 +333,7 @@ export function mountBoard(host, opts = {}) {
     // Nothing lies beyond the last boss: the sky over the summit is never dimmed.
     return b && b.kind !== 'cairn' ? b.lock : -1;
   };
-  const artKey = () => [shown.current, shown.start, shown.next, shown.boss, shown.prints, o.dark, layout.W].join('/');
+  const artKey = () => [shown.current, shown.start, shown.next, shown.boss, shown.prints, shown.aurora, o.dark, layout.W].join('/');
 
   /* Dark theme: the day lands go to dusk. The town is night already, and
      keeps its lights. `c` is a canvas whose top row is board row y0. */
@@ -307,7 +356,7 @@ export function mountBoard(host, opts = {}) {
     }
     const h = t.y1 - t.y0;
     const c = pixelCanvas(cv, layout.W, h);
-    drawBoard(c, layout, { current: shown.current, start: shown.start, next: shown.next, icons, hedge: false,
+    drawBoard(c, layout, { current: shown.current, start: shown.start, next: shown.next, icons, hedge: false, aurora: shown.aurora !== false,
       prints: shown.prints == null ? null : [shown.prints, shown.prints + 1] }, t);
     const line = lockLine();
     if (line > t.y0) {
@@ -357,6 +406,39 @@ export function mountBoard(host, opts = {}) {
   const onScroll = () => { if (!queued) queued = requestAnimationFrame(paintTiles); };
   host.addEventListener('scroll', onScroll, { passive: true });
 
+  /* ── Ambient life ──
+     One small canvas, only as tall as the part of the board on screen, moved
+     to wherever that is and drawn at 30 frames a second at most. It runs
+     only with Animations on, the board in view and the app in front; still,
+     the land is the picture alone. `view` is the band of rows the canvas
+     covers, as drawBoard takes it, and what is lit. */
+  let ambRaf = 0, ambLast = 0, ambSeen = true, ambTop = -1, ambRows = 0;
+  const ambientOn = () => typeof o.ambient === 'function' && o.motion && ambSeen && !document.hidden && !!layout;
+  function ambientFrame(now) {
+    ambRaf = 0;
+    if (!ambientOn()) { ambientCanvas.style.display = 'none'; return; }
+    ambRaf = requestAnimationFrame(ambientFrame);
+    if (now - ambLast < 33) return;
+    ambLast = now;
+    const top = clamp(Math.floor((host.scrollTop - board.offsetTop) / SCALE), 0, layout.H);
+    const rows = Math.min(layout.H - top, Math.ceil(host.clientHeight / SCALE) + 2);
+    if (rows <= 0) return;
+    let c = ambientCanvas.getContext('2d');
+    if (rows !== ambRows || ambientCanvas.width !== layout.W) { ambRows = rows; c = pixelCanvas(ambientCanvas, layout.W, rows); }
+    else c.clearRect(0, 0, layout.W, rows);
+    if (top !== ambTop) { ambTop = top; ambientCanvas.style.top = top * SCALE + 'px'; }
+    o.ambient(c, layout, { y0: top, y1: top + rows, dark: o.dark, lock: lockLine(), current: shown.current }, now);
+    ambientCanvas.style.display = 'block';
+  }
+  const ambientKick = () => {
+    if (ambientOn()) { if (!ambRaf) ambRaf = requestAnimationFrame(ambientFrame); }
+    else ambientCanvas.style.display = 'none';
+  };
+  const ambWatch = typeof IntersectionObserver === 'function'
+    ? new IntersectionObserver((es) => { ambSeen = es[es.length - 1].isIntersecting; ambientKick(); }) : null;
+  if (ambWatch) ambWatch.observe(host);
+  document.addEventListener('visibilitychange', ambientKick);
+
   function paintGates() {
     const line = lockLine();
     gates.forEach((g, k) => {
@@ -387,7 +469,7 @@ export function mountBoard(host, opts = {}) {
     if (!plaques.has(key)) {
       const big = el('canvas');
       const [pw, ph] = plaqueSize(level); big.width = pw; big.height = ph;
-      drawPlaque(big.getContext('2d'), level, status, levelSpec(level).boss);
+      drawPlaque(big.getContext('2d'), level, status, levelSpec(level).boss, layout.landAt(layout.stones[level - 1].y));
       plaques.set(key, crispURL(big, SCALE * dpr));
     }
     return plaques.get(key);
@@ -424,7 +506,24 @@ export function mountBoard(host, opts = {}) {
     wear(ring.pointer, selected, true);
   }
 
+  /* A sign steps aside for the team: a boss's own sign while the team
+     stands at its gate or just through it (it lay across the handler), and
+     every sign near a moment while it plays (the title landed on one). */
+  function signs() {
+    board.querySelectorAll('.tb-sign').forEach((d) => {
+      const boss = Number(d.dataset.boss) || 0;
+      let hide = false;
+      if (moment) hide = true;
+      else if (boss && boss < layout.stones.length) hide = shown.current >= boss - 1 && shown.current <= boss + 1;
+      d.classList.toggle('away', hide);
+    });
+  }
+
   function teamSpot() { return teamSeat(o.lv, layout); }
+  /* The team's look, with the land it stands on: its shadow is that land's
+     shadow, and the cold stage is the town or the climb. */
+  const LAND_NAME = { hot: 'meadow', warm: 'wood', town: 'town', alp: 'climb' };
+  const lookHere = (lv = o.lv) => Object.assign({}, o.look, { land: LAND_NAME[layout.landAt(teamSeat(lv, layout).pt[1])] || 'meadow' });
   function placeAt(box, left) {
     if (facing !== left) { facing = left; team.set({ flip: left }); }
     teamCanvas.style.left = box[0] * SCALE + 'px';
@@ -441,14 +540,16 @@ export function mountBoard(host, opts = {}) {
   function render() {
     if (!moment) {
       shown = boardView(o.lv);
+      shown.aurora = shown.current >= layout.stones.length;
       const seat = teamSpot();
       shown.prints = shown.next == null ? null : Math.floor(seat.seg + 1e-6);
     }
     stones();
     paintTiles();
     paintGates();
+    signs();
     if (!moment) {
-      team.set({ look: o.look, motion: o.motion, state: restState() });
+      team.set({ look: lookHere(), motion: o.motion, state: restState() });
       place();
     }
   }
@@ -469,36 +570,28 @@ export function mountBoard(host, opts = {}) {
     for (const k of Object.keys(patch)) if (shown[k] !== patch[k]) { shown[k] = patch[k]; changed = true; }
     if (changed) { stones(); paintTiles(); paintGates(); }
   };
-  /* A pop: 0.85, up past 1 to 1.08, then back to 1. */
-  const pop = (T) => (T < 0 || T >= 380 ? 1 : T < 133 ? 0.85 + 0.23 * T / 133 : 1.08 - 0.08 * (T - 133) / 247);
+  /* A pop, in whole frames: small, past its size, back under it, there. */
+  const POP = [0.6, 1.16, 1.06, 0.96];
+  const pop = (T) => (T < 0 ? 1 : POP[Math.floor(T / 67)] || 1);
 
-  /* The stamp: the paw lands at twice size, then a ring of gold steps out. */
-  function stampAt(T, s) {
-    if (T < 0 || T > 600) { stampCanvas.style.display = 'none'; return; }
-    stampCanvas.style.display = 'block';
-    stampCanvas.style.left = (s.x - 18) * SCALE + 'px'; stampCanvas.style.top = (s.y - 18) * SCALE + 'px';
-    const c = stampCanvas.getContext('2d');
-    c.clearRect(0, 0, 36, 36);
-    if (T < 140) {
-      c.fillStyle = '#1c1411';
-      ICONS.paw.forEach((r, y) => { for (let x = 0; x < r.length; x++) if (r[x] !== '.') c.fillRect(11 + x * 2, 10 + y * 2, 4, 4); });
-      c.fillStyle = '#f2c14e';
-      ICONS.paw.forEach((r, y) => { for (let x = 0; x < r.length; x++) if (r[x] !== '.') c.fillRect(12 + x * 2, 11 + y * 2, 2, 2); });
-      return;
-    }
-    const r = [9, 12, 15, 17][Math.min(3, Math.floor((T - 140) / 115))];
-    c.fillStyle = T > 480 ? '#fff3c4' : '#f2c14e';
-    let last = null;
-    for (let a = 0; a < 360; a += 4) {
-      const x = 18 + Math.round(r * Math.cos(a * Math.PI / 180)), y = 18 + Math.round(r * 0.62 * Math.sin(a * Math.PI / 180));
-      if (last && last[0] === x && last[1] === y) continue;
-      last = [x, y];
-      if (T > 480 && (x + y) % 2) continue;
-      c.fillRect(x, y, 1, 1);
-    }
+  /* The effects layer for this frame: cleared, moved to the rows on screen,
+     and drawn on in the board's own rows. */
+  let fxTop = -1, fxRows = 0;
+  function fxBegin() {
+    const top = clamp(Math.floor((host.scrollTop - board.offsetTop) / SCALE) - 12, 0, layout.H);
+    const rows = Math.max(1, Math.min(layout.H - top, Math.ceil((host.clientHeight || 600) / SCALE) + 24));
+    let c;
+    if (rows !== fxRows || fxCanvas.width !== layout.W) { fxRows = rows; c = pixelCanvas(fxCanvas, layout.W, rows); }
+    else { c = fxCanvas.getContext('2d'); c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, layout.W, rows); }
+    if (top !== fxTop) { fxTop = top; fxCanvas.style.top = top * SCALE + 'px'; }
+    fxCanvas.style.display = 'block';
+    c.setTransform(1, 0, 0, 1, 0, -top);
+    return c;
   }
   function ribbonAt(text, cls, x, y, k) {
-    if (!text) { ribbon.style.display = 'none'; return; }
+    /* In the level-up's own overlay the card under the board says the name
+       and the title: said on the board as well, it was written twice. */
+    if (!text || o.still) { ribbon.style.display = 'none'; return; }
     if (ribbon.textContent !== text) ribbon.textContent = text;
     ribbon.className = 'tb-ribbon ' + cls;
     ribbon.style.display = 'block';
@@ -508,41 +601,101 @@ export function mountBoard(host, opts = {}) {
   }
   const cue = (m, name) => { if (!m.fired[name]) { m.fired[name] = true; if (m.onCue) m.onCue(name); } };
 
-  /* A level passed: the paw lands on its stone, the new name pops up over
-     it, and the team trots on to stand there. */
+  /* The way from one seat to another along the trail, as points a pixel or
+     so apart with how far along each is: the team is moved by distance, at
+     the speed its feet are going, so they do not slide. */
+  function wayBetween(seatA, seatB) {
+    const pts = [], n = Math.max(8, Math.ceil(Math.abs(seatB.seg - seatA.seg) * 48));
+    let d = 0;
+    for (let i = 0; i <= n; i++) {
+      const u = i / n;
+      const p = i === 0 ? seatA.pt : i === n ? seatB.pt : trailPoint(layout, 0, seatA.seg + (seatB.seg - seatA.seg) * u);
+      if (i) d += Math.hypot(p[0] - pts[i - 1].x, p[1] - pts[i - 1].y);
+      pts.push({ x: p[0], y: p[1], d });
+    }
+    return { pts, len: d };
+  }
+  function along(way, d) {
+    const pts = way.pts;
+    let i = 1;
+    while (i < pts.length - 1 && pts[i].d < d) i++;
+    const a = pts[i - 1], b = pts[i], k = b.d > a.d ? clamp((d - a.d) / (b.d - a.d), 0, 1) : 0;
+    return [Math.round(a.x + (b.x - a.x) * k), Math.round(a.y + (b.y - a.y) * k)];
+  }
+  /* How long the run's steps must be for the feet to keep up with the way. */
+  const strideFor = (len, ms) => clamp((len / (ms / 1000)) / SPEED.run, 0.55, 1.6);
+  const glowOf = () => STAGE_GLOW[(o.look && o.look.stage) || 'hot'] || STAGE_GLOW.hot;
+
+  /* A level passed: the paw lands on its stone with a flash and a ring of
+     sparks, the new name pops up over it, the trail lights up towards it,
+     the team runs there, and the stone after it takes the ring under a
+     burst of confetti. The summit is the same as far as the arrival, then
+     has a finale of its own. */
   function levelUpAt(m, t) {
-    const c = MOMENTS.levelup.cues;
+    const sum = m.kind === 'summit';
+    const c = MOMENTS[m.kind].cues;
     const top = stoneAt(m.after.current);
-    show({ current: t >= c.paw ? m.after.current : m.before.current, next: t >= c.arrive ? m.after.next : m.before.next,
-      boss: t >= c.arrive ? m.after.boss : m.before.boss });
-    stampAt(t - c.paw, top);
+    show(Object.assign({ current: t >= c.paw ? m.after.current : m.before.current, next: t >= c.arrive ? m.after.next : m.before.next,
+      boss: t >= c.arrive ? m.after.boss : m.before.boss }, sum ? { aurora: t >= c.flare } : {}));
     if (t >= c.name) cue(m, 'name');
-    if (m.title && t >= c.arrive) cue(m, 'title');
+    const titleAt = sum ? c.title : c.arrive + 250;
+    if (m.title && t >= titleAt) cue(m, 'title');
     // The name sits over the stone, and leaves before the team gets there.
-    ribbonAt(t >= c.name && (t < c.trot + 400 || t >= c.arrive + 250) ? (t >= c.arrive ? m.title || m.name : m.name) : '',
-      t >= c.arrive && m.title ? 'boss' : '', top.x, top.y - (t >= c.arrive ? 58 : 26), pop(t - (t >= c.arrive ? c.arrive + 250 : c.name)));
+    const titled = !!m.title && t >= titleAt;
+    ribbonAt(t >= c.name && (t < c.trot + 400 || t >= titleAt) ? (titled ? m.title : m.name) : '',
+      titled ? 'boss' : '', top.x, top.y - (t >= c.arrive ? (sum ? 84 : 66) : 30), pop(t - (t >= titleAt ? titleAt : c.name)));
     const u = clamp((t - c.trot) / (c.arrive - c.trot), 0, 1);
-    const left = u >= 1 ? m.seatB.left : m.seatA.left;
-    const seg = m.seatA.seg + (m.seatB.seg - m.seatA.seg) * u;
-    const pt = u <= 0 ? m.seatA.pt : u >= 1 ? m.seatB.pt : trailPoint(layout, 0, seg);
+    const d = u * m.way.len;
+    let pt = u <= 0 ? m.seatA.pt : u >= 1 ? m.seatB.pt : along(m.way, d);
+    /* The team pulls up a little to one side when the find would not fit
+       on the board from the stone itself (a stone in the middle of a narrow
+       board), and steps back on to it once the person has ducked away. */
+    if (m.endShift) {
+      const back = c.hide != null ? clamp((t - c.hide) / 500, 0, 1) : 0;
+      pt = [pt[0] + Math.round(m.endShift * u * u * (1 - back)), pt[1]];
+    }
+    /* On the way the team faces the way it is going; at each end, the way
+       it stands there. */
+    const left = u <= 0 ? m.seatA.left : u >= 1 ? m.endLeft : m.goLeft;
     placeAt(teamBox(pt, left), left);
     if (o.motion && u > 0 && u < 1) scrollTo(pt[1], 0.62, false);
-    /* The summit has no gate to open: its flag turns gold as the team arrives. */
-    if (m.bossK != null) { gateState = { k: m.bossK, open: 1, passed: t >= c.arrive }; paintGates(); }
+    /* The summit has no gate to open: its flag turns gold once the team is
+       up there (at the cue of its own, in the finale). */
+    if (m.bossK != null) { gateState = { k: m.bossK, open: 1, passed: t >= (sum ? c.flag : c.arrive) }; paintGates(); }
     if (t >= c.buzz) cue(m, 'buzz');
+    if (!o.motion) return;
+    const g = fxBegin(), glow = glowOf();
+    // The trail lights up from the team to the stamped stone, ahead of the run.
+    const lit = clamp((t - c.name) / Math.max(1, c.trot - c.name + 250), 0, 1);
+    if (lit > 0 && u < 1) trailGlow(g, m.dots.filter(p => p.d > d + 10), lit, t, m.dots.length);
+    stampPaw(g, top.x, top.y - 1, t - c.paw, ICONS.paw);
+    burst(g, top.x, top.y, t - c.paw, glow);
+    if (t >= c.arrive) {
+      const ring = m.after.next != null ? stoneAt(m.after.next) : null;
+      if (ring && !sum) flash(g, ring.x, ring.y, t - c.arrive);
+      if (!sum) confetti(g, pt[0] + (left ? -34 : 34), pt[1] - 30, t - c.arrive, { n: 38, stage: (o.look && o.look.stage) || 'hot', spread: 64, seed: m.after.current, life: 1350 });
+    }
+    if (sum) {
+      if (t >= c.flag) burst(g, m.gateX + (layout.faceLeft[layout.bosses[m.bossK].level - 1] ? 33 : -13), layout.bosses[m.bossK].y - 44, t - c.flag, STAGE_GLOW.cold, { round: true });
+      // The flare keeps to the sky over the team's heads.
+      if (layout.sky && t >= c.flare) skyFlare(g, layout.W, 4, Math.max(20, layout.sky.y - 52), t - c.flare);
+      if (t >= c.flare) burst(g, top.x, top.y - 4, t - c.flare, [GOLD_SPARK, '#ffffff', '#b4f8c8', '#fff0b0'], { round: true });
+      if (t >= c.title) {
+        confetti(g, top.x, top.y - 70, t - c.title, { n: 40, gold: true, spread: 80, seed: 7, life: 1500 });
+        confetti(g, top.x, top.y - 70, t - c.title - 500, { n: 24, gold: true, spread: 60, seed: 11, life: 1500 });
+      }
+    }
   }
 
-  /* A boss beaten: the trot to the gate, the find, the next land lighting
+  /* A boss beaten: the run to the gate, the find, the next land lighting
      up from the gate upward, the gate swinging, the team going through,
-     then the title. */
+     then the title under gold. */
   function bossAt(m, t) {
     const c = MOMENTS.boss.cues;
     const b = layout.bosses[m.bossK], s = stoneAt(b.level);
-    const left = stoneAt(b.level - 1).x > s.x;
+    const left = m.gateLeft;
     const home = teamBox(m.seatA.pt, left);
-    // At the gate: the gap between the dog and the person sits in the gateway.
-    const gateFor = (l) => [m.gateX - (l ? TEAM.w - 1 - 75 : 75) + (l ? 2 : 0), b.y + 4 - TEAM.ground];
-    const gate = gateFor(left);
+    const gate = m.gateFor(left);
     const beyond = teamBox(m.seatB.pt, m.seatB.left);
     let box, flip = left;
     /* The board follows the team to the gate. A run that passes several
@@ -561,7 +714,7 @@ export function mountBoard(host, opts = {}) {
          (off the edge of a narrow board) until the last frame snapped it back. */
       const u = Math.min(1, (t - c.through) / (c.title - c.through));
       flip = m.seatB.left;
-      box = lerpBox(gateFor(flip), beyond, u);
+      box = lerpBox(m.gateFor(flip), beyond, u);
     }
     placeAt(box, flip);
     gateState = { k: m.bossK, open: gateOpen(t), passed: t >= c.gate };
@@ -575,8 +728,16 @@ export function mountBoard(host, opts = {}) {
       sweepCanvas.getContext('2d').putImageData(unlockWood(m.locked, layout, p), 0, 0);
     } else sweepCanvas.style.display = 'none';
     if (t >= c.title) cue(m, 'title');
-    ribbonAt(t >= c.title ? m.title : '', 'boss', s.x, b.y - 96, pop(t - c.title));
+    ribbonAt(t >= c.title ? m.title : '', 'boss', s.x, b.y - 112, pop(t - c.title));
     if (t >= c.buzz) cue(m, 'buzz');
+    if (!o.motion) return;
+    const g = fxBegin();
+    // Sparks off the gate as it swings, and gold over the title.
+    burst(g, m.gateX, b.y - 14, t - c.gate - 133, glowOf(), { round: true });
+    if (t >= c.title) {
+      confetti(g, s.x, b.y - 96, t - c.title, { n: 36, gold: true, spread: 78, seed: b.level, life: 1500 });
+      confetti(g, s.x, b.y - 96, t - c.title - 420, { n: 20, gold: true, spread: 56, seed: b.level + 3, life: 1300 });
+    }
   }
 
   /* The land beyond a gate as it looks while locked, for the rows on screen
@@ -602,7 +763,7 @@ export function mountBoard(host, opts = {}) {
     const m = moment;
     if (!m) return;
     moment = null; gateState = null;
-    sweepCanvas.style.display = 'none'; stampCanvas.style.display = 'none';
+    sweepCanvas.style.display = 'none'; fxCanvas.style.display = 'none';
     /* The name stays up where the handler asked for no movement: it is the
        whole of the moment there. */
     if (o.motion) ribbon.style.display = 'none';
@@ -632,14 +793,45 @@ export function mountBoard(host, opts = {}) {
     /* The last boss stands on the summit with no gate and no land beyond,
        so it is played as a level passed, with its title. */
     const gated = m.kind === 'boss' && b && b.kind !== 'cairn';
-    moment = { kind: gated ? 'boss' : 'levelup', before, after, seatA, seatB, lvAfter: m.after, name: m.name || '', title: m.title || '',
+    /* The last boss stands on the summit with no gate and no land beyond:
+       it is played as a level passed as far as the cairn, and then has the
+       summit's own finale. */
+    const summit = !!b && b.kind === 'cairn';
+    const kind = gated ? 'boss' : summit ? 'summit' : 'levelup';
+    moment = { kind, before, after, seatA, seatB, lvAfter: m.after, name: m.name || '', title: m.title || '',
       bossK: b ? bossK : null, gateX: b ? gateX(layout, b) : 0,
       onCue: m.onCue || null, onEnd: m.onEnd || null, fired: {}, locked: null, tick: null };
     const mm = moment;
+    const cues = MOMENTS[kind].cues;
+    let env;
+    if (gated) {
+      const s = stoneAt(b.level);
+      mm.gateLeft = stoneAt(b.level - 1).x > s.x;
+      // At the gate: the gap between the dog and the person sits in the gateway.
+      mm.gateFor = (l) => [mm.gateX - (l ? TEAM.w - 1 - REACH.gate : REACH.gate) + (l ? 2 : 0), b.y + 4 - TEAM.ground];
+      const home = teamBox(seatA.pt, mm.gateLeft), gate = mm.gateFor(mm.gateLeft);
+      const out = mm.gateFor(seatB.left), beyond = teamBox(seatB.pt, seatB.left);
+      env = { stride: strideFor(Math.hypot(gate[0] - home[0], gate[1] - home[1]), cues.arrive),
+        stride2: strideFor(Math.hypot(beyond[0] - out[0], beyond[1] - out[1]), cues.title - cues.through) };
+    } else {
+      mm.way = wayBetween(seatA, seatB);
+      mm.goLeft = Math.abs(seatB.pt[0] - seatA.pt[0]) < 2 ? seatB.left : seatB.pt[0] < seatA.pt[0];
+      /* The find is played where the team pulls up, and the person in the
+         bush stands a good way past the dog's nose: the team faces whichever
+         way keeps them on the board, and turns to how it will stand once
+         the moment is over. */
+      const over = (l) => (l ? Math.max(0, FIND_REACH - seatB.pt[0]) : Math.min(0, layout.W - FIND_REACH - seatB.pt[0]));
+      mm.endLeft = summit || Math.abs(over(seatB.left)) <= Math.abs(over(!seatB.left)) ? seatB.left : !seatB.left;
+      mm.endShift = summit ? 0 : over(mm.endLeft);
+      // A light every six pixels or so of the way, for the trail to come on by.
+      mm.dots = [];
+      for (let d = 8; d < mm.way.len - 6; d += 6) { const q = along(mm.way, d); q.d = d; q.i = mm.dots.length; mm.dots.push(q); }
+      env = { stride: strideFor(mm.way.len, cues.arrive - cues.trot) };
+    }
     mm.tick = (t) => (mm.kind === 'boss' ? bossAt(mm, t) : levelUpAt(mm, t));
     o.lv = m.before;
-    shown = Object.assign({}, before, { prints: null });
-    stones(); paintTiles(); paintGates();
+    shown = Object.assign({}, before, { prints: null, aurora: before.current >= layout.stones.length });
+    stones(); paintTiles(); paintGates(); signs();
     if (gated) {
       /* Still, it goes straight to the gate; moving, it starts on the team
          (bossAt scrolls with it). */
@@ -649,11 +841,11 @@ export function mountBoard(host, opts = {}) {
     if (!o.motion) {
       mm.tick(MOMENTS[mm.kind].duration);
       const top = stoneAt(after.current);
-      ribbonAt(mm.title || mm.name, mm.title ? 'boss' : '', top.x, seatB.pt[1] - 56, 1);
+      ribbonAt(mm.title || mm.name, mm.title ? 'boss' : '', top.x, seatB.pt[1] - 66, 1);
       finish();
       return api;
     }
-    team.set({ motion: true, look: o.look, state: mm.kind });
+    team.set({ motion: true, look: lookHere(m.before), env, state: mm.kind });
     mm.tick(0);
     return api;
   }
@@ -665,6 +857,7 @@ export function mountBoard(host, opts = {}) {
       if (patch.lv) rover = null;
       if (moment && patch.lv) moment.lvAfter = patch.lv;
       if (!layout || hostWidth() !== builtW) { if (moment) finish(); build(); }
+      ambientKick();
       if (moment) { if (patch.motion === false) finish(); return api; }
       render();
       return api;
@@ -689,6 +882,10 @@ export function mountBoard(host, opts = {}) {
       moment = null;
       if (queued) cancelAnimationFrame(queued);
       host.removeEventListener('scroll', onScroll);
+      document.removeEventListener('visibilitychange', ambientKick);
+      if (ambWatch) ambWatch.disconnect();
+      if (ambRaf) cancelAnimationFrame(ambRaf);
+      o.ambient = null;
       team.destroy();
       host.textContent = '';
     },
@@ -713,5 +910,6 @@ export function mountBoard(host, opts = {}) {
      the ones it stands on, not the summit's. */
   scrollTo(teamSpot().pt[1], 0.68, false);
   render();
+  ambientKick();
   return api;
 }

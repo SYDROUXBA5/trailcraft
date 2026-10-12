@@ -1631,37 +1631,120 @@ body:has(#saveTrouble:not([hidden])) .screen.paper .page { padding-bottom: calc(
 /* ── Teams and the trail board ────────────────────────────────────────
    A team is one handler with one dog. Its stage colours are the trail-age
    colours the app already uses for Hot, Warm and Cold; where one is a fill
-   behind white words it is a shade darker, so the words can be read. */
+   behind white words it is a shade darker, so the words can be read.
+
+   These screens sit beside pixel art, so they share its edge and its
+   rhythm without pretending to be it: the type stays the app's, and three
+   things only wear a pixel frame (the level badge, the top of the next
+   level's card, the level-up card). Everything on them that is a line or a
+   step is 2px, the size of one art pixel. */
 :root { --hot: #BE3F2E; --warm: #D0821F; --cold: #3B8BD6; --hot-fill: #B0362A; --warm-fill: #A8620F; --cold-fill: #2A6DB0;
-  --gold-ink: #8A6210; --well: #EEF1F6; }
-:root[data-theme="dark"] { --gold-ink: #F2C14E; --well: #1C3560; }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --gold-ink: #F2C14E; --well: #1C3560; } }
+  --hot-deep: #7A2018; --warm-deep: #6E3F08; --cold-deep: #1A4778;
+  --hot-ink: #B0362A; --warm-ink: #96560A; --cold-ink: #2A6DB0;
+  --gold-ink: #8A6210; --gold: #F2C14E; --gold-deep: #B8861B; --on-gold: #2A1705; --well: #EEF1F6; --ok: #2F8A4A;
+  /* The pixel frame: a dark line, a gold line, then the card. */
+  --pxf-edge: #14284B; --pxf-rim: #DDB95A;
+  /* The primary button's lower edge, which closes when it is pressed. */
+  --press-edge: #0B1730; --press-ink: #FFFFFF;
+  /* Corners cut in steps of one art pixel. A clip, so they need no image:
+     8px for a card, 4px for a badge, 2px for a tag. */
+  --px-c8: polygon(0 8px, 2px 8px, 2px 4px, 4px 4px, 4px 2px, 8px 2px, 8px 0,
+    calc(100% - 8px) 0, calc(100% - 8px) 2px, calc(100% - 4px) 2px, calc(100% - 4px) 4px, calc(100% - 2px) 4px, calc(100% - 2px) 8px, 100% 8px,
+    100% calc(100% - 8px), calc(100% - 2px) calc(100% - 8px), calc(100% - 2px) calc(100% - 4px), calc(100% - 4px) calc(100% - 4px), calc(100% - 4px) calc(100% - 2px), calc(100% - 8px) calc(100% - 2px), calc(100% - 8px) 100%,
+    8px 100%, 8px calc(100% - 2px), 4px calc(100% - 2px), 4px calc(100% - 4px), 2px calc(100% - 4px), 2px calc(100% - 8px), 0 calc(100% - 8px));
+  --px-c8-top: polygon(0 8px, 2px 8px, 2px 4px, 4px 4px, 4px 2px, 8px 2px, 8px 0,
+    calc(100% - 8px) 0, calc(100% - 8px) 2px, calc(100% - 4px) 2px, calc(100% - 4px) 4px, calc(100% - 2px) 4px, calc(100% - 2px) 8px, 100% 8px, 100% 100%, 0 100%);
+  --px-c4: polygon(0 4px, 2px 4px, 2px 2px, 4px 2px, 4px 0, calc(100% - 4px) 0, calc(100% - 4px) 2px, calc(100% - 2px) 2px, calc(100% - 2px) 4px, 100% 4px,
+    100% calc(100% - 4px), calc(100% - 2px) calc(100% - 4px), calc(100% - 2px) calc(100% - 2px), calc(100% - 4px) calc(100% - 2px), calc(100% - 4px) 100%,
+    4px 100%, 4px calc(100% - 2px), 2px calc(100% - 2px), 2px calc(100% - 4px), 0 calc(100% - 4px));
+  --px-c2: polygon(0 2px, 2px 2px, 2px 0, calc(100% - 2px) 0, calc(100% - 2px) 2px, 100% 2px,
+    100% calc(100% - 2px), calc(100% - 2px) calc(100% - 2px), calc(100% - 2px) 100%, 2px 100%, 2px calc(100% - 2px), 0 calc(100% - 2px)); }
+:root[data-theme="dark"] { --gold-ink: #F2C14E; --well: #1C3560; --ok: #58B874;
+  --hot-ink: #FF8A76; --warm-ink: #F0A64A; --cold-ink: #7DB8EE;
+  --pxf-edge: #050B1A; --pxf-rim: #CFAE58; --press-edge: #1B3668; --press-ink: #FFE8A8; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --gold-ink: #F2C14E; --well: #1C3560; --ok: #58B874;
+  --hot-ink: #FF8A76; --warm-ink: #F0A64A; --cold-ink: #7DB8EE;
+  --pxf-edge: #050B1A; --pxf-rim: #CFAE58; --press-edge: #1B3668; --press-ink: #FFE8A8; } }
 
 /* Words for a screen reader only: what a tick or a ring says to the eye. */
 .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 
-.lvl-chip {
-  flex: 0 0 auto; padding: 5px 10px; border-radius: 999px; color: #fff; background: var(--muted);
-  font-size: calc(12.5 * var(--px)); font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap;
+/* A small picture made of art pixels (app.js draws them as squares): a
+   tick, a cross, a dash. Sized in whole art pixels, never with the text. */
+.pxi { display: block; width: 14px; height: 14px; fill: currentColor; shape-rendering: crispEdges; }
+
+/* The level badge: a stepping stone seen from the front, in the colour of
+   the stage, with the level on it. A team that has passed nothing of its
+   own yet wears it hatched: the number is where it starts, not what it has
+   earned. The whole badge grows with the text size, number and stone
+   together; only its steps stay one art pixel. */
+.lvl-badge {
+  --b-fill: var(--muted); --b-light: #8C9AB4; --b-deep: #36435C;
+  flex: 0 0 auto; position: relative; isolation: isolate; width: calc(44 * var(--px)); height: calc(44 * var(--px)); padding-bottom: 4px;
+  display: grid; place-items: center; clip-path: var(--px-c4); background: var(--b-deep); color: #fff;
+  font: 800 calc(18 * var(--px))/1 var(--display); font-variant-numeric: tabular-nums; letter-spacing: -0.02em;
+  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.28);
 }
-.lvl-chip.hot { background: var(--hot-fill); }
-.lvl-chip.warm { background: var(--warm-fill); }
-.lvl-chip.cold { background: var(--cold-fill); }
+.lvl-badge::before {
+  content: ""; position: absolute; z-index: -1; inset: 2px 2px 6px; clip-path: var(--px-c4);
+  background: var(--b-fill); box-shadow: inset 0 2px 0 var(--b-light);
+}
+.lvl-badge.hot { --b-fill: var(--hot-fill); --b-light: #DB6450; --b-deep: var(--hot-deep); }
+.lvl-badge.warm { --b-fill: var(--warm-fill); --b-light: #E09A3C; --b-deep: var(--warm-deep); }
+.lvl-badge.cold { --b-fill: var(--cold-fill); --b-light: #62A6E4; --b-deep: var(--cold-deep); }
+.lvl-badge.unproven::before {
+  background-image: repeating-conic-gradient(rgba(0, 0, 0, 0.26) 0 25%, transparent 0 50%); background-size: 4px 4px;
+}
+.lvl-badge.d3 { font-size: calc(15 * var(--px)); }
+.lvl-badge.sm { width: calc(36 * var(--px)); height: calc(36 * var(--px)); font-size: calc(15 * var(--px)); }
+.lvl-badge.sm.d3 { font-size: calc(12 * var(--px)); }
+/* Every stone carries the paw: the last badge is gold. */
+.lvl-badge.done { --b-fill: #D9A22E; --b-light: #FFE08A; --b-deep: #7A5208; color: var(--on-gold); text-shadow: none; }
+
+/* The words that go with a badge where there is room for them: "L22 · Warm". */
+.lvl-words { font-size: calc(12 * var(--px)); font-weight: 800; letter-spacing: 0.04em; color: var(--muted); white-space: nowrap; }
+.lvl-words.hot { color: var(--hot-ink); }
+.lvl-words.warm { color: var(--warm-ink); }
+.lvl-words.cold { color: var(--cold-ink); }
 
 /* Home: the picked handler and dog as a team, and the way to its board. */
 .team-row {
-  display: flex; align-items: center; gap: 12px; width: 100%; min-height: 56px; padding: 10px 14px;
+  display: flex; align-items: center; gap: 12px; width: 100%; min-height: 60px; padding: 10px 14px 10px 12px;
   background: var(--card); color: var(--ink); border: 1.5px solid var(--rim); border-radius: 16px;
   text-align: left; font: inherit; cursor: pointer; transition: transform 130ms var(--ease-out);
 }
 .team-row:active { transform: scale(0.98); }
-.team-row .who { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.25; }
-.team-row .who b { font-size: calc(16 * var(--px)); font-weight: 700; overflow-wrap: anywhere; }
-.team-row .who i { font-style: normal; font-size: calc(13.5 * var(--px)); font-weight: 700; color: var(--gold-ink); overflow-wrap: anywhere; }
+.team-row .who { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; line-height: 1.25; }
+.team-row .who b { font-size: calc(16 * var(--px)); font-weight: 800; overflow-wrap: anywhere; }
+.team-row .who .sub { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 8px; }
+.team-row .who i { font-style: normal; font-size: calc(14 * var(--px)); font-weight: 800; color: var(--gold-ink); overflow-wrap: anywhere; }
 .team-row.none .who i { color: var(--muted); font-weight: 500; }
 .team-row .go { flex: 0 0 auto; color: var(--muted); display: grid; }
 .team-row:focus-visible { outline: 2px solid var(--ember); outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) { .team-row:active { transform: none; } }
+
+/* The one filled button on a team screen: a 2px edge underneath that
+   closes when it is pressed, the way a button in the game would. */
+.team-screen .btn.moss, .team-screen .btn.ember, .lu-card .btn.moss, .tn-page .btn.moss {
+  min-height: 48px; color: var(--press-ink); font-weight: 800; box-shadow: 0 2px 0 var(--press-edge);
+  transition: transform 90ms var(--ease-out), box-shadow 90ms var(--ease-out);
+}
+.team-screen .btn.ember { --press-edge: #7A5708; --press-ink: #fff; }
+.team-screen .btn.moss:active, .team-screen .btn.ember:active, .lu-card .btn.moss:active, .tn-page .btn.moss:active {
+  transform: translateY(2px); box-shadow: 0 0 0 var(--press-edge); filter: none;
+}
+.team-screen .btn:focus-visible, .lu-card .btn:focus-visible, .tn-page .btn:focus-visible { outline: 2px solid var(--ember); outline-offset: 3px; }
+.tn-page .btn.moss:disabled { opacity: 0.45; box-shadow: none; }
+/* Cancel is no taller than the button that saves, and the way back is a
+   full 44. */
+.tn-page .btn.ghost { min-height: 48px; padding-top: 8px; padding-bottom: 8px; }
+.tn-page .back-btn { width: 44px; height: 44px; }
+/* Animations Off, or the phone's Reduce Motion: a press is shown by the
+   edge closing alone, nothing moves, and what fades does it quickly. */
+html[data-motion="off"] .team-screen .btn.moss:active, html[data-motion="off"] .team-screen .btn.ember:active,
+html[data-motion="off"] .lu-card .btn.moss:active, html[data-motion="off"] .tn-page .btn.moss:active,
+html[data-motion="off"] .tn-preset:active, html[data-motion="off"] .team-row:active { transform: none; }
+html[data-motion="off"] .lu { transition-duration: 120ms; }
 
 /* The board screen: three rows, and only the board in the middle scrolls. */
 .screen.team-screen { display: flex; flex-direction: column; overflow: hidden; }
@@ -1669,32 +1752,60 @@ body:has(#saveTrouble:not([hidden])) .screen.paper .page { padding-bottom: calc(
    key reach the next level before the hundred stones; on screen it stays
    pinned underneath. */
 .team-screen > .tb-scroll { order: 1; }
-.team-screen > .team-card { order: 2; }
+.team-screen > .team-sheet { order: 2; }
+/* The header: who, the level they stand on, the name they have earned. */
 .team-head {
-  flex: 0 0 auto; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px 12px; align-items: center;
-  padding: calc(var(--safe-t) + 12px) max(16px, calc((100% - 480px) / 2)) 12px;
-  background: var(--card); border-bottom: 1px solid var(--border);
+  flex: 0 0 auto; position: relative; z-index: 10;
+  display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; gap: 10px; align-items: center;
+  padding: calc(var(--safe-t) + 10px) max(16px, calc((100% - 480px) / 2)) 10px;
+  /* The board keeps its own daylight whatever the theme: a plain edge, no shadow. */
+  background: var(--card); border-bottom: 2px solid var(--border);
 }
-.team-head .back-btn { margin: 0; align-self: center; }
+.team-head .back-btn { margin: 0 -2px 0 -4px; align-self: center; width: 44px; height: 44px; }
 .team-who { min-width: 0; }
-.team-who .display { font-size: calc(21 * var(--px)); letter-spacing: -0.2px; line-height: 1.15; overflow-wrap: anywhere; }
-.team-name { margin: 2px 0 0; font-size: calc(15 * var(--px)); font-weight: 700; color: var(--gold-ink); overflow-wrap: anywhere; }
-.team-name .team-title {
-  display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: 999px; vertical-align: 1px;
-  background: var(--ember); color: #fff; font-size: calc(11.5 * var(--px)); font-weight: 800; letter-spacing: 0.04em;
+.team-who .display { font-size: calc(19 * var(--px)); font-weight: 800; letter-spacing: -0.2px; line-height: 1.15; overflow-wrap: anywhere; }
+.team-name {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 3px 6px; margin: 2px 0 0;
+  font-size: calc(14 * var(--px)); font-weight: 800; line-height: 1.2; color: var(--gold-ink); overflow-wrap: anywhere;
 }
-.team-meter { grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; font-size: calc(12.5 * var(--px)); color: var(--muted); }
+/* The title a boss gave: the one gold plate in the header. */
+.team-title, .tc-boss {
+  display: inline-block; padding: 3px 7px 2px; clip-path: var(--px-c2);
+  background: var(--gold); color: var(--on-gold); box-shadow: inset 0 -2px 0 var(--gold-deep);
+  font-size: calc(11 * var(--px)); font-weight: 800; letter-spacing: 0.08em; line-height: 1.2; text-transform: uppercase; white-space: nowrap;
+}
+.team-head .btn.small { min-height: 44px; padding: 8px 14px; font-weight: 800; }
+.team-meter {
+  grid-column: 1 / -1; display: flex; align-items: center; gap: 12px; min-height: 14px;
+  font-size: calc(12 * var(--px)); font-weight: 500; line-height: 1.2; color: var(--muted);
+}
 .team-meter > span { white-space: nowrap; }
-.team-meter strong { color: var(--ink); font-variant-numeric: tabular-nums; }
-.stage-bar { flex: 1; display: flex; gap: 3px; height: 8px; min-width: 60px; }
-.stage-bar i { display: block; position: relative; overflow: hidden; border-radius: 3px; background: var(--well); }
-.stage-bar i b { position: absolute; top: 0; bottom: 0; left: 0; }
+.team-meter strong { color: var(--ink); font-weight: 800; font-variant-numeric: tabular-nums; }
+/* Hot, Warm and Cold, each as long as its share of the ladder, with a tick
+   standing proud of the bar at each boss. */
+.stage-bar { flex: 1; display: flex; gap: 2px; height: 6px; min-width: 60px; margin: 4px 0; }
+.stage-bar i { display: block; position: relative; background: var(--border); }
+.stage-bar i b { position: absolute; top: 0; bottom: 0; left: 0; box-shadow: inset 0 2px 0 rgba(255, 255, 255, 0.28); }
 .stage-bar .hot b { background: var(--hot); }
 .stage-bar .warm b { background: var(--warm); }
 .stage-bar .cold b { background: var(--cold); }
+.stage-bar u { position: absolute; top: -2px; bottom: -2px; width: 2px; margin-left: -2px; background: var(--muted); text-decoration: none; }
+.stage-bar u.won { background: var(--gold-deep); top: -4px; bottom: -4px; }
 /* A team that has passed nothing of its own yet: the stages below its start
-   are drawn faint, stepped over and not earned. */
-.stage-bar.unproven b { opacity: 0.35; }
+   are drawn hatched, stepped over and not earned. */
+.stage-bar.unproven b {
+  opacity: 0.6; box-shadow: none;
+  -webkit-mask-image: repeating-conic-gradient(#000 0 25%, transparent 0 50%); mask-image: repeating-conic-gradient(#000 0 25%, transparent 0 50%);
+  -webkit-mask-size: 4px 4px; mask-size: 4px 4px;
+}
+
+/* A narrow phone (320 wide): the same row, drawn a little tighter. */
+@media (max-width: 350px) {
+  .team-head { gap: 8px; }
+  .team-head .btn.small { padding: 8px 10px; }
+  .tc-k { letter-spacing: 0.08em; }
+  .tc-r { gap: 6px; }
+}
 
 /* The trail board. Every size inside it is a whole number of art pixels, so
    nothing here grows with the text size: it is a picture, drawn to fit. */
@@ -1702,7 +1813,7 @@ body:has(#saveTrouble:not([hidden])) .screen.paper .page { padding-bottom: calc(
   flex: 1 1 auto; min-height: 0; position: relative; overflow-x: hidden; overflow-y: auto; -webkit-overflow-scrolling: touch;
   /* The meadow's green until the board says which land is on screen
      (board.js sets it), so its sides and a pull past its ends match. */
-  background: #9cc35a; padding-bottom: 18px;
+  background: #9cc35a; padding-bottom: 0;
   /* No scrollbar taking a strip off the side: the board is drawn to the
      width it is given, in whole art pixels, and must be given the same
      width before it has anything to scroll as after. */
@@ -1717,7 +1828,12 @@ body:has(#saveTrouble:not([hidden])) .screen.paper .page { padding-bottom: calc(
 .tb-layer { position: absolute; left: 0; pointer-events: none; }
 /* A land lighting up when its boss is beaten, and the paw landing on a stone. */
 .tb-sweep { z-index: 1; }
-.tb-stamp { z-index: 5; }
+/* A moment's effects (the paw, its sparks, the confetti) go over the team
+   and the gates. */
+.tb-fx { z-index: 8; top: 0; }
+/* What moves on the land by itself (grass, water, smoke, snow): over the
+   picture, under everything that stands on it. */
+.tb-ambient { z-index: 1; top: 0; }
 /* A boss's landmark: behind the team until the team is through it. */
 .tb-gate { z-index: 2; }
 .tb-gate.over { z-index: 7; }
@@ -1736,162 +1852,303 @@ body:has(#saveTrouble:not([hidden])) .screen.paper .page { padding-bottom: calc(
 html[data-motion="on"] .tb-ring.cur.big { animation: tb-blink 1.2s steps(1) infinite; }
 html[data-motion="on"] .tb-ring.cur.small { animation: tb-blink 1.2s steps(1) infinite reverse; }
 @keyframes tb-blink { 0% { opacity: 1; } 50% { opacity: 0; } }
-.tb-stone .tb-pointer { left: 50%; top: -14px; width: 12px; height: 10px; margin-left: -6px; display: none; }
+/* The stone being read: its gold ring and its plate stand one art pixel
+   proud, and an arrow points down at it. */
+.tb-stone[aria-pressed="true"] .tb-ring.sel, .tb-stone[aria-pressed="true"] .tb-plaque { transform: translateY(-2px); }
+.tb-stone .tb-pointer { left: 50%; top: -16px; width: 12px; height: 10px; margin-left: -6px; display: none; }
 .tb-stone[aria-pressed="true"] .tb-pointer { display: block; }
 html[data-motion="on"] .tb-stone[aria-pressed="true"] .tb-pointer { animation: tb-bob 0.8s steps(2) infinite; }
 @keyframes tb-bob { 0% { transform: translateY(0); } 50% { transform: translateY(-2px); } }
+
+/* A signpost: a plank on a post, in the wood of the land it stands in
+   (board.js hands over that land's five tones). It names a land where the
+   land starts, and a boss by its gate. The words are the app's own type,
+   so they can be read; everything else about it is on the art's grid. */
 .tb-sign {
-  position: absolute; left: 50%; z-index: 4; transform: translateX(-50%); white-space: nowrap; pointer-events: none;
-  padding: 5px 10px; border-radius: 6px; box-shadow: 0 3px 0 rgba(0, 0, 0, 0.25);
-  font-size: calc(11 * var(--px)); font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; color: #fff;
+  --w0: #2a1a22; --w1: #46292a; --w2: #6a4030; --w3: #96623a; --w4: #c88e4a; --cast: rgba(28, 52, 64, 0.3);
+  position: absolute; z-index: 4; display: flex; flex-direction: column; align-items: center; pointer-events: none;
+  transition: opacity 180ms ease;
 }
-.tb-sign.left { left: 6px; transform: none; }
-.tb-sign.right { left: auto; right: 6px; transform: none; }
-.tb-sign.hot { background: var(--hot-fill); }
-.tb-sign.cold { background: var(--cold-fill); }
-.tb-sign.warm { background: #E39A3B; color: #2A1705; }
-.tb-sign.boss { background: #2A1D12; color: #FFD98A; }
+/* A sign steps aside for the team (board.js): it fades, it does not jump. */
+.tb-sign.away { opacity: 0; visibility: hidden; transition: opacity 180ms ease, visibility 0s 180ms; }
+.tb-sign b {
+  display: block; padding: 2px; background: var(--w0); clip-path: var(--px-c2);
+  font-size: calc(11 * var(--px)); font-weight: 800; letter-spacing: 0.1em; line-height: 1; text-transform: uppercase; white-space: nowrap;
+}
+.tb-sign b > span {
+  display: flex; align-items: center; gap: 6px; padding: 5px 7px 5px; background: var(--w2); color: #FFF3D6;
+  box-shadow: inset 0 2px 0 var(--w3), inset 0 -2px 0 var(--w1); text-shadow: 0 2px 0 var(--w0);
+}
+/* The stage the land belongs to, as a painted square on the plank. */
+.tb-sign b > span::before { content: ""; flex: none; width: 6px; height: 6px; background: var(--pip, transparent); box-shadow: 0 0 0 2px var(--w0); margin: 0 2px 0 3px; }
+.tb-sign.hot { --pip: #E0513C; }
+.tb-sign.warm { --pip: #F0A030; }
+.tb-sign.cold { --pip: #5AA8F0; }
+.tb-sign.boss b > span { background: var(--w1); color: #FFD98A; box-shadow: inset 0 2px 0 var(--w2), inset 0 -2px 0 var(--w0); }
+.tb-sign.boss b > span::before { display: none; }
+/* The post, and the shadow it throws down and to the right. */
+.tb-sign::after {
+  content: ""; width: 4px; height: 12px; margin-top: -2px; background: linear-gradient(var(--w1) 0 4px, var(--w3) 0);
+  box-shadow: -2px 0 0 var(--w0), 2px 0 0 var(--w2), 4px 0 0 var(--w0), 0 2px 0 var(--w0), 2px 2px 0 var(--w0),
+    6px 0 0 var(--cast), 8px 0 0 var(--cast), 6px 2px 0 var(--cast), 10px 2px 0 var(--cast), 8px 2px 0 var(--cast);
+}
 /* The name a level-up earns, popping up over its stone. */
 .tb-ribbon {
   position: absolute; z-index: 8; white-space: nowrap; pointer-events: none; transform-origin: 50% 100%;
-  padding: 5px 12px; border-radius: 8px; background: #2A1D12; color: #FFD98A; box-shadow: 0 3px 0 rgba(0, 0, 0, 0.3);
-  font-size: calc(14 * var(--px)); font-weight: 800; letter-spacing: 0.02em;
+  padding: 6px 12px 7px; clip-path: var(--px-c2); background: #2A1D12; color: #FFD98A;
+  box-shadow: inset 0 0 0 2px #2A1D12, inset 0 4px 0 #4A3320, inset 0 -4px 0 #17100A;
+  font-size: calc(14 * var(--px)); font-weight: 800; letter-spacing: 0.02em; line-height: 1.2;
 }
-.tb-ribbon.boss { background: #F2C14E; color: #2A1705; font-size: calc(17 * var(--px)); padding: 7px 16px; }
+.tb-ribbon.boss {
+  background: var(--gold); color: var(--on-gold); font-size: calc(16 * var(--px)); padding: 8px 16px 9px; letter-spacing: 0.06em; text-transform: uppercase;
+  box-shadow: inset 0 0 0 2px #6E4A08, inset 0 4px 0 #FFE9A8, inset 0 -4px 0 var(--gold-deep);
+}
 
 /* A level passed, played over the result. The scrim takes the tap that
-   skips it; the board inside is a picture, never scrolled by hand. */
+   skips it; the board inside is a picture, never scrolled by hand. The
+   scrim is a flat dark with no blur: on a phone with Reduce Transparency a
+   blur is dropped anyway, and what is left has to be enough. */
 .lu {
-  position: fixed; inset: 0; z-index: 70; display: grid; place-items: center;
-  padding: calc(var(--safe-t) + 16px) 16px 24px; background: rgba(11, 22, 48, 0.72);
-  opacity: 0; transition: opacity 250ms ease;
+  position: fixed; inset: 0; z-index: 70; display: grid; place-items: center; isolation: isolate;
+  padding: calc(var(--safe-t) + 16px) 16px calc(var(--safe-b) + 20px);
+  opacity: 0; transition: opacity 200ms var(--ease-out);
 }
+.lu::before { content: ""; position: absolute; inset: 0; z-index: -1; background: var(--moss-deep); opacity: 0.88; }
 .lu[hidden] { display: none; }
 .lu.show { opacity: 1; }
+/* The card wears the pixel frame: a dark line, a gold line, the card. */
 .lu-card {
-  width: min(100%, 420px); background: var(--card); color: var(--ink); border-radius: 24px; overflow: hidden;
-  padding: 18px 0 16px; box-shadow: 0 24px 60px -20px rgba(0, 0, 0, 0.6); text-align: center;
+  position: relative; isolation: isolate; width: min(100%, 400px); padding: 4px 4px 20px;
+  background: var(--pxf-edge); color: var(--ink); clip-path: var(--px-c8); text-align: center;
 }
-.lu-card .label { display: block; margin: 0 16px; color: var(--gold-ink); }
-.lu-name { margin: 4px 16px 0; font-family: var(--display); font-size: calc(26 * var(--px)); line-height: 1.15; letter-spacing: -0.3px; overflow-wrap: anywhere; }
+.lu-card::before, .lu-card::after { content: ""; position: absolute; z-index: -1; pointer-events: none; clip-path: var(--px-c8); }
+.lu-card::before { inset: 2px; background: var(--pxf-rim); }
+.lu-card::after { inset: 4px; background: var(--card); }
+/* The board fills the top two thirds of the card, its edges falling off
+   into the frame in a dither. */
+.lu-stage { position: relative; margin: 0 0 14px; border-bottom: 2px solid var(--pxf-rim); clip-path: var(--px-c8-top); }
+.lu-stage::before, .lu-stage::after {
+  content: ""; position: absolute; inset: 0; z-index: 12; pointer-events: none; --v: rgba(6, 12, 30, 0.55);
+  /* Only the rim of each is kept: the middle is cut out of the mask. */
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude;
+}
+.lu-stage::before { padding: 8px; background: repeating-conic-gradient(var(--v) 0 25%, transparent 0 50%) 0 0 / 4px 4px; }
+.lu-stage::after { padding: 16px; background: conic-gradient(var(--v) 25%, transparent 0) 2px 0 / 4px 4px; }
+.lu-board { flex: none; display: block; height: min(54vh, 432px); margin: 0; padding: 0; overflow: hidden; pointer-events: none; }
+.lu-card .label { display: block; margin: 0 20px; color: var(--gold-ink); font-size: calc(12 * var(--px)); font-weight: 800; letter-spacing: 0.14em; }
+.lu-name {
+  margin: 4px 20px 0; font-family: var(--display); font-size: calc(28 * var(--px)); font-weight: 800; line-height: 1.12; letter-spacing: -0.4px;
+  overflow-wrap: anywhere;
+}
+/* The boss's title: gold, on a plate. */
 .lu-title {
-  display: inline-block; margin: 8px 16px 0; padding: 3px 14px; border-radius: 999px;
-  background: var(--ember); color: #fff; font-size: calc(14 * var(--px)); font-weight: 800; letter-spacing: 0.04em;
+  display: inline-block; margin: 10px 20px 0; padding: 6px 14px 5px; clip-path: var(--px-c2);
+  background: var(--gold); color: var(--on-gold); box-shadow: inset 0 2px 0 #FFE9A8, inset 0 -2px 0 var(--gold-deep);
+  font-size: calc(14 * var(--px)); font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase;
 }
 .lu-title[hidden] { display: none; }
-.lu-board { flex: none; height: min(320px, 46vh); margin: 14px 0 16px; padding: 0; overflow: hidden; pointer-events: none; }
-.lu-card .btn { width: calc(100% - 32px); margin: 0 16px; min-height: 48px; }
-.lu-hint { margin: -6px 16px 12px; font-size: calc(13 * var(--px)); line-height: 1.4; color: var(--muted); }
+.lu-card .btn { display: block; width: calc(100% - 40px); margin: 18px 20px 0; }
+.lu-hint { margin: 10px 20px 0; font-size: calc(14 * var(--px)); line-height: 1.4; color: var(--muted); }
 .lu-hint[hidden] { display: none; }
 /* Its signs would only crowd so small a picture. */
 .lu-board .tb-sign { display: none; }
-html[data-motion="on"] .lu-name.pop { animation: lu-pop 380ms var(--ease-out); }
-@keyframes lu-pop { 0% { transform: scale(0.85); } 35% { transform: scale(1.08); } 100% { transform: scale(1); } }
+html[data-motion="on"] .lu-name.pop { animation: lu-pop 360ms steps(1) both; }
+/* The new name lands in whole art pixels: up four, up two more, back. */
+@keyframes lu-pop { 0% { transform: translateY(6px); opacity: 0; } 20% { transform: translateY(-4px); opacity: 1; } 45% { transform: translateY(-6px); } 70% { transform: translateY(-2px); } 100% { transform: none; } }
+html[data-motion="on"] .lu-title:not([hidden]) { animation: lu-plate 300ms steps(1) both; }
+@keyframes lu-plate { 0% { transform: translateY(4px); opacity: 0; } 40% { transform: translateY(-2px); opacity: 1; } 100% { transform: none; } }
+@media (max-height: 620px) { .lu-board { height: min(44vh, 300px); } .lu-name { font-size: calc(24 * var(--px)); } }
 
 /* The run's line on its result: what it did for the team's level. */
 .res-level {
-  display: flex; align-items: center; gap: 10px; width: 100%; min-height: 48px; margin: 12px 0 0; padding: 10px 12px;
-  border: 1px solid var(--border); border-radius: 14px; background: var(--card); color: var(--ink);
-  font: 600 calc(14.5 * var(--px)) var(--body); line-height: 1.35; text-align: left; cursor: pointer;
+  display: flex; align-items: center; gap: 10px; width: 100%; min-height: 52px; margin: 12px 0 0; padding: 10px 12px;
+  border: 1.5px solid var(--border); border-radius: 14px; background: var(--card); color: var(--ink);
+  font: 500 calc(14 * var(--px)) var(--body); line-height: 1.35; text-align: left; cursor: pointer;
 }
 .res-level[hidden] { display: none; }
-.res-level .i { flex: 0 0 26px; height: 26px; display: grid; place-items: center; border-radius: 8px; background: var(--muted); color: var(--card); font-weight: 800; }
+.res-level .i, .tc-tries .i {
+  flex: 0 0 auto; width: 26px; height: 26px; display: grid; place-items: center; clip-path: var(--px-c2);
+  background: var(--muted); color: var(--card); font-weight: 800; box-shadow: inset 0 -2px 0 rgba(0, 0, 0, 0.22);
+}
 .res-level .t { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .res-level .go { flex: 0 0 auto; color: var(--muted); display: grid; }
-.res-level.up { border-color: var(--gold-ink); }
-.res-level.up .i { background: #F2C14E; color: #2A1705; }
-.res-level.yes .i { background: #2F8A4A; color: #fff; }
+.res-level.up { border-color: var(--rim); font-weight: 800; }
+.res-level.up .i { background: var(--gold); color: var(--on-gold); }
+.res-level.yes .i, .tc-tries .yes .i { background: var(--ok); color: #fff; }
+.res-level.miss .i, .tc-tries .miss .i { background: var(--hot-fill); color: #fff; }
 .res-level:focus-visible { outline: 2px solid var(--ember); outline-offset: 2px; }
 
-/* The card pinned under the board: the next level, or the stone tapped. */
-.team-card {
-  flex: 0 0 auto; position: relative; z-index: 9; max-height: 60%; margin-top: -18px;
-  overflow-y: auto; -webkit-overflow-scrolling: touch;
-  padding: 0 max(16px, calc((100% - 480px) / 2)) calc(var(--safe-b) + 14px);
-  background: var(--card); border-radius: 22px 22px 0 0; box-shadow: 0 -8px 28px rgba(15, 31, 61, 0.16);
+/* The card pinned under the board: the next level, or the stone tapped.
+   The sheet is what stays put and wears the frame along its top; the card
+   inside it is what scrolls when it is opened out. */
+.team-sheet {
+  flex: 0 0 auto; position: relative; z-index: 9; isolation: isolate; display: flex; flex-direction: column;
+  max-height: 62%; margin-top: -8px; background: var(--pxf-edge); clip-path: var(--px-c8-top);
 }
-:root[data-theme="dark"] .team-card { box-shadow: 0 -8px 28px rgba(0, 0, 0, 0.45); }
+.team-sheet::before, .team-sheet::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; z-index: -1; pointer-events: none; clip-path: var(--px-c8-top); }
+.team-sheet::before { top: 2px; background: var(--pxf-rim); }
+.team-sheet::after { top: 4px; background: var(--card); }
+.team-card {
+  flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch;
+  padding: 4px max(16px, calc((100% - 480px) / 2)) calc(var(--safe-b) + 14px);
+}
 .tc-top {
-  display: block; width: 100%; min-height: 44px; padding: 8px 0 4px; border: 0; background: none;
+  display: block; width: 100%; min-height: 44px; padding: 6px 0 4px; border: 0; background: none;
   font: inherit; color: inherit; text-align: left; cursor: pointer;
 }
-.tc-top::before { content: ""; display: block; width: 36px; height: 4px; margin: 0 auto 8px; border-radius: 2px; background: var(--border); }
-.tc-top:focus-visible { outline: 2px solid var(--ember); outline-offset: -2px; border-radius: 12px; }
-.tc-k {
-  display: flex; justify-content: space-between; gap: 8px;
-  font-size: calc(11.5 * var(--px)); font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted);
+/* The handle: three art pixels in a row, which is how the game says "pull". */
+.tc-top::before {
+  content: ""; display: block; width: 6px; height: 4px; margin: 0 auto 8px; background: var(--muted); opacity: 0.6;
+  box-shadow: -10px 0 0 var(--muted), 10px 0 0 var(--muted);
 }
-.tc-stage.hot { color: var(--hot-fill); }
-.tc-stage.warm { color: var(--warm-fill); }
-.tc-stage.cold { color: var(--cold-fill); }
-:root[data-theme="dark"] .tc-stage.hot { color: #FF7A66; }
-:root[data-theme="dark"] .tc-stage.warm { color: #F0A64A; }
-:root[data-theme="dark"] .tc-stage.cold { color: #7DB8EE; }
-.tc-name { margin: 0; font-size: calc(21 * var(--px)); font-weight: 800; letter-spacing: -0.3px; line-height: 1.2; overflow-wrap: anywhere; }
-.tc-new { margin: 3px 0 0; font-size: calc(14 * var(--px)); font-weight: 700; color: var(--gold-ink); }
-.tc-also { margin: 2px 0 0; font-size: calc(13 * var(--px)); color: var(--muted); }
-.tc-body { margin: 6px 0 0; font-size: calc(14.5 * var(--px)); line-height: 1.45; }
-.tc-checks { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 2px; padding: 0; list-style: none; }
+/* The ring sits inside the row, clear of the frame above it and of the
+   words: drawn on the button's own edge it cut through "Next" and the
+   chevron. The row is padded out for it and pulled back by the same. */
+.tc-top { width: calc(100% + 16px); margin: 0 -8px; padding: 6px 8px 4px; }
+.tc-top:focus-visible { outline: 2px solid var(--ember); outline-offset: -3px; border-radius: 8px; }
+.tc-k {
+  display: flex; justify-content: space-between; align-items: center; gap: 8px;
+  font-size: calc(12 * var(--px)); font-weight: 800; letter-spacing: 0.14em; line-height: 1.3; text-transform: uppercase; color: var(--muted);
+}
+.tc-k > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tc-r { flex: none; display: inline-flex; gap: 10px; align-items: center; white-space: nowrap; }
+/* The stage, as a painted tag in its own colour. */
+.tc-stage { padding: 3px 7px 2px; clip-path: var(--px-c2); background: var(--muted); color: #fff; letter-spacing: 0.1em; }
+.tc-stage.hot { background: var(--hot-fill); }
+.tc-stage.warm { background: var(--warm-fill); }
+.tc-stage.cold { background: var(--cold-fill); }
+.tc-more { display: inline-flex; align-items: center; gap: 4px; color: var(--gold-ink); }
+.tc-more svg { width: 10px; height: 6px; fill: currentColor; shape-rendering: crispEdges; }
+.tc-top[aria-expanded="true"] .tc-more svg { transform: scaleY(-1); }
+.tc-notes { display: none; }
+.tc-name {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin: 0;
+  font-size: calc(22 * var(--px)); font-weight: 800; letter-spacing: -0.3px; line-height: 1.18; overflow-wrap: anywhere;
+}
+.tc-new { display: flex; align-items: baseline; gap: 8px; margin: 5px 0 0; font-size: calc(14 * var(--px)); font-weight: 800; line-height: 1.3; color: var(--gold-ink); }
+.tc-new-k {
+  flex: none; padding: 3px 6px 2px; clip-path: var(--px-c2); background: var(--gold); color: var(--on-gold);
+  font-size: calc(11 * var(--px)); letter-spacing: 0.12em; line-height: 1.2; text-transform: uppercase;
+}
+.tc-also { margin: 4px 0 0; font-size: calc(14 * var(--px)); line-height: 1.35; color: var(--muted); }
+.tc-body { margin: 6px 0 0; font-size: calc(16 * var(--px)); line-height: 1.45; }
+
+/* What the level asks, a chip to a thing. Three states, told apart by
+   shape as well as colour: a filled box with a tick is done, an empty box
+   is still to do, a hatched box with a figure is how near the best try
+   came. What is new at this level is outlined in gold. */
+.tc-checks { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 0; padding: 0; list-style: none; }
 .tc-checks li {
-  display: inline-flex; align-items: center; gap: 6px; padding: 5px 11px 5px 6px; border-radius: 999px;
-  background: var(--well); font-size: calc(13 * var(--px)); font-weight: 600;
+  flex: none; display: inline-flex; align-items: center; gap: 7px; min-height: 34px; padding: 5px 10px 5px 6px; border-radius: 8px;
+  background: var(--well); font-size: calc(14 * var(--px)); font-weight: 500; line-height: 1.2; white-space: nowrap;
 }
 .tc-checks .m {
-  flex: 0 0 auto; width: 17px; height: 17px; display: inline-grid; place-items: center; border-radius: 50%;
-  border: 2px solid var(--muted); color: transparent; font-size: calc(11 * var(--px)); line-height: 1;
+  flex: 0 0 auto; width: 18px; height: 18px; display: grid; place-items: center;
+  border: 2px solid var(--muted); color: transparent;
 }
-.tc-checks li.ok .m { border-color: var(--ink); background: var(--ink); color: var(--card); }
-/* What this level adds is ringed in gold, whether or not it is ticked yet. */
-.tc-checks li.new { box-shadow: inset 0 0 0 1.5px var(--ember); color: var(--gold-ink); }
-.tc-checks li i { font-style: normal; font-weight: 500; color: var(--muted); }
-.tc-states { display: grid; gap: 8px; margin-top: 10px; }
-.tc-state { padding: 10px 12px; border-radius: 14px; background: var(--well); border-left: 4px solid var(--muted); }
-.tc-state.warn { border-left-color: var(--ember); }
-.tc-state.gold { border-left-color: var(--ember); background: rgba(184, 134, 27, 0.14); }
-.tc-state b { display: block; font-size: calc(14 * var(--px)); font-weight: 800; }
-.tc-state p { margin: 2px 0 0; font-size: calc(13.5 * var(--px)); line-height: 1.4; }
-.tc-state .btn { margin-top: 8px; }
-.tc-state.quiet { padding: 0; background: none; border: 0; color: var(--muted); }
-.tc-state.quiet b { display: inline; font-size: calc(13 * var(--px)); font-weight: 700; }
-.tc-state.quiet p { display: inline; font-size: calc(13 * var(--px)); }
-.tc-tries-k { margin-top: 12px; }
-.tc-tries { display: grid; gap: 5px; margin: 6px 0 0; padding: 0; list-style: none; }
+.tc-checks li.ok { font-weight: 800; }
+.tc-checks li.ok .m { border-color: var(--ok); background: var(--ok); color: #fff; }
+.tc-checks li.part .m {
+  border-color: var(--gold-deep);
+  background: repeating-conic-gradient(var(--gold-deep) 0 25%, transparent 0 50%) 0 0 / 4px 4px;
+}
+.tc-checks li.new { box-shadow: inset 0 0 0 2px var(--rim); }
+.tc-checks li i { font-style: normal; font-weight: 800; color: var(--gold-ink); margin-left: 2px; }
+
+/* What the engine has to say: a placement to prove, a day to ease off, a
+   dog too young, a hot day, the day's limit. A coloured bar and a mark at
+   the left say how much it matters before a word is read. */
+.tc-states { display: grid; gap: 6px; margin-top: 10px; }
+.tc-state {
+  --tone: var(--cold-ink);
+  display: grid; grid-template-columns: 22px minmax(0, 1fr); column-gap: 8px; align-items: start;
+  padding: 9px 12px 9px 10px; border-radius: 8px; background: var(--well); box-shadow: inset 4px 0 0 var(--tone);
+}
+.tc-state > .n { width: 18px; height: 18px; margin: 1px 0 0 4px; display: grid; place-items: center; clip-path: var(--px-c2); background: var(--tone); color: var(--card); }
+.tc-state.warn { --tone: var(--warm-ink); }
+.tc-state.gold { --tone: var(--gold-deep); background: rgba(242, 193, 78, 0.18); }
+.tc-state b { display: block; font-size: calc(14 * var(--px)); font-weight: 800; line-height: 1.3; }
+.tc-state p { grid-column: 2; margin: 1px 0 0; font-size: calc(14 * var(--px)); line-height: 1.4; }
+.tc-state .btn { grid-column: 2; justify-self: start; margin-top: 8px; min-height: 44px; }
+.tc-state.quiet { display: block; padding: 0; background: none; box-shadow: none; color: var(--muted); }
+.tc-state.quiet p { margin: 0; font-size: calc(14 * var(--px)); }
+
+/* The last tries: a mark for the verdict, the day, the word, and under
+   them the engine's own reason in plain words. */
+.tc-tries-k { margin-top: 14px; font-weight: 800; letter-spacing: 0.14em; }
+.tc-tries { display: grid; gap: 6px; margin: 6px 0 0; padding: 0; list-style: none; }
 .tc-tries li {
-  display: grid; grid-template-columns: 20px minmax(0, 1fr); column-gap: 8px; align-items: start;
-  padding: 8px 10px; border-radius: 12px; background: var(--well); font-size: calc(13 * var(--px)); line-height: 1.35;
+  display: grid; grid-template-columns: 26px minmax(0, 1fr); column-gap: 10px; align-items: start;
+  padding: 8px 10px; border-radius: 8px; background: var(--well); font-size: calc(14 * var(--px)); line-height: 1.35;
 }
-.tc-tries .i {
-  width: 18px; height: 18px; margin-top: 1px; display: inline-grid; place-items: center; border-radius: 5px;
-  background: var(--muted); color: var(--card); font-size: calc(11 * var(--px)); font-weight: 800;
-}
-.tc-tries .yes .i { background: #2F8A4A; color: #fff; }
-.tc-tries b { font-weight: 700; }
+.tc-tries .i { margin-top: 1px; }
+.tc-tries .h { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0 8px; }
+.tc-tries b { font-weight: 800; }
+.tc-tries .v { font-weight: 800; color: var(--muted); }
+.tc-tries .yes .v { color: var(--ok); }
+.tc-tries .miss .v { color: var(--hot-ink); }
 .tc-tries .why { display: block; color: var(--muted); overflow-wrap: anywhere; }
-.tc-back { min-height: 44px; padding: 0; border: 0; background: none; font: inherit; font-size: calc(14 * var(--px)); font-weight: 700; color: var(--gold-ink); cursor: pointer; }
-.tc-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
-/* Folded, the card is the level's name, its checklist and whatever the
-   handler must not miss: the placement offer with its button, Ease off, the
-   dog's age, the heat, the day's limit. Only the quiet line, the small print
-   and the tries fold away, and the word at the top right says there is more. */
+.tc-back {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 44px; margin-top: 6px; padding: 0; border: 0; background: none;
+  font: inherit; font-size: calc(14 * var(--px)); font-weight: 800; color: var(--gold-ink); cursor: pointer;
+}
+.tc-back:focus-visible { outline: 2px solid var(--ember); outline-offset: 2px; border-radius: 8px; }
+.tc-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
+/* Folded, which is how the card starts, it is the level's name, what is
+   new and the checklist on one row that scrolls sideways, so the board
+   keeps most of the screen. Whatever the handler must not miss stays in
+   full: the offer to start lower with its button, Ease off, the dog's age,
+   the heat, the day's limit. A note that only informs (the placement
+   check, Rusty) shrinks to its title; the small print and the tries fold
+   away, and the word at the top right says there is more. */
 .team-card.folded .tc-also, .team-card.folded .tc-state.quiet, .team-card.folded .tc-tries-k, .team-card.folded .tc-tries { display: none; }
-.tc-r { display: inline-flex; gap: 12px; align-items: baseline; }
-.tc-more { color: var(--gold-ink); }
-.tc-notes { display: none; }
+.team-card.folded .tc-checks {
+  flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none;
+  margin-left: calc(-1 * max(16px, calc((100vw - 480px) / 2))); margin-right: calc(-1 * max(16px, calc((100vw - 480px) / 2)));
+  padding: 2px max(16px, calc((100vw - 480px) / 2));
+}
+.team-card.folded .tc-checks::-webkit-scrollbar { display: none; }
+.team-card.folded .tc-state.info.fold { display: inline-grid; grid-template-columns: 22px auto; justify-self: start; padding: 6px 12px 6px 8px; }
+.team-card.folded .tc-state.info.fold p { display: none; }
 /* A very short phone (320 by 568): the board was a strip one stone high.
    The card takes less, and folded it is the level's name alone, with the
    notes it has folded away counted beside "More". */
 @media (max-height: 620px) {
-  .team-card { max-height: 45%; }
+  .team-sheet { max-height: 45%; }
   .team-card.folded .tc-new, .team-card.folded .tc-checks, .team-card.folded .tc-states { display: none; }
   .team-card.folded .tc-notes { display: inline; }
 }
+/* Short and narrow at once: "1 note" says more than "More" does, and there
+   is not the width for both beside the level and its stage. */
+@media (max-height: 620px) and (max-width: 350px) { .tc-more.has-notes .tc-more-w { display: none; } }
 
-/* A new team: the look, tried on before it is kept. */
-.tn-stage { display: grid; place-items: center; padding: 16px 0 6px; border-radius: 16px; background: #9cc35a; overflow: hidden; }
-.tn-stage canvas { display: block; max-width: 100%; image-rendering: pixelated; }
-.chip .dot { flex: 0 0 auto; width: 18px; height: 18px; margin-left: 6px; border-radius: 50%; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.25); }
-.chip.look { min-height: 48px; padding: 8px 16px 8px 10px; }
+/* A new team: where it starts, and the look, tried on before it is kept. */
+.tn-presets { display: grid; gap: 8px; }
+.tn-preset {
+  display: flex; align-items: center; gap: 12px; width: 100%; min-height: 60px; padding: 10px 14px 10px 12px;
+  border: 2px solid var(--border); border-radius: 14px; background: var(--card); color: var(--ink);
+  font: inherit; text-align: left; cursor: pointer; transition: transform 130ms var(--ease-out);
+}
+.tn-preset:active { transform: scale(0.98); }
+.tn-preset .check-text b { font-weight: 800; }
+.tn-preset.on { border-color: var(--ember); background: var(--well); }
+.tn-preset.on .check-mark { opacity: 1; transform: scale(1); }
+.tn-preset:focus-visible { outline: 2px solid var(--ember); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { .tn-preset:active { transform: none; } }
+/* The team as it will look, kept in sight while the coat, the jacket and
+   the hat are picked underneath it. */
+.tn-stage {
+  position: -webkit-sticky; position: sticky; top: calc(var(--safe-t) + 8px); z-index: 3;
+  display: grid; place-items: center; overflow: hidden; border: 2px solid var(--border); border-radius: 12px; background: var(--well);
+}
+/* Never squeezed to fit: a picture scaled by anything but a whole number
+   goes soft. On a narrow phone its two sides are cropped instead. */
+.tn-stage canvas { display: block; max-width: none; image-rendering: pixelated; }
+.chip .dot { flex: 0 0 auto; width: 18px; height: 18px; margin-left: 6px; border-radius: 4px; box-shadow: inset 0 0 0 2px rgba(0, 0, 0, 0.28); }
+.chip .dot.two { background: linear-gradient(135deg, var(--a) 0 50%, var(--b) 50% 100%); }
+.chip.look { min-height: 48px; padding: 8px 16px 8px 10px; font-weight: 800; }
 .chip.look.bare { padding-left: 16px; }
+.tn-page .chip.look.selected { box-shadow: 0 2px 0 var(--press-edge); }
 
 /* ── A light gold rim on every button ────────────────────────────────
    Rémi's call, 21 Sept 2026. One token and one rule, last in the file, so

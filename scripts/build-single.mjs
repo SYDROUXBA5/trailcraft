@@ -17,23 +17,37 @@ import { readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+import { dirname, join, posix } from 'node:path';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const pub = (f) => readFileSync(join(root, 'public', f), 'utf8');
 
 /* Dependency order: roots first, then their dependents, app last. */
 const MODULES = ['native', 'params', 'geo', 'colours', 'mvt', 'ground', 'debrief', 'marks', 'call', 'coach', 'field', 'walls', 'sim', 'card', 'sync-core', 'backup', 'firebase-config', 'sync', 'store', 'log', 'draft', 'share', 'pdf',
-  /* The team levels: the engine, its words, the pixel art, then the board that draws with all three. */
-  'levels', 'teams', 'pixel-team', 'board'];
+  /* The team levels: the engine, its words, the pixel art, then the board that draws with all three.
+     The art is a folder of modules behind the one door, pixel-team: each needs only the ones before it. */
+  'levels', 'teams',
+  'pixel/core', 'pixel/ramps', 'pixel/paint', 'pixel/terrain', 'pixel/dog', 'pixel/human', 'pixel/props', 'pixel/rope', 'pixel/states', 'pixel/moments', 'pixel/stones', 'pixel/layout',
+  'pixel/scenery', 'pixel/landmarks', 'pixel/scene', 'pixel/ground', 'pixel/board-art', 'pixel/close', 'pixel/fx', 'pixel/ambient', 'pixel/team', 'pixel/player',
+  'pixel-team', 'board'];
 
 /** Inline-script safety: a literal "</script>" inside JS would end the tag.
     The escape is invisible at runtime (identical string value). */
 const safe = (js) => js.replace(/<\/script/gi, '<\\/script');
 
 /** Namespace identifier for a module file name — hyphens are not valid in
-    JS identifiers, so engine-demo becomes __engine_demo. */
-const ns = (name) => '__' + name.replace(/-/g, '_');
+    JS identifiers, so engine-demo becomes __engine_demo. A module in a folder
+    keeps the folder, with a $ for the slash: pixel/team is __pixel$team, which
+    pixel-team (__pixel_team) can never be mistaken for. */
+const ns = (name) => '__' + name.replace(/-/g, '_').replace(/\//g, '$');
+
+/** The module an import names, as MODULES spells it: './core.js' asked for
+    from pixel/dog is pixel/core, './pixel/core.js' from pixel-team the same. */
+const resolve = (from, spec) => posix.normalize(posix.join(posix.dirname(from), spec));
+
+/** `a, b as c` from an import or a re-export, as [name there, name here]. */
+const pairs = (names) => names.split(',').map(n => n.trim()).filter(Boolean)
+  .map(n => { const m = n.match(/^([\w$]+)(?:\s+as\s+([\w$]+))?$/); if (!m) throw new Error(`cannot read the name "${n}"`); return [m[1], m[2] || m[1]]; });
 
 /** One module → an IIFE namespace. Imports become destructuring, exports are
     collected and returned. */
@@ -43,12 +57,31 @@ const ns = (name) => '__' + name.replace(/-/g, '_');
 const destructure = (names) => names.replace(/\s+/g, ' ').trim()
   .replace(/\b([\w$]+)\s+as\s+([\w$]+)\b/g, '$1: $2');
 
+/** A dependency must already be inlined when its dependent runs: one that is
+    missing from MODULES, or listed after the module that needs it, would be
+    a ReferenceError the moment the Desktop copy opened. */
+function needs(name, spec) {
+  const dep = resolve(name, spec);
+  const at = MODULES.indexOf(dep), me = MODULES.indexOf(name);
+  if (at < 0) throw new Error(`${name}.js imports ${dep}.js, which is not in MODULES`);
+  if (me >= 0 && at > me) throw new Error(`${name}.js imports ${dep}.js, which MODULES lists after it`);
+  return dep;
+}
+
 function toNamespace(name) {
   let src = pub(`${name}.js`);
   const preludes = [];
 
-  src = src.replace(/import\s*\{([\s\S]*?)\}\s*from\s*'\.\/([\w-]+)\.js';?/g, (_, names, dep) => {
-    preludes.push(`const {${destructure(names)}} = ${ns(dep)};`);
+  /* `export { a, b } from './x.js'` hands on another module's names: the
+     door a folder of modules is reached by (pixel-team.js) is made of these. */
+  const handedOn = [];
+  src = src.replace(/export\s*\{([\s\S]*?)\}\s*from\s*'(\.\.?\/[\w/-]+)\.js';?/g, (_, names, dep) => {
+    for (const [there, here] of pairs(names)) handedOn.push(`${here}: ${ns(needs(name, dep))}.${there}`);
+    return '';
+  });
+
+  src = src.replace(/import\s*\{([\s\S]*?)\}\s*from\s*'(\.\.?\/[\w/-]+)\.js';?/g, (_, names, dep) => {
+    preludes.push(`const {${destructure(names)}} = ${ns(needs(name, dep))};`);
     return '';
   });
 
@@ -58,9 +91,9 @@ function toNamespace(name) {
     return `${kind} ${id}`;
   });
   if (/^export\s/m.test(src)) throw new Error(`${name}.js: unhandled export form`);
-  if (!exported.length) throw new Error(`${name}.js: no exports found`);
+  if (!exported.length && !handedOn.length) throw new Error(`${name}.js: no exports found`);
 
-  return `const ${ns(name)} = (() => {\n${preludes.join('\n')}\n${src}\nreturn { ${exported.join(', ')} };\n})();`;
+  return `const ${ns(name)} = (() => {\n${preludes.join('\n')}\n${src}\nreturn { ${[...exported, ...handedOn].join(', ')} };\n})();`;
 }
 
 /** app.js is the program, not a library: imports become top-level

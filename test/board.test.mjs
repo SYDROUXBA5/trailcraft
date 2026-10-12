@@ -5,7 +5,7 @@
    Run with `node test/board.test.mjs`. */
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { boardLayout, boardTiles, tilesNear, trailPoint, throughGate, gateX, barrierBand, lockPixels, ICONS, TEAM, MOMENTS, createTeam } from '../public/pixel-team.js';
+import { boardLayout, boardTiles, tilesNear, trailPoint, throughGate, gateX, barrierBand, lockPixels, ICONS, TEAM, MOMENTS, STILL_AT, SPEED, STATES, frame, confetti, burst, createTeam } from '../public/pixel-team.js';
 import { BOARD_LEVELS, TILE, BOARD_MAX_W, GATE_ROOM, WAVE_ICON, layoutFor, boardView, teamSeat, teamBox } from '../public/board.js';
 import { LADDER_V1, newTeam, teamLevel, levelSpec } from '../public/levels.js';
 import { shownLevel, withShown, momentFor, beforeMoment, resultLine, standing, stoneStatus } from '../public/teams.js';
@@ -138,8 +138,13 @@ t('the team stands on the last stone it passed, through a beaten gate, or short 
   const stone = (n) => [L.stones[n - 1].x, L.stones[n - 1].y];
   // A new team waits at the trailhead, below stone 1.
   const head = teamSeat(fresh(), L);
-  assert.equal(head.seg, -0.5);
+  assert.equal(head.seg, -0.62);
   assert.ok(head.pt[1] > L.stones[0].y);
+  // Far enough below it that the handler's head (34 rows) is under the
+  // stone's number plate, which hangs to 20 rows below the stone, and still
+  // on the board.
+  assert.ok(head.pt[1] - 34 >= L.stones[0].y + 20, `feet at ${head.pt[1]}, stone 1 at ${L.stones[0].y}`);
+  assert.ok(head.pt[1] < L.H);
   // On a stone.
   const on7 = teamSeat(at(7), L);
   assert.equal(on7.seg, 6);
@@ -334,7 +339,7 @@ t('just through a gate there is room to stand: clear of the arch, short of the n
     for (let i = 1; i < L.path.length; i++) assert.ok(L.path[i].y <= L.path[i - 1].y + 1e-6);
   }
   assert.equal(boardLayout(160, LADDER_V1.levels.slice(0, 20).map(l => ({ level: l.level, boss: l.boss }))).stones[14].y
-    - boardLayout(160, LADDER_V1.levels.slice(0, 20).map(l => ({ level: l.level, boss: l.boss }))).stones[15].y, 40, 'the sample board is laid out as it was');
+    - boardLayout(160, LADDER_V1.levels.slice(0, 20).map(l => ({ level: l.level, boss: l.boss }))).stones[15].y, 52, 'the sample board keeps the plain step: no room past its gate unless asked');
 });
 
 t('a boss moment follows the team to the gate, and cannot be left hanging', () => {
@@ -386,6 +391,62 @@ t('a moment watched to its end leaves no loop running, and a destroyed team asks
     Object.defineProperty(globalThis, 'performance', { value: had.performance, configurable: true, writable: true });
     globalThis.requestAnimationFrame = had.raf; globalThis.cancelAnimationFrame = had.caf; globalThis.document = had.document; globalThis.window = had.window;
   }
+});
+
+t('the summit has a finale of its own, as long as a boss, and every moment ends on a frame that can be held', () => {
+  /* The page allows a boss's length for the last level (it calls it a boss),
+     so the summit's moment is exactly as long. */
+  assert.equal(MOMENTS.summit.duration, MOMENTS.boss.duration);
+  for (const kind of ['levelup', 'boss', 'summit']) {
+    const m = MOMENTS[kind], at = Object.values(m.cues);
+    assert.ok(at.every((v, i) => i === 0 || v > at[i - 1]), `${kind}: the cues come in order`);
+    assert.ok(at[at.length - 1] < m.duration - 500, `${kind}: there is a hold after the last cue`);
+    assert.equal(STILL_AT[kind], m.duration, `${kind}: with motion off it shows its end`);
+    // The cues the page hangs its haptics and its card on are still there.
+    assert.ok('buzz' in m.cues && ('name' in m.cues || 'title' in m.cues));
+  }
+  for (const k of ['flag', 'flare', 'title']) assert.ok(k in MOMENTS.summit.cues);
+  const board = src('board.js');
+  assert.match(board, /const kind = gated \? 'boss' : summit \? 'summit' : 'levelup';/);
+  assert.match(board, /team\.set\(\{ motion: true, look: lookHere\(m\.before\), env, state: mm\.kind \}\);/);
+});
+t('every state and moment is a pure function of its clock, at any time and any stride', () => {
+  for (const state of STATES.concat(['levelup', 'boss', 'summit'])) {
+    for (let ms = 0; ms <= 9200; ms += 33) {
+      const a = frame(state, ms, { stride: 0.7, stride2: 1.4 }), b = frame(state, ms, { stride: 0.7, stride2: 1.4 });
+      assert.ok(a.dog && a.handler && a.handler.o, `${state} at ${ms}: a dog and a handler`);
+      assert.deepEqual(a, b, `${state} at ${ms}: the same frame twice`);
+      for (const v of [a.dog.x, a.dog.y, a.handler.x, a.line]) assert.ok(Number.isFinite(v), `${state} at ${ms}: numbers`);
+    }
+  }
+});
+t('the team is moved at the speed its feet are going, so they do not slide', () => {
+  assert.ok(SPEED.trail > 10 && SPEED.trail < 30 && SPEED.run > SPEED.trail * 1.6);
+  /* A run says how fast the ground must pass, scaled by the stride it was
+     given; the board works the stride out from the way and the time. */
+  const c = MOMENTS.levelup.cues, mid = (c.trot + c.arrive) / 2;
+  assert.equal(frame('levelup', mid, { stride: 1 }).speed, SPEED.run);
+  assert.equal(frame('levelup', mid, { stride: 1.25 }).speed, SPEED.run * 1.25);
+  assert.ok(frame('levelup', mid, { stride: 1.25 }).dog.legs.reach > frame('levelup', mid, { stride: 1 }).dog.legs.reach);
+  assert.equal(frame('trailing', 500).speed, SPEED.trail);
+  const board = src('board.js');
+  assert.match(board, /const strideFor = \(len, ms\) => clamp\(\(len \/ \(ms \/ 1000\)\) \/ SPEED\.run, 0\.55, 1\.6\);/);
+  assert.match(board, /env = \{ stride: strideFor\(mm\.way\.len, cues\.arrive - cues\.trot\) \};/);
+});
+t('a moment’s effects are drawn from the clock alone, and only with Animations on', () => {
+  const seen = (fn) => { const out = []; fn({ set fillStyle(v) { this.f = v; }, fillRect(...a) { out.push(a.join()); } }); return out; };
+  const a = seen(c => confetti(c, 100, 100, 600, { n: 16, stage: 'hot', seed: 7 }));
+  assert.ok(a.length >= 16, 'sixteen pieces in the air');
+  assert.deepEqual(a, seen(c => confetti(c, 100, 100, 600, { n: 16, stage: 'hot', seed: 7 })), 'the same frame twice');
+  assert.equal(seen(c => confetti(c, 100, 100, 5000, { n: 16, stage: 'hot' })).length, 0, 'and none left lying about');
+  assert.ok(seen(c => burst(c, 50, 50, 70, ['#111', '#222', '#333', '#fff'])).length >= 8, 'a ring of eight sparks');
+  assert.equal(seen(c => burst(c, 50, 50, 600, ['#111', '#222', '#333', '#fff'])).length, 0);
+  const board = src('board.js');
+  /* Still, the moment is its end state: no effects layer is ever shown. */
+  assert.match(board, /if \(!o\.motion\) return;\s*\n\s*const g = fxBegin\(\)/);
+  assert.match(board, /sweepCanvas\.style\.display = 'none'; fxCanvas\.style\.display = 'none';/);
+  assert.match(board, /const ambientOn = \(\) => typeof o\.ambient === 'function' && o\.motion && ambSeen && !document\.hidden && !!layout;/);
+  assert.match(src('app.js'), /onPick: pickStone, ambient: drawAmbient \};/);
 });
 
 console.log(`\nboard: ${pass} checks passed`);
