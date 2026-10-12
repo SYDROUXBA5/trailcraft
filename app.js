@@ -55,13 +55,13 @@ import { MOTIONS, motionChoice, motionOn, COAT_IDS, teamLook, makeTeam, putTeam,
          levelChip, chipStage, proven, meterWords, teamTitle, earnedName, pairName, stageBar, levelCard, tryRows, teamStates,
          levelFields, levelNeeds, stickyLevel, stickyLevelFrom, tryStamp, LEFT_AGO, leftAgoLabel,
          shownLevel, withShown, momentFor, takenBack, beforeMoment, resultLine, levelsSaid, debriefWouldFix } from './teams.js';
-import { createTeam, COATS, JACKETS, HATS, MOMENTS } from './pixel-team.js';
+import { createTeam, COATS, JACKETS, HATS, MOMENTS, drawAmbient } from './pixel-team.js';
 import { mountBoard } from './board.js';
 import { searchWords, logRows, recentRuns, runAt, midnight, facets, filterRows, groupRows, foldersOf, inFolder, folderList, folderNamed,
          cleanFolderName, putMany, toggleFolder, renameIn, dropFrom, mergeFolders, emptyHeld, folderPatch } from './log.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-10-10a';
+const BUILD = '2026-10-12a';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true,
@@ -7908,9 +7908,40 @@ function dogSub(d, handlerId) {
 }
 
 const TEAM_GO = '<span class="go" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20"><path d="M9.5 5.5 16 12l-6.5 6.5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>';
-/** What a team's row says: who, the name they have earned, the level chip. */
+/* Marks drawn in art pixels, so the team screens' ticks and crosses are
+   cut from the same cloth as the board: each is a few unit squares on a 7
+   by 7 grid, shown at two CSS pixels to the square (app.css .pxi). */
+const pxIcon = (d, box = '0 0 7 7') => `<svg class="pxi" viewBox="${box}" aria-hidden="true"><path d="${d}"/></svg>`;
+const PX = {
+  tick: pxIcon('M6 0h1v2H6zM5 1h1v2H5zM4 2h1v2H4zM3 3h1v2H3zM2 4h1v2H2zM1 3h1v2H1zM0 2h1v2H0z', '0 -0.5 7 7'),
+  cross: pxIcon('M0 0h1v1H0zM6 0h1v1H6zM0 1h2v1H0zM5 1h2v1H5zM1 2h2v1H1zM4 2h2v1H4zM2 3h3v1H2zM1 4h2v1H1zM4 4h2v1H4zM0 5h2v1H0zM5 5h2v1H5zM0 6h1v1H0zM6 6h1v1H6z'),
+  dash: pxIcon('M1 3h5v1H1z'),
+  star: pxIcon('M3 0h1v2H3zM0 2h7v1H0zM1 3h5v1H1zM2 4h3v1H2zM1 5h2v1H1zM4 5h2v1H4zM1 6h1v1H1zM5 6h1v1H5z'),
+  bang: pxIcon('M3 0h1v4H3zM3 5h1v2H3z'),
+  info: pxIcon('M3 0h1v2H3zM3 3h1v4H3z'),
+  more: '<svg viewBox="0 0 5 3" aria-hidden="true"><path d="M0 0h1v1H0zM1 1h1v1H1zM2 2h1v1H2zM3 1h1v1H3zM4 0h1v1H4z"/></svg>',
+};
+/** A verdict as its mark: a pass, a miss, a run that did not count, a level passed. */
+const PX_MARK = { yes: PX.tick, miss: PX.cross, no: PX.dash, up: PX.star };
+
+/** The level badge: the stone a team stands on, in its stage's colour, with
+    the level on it. A team that has passed nothing of its own yet wears it
+    hatched, with the level it starts at. The words beside it always say the
+    same, so the badge itself is for the eye only. */
+function levelBadge(lv, size = '') {
+  if (!lv) return `<span class="lvl-badge${size ? ` ${size}` : ''}" aria-hidden="true">+</span>`;
+  const own = proven(lv), n = own ? lv.passed : lv.level;
+  return `<span class="${badgeClass(lv)}${size ? ` ${size}` : ''}" aria-hidden="true">${n}</span>`;
+}
+const badgeClass = (lv) => {
+  const own = proven(lv), n = own ? lv.passed : lv.level;
+  return `lvl-badge ${chipStage(lv)}${own ? '' : ' unproven'}${lv.done ? ' done' : ''}${n > 99 ? ' d3' : ''}`;
+};
+
+/** What a team's row says: the badge, who, the name they have earned, and
+    the level in words. */
 const teamRowHtml = (h, d, lv) =>
-  `<span class="who"><b>${esc(pairName(h.name, d.name))}</b><i>${esc(earnedName(lv))}</i></span><span class="lvl-chip ${esc(chipStage(lv))}">${esc(levelChip(lv))}</span>${TEAM_GO}`;
+  `${levelBadge(lv, 'sm')}<span class="who"><b>${esc(pairName(h.name, d.name))}</b><span class="sub"><i>${esc(earnedName(lv))}</i><span class="lvl-words ${esc(chipStage(lv))}">${esc(levelChip(lv))}</span></span></span>${TEAM_GO}`;
 const teamRowLabel = (h, d, lv) => `${pairName(h.name, d.name)}, ${earnedName(lv)}, ${levelChip(lv)}. Open the team board`;
 
 /** Home: the picked handler and dog as a team, or the offer to make them one. */
@@ -7922,7 +7953,7 @@ function paintHomeTeam() {
   const lv = levelOf(dog, handler.id);
   row.classList.toggle('none', !lv);
   row.innerHTML = lv ? teamRowHtml(handler, dog, lv)
-    : `<span class="who"><b>${esc(pairName(handler.name, dog.name))}</b><i>Not a team yet. Tap for a new team</i></span>${TEAM_GO}`;
+    : `${levelBadge(null, 'sm')}<span class="who"><b>${esc(pairName(handler.name, dog.name))}</b><i>Not a team yet. Tap for a new team</i></span>${TEAM_GO}`;
   row.setAttribute('aria-label', lv ? teamRowLabel(handler, dog, lv) : `${pairName(handler.name, dog.name)}. Not a team yet. Open the team board`);
 }
 
@@ -7981,9 +8012,22 @@ function paintTeam() {
      level to its name yet: the meter says where it starts, and the bar up to
      there is drawn faint. A pair that is not a team has the bar alone. */
   const own = proven(lv);
+  const badge = $('teamBadge');
+  badge.className = team ? badgeClass(lv) : 'lvl-badge';
+  badge.textContent = team ? (own ? lv.passed : lv.level) : '–';
+  /* The bar has a tick at each boss, gold once the team has beaten it: the
+     four gates are what the hundred levels are counted between. */
+  const passed = team ? lv.passed : 0, bosses = LADDER_V1.bosses.map(b => (typeof b === 'number' ? b : b.level));
+  let from = 1;
+  const bars = stageBar(passed).map(b => {
+    const lo = from, hi = from + b.span - 1;
+    from = hi + 1;
+    const ticks = bosses.filter(n => n >= lo && n <= hi).map(n =>
+      `<u${own && passed >= n ? ' class="won"' : ''} style="left:${+((n - lo + 1) / b.span * 100).toFixed(2)}%"></u>`).join('');
+    return `<i class="${b.key}" style="flex:${b.span}"><b style="width:${Math.round(b.fill * 100)}%"></b>${ticks}</i>`;
+  }).join('');
   $('teamMeter').innerHTML = `${team ? `<span>${esc(meterWords(lv)).replace(/\d+/, '<strong>$&</strong>')}</span>` : ''}
-    <span class="stage-bar${own ? '' : ' unproven'}" aria-hidden="true">${stageBar(team ? lv.passed : 0).map(b =>
-      `<i class="${b.key}" style="flex:${b.span}"><b style="width:${Math.round(b.fill * 100)}%"></b></i>`).join('')}</span>`;
+    <span class="stage-bar${own ? '' : ' unproven'}" aria-hidden="true">${bars}</span>`;
   mountTeamBoard($('teamBoard'), { lv, look: teamLook(team, d, lv.stage) });
   paintTeamCard();
   /* Opened, or back on another team: the board goes to where the team
@@ -7997,7 +8041,7 @@ function paintTeam() {
     wears. It makes the board the first time and repaints it after, and
     leaves it on teamView.board (board.js says what that handle can do). */
 function mountTeamBoard(host, { lv, look }) {
-  const opts = { lv, look, motion: teamMotion(), dark: resolvedTheme() === 'dark', imperial: imp(), onPick: pickStone };
+  const opts = { lv, look, motion: teamMotion(), dark: resolvedTheme() === 'dark', imperial: imp(), onPick: pickStone, ambient: drawAmbient };
   if (teamView.board) teamView.board.update(opts);
   else teamView.board = mountBoard(host, opts);
   teamView.board.select(teamView.picked);
@@ -8025,15 +8069,16 @@ function pickStone(level) {
     the welfare notes inside it. `notes` are the notes a very short screen
     folds away too, counted so they are not missed. */
 const foldWord = (folded, notes = 0) =>
-  `<span class="tc-more">${folded ? `More${notes ? `<span class="tc-notes"> · ${notes} note${notes === 1 ? '' : 's'}</span>` : ''}` : 'Less'}</span>`;
+  `<span class="tc-more${folded && notes ? ' has-notes' : ''}">${folded ? `<span class="tc-more-w">More</span>${notes ? `<span class="tc-notes"><span class="tc-more-w"> · </span>${notes} note${notes === 1 ? '' : 's'}</span>` : ''}` : 'Less'}${PX.more}</span>`;
 
 function levelCardHtml(c, folded, { more = true, notes = 0 } = {}) {
   return `<button type="button" class="tc-top" id="tcTop" aria-expanded="${!folded}"><span class="tc-k"><span>${esc(c.kicker)}</span><span class="tc-r"><span class="tc-stage ${esc(c.stage)}">${esc(c.stageLabel)}</span>${more ? foldWord(folded, notes) : ''}</span></span></button>
-    <h2 class="tc-name">${esc(c.name)}${c.boss ? ` · boss: ${esc(c.bossName)}` : ''}</h2>
-    ${c.news.length ? `<p class="tc-new">New: ${esc(c.news.join(' · '))}</p>` : ''}
+    <h2 class="tc-name"><span>${esc(c.name)}</span>${c.boss ? `<span class="tc-boss"><span class="sr-only">, </span>Boss · ${esc(c.bossName)}</span>` : ''}</h2>
+    ${c.news.length ? `<p class="tc-new"><span class="tc-new-k">New</span><span><span class="sr-only">: </span>${esc(c.news.join(' · '))}</span></p>` : ''}
     ${c.also.map(a => `<p class="tc-also">${esc(a)}</p>`).join('')}
     <ul class="tc-checks" aria-label="What this level asks">${c.rows.map(r =>
-      `<li class="${r.ok ? 'ok' : ''}${r.isNew ? ' new' : ''}"><span class="m" aria-hidden="true">✓</span><span>${esc(r.text)}${r.got ? ` <i>${esc(r.got)} so far</i>` : ''}<span class="sr-only">${r.ok ? ', done' : ', to do'}</span></span></li>`).join('')}</ul>`;
+      /* Done, to do, or how near the best try came: a shape each, as well as a colour. */
+      `<li class="${r.ok ? 'ok' : r.got ? 'part' : 'todo'}${r.isNew ? ' new' : ''}"><span class="m" aria-hidden="true">${PX.tick}</span><span>${esc(r.text)}${r.got ? ` <i>${esc(r.got)} so far</i>` : ''}<span class="sr-only">${r.ok ? ', done' : ', to do'}</span></span></li>`).join('')}</ul>`;
 }
 
 /** The card pinned under the board: the next level with its checklist, the
@@ -8045,8 +8090,9 @@ function paintTeamCard() {
   const { h, d, team, lv } = now;
   const card = $('teamCard');
   const units = { imperial: imp(), fahrenheit: fahr() };
-  /* On a short phone the card starts folded, so the board keeps its room. */
-  if (teamView.folded === null) teamView.folded = (window.innerHeight || 800) < 700;
+  /* The card starts folded, so the board keeps most of the screen: what
+     must not be missed stays on it folded (app.css says what). */
+  if (teamView.folded === null) teamView.folded = true;
   const folded = teamView.folded;
   card.classList.toggle('folded', folded);
   const picked = teamView.picked;
@@ -8054,7 +8100,7 @@ function paintTeamCard() {
   if (picked != null) {
     /* A stone seen from a pair that is not a team yet is simply what it asks. */
     html = levelCardHtml(levelCard(picked, team ? lv : null, units), folded)
-      + `<button type="button" class="tc-back" data-team-act="next">${team ? 'Back to the next level' : 'Back'}</button>`;
+      + `<button type="button" class="tc-back" data-team-act="next"><span aria-hidden="true">‹</span>${team ? 'Back to the next level' : 'Back'}</button>`;
   } else if (!team) {
     html = `<div class="tc-top"><span class="tc-k"><span>Not a team yet</span></span></div>
       <h2 class="tc-name">${esc(pairName(h.name, d.name))} as a team</h2>
@@ -8069,11 +8115,14 @@ function paintTeamCard() {
          <h2 class="tc-name">${esc(earnedName(lv))}</h2>`
       : levelCardHtml(levelCard(lv.level, lv, units), folded, { notes }))
       + (states.length ? `<div class="tc-states">${states.map(st =>
-        `<div class="tc-state ${st.tone}">${st.tone === 'quiet' ? '' : `<b>${esc(st.title)}</b>`}<p>${esc(st.text)}</p>${st.action
+        /* A note that only informs folds down to its title. One with a
+           button, or about the dog's age, never does. */
+        `<div class="tc-state ${st.tone}${st.tone === 'info' && !st.action && st.key !== 'gate' ? ' fold' : ''}">${st.tone === 'quiet' ? ''
+          : `<span class="n" aria-hidden="true">${st.tone === 'info' ? PX.info : st.tone === 'gold' ? PX.star : PX.bang}</span><b>${esc(st.title)}</b>`}<p>${esc(st.text)}</p>${st.action
           ? `<button type="button" class="btn small ember" data-team-act="${esc(st.action.id)}" data-level="${st.action.level}">${esc(st.action.label)}</button>` : ''}</div>`).join('')}</div>` : '')
       + (tries.length ? `<span class="label tc-tries-k">${tries.length === 1 ? 'Last try' : `Last ${tries.length} tries`}</span>
         <ul class="tc-tries">${tries.map(t =>
-          `<li class="${t.kind}"><span class="i" aria-hidden="true">${t.mark}</span><span><b>${esc(t.when)}</b> · level ${t.level}<span class="why">${esc(t.why)}</span></span></li>`).join('')}</ul>` : '');
+          `<li class="${t.kind}"><span class="i" aria-hidden="true">${PX_MARK[t.kind] ?? PX.dash}</span><span><span class="h"><b>${esc(t.when)} · level ${t.level}</b><span class="v">${esc(t.says)}</span></span><span class="why">${esc(t.why)}</span></span></li>`).join('')}</ul>` : '');
   }
   card.innerHTML = html;
   card.scrollTop = 0;
@@ -8169,7 +8218,7 @@ function paintResultLevel(s) {
   row.dataset.dog = s.dogId;
   row.dataset.session = s.id;
   row.dataset.opens = toDebrief ? 'debrief' : 'team';
-  row.innerHTML = `<span class="i" aria-hidden="true">${line.mark}</span><span class="t">${esc(line.text)}</span>${TEAM_GO}`;
+  row.innerHTML = `<span class="i" aria-hidden="true">${PX_MARK[line.kind] ?? PX.dash}</span><span class="t">${esc(line.text)}</span>${TEAM_GO}`;
   row.setAttribute('aria-label', `${line.text}. ${toDebrief ? 'Open the debrief' : 'Open the team board'}`);
 }
 
@@ -8227,7 +8276,7 @@ function playMoment(m, { handlerId, dogId }) {
   moment.ended = false;
   moment.board = mountBoard($('luBoard'), {
     lv: beforeMoment(lv, m), look: teamLook(team, d, levelSpec(m.from)?.stage ?? lv.stage),
-    motion: on, dark: resolvedTheme() === 'dark', imperial: imp(), still: true,
+    motion: on, dark: resolvedTheme() === 'dark', imperial: imp(), still: true, ambient: drawAmbient,
   });
   /* Set before play(): with motion off the moment ends inside it. */
   if (on) moment.timer = setTimeout(() => { if (moment.board?.playing) moment.board.skip(); }, MOMENTS[m.kind].duration + MOMENT_GRACE);
@@ -8267,9 +8316,12 @@ function behindMoment(on) {
 }
 
 /** A tap on the moment: while it plays, skip to how it ends; after, close it. */
-function momentTap() {
-  if (moment.board?.playing) moment.board.skip();
-  else closeMoment();
+function momentTap(e) {
+  /* The button says "Carry on" and does, at the first press: asked to skip
+     first, it wanted pressing twice. Anywhere else, a tap skips to the end. */
+  const done = e && e.target && e.target.closest && e.target.closest('#luDone');
+  if (moment.board?.playing) { moment.board.skip(); if (!done) return; }
+  closeMoment();
 }
 
 function closeMoment() {
@@ -8328,7 +8380,9 @@ function openTeamForm({ handlerId = null, dogId = null, edit = false } = {}) {
   /* And the pixel team after that, so its canvas has a size to be drawn at. */
   const player = { look: { ...look, stage: formStage() }, motion: teamMotion(), state: 'waiting' };
   if (teamForm.player) teamForm.player.set(player);
-  else teamForm.player = createTeam($('tnPreview'), { scene: 'team', scale: 3, ...player });
+  /* Two CSS pixels to the art pixel, as on the board: one pixel size on
+     every team screen. */
+  else teamForm.player = createTeam($('tnPreview'), { scene: 'close', scale: 2, ...player });
 }
 function closeTeamForm() { teamForm.player?.set({ motion: false }); }
 
@@ -8364,9 +8418,14 @@ function paintTeamForm() {
   const months = dogMonths(d);
   const young = (p) => { const need = levelSpec(p.startLevel).minDogMonths; return months !== null && need > months ? ` · from ${need} months` : ''; };
   $('tnPresets').innerHTML = moves.map(p =>
-    `<button type="button" class="check-row${p.id === f.preset ? ' on' : ''}" data-tn-preset="${p.id}" aria-pressed="${p.id === f.preset}"><span class="check-text"><b>${esc(p.label)}</b><i>Starts at level ${p.startLevel} · ${esc(levelSpec(p.startLevel).waveName)}${young(p)}</i></span>${CHECK_MARK}</button>`).join('');
-  $('tnCoats').innerHTML = COATS.filter(c => COAT_IDS.includes(c.id)).map(c =>
-    `<button type="button" class="chip look bare${c.id === f.coat ? ' selected' : ''}" data-tn-coat="${c.id}" aria-pressed="${c.id === f.coat}">${esc(c.name)}</button>`).join('');
+    /* A card to a start, with the stone it starts on at the left. */
+    `<button type="button" class="tn-preset${p.id === f.preset ? ' on' : ''}" data-tn-preset="${p.id}" aria-pressed="${p.id === f.preset}"><span class="lvl-badge sm ${esc(levelSpec(p.startLevel).stage)}" aria-hidden="true">${p.startLevel}</span><span class="check-text"><b>${esc(p.label)}</b><i>Starts at level ${p.startLevel} · ${esc(levelSpec(p.startLevel).waveName)}${young(p)}</i></span>${CHECK_MARK}</button>`).join('');
+  $('tnCoats').innerHTML = COATS.filter(c => COAT_IDS.includes(c.id)).map(c => {
+    /* The coat's two main colours, where the coat says what they are. */
+    const sw = c.swatch ?? (c.pal ? [c.pal.b, c.pal.s] : null);
+    const dot = sw && sw[0] ? `<span class="dot two" style="--a:${esc(sw[0])};--b:${esc(sw[1] ?? sw[0])}"></span>` : '';
+    return `<button type="button" class="chip look${dot ? '' : ' bare'}${c.id === f.coat ? ' selected' : ''}" data-tn-coat="${c.id}" aria-pressed="${c.id === f.coat}">${dot}${esc(c.name)}</button>`;
+  }).join('');
   $('tnJackets').innerHTML = JACKETS.map(j =>
     `<button type="button" class="chip look${j.id === f.jacket ? ' selected' : ''}" data-tn-jacket="${j.id}" aria-pressed="${j.id === f.jacket}"><span class="dot" style="background:${j.colour}"></span>${esc(j.name)}</button>`).join('');
   $('tnHats').innerHTML = HATS.map(x =>
