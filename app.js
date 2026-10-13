@@ -41,7 +41,9 @@ import { DEBRIEF, FLAGS, NOTE_TAGS, blankDebrief, debriefLine, labelOf, ownRun, 
          unwalkedPlan, noLineYet, trailShown, ranBlind } from './debrief.js';
 import { CONFIDENCE, stampCall, confidenceOf, firstCall, firstCallWasFind, calibration, calibrationLine, callVerdict, runsOf } from './call.js';
 import { placeMark, addMark, removeMark, callOwed, callMovedTo, removable, markingSave } from './marks.js';
-import { isNative, watchBackground, canHaptic, haptic, watchHeading, shareFile,
+import { CLIP, CLIP_SAYS, clipSupport, canHoldScreen, clipOffered, answerPlan, withoutAnswer, clipLines, clipClosing, windLine,
+         creditLine, cssUrl, clipName, clipProgress, recordClip } from './clip.js';
+import { isNative, watchBackground, canHaptic, haptic, watchHeading, shareFile, shareBlob, keepAwake,
          canSpeakNative, nativeVoices, speakNative, stopNativeSpeech, watchNativeVoices } from './native.js';
 import { readBackup, restoreChanges, restoreQuestion, restoreNothing, BACKUP_MAX_BYTES } from './backup.js';
 import { firebaseConfig } from './firebase-config.js';
@@ -61,7 +63,7 @@ import { searchWords, logRows, recentRuns, runAt, midnight, facets, filterRows, 
          cleanFolderName, putMany, toggleFolder, renameIn, dropFrom, mergeFolders, emptyHeld, folderPatch } from './log.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-10-12b';
+const BUILD = '2026-10-13a';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true,
@@ -326,6 +328,13 @@ window.addEventListener('popstate', () => {
   if (currentScreen === 'scrReplay' && marksUnkept()) {
     try { history.pushState({ tc: currentScreen }, ''); } catch { /* file:// and the like */ }
     toast('Tap See the result to keep your marks');
+    return;
+  }
+  /* Back with the video sheet up closes the sheet, as it would any other,
+     and stops a recording on the way: the replay stays. */
+  if (currentScreen === 'scrReplay' && clipUi.open) {
+    try { history.pushState({ tc: currentScreen }, ''); } catch { /* file:// and the like */ }
+    closeClip();
     return;
   }
   if (currentScreen && currentScreen !== 'scrHome') goBackNow();
@@ -3163,22 +3172,7 @@ function openReplay(s) {
   replay.speed = 4;
   replayPause();
 
-  clearMap();
-  if (targetById(s.targetId).kind === 'hide') {
-    // A search has hides and no trail: no start, no plan, no plume to draw.
-    setSrc('hides', pointsOf(s.data.hides || []));
-  } else if (noLineYet(s.data)) {
-    /* A blind trail with no line yet: the dog alone, and the find. */
-  } else {
-    setTrail(trailOf(s));
-    setSrc('start', pointsOf([s.data.trail[0]]));
-    if (s.data.planTrail?.length > 1) setSrc('plan', lineOf(s.data.planTrail));
-    /* On the replay's clock from the first frame, and pruned by the start of
-       the run, because the slider can be dragged back there at any time. */
-    const w0 = windAt(s, replay.at).wx;
-    if (w0) plumeStart(trailOf(s), w0, plume.T, s.data.contamination,
-      { at: replay.at, since: replay.from });
-  }
+  drawReplayGround(s);
   // Only once the map is drawn, so a replay that fails to open is not left half open.
   replay.s = s;
   /* The trail is on the map from here, so the answer has been seen. */
@@ -3196,6 +3190,34 @@ function openReplay(s) {
   paintReplay();
 }
 
+/** What a replay stands on: the laid trail, its start, its plan and its
+    scent, or a search's hides, as they were at `replay.at`. Drawn when a
+    replay opens, and again by the video (clip.js) each time it takes the
+    answer off the map or puts it back. `keep` leaves what is on the map
+    where it is and only adds to it: the video asks for that when it puts
+    the answer back over a map that had none of it, because clearing first
+    empties the dog's route too, and the map can draw that empty moment
+    into the video before the route is back. */
+function drawReplayGround(s, { keep = false } = {}) {
+  if (!keep) clearMap();
+  if (targetById(s.targetId).kind === 'hide') {
+    // A search has hides and no trail: no start, no plan, no plume to draw.
+    setSrc('hides', pointsOf(s.data.hides || []));
+  } else if (noLineYet(s.data) || !(s.data.trail?.length > 1)) {
+    /* A blind trail with no line yet: the dog alone, and the find. So is a
+       run whose trail the video is holding back until the end. */
+  } else {
+    setTrail(trailOf(s));
+    setSrc('start', pointsOf([s.data.trail[0]]));
+    if (s.data.planTrail?.length > 1) setSrc('plan', lineOf(s.data.planTrail));
+    /* On the replay's clock from the first frame, and pruned by the start of
+       the run, because the slider can be dragged back there at any time. */
+    const w0 = windAt(s, replay.at).wx;
+    if (w0) plumeStart(trailOf(s), w0, plume.T, s.data.contamination,
+      { at: replay.at, since: replay.from });
+  }
+}
+
 /** A run's marks as the map shows them. A blind trail's find has no trail
     end to sit on, so with no line it is marked where the track ends, which
     is where Found was tapped. */
@@ -3209,6 +3231,7 @@ function marksOf(s) {
 
 function closeReplay() {
   replayPause();
+  closeClip();                 // a video being made of it stops with it
   if (replay.mark) endMarking();
   replay.s = null;
   plume.clock = null;          // hand the plume back to the real clock
@@ -3298,6 +3321,313 @@ function replayPause() {
   replay.raf = 0;
   const b = $('repPlay');
   if (b) { b.innerHTML = '&#9654;'; b.setAttribute('aria-label', 'Play'); }
+}
+
+/* ── The replay as a video ────────────────────────────────────────────
+   Save video on the replay: a length is picked, the replay plays through
+   once on the video's own clock while clip.js records it, and the file goes
+   to the share sheet (the iPhone app, a phone's browser) or is downloaded.
+   The frame, the timing and the recorder are clip.js; this is the sheet,
+   and the replay lent to it and put back exactly as it was.
+
+   `job` is the recording in flight, `was` the replay as it stood before it,
+   `made` the finished file until the sheet is closed. */
+const clipUi = { open: false, seconds: 30, job: null, was: null, made: null, saving: null, saved: false };
+const CLIP_INTRO = 'A tall video of the whole run, sped up to fit the length you pick. Keep Trailcraft on screen while it records.';
+
+/* A phone (or the iPhone app), not a computer. Two things turn on it. A
+   phone locks itself after half a minute untouched and a computer does not;
+   and a phone's share sheet is how a video reaches Photos or a message,
+   while a computer's (Safari on a Mac, Chrome on Windows) offers AirDrop and
+   Mail and no way to simply keep the file, where a download does. */
+const clipOnPhone = () => isNative() || (navigator.maxTouchPoints > 0 && matchMedia('(pointer: coarse)').matches);
+
+/** Can anything keep this screen on while it records: the page's own hold,
+    or the iPhone app's (asked to let go, which changes nothing and answers
+    whether it is there)? */
+const clipHolds = async () => canHoldScreen() || (isNative() && await keepAwake(false));
+
+/* Nothing under the sheet can be reached while it is up, by a finger (the
+   sheet covers it), by a keyboard or by a screen reader. */
+function clipLock(on) {
+  /* The map as well: it takes the arrow keys, and a camera nudged from the
+     keyboard would be in the video. The compass is its own button beside
+     the air panel, not inside it. */
+  for (const el of [$('repHud'), $('scrReplay').querySelector('.glass-bottom'), $('map'), $('wxPanel'), $('wxRose'), $('btnRecentre'), $('btnMapStyle')]) {
+    el.inert = on;
+    if (on) el.setAttribute('aria-hidden', 'true'); else el.removeAttribute('aria-hidden');
+  }
+}
+function clipPane(id) {
+  for (const p of ['clipPick', 'clipRec', 'clipDone']) $(p).hidden = p !== id;
+}
+function paintClipLen() {
+  for (const b of $('clipLen').querySelectorAll('[data-clip]')) {
+    const on = Number(b.dataset.clip) === clipUi.seconds;
+    b.setAttribute('aria-checked', String(on));
+    b.tabIndex = on ? 0 : -1;
+  }
+  $('clipStart').textContent = `Start · ${clipUi.seconds} s`;
+}
+
+/** The picker when this device cannot make the video at all: why, the one
+    other way there is on an iPhone, and no Start to try again with. */
+function clipCannot(say) {
+  $('clipSay').textContent = say + (isNative() || /iPhone|iPad/.test(navigator.userAgent)
+    ? ' You can still record the screen from Control Centre while the replay plays.' : '');
+  $('clipLen').hidden = true;
+  $('clipStart').hidden = true;
+}
+
+/** The ready pane: what was made, and whether it has left the app yet. A
+    video nobody has saved is not "done": the other button says Discard
+    until it has been, because closing the sheet lets the file go. */
+function paintClipDone() {
+  const made = clipUi.made;
+  if (!made) return;
+  const ready = made.ext === 'webm'
+    ? `Your ${made.seconds} s video is ready as a .webm file. It plays in a browser, but Photos and some apps won’t take it. Safari, Chrome or the iPhone app make an .mp4.`
+    : `Your ${made.seconds} s video is ready.`;
+  $('clipDoneSay').textContent = clipUi.saved === 'saved' ? 'Your video is in your downloads.'
+    : clipUi.saved ? 'Your video is saved or sent.'
+      : `${ready} Tap Save video to keep it.`;
+  $('clipDoneClose').textContent = clipUi.saved ? 'Done' : 'Discard';
+}
+
+function openClip() {
+  const s = replay.s;
+  if (!clipOffered({ run: s?.data?.track?.length > 1, marking: !!replay.mark, recording: !!clipUi.job })) return;
+  replayPause();
+  clipUi.open = true;
+  $('clipSay').textContent = CLIP_INTRO;
+  $('clipLen').hidden = false;
+  $('clipStart').hidden = false;
+  /* Said before a length is picked, not after thirty seconds of trying. */
+  if (!clipSupport()) clipCannot(CLIP_SAYS.unsupported);
+  else if (clipOnPhone()) clipHolds().then((ok) => {
+    /* Nothing to keep the screen on (an iPhone before iOS 16.4 in Safari,
+       an app built before its own hold): the phone will lock itself about
+       thirty seconds in, so the short video is the one offered and the
+       handler is told what to do about the others. */
+    if (ok || !clipUi.open || clipUi.job || $('clipPick').hidden) return;
+    clipUi.seconds = CLIP.LENGTHS[0];
+    paintClipLen();
+    $('clipSay').textContent = `${CLIP_INTRO} ${CLIP_SAYS.lock}`;
+  });
+  paintClipLen();
+  clipPane('clipPick');
+  $('clipSheet').hidden = false;
+  clipLock(true);
+  $('clipTitle').focus({ preventScroll: true });
+}
+
+/** The sheet away, a recording stopped, a finished file let go. */
+function closeClip() {
+  if (!clipUi.open) return;
+  stopClip('closed');
+  clipUi.open = false;
+  clipUi.made = null;
+  clipUi.saved = false;
+  clipUi.saving = null;
+  $('clipSave').disabled = false;
+  $('clipView').textContent = '';
+  $('clipSheet').hidden = true;
+  clipLock(false);
+  if (currentScreen === 'scrReplay' && !$('repClip').hidden) $('repClip').focus({ preventScroll: true });
+}
+
+/** The replay as the video needs it (clip.js recordClip's `host`). */
+function clipHost(s) {
+  const kind = targetById(s.targetId).kind;
+  const name = peopleFor(s).dog?.name ?? null;
+  const dog = S.dogs.find(d => d.id === s.dogId);
+  /* The level a team has earned, never the one it was only placed at. */
+  const lv = kind === 'person' && dog ? levelOf(dog, s.handlerId) : null;
+  const track = s.data.track;
+  const hidden = withoutAnswer(s);
+  const day = (t) => new Date(t).toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' });
+  const dp = trackPalette(settings.dogColor);
+  return {
+    from: replay.from, to: replay.to,
+    points: [track, s.data.trail, s.data.hides, s.data.planTrail].filter(Array.isArray).flat()
+      .filter(p => Number.isFinite(p?.lat) && Number.isFinite(p?.lon)),
+    reveal: answerPlan(s, kind),
+    revealWords: kind === 'hide' ? 'Where the hides were' : 'The laid trail',
+    lines: clipLines({ dog: name, track, level: lv && proven(lv) ? earnedName(lv) : null, imperial: imp(), day }),
+    closing: clipClosing(s, { dog: name, units: unitsForText(), kind }),
+    /* The credit the live map is showing, read off it, and Mapbox's
+       wordmark with it, out of the map's own stylesheet. */
+    credit: creditLine($('map').querySelector('.mapboxgl-ctrl-attrib-inner, .maplibregl-ctrl-attrib-inner')?.textContent,
+      { mapbox: GL === mapboxgl }),
+    logo: GL === mapboxgl && $('map').querySelector('.mapboxgl-ctrl-logo')
+      ? cssUrl(getComputedStyle($('map').querySelector('.mapboxgl-ctrl-logo')).backgroundImage) : null,
+    /* The route again, for the video to draw over the laid trail's scent
+       and footprints, which the map puts on top of it. */
+    route: () => track,
+    dog: { colour: dp.base, casing: dp.casing },
+    answer(show) {
+      const was = replay.s;
+      replay.s = show ? s : hidden;
+      if (!show) plumeStop();
+      /* Put back over the hidden copy, nothing is cleared first: that copy
+         has no trail, plan, scent or hides on the map to go stale. */
+      drawReplayGround(replay.s, { keep: show && was === hidden });
+    },
+    paint(at) { replay.at = at; paintReplay(); },
+    marks: (at) => marksOf(s).filter(w => w.t <= at),
+    wind: (at) => windLine(windAt(s, at).wx,
+      { felt: windWords(s, { imperial: imp(), short: true }), mode: feltOf(s.data)?.mode ?? null, imperial: imp() }),
+    hold: (on) => keepAwake(on),
+  };
+}
+
+function startClip() {
+  const s = replay.s;
+  if (clipUi.job || !s || replay.mark || !mapReady) return;
+  replayPause();
+  const canvas = document.createElement('canvas');
+  $('clipView').textContent = '';
+  $('clipView').appendChild(canvas);
+  $('clipBar').firstElementChild.style.width = '0%';
+  $('clipBar').setAttribute('aria-valuenow', '0');
+  $('clipStatus').textContent = 'Getting the map ready…';
+  $('clipHint').hidden = true;
+  $('clipSay').textContent = CLIP_INTRO;
+  clipPane('clipRec');
+  $('clipCancel').focus({ preventScroll: true });
+
+  clipUi.was = { s, at: replay.at };
+  let said = -1;
+  const job = recordClip({
+    map, canvas, seconds: clipUi.seconds, host: clipHost(s),
+    onProgress: ({ stage, t, total, held }) => {
+      if (stage === 'prepare') {
+        /* The hold was asked for and not given: on a phone the screen will
+           lock unless it is touched, and a locked phone stops the recording. */
+        $('clipHint').textContent = CLIP_SAYS.touch;
+        $('clipHint').hidden = held !== false || !clipOnPhone();
+        return;
+      }
+      if (stage === 'finish') { $('clipStatus').textContent = 'Finishing the video…'; return; }
+      if (stage !== 'record') return;
+      $('clipBar').firstElementChild.style.width = `${(100 * t / total).toFixed(1)}%`;
+      /* Once a second, not thirty times: it is read out. */
+      if (Math.floor(t) === said) return;
+      said = Math.floor(t);
+      $('clipBar').setAttribute('aria-valuenow', String(Math.round(100 * t / total)));
+      $('clipStatus').textContent = `Recording… ${clipProgress(t, total)}`;
+    },
+  });
+  clipUi.job = job;
+  job.done.then((out) => {
+    if (clipUi.job === job) { clipUi.job = null; clipRestore(); }
+    if (!clipUi.open) return;                  // closed while it ran: nothing to say
+    if (out.status === 'done') {
+      /* `seconds` is the length the file is, not the one asked for. */
+      clipUi.made = { blob: out.blob, type: out.type, ext: out.ext, seconds: out.seconds, name: clipName(modelOf(s), out.ext) };
+      clipUi.saved = false;
+      paintClipDone();
+      clipPane('clipDone');
+      /* In the app the button is about to go off while the file is handed
+         over, and focus on a button that is off is focus nowhere. */
+      (isNative() ? $('clipTitle') : $('clipSave')).focus({ preventScroll: true });
+      /* The iPhone app opens its share sheet by itself. A browser will only
+         open one, or start a download, from a tap, and the tap that began
+         this was half a minute ago. */
+      if (isNative()) saveClip();
+      return;
+    }
+    if (out.status === 'cancelled' && out.reason === 'closed') return;
+    clipPane('clipPick');
+    if (out.status === 'cancelled' && out.reason !== 'background') return $('clipStart').focus({ preventScroll: true });
+    /* Why there is no video, said in the sheet, where it stays until it is
+       read. A toast would be gone in four seconds, and one raised while the
+       app is in the background (which is when a recording is stopped for
+       going there) is never shown at all. */
+    if (out.status === 'failed' && (out.why === 'blank' || out.why === 'unsupported')) {
+      clipCannot(out.say);
+      return $('clipClose').focus({ preventScroll: true });
+    }
+    $('clipSay').textContent = out.status === 'failed' ? out.say : CLIP_SAYS.background;
+    $('clipStart').focus({ preventScroll: true });
+  });
+}
+
+/** Stop a recording now. The map is its own again by the time this
+    returns (clip.js), and so is the replay. */
+function stopClip(reason = 'cancelled') {
+  const job = clipUi.job;
+  if (!job) return;
+  clipUi.job = null;
+  job.cancel(reason);
+  clipRestore();
+}
+
+/** The replay as it stood before the video borrowed it: the same run, with
+    its trail back on the map, at the moment the slider was on. */
+function clipRestore() {
+  const was = clipUi.was;
+  clipUi.was = null;
+  if (!was || !replay.s) return;
+  replay.s = was.s;
+  replay.at = was.at;
+  drawReplayGround(was.s);
+  paintReplay();
+}
+
+/** Save video on the ready pane, and the iPhone app's own call when a
+    recording ends. One save at a time: in the app the file takes some forty
+    trips to the shell before the share sheet shows, and a tap on the button
+    in that wait (it is the obvious thing on the screen) used to start a
+    second save over the first. The button is off and the pane says what is
+    happening until this one is over. */
+function saveClip() {
+  const made = clipUi.made;
+  if (!made) return null;
+  if (clipUi.saving) return clipUi.saving;
+  $('clipSave').disabled = true;
+  if (isNative()) $('clipDoneSay').textContent = 'Getting the video ready to share…';
+  const saving = deliverClip(made).then((how) => {
+    if (clipUi.made === made && (how === 'shared' || how === 'saved')) clipUi.saved = how;
+  }).finally(() => {
+    if (clipUi.saving !== saving) return;        // the sheet was closed under it
+    clipUi.saving = null;
+    $('clipSave').disabled = false;
+    if (clipUi.made === made) paintClipDone();
+  });
+  clipUi.saving = saving;
+  return saving;
+}
+
+/** The finished video out of the app. Inside the iPhone app, the phone's
+    own share sheet (Save Video, Messages, AirDrop) by way of a file in the
+    cache; in a phone's browser, its share sheet when it takes files; on a
+    computer, and anywhere else, a download. Answers 'shared', 'saved' (a
+    download), 'cancelled' or 'failed'. */
+async function deliverClip(made) {
+  if (isNative()) {
+    const how = await shareBlob(made.blob, made.name);
+    if (how === 'shared' || how === 'cancelled') return how;
+    if (how === 'failed') { toast('Could not share the video from this app'); return 'failed'; }
+    /* 'none': a shell without the plugins. The web view's own sheet is next. */
+  }
+  const file = new File([made.blob], made.name, { type: made.type });
+  if (clipOnPhone() && navigator.canShare?.({ files: [file] })) {
+    try { await navigator.share({ files: [file], title: made.name }); return 'shared'; }
+    catch (e) { if (e?.name === 'AbortError') return 'cancelled'; }
+  }
+  /* Inside the iPhone app a download goes nowhere and says nothing
+     (deliverFile): better to say it could not be shared. */
+  if (isNative()) { toast('Could not share the video from this app'); return 'failed'; }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(file);
+  a.download = made.name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+  toast(`Saved ${made.name}`);
+  return 'saved';
 }
 
 /* ── Marking the run ──────────────────────────────────────────────────
@@ -3398,8 +3728,12 @@ function paintMarkTools() {
   $('repMarkRow').hidden = !m;
   $('repRow').hidden = !!m;
   $('repCancel').hidden = !m || m.hidden;
-  /* A row of its own: beside Write the debrief and Done it wrapped to three lines. */
-  $('repEditRow').hidden = !!m || !s || !marksEditable(sessionById(s.id) ?? s);
+  /* A row of its own: beside Write the debrief and Done it wrapped to three lines.
+     Save video shares it, and is there for any run being watched: never
+     while it is being marked, when the answer may still be hidden (clip.js). */
+  $('repEdit').hidden = !s || !marksEditable(sessionById(s.id) ?? s);
+  $('repClip').hidden = !clipOffered({ run: s?.data?.track?.length > 1, marking: !!m });
+  $('repEditRow').hidden = !!m || !s || ($('repEdit').hidden && $('repClip').hidden);
   paintMarkList();
 }
 
@@ -3558,7 +3892,7 @@ function cancelMarking() {
   if (s) replay.s = s;
   paintMarkTools();
   paintReplay();
-  ($('repEditRow').hidden ? $('repPlay') : $('repEdit')).focus({ preventScroll: true });
+  ($('repEditRow').hidden || $('repEdit').hidden ? $('repPlay') : $('repEdit')).focus({ preventScroll: true });
 }
 
 /* ── Wind tracers ─────────────────────────────────────────────────────
@@ -9627,6 +9961,29 @@ function wire() {
   $('repSee').addEventListener('click', seeResult);
   $('repCancel').addEventListener('click', cancelMarking);
   $('repPlay').addEventListener('click', () => (replay.playing ? replayPause() : replayPlay()));
+  $('repClip').addEventListener('click', openClip);
+  $('clipLen').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-clip]');
+    if (!b) return;
+    clipUi.seconds = Number(b.dataset.clip);
+    paintClipLen();
+  });
+  /* A radio group: the arrows move the choice, as they do on any other. */
+  $('clipLen').addEventListener('keydown', (e) => {
+    const step = e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 0;
+    if (!step) return;
+    e.preventDefault();
+    const i = CLIP.LENGTHS.indexOf(clipUi.seconds);
+    clipUi.seconds = CLIP.LENGTHS[(i + step + CLIP.LENGTHS.length) % CLIP.LENGTHS.length];
+    paintClipLen();
+    $('clipLen').querySelector('[aria-checked="true"]').focus({ preventScroll: true });
+  });
+  $('clipStart').addEventListener('click', startClip);
+  $('clipClose').addEventListener('click', closeClip);
+  $('clipCancel').addEventListener('click', () => stopClip('cancelled'));
+  $('clipSave').addEventListener('click', saveClip);
+  $('clipDoneClose').addEventListener('click', closeClip);
+  $('clipSheet').addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); closeClip(); } });
   $('repSpeed').addEventListener('click', () => {
     const i = (REPLAY_SPEEDS.indexOf(replay.speed) + 1) % REPLAY_SPEEDS.length;
     replay.speed = REPLAY_SPEEDS[i];

@@ -108,6 +108,67 @@ export async function shareFile(bytes, name) {
   }
 }
 
+/** A big file, a video, to the phone's share sheet. shareFile hands the
+    whole file across to the shell as one string, which for a minute of
+    video is fifty megabytes of text in the web view's memory at the moment
+    it has least to spare. This writes it a megabyte at a time (Filesystem's
+    appendFile), into a folder of its own in the cache that is emptied
+    first, so the phone only ever keeps the last video made. A file there
+    with a video's extension is what makes the sheet offer Save Video.
+    Answers as shareFile does.
+
+    One at a time, whatever the caller does. Writing a minute of video is
+    some forty trips to the shell, during which nothing shows, and a second
+    tap in that time used to start a second writer on the same file: one
+    emptied the folder under the other and both appended to what was left,
+    so the sheet was handed a video with its pieces shuffled. A second call
+    for the same file now joins the first (one write, one sheet); a call for
+    another file waits until the first is finished with. */
+let sharing = null;      // { blob, name, promise }: the one in flight
+export function shareBlob(blob, name, opts) {
+  if (sharing && sharing.blob === blob && sharing.name === name) return sharing.promise;
+  const before = sharing ? sharing.promise : Promise.resolve();
+  const promise = before.then(() => writeAndShare(blob, name, opts))
+    .finally(() => { if (sharing?.promise === promise) sharing = null; });
+  sharing = { blob, name, promise };
+  return promise;
+}
+async function writeAndShare(blob, name, { piece = 1024 * 1024 } = {}) {
+  const FS = plugin('Filesystem'), SH = plugin('Share');
+  if (!FS?.writeFile || !FS?.appendFile || !SH?.share) return 'none';
+  const path = `clips/${safeName(name)}`;
+  let uri;
+  try {
+    try { await FS.rmdir?.({ path: 'clips', directory: 'CACHE', recursive: true }); } catch { /* nothing there yet */ }
+    for (let at = 0; at === 0 || at < blob.size; at += piece) {
+      const data = base64Of(await blob.slice(at, at + piece).arrayBuffer());
+      if (at === 0) ({ uri } = await FS.writeFile({ path, directory: 'CACHE', data, recursive: true }));
+      else await FS.appendFile({ path, directory: 'CACHE', data });
+    }
+  } catch { return 'failed'; }
+  if (!uri) return 'failed';
+  try {
+    await SH.share({ title: name, files: [uri] });
+    return 'shared';
+  } catch (e) {
+    return /cancel/i.test(String(e?.message ?? e)) ? 'cancelled' : 'failed';
+  }
+}
+
+/** Keep the phone's screen on, or let it sleep again, from the shell's own
+    switch (KeepAwake in TrailcraftNative.swift). A video of the replay takes
+    up to a minute with nobody touching the phone, and a phone that locks
+    itself half-way stops the recording. True when the shell did it; false
+    in a browser, or in an app built before the switch was there, where the
+    caller falls back on the page's own hold or says there is none. Asking
+    for `false` changes nothing on a phone that was never held, so it is
+    also how the caller finds out whether the switch exists. */
+export async function keepAwake(on) {
+  const K = plugin('KeepAwake');
+  if (!K?.on || !K.off) return false;
+  try { await (on ? K.on() : K.off()); return true; } catch { return false; }
+}
+
 /** Can the shell tap the wrist? (iPhones cannot from a web page.) */
 export const canHaptic = () => !!plugin('Haptics');
 

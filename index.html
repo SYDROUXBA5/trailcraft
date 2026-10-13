@@ -879,10 +879,47 @@
     </div>
     <div class="row-gap" id="repEditRow" hidden>
       <button class="btn ghost" id="repEdit">Edit marks</button>
+      <button class="btn ghost" id="repClip">Save video</button>
     </div>
     <div class="row-gap" id="repRow">
       <button class="btn ghost" id="repDebrief">Write the debrief</button>
       <button class="btn ghost" id="repBack">Done</button>
+    </div>
+  </div>
+  <!-- ── The replay as a video ────────────────────────────────────────
+       A sheet over the whole replay: a length is picked, then it records
+       while it plays and nothing under it can be touched, because a finger
+       on the map or the slider would be in the video. The small picture is
+       the video itself as it is being made. -->
+  <div class="clip" id="clipSheet" role="dialog" aria-modal="true" aria-labelledby="clipTitle" hidden>
+    <div class="clip-card">
+      <span class="label" id="clipTitle" tabindex="-1" style="margin-top:0">Save video</span>
+      <div id="clipPick">
+        <p class="clip-say" id="clipSay" role="status">A tall video of the whole run, sped up to fit the length you pick. Keep Trailcraft on screen while it records.</p>
+        <div class="clip-len" id="clipLen" role="radiogroup" aria-label="Video length">
+          <button type="button" class="db-opt" role="radio" data-clip="15" aria-checked="false">15 s</button>
+          <button type="button" class="db-opt" role="radio" data-clip="30" aria-checked="false">30 s</button>
+          <button type="button" class="db-opt" role="radio" data-clip="60" aria-checked="false">60 s</button>
+        </div>
+        <div class="row-gap">
+          <button class="btn ghost" id="clipClose">Not now</button>
+          <button class="btn big ember grow" id="clipStart">Start</button>
+        </div>
+      </div>
+      <div id="clipRec" hidden>
+        <div class="clip-view" id="clipView" aria-hidden="true"></div>
+        <div class="clip-bar" id="clipBar" role="progressbar" aria-label="Recording" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i></i></div>
+        <p class="clip-say" id="clipStatus" role="status"></p>
+        <p class="clip-say" id="clipHint" hidden></p>
+        <button class="btn ghost" id="clipCancel">Cancel</button>
+      </div>
+      <div id="clipDone" hidden>
+        <p class="clip-say" id="clipDoneSay" role="status"></p>
+        <div class="row-gap">
+          <button class="btn ghost" id="clipDoneClose">Discard</button>
+          <button class="btn big ember grow" id="clipSave">Save video</button>
+        </div>
+      </div>
     </div>
   </div>
 </section>
