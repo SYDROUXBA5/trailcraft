@@ -21,6 +21,7 @@ import { runAgain } from '../public/store.js';
 import { noLineYet, ownRun } from '../public/debrief.js';
 import { patchSession } from '../public/store.js';
 import { fmtDur } from '../public/geo.js';
+import { clipOffered } from '../public/clip.js';
 
 let pass = 0;
 const t = async (name, fn) => { await fn(); pass++; console.log(`  ok  ${name}`); };
@@ -208,6 +209,8 @@ function marking({ session, screen = 'scrReplay' } = {}) {
     rec: { on: false }, run: { session }, currentScreen: screen, callWp: null, navigator: {},
     targetById: (id) => ({ kind: id === 'hide' ? 'hide' : 'person' }), ownRun, noLineYet, patchSession,
     placeMark, addMark, removeMark, callOwed, callMovedTo, removable, markingSave, fmtDur,
+    /* Save video shares the Edit marks row, and is never offered while marking (clip.test). */
+    clipOffered,
     keepPatch: (s, p) => sb.saveSession(s, p), foldIntoPending: () => null,
     esc: (s) => String(s ?? ''), toast: (m) => toasts.push(m), snap() {}, imp: () => false,
     sessionById: (id) => saved.get(id) ?? null,
@@ -474,7 +477,8 @@ await t('wired: the run screen has no marks on a trail, Found and Done open the 
   assert.doesNotMatch(js, /Mark what you see/, 'the tutorial no longer tells them to mark during the run');
   assert.match(bodyOf('paintReplay'), /sc\.setAttribute\('aria-valuetext', fmtDur\(/, 'the slider is read out as a time into the run');
   assert.match(bodyOf('editMarks'), /\$\('repMarks'\)\.querySelector\('\.wp-pill'\)\?\.focus\(/, 'focus goes to the tools that came');
-  assert.match(bodyOf('cancelMarking'), /\(\$\('repEditRow'\)\.hidden \? \$\('repPlay'\) : \$\('repEdit'\)\)\.focus\(/);
+  /* The row is Save video's too now (clip.js), so it can be showing with Edit marks hidden. */
+  assert.match(bodyOf('cancelMarking'), /\(\$\('repEditRow'\)\.hidden \|\| \$\('repEdit'\)\.hidden \? \$\('repPlay'\) : \$\('repEdit'\)\)\.focus\(/);
   assert.match(bodyOf('openMarkWind'), /paintFeltSheet\(replay\.s, \{ marking: true \}\)/, 'the sheet says it is one wind for the whole run');
   const css = readFileSync(new URL('../public/app.css', import.meta.url), 'utf8');
   assert.match(css, /#repMarks \{ display: grid; grid-template-columns: repeat\(6, 1fr\);/, 'all five marks in view on a phone');

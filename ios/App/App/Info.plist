@@ -34,6 +34,8 @@
 	<string>Trailcraft records the trail you lay and the run your dog makes, and reads the weather where you are. Your positions stay on this phone unless you back them up or share them.</string>
 	<key>NSMotionUsageDescription</key>
 	<string>To show which way you are facing on the compass, next to the wind.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>To save the video of a replay to your photos when you choose Save Video.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>To pick a photo for a dog or a handler, or a photo of a Trail Card.</string>
 	<key>UIApplicationSceneManifest</key>

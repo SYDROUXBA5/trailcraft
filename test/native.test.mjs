@@ -16,14 +16,14 @@
 
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { shareFile, isNative, canSpeakNative, nativeVoices, speakNative, stopNativeSpeech, watchNativeVoices } from '../public/native.js';
+import { shareFile, shareBlob, keepAwake, isNative, canSpeakNative, nativeVoices, speakNative, stopNativeSpeech, watchNativeVoices } from '../public/native.js';
 
 let pass = 0;
 const t = async (name, fn) => { await fn(); pass++; console.log(`  ok  ${name}`); };
 
 /** A shell with the two plugins, each keeping what it was handed. */
-function shell({ shareFails = null, writeFails = false, plugins = ['Filesystem', 'Share'] } = {}) {
-  const seen = { writes: [], shares: [] };
+function shell({ shareFails = null, writeFails = false, appendFails = false, plugins = ['Filesystem', 'Share'] } = {}) {
+  const seen = { writes: [], shares: [], appends: [], cleared: [] };
   const all = {
     Filesystem: {
       async writeFile(o) {
@@ -31,6 +31,9 @@ function shell({ shareFails = null, writeFails = false, plugins = ['Filesystem',
         seen.writes.push(o);
         return { uri: `file:///cache/${o.path}` };
       },
+      /* A video is written a piece at a time (shareBlob), into a folder emptied first. */
+      async appendFile(o) { if (appendFails) throw new Error('disk'); seen.appends.push(o); },
+      async rmdir(o) { seen.cleared.push(o); if (!seen.writes.length) throw new Error('no such folder'); },
     },
     Share: {
       async share(o) {
@@ -220,4 +223,127 @@ await t('the audio background mode is explained for App Review, with a way to he
 });
 
 delete globalThis.window;
+/* ── A video out of the app (shareBlob) ─────────────────────────────── */
+
+await t('a video goes to the share sheet a piece at a time, from a folder that only keeps the last one', async () => {
+  const seen = shell();
+  const bytes = new Uint8Array(2500).map((_, i) => i % 251);
+  const blob = new Blob([bytes], { type: 'video/mp4' });
+  assert.equal(await shareBlob(blob, 'trailcraft-2026-10-13-rex-trail.mp4', { piece: 1000 }), 'shared');
+  assert.deepEqual(seen.cleared, [{ path: 'clips', directory: 'CACHE', recursive: true }], 'the last video is cleared first, and a folder not there yet is no failure');
+  assert.equal(seen.writes.length, 1);
+  assert.deepEqual(seen.appends.length, 2, 'three pieces: one write, two appends');
+  const path = 'clips/trailcraft-2026-10-13-rex-trail.mp4';
+  assert.deepEqual([seen.writes[0].path, seen.writes[0].directory, seen.writes[0].recursive, seen.writes[0].encoding], [path, 'CACHE', true, undefined]);
+  assert.ok(seen.appends.every(a => a.path === path && a.directory === 'CACHE' && !('encoding' in a)), 'as bytes, never as text');
+  /* Put back together, it is the file that went in. */
+  const back = Buffer.concat([seen.writes[0], ...seen.appends].map(o => Buffer.from(o.data, 'base64')));
+  assert.deepEqual(new Uint8Array(back), bytes);
+  assert.deepEqual(seen.shares, [{ title: 'trailcraft-2026-10-13-rex-trail.mp4', files: [`file:///cache/${path}`] }], 'the file itself, so the sheet offers Save Video');
+});
+
+await t('a video: a name cannot leave the folder, and each way it can go wrong has its own answer', async () => {
+  let seen = shell();
+  await shareBlob(new Blob(['x']), '../../Documents/Rex’s run.mp4');
+  assert.equal(seen.writes[0].path, 'clips/Documents-Rex-s-run.mp4');
+  seen = shell();
+  assert.equal(await shareBlob(new Blob([]), 'empty.mp4'), 'shared', 'an empty file is still written once');
+  assert.equal(seen.writes.length, 1);
+  shell({ shareFails: 'Share canceled' });
+  assert.equal(await shareBlob(new Blob(['x']), 'a.mp4'), 'cancelled');
+  shell({ shareFails: 'boom' });
+  assert.equal(await shareBlob(new Blob(['x']), 'a.mp4'), 'failed');
+  shell({ writeFails: true });
+  assert.equal(await shareBlob(new Blob(['x']), 'a.mp4'), 'failed');
+  seen = shell({ appendFails: true });
+  assert.equal(await shareBlob(new Blob(['xyz']), 'a.mp4', { piece: 1 }), 'failed', 'a disk that fills part-way');
+  assert.equal(seen.shares.length, 0, 'half a video is never offered');
+  shell({ plugins: ['Share'] });
+  assert.equal(await shareBlob(new Blob(['x']), 'a.mp4'), 'none');
+  globalThis.window = {};
+  assert.equal(await shareBlob(new Blob(['x']), 'a.mp4'), 'none', 'in a browser there is no shell');
+});
+
+/** A shell with a real folder behind it: what is written is kept, appending
+    to a file that is not there starts one (as the phone does), and every
+    call takes a turn of the loop, so two writers at once would interleave. */
+function disk() {
+  const d = { files: new Map(), shared: [], writes: 0, cleared: 0, sheets: [] };
+  const turn = () => new Promise(r => setImmediate(r));
+  const bytes = (o) => Buffer.from(o.data, 'base64');
+  globalThis.window = { Capacitor: { isNativePlatform: () => true, getPlatform: () => 'ios', Plugins: {
+    Filesystem: {
+      async writeFile(o) { await turn(); d.writes++; d.files.set(o.path, bytes(o)); return { uri: `file:///cache/${o.path}` }; },
+      async appendFile(o) { await turn(); d.files.set(o.path, Buffer.concat([d.files.get(o.path) ?? Buffer.alloc(0), bytes(o)])); },
+      async rmdir() { await turn(); d.cleared++; d.files.clear(); },
+    },
+    Share: {
+      /* The sheet stays up until it is let go, as a real one does. */
+      share(o) { return new Promise((res) => { d.shared.push({ uri: o.files[0], bytes: Buffer.from(d.files.get(o.files[0].replace('file:///cache/', '')) ?? []) }); d.sheets.push(res); }); },
+    },
+  } } };
+  d.settle = async () => { for (let i = 0; i < 400; i++) await turn(); };
+  return d;
+}
+
+await t('two saves of one video at once are one write and one sheet, and the file shared is the file made', async () => {
+  const d = disk();
+  const src = new Uint8Array(40000).map((_, i) => (i * 7) % 251);
+  const blob = new Blob([src], { type: 'video/mp4' });
+  /* The app's own save as the recording ends, and a tap on Save video while it is still writing. */
+  const a = shareBlob(blob, 'rex.mp4', { piece: 1000 });
+  await new Promise(r => setImmediate(r));
+  const b = shareBlob(blob, 'rex.mp4', { piece: 1000 });
+  assert.equal(a, b, 'the second joins the first');
+  await d.settle();
+  assert.deepEqual([d.writes, d.cleared, d.shared.length], [1, 1, 1], 'one writer, one sheet');
+  assert.deepEqual(new Uint8Array(d.shared[0].bytes), src, 'byte for byte the video that was recorded');
+  d.sheets.shift()({});
+  assert.deepEqual([await a, await b], ['shared', 'shared']);
+  /* Once it is over, the same video can be shared again. */
+  const c = shareBlob(blob, 'rex.mp4', { piece: 1000 });
+  assert.notEqual(c, a);
+  await d.settle();
+  d.sheets.shift()({});
+  assert.equal(await c, 'shared');
+  assert.deepEqual(new Uint8Array(d.shared[1].bytes), src);
+});
+
+await t('two different videos never share the folder at the same time: the second waits for the first', async () => {
+  const d = disk();
+  const one = new Uint8Array(30000).fill(1), two = new Uint8Array(20000).fill(2);
+  const a = shareBlob(new Blob([one]), 'one.mp4', { piece: 1000 });
+  await new Promise(r => setImmediate(r));
+  const b = shareBlob(new Blob([two]), 'two.mp4', { piece: 1000 });
+  await d.settle();
+  assert.equal(d.shared.length, 1, 'the second has not touched the folder while the first is out');
+  assert.deepEqual(new Uint8Array(d.shared[0].bytes), one);
+  d.sheets.shift()({});
+  await d.settle();
+  assert.equal(d.shared.length, 2);
+  assert.deepEqual(new Uint8Array(d.shared[1].bytes), two, 'and each is whole');
+  d.sheets.shift()({});
+  assert.deepEqual([await a, await b], ['shared', 'shared']);
+});
+
+/* ── The screen kept on while a video is made (keepAwake) ───────────── */
+
+await t('the shell holds the screen and lets it go, and where it cannot the answer is no', async () => {
+  const calls = [];
+  globalThis.window = { Capacitor: { isNativePlatform: () => true, getPlatform: () => 'ios',
+    Plugins: { KeepAwake: { async on() { calls.push('on'); }, async off() { calls.push('off'); } } } } };
+  assert.equal(await keepAwake(true), true);
+  assert.equal(await keepAwake(false), true);
+  assert.deepEqual(calls, ['on', 'off']);
+  /* An app built before the switch: Capacitor hands back a stand-in whose every call is refused. */
+  globalThis.window = { Capacitor: { isNativePlatform: () => true, getPlatform: () => 'ios', Plugins: {},
+    registerPlugin: () => new Proxy({}, { get: () => async () => { throw new Error('"KeepAwake" plugin is not implemented on ios'); } }) } };
+  assert.equal(await keepAwake(true), false);
+  assert.equal(await keepAwake(false), false, 'which is how the app finds out there is no hold');
+  globalThis.window = {};
+  assert.equal(await keepAwake(true), false, 'in a browser there is no shell');
+  delete globalThis.window;
+  assert.equal(await keepAwake(true), false);
+});
+
 console.log(`\n${pass} passed total\n`);

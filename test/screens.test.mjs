@@ -119,6 +119,8 @@ function app() {
     closeContam() {}, plumeStop() {}, stopCountdownUi() {}, setSrc() {}, EMPTY: {}, onHideTap() {},
     // Marks placed after a trail and not kept yet hold the back gesture (marks.test.mjs).
     marksUnkept: () => false,
+    // The video sheet holds the back gesture while it is up, as any sheet does (clip.test.mjs).
+    clipUi: { open: false }, closeClip() {},
     CD: { sid: 's1' }, renderShare() {},
     // The real openers draw a screen and then go() to it; that last step is what matters here.
     openDebrief: (s) => { sb.dbFor = s; sb.dbDraft = { flags: [] }; sb.dbSeen = {}; sb.go('scrDebrief'); },

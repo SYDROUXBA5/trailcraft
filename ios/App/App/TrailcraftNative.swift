@@ -8,6 +8,7 @@ class MainViewController: CAPBridgeViewController {
     override open func capacitorDidLoad() {
         bridge?.registerPluginInstance(HeadingPlugin())
         bridge?.registerPluginInstance(SpeechPlugin())      // TrailcraftSpeech.swift: the coach's voice
+        bridge?.registerPluginInstance(KeepAwakePlugin())   // the screen held on while a replay is recorded as a video
     }
 }
 
@@ -67,5 +68,39 @@ public class HeadingPlugin: CAPPlugin, CAPBridgedPlugin, CLLocationManagerDelega
     /// Let iOS show its figure-of-eight calibration card when the compass needs it.
     public func locationManagerShouldDisplayHeadingCalibration(_ manager: CLLocationManager) -> Bool {
         return true
+    }
+}
+
+/// The screen kept on while the replay is being recorded as a video.
+///
+/// Nobody touches the phone for the half-minute or minute that takes, so iOS
+/// dims and locks it (after 30 seconds unless the owner chose otherwise), the
+/// app goes to the background and the recording is lost. A web page can ask
+/// for the screen to stay on, but not on iOS before 16.4, and inside an app's
+/// web view the request has not always been honoured. The idle timer is the
+/// system's own switch for it and works on every iOS this app runs on.
+/// `off` always follows `on`: the web layer calls it whichever way a recording
+/// ends, and iOS drops the setting itself when the app leaves the screen.
+@objc(KeepAwakePlugin)
+public class KeepAwakePlugin: CAPPlugin, CAPBridgedPlugin {
+    public let identifier = "KeepAwakePlugin"
+    public let jsName = "KeepAwake"
+    public let pluginMethods: [CAPPluginMethod] = [
+        CAPPluginMethod(name: "on", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "off", returnType: CAPPluginReturnPromise)
+    ]
+
+    @objc func on(_ call: CAPPluginCall) {
+        DispatchQueue.main.async {
+            UIApplication.shared.isIdleTimerDisabled = true
+            call.resolve()
+        }
+    }
+
+    @objc func off(_ call: CAPPluginCall) {
+        DispatchQueue.main.async {
+            UIApplication.shared.isIdleTimerDisabled = false
+            call.resolve()
+        }
     }
 }

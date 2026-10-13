@@ -751,15 +751,18 @@ t('a replay shows the air as it was, and a search can be replayed', () => {
   assert.match(frame, /plume\.contam\.prune\(now, plume\.wx, plume\.st, \{ max: 5000, since: plume\.since \}\)/);
   assert.match(bodyOf('contamSim'), /new ScentSim\(\{ pool: false \}\)/,
     'contamination is walked through: nobody stands at the end of it');
+  /* What the replay stands on is drawn by drawReplayGround, which the video
+     (clip.js) calls again to take the answer off the map and put it back. */
   const open = bodyOf('openReplay');
-  assert.match(open, /plumeStart\(trailOf\(s\), w0, plume\.T, s\.data\.contamination,\s*\{ at: replay\.at, since: replay\.from \}\)/,
+  const ground = bodyOf('drawReplayGround');
+  assert.match(ground, /plumeStart\(trailOf\(s\), w0, plume\.T, s\.data\.contamination,\s*\{ at: replay\.at, since: replay\.from \}\)/,
     'on the replay’s clock, pruned by the start of the run, in the wind of that moment');
-  assert.doesNotMatch(open, /plume\.clock =/, 'the clock is plumeStart’s to set');
-  const hide = open.indexOf("if (targetById(s.targetId).kind === 'hide') {");
-  assert.ok(hide > 0 && hide < open.indexOf('s.data.trail[0]'), 'a search never reads a trail it does not have');
-  assert.match(open.slice(hide), /^[^}]*setSrc\('hides', pointsOf\(s\.data\.hides \|\| \[\]\)\);/, 'it shows the hides');
+  assert.doesNotMatch(open + ground, /plume\.clock =/, 'the clock is plumeStart’s to set');
+  const hide = ground.indexOf("if (targetById(s.targetId).kind === 'hide') {");
+  assert.ok(hide > 0 && hide < ground.indexOf('s.data.trail[0]'), 'a search never reads a trail it does not have');
+  assert.match(ground.slice(hide), /^[^}]*setSrc\('hides', pointsOf\(s\.data\.hides \|\| \[\]\)\);/, 'it shows the hides');
   assert.match(open, /fitTo\(s\.data\.trail \|\| s\.data\.hides \|\| \[\], track,/);
-  assert.ok(open.indexOf('replay.s = s;') > open.indexOf('plumeStart('), 'nothing is left half open');
+  assert.ok(open.indexOf('replay.s = s;') > open.indexOf('drawReplayGround(s);'), 'nothing is left half open');
   assert.match(bodyOf('paintReplay'), /const laid = targetById\(s\.targetId\)\.kind === 'hide' \? 'Hides' : 'Trail';/);
   assert.match(bodyOf('showOnMap'),
     /plumeStart\(trailOf\(s\), wx, undefined, s\.data\.contamination, \{ at: s\.data\.trackStarted \?\? null \}\)/,

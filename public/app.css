@@ -1398,6 +1398,48 @@ h2.log-day { margin: 14px 0 0; }
 .call-opt.on { background: var(--moss); border-color: var(--moss); color: #fff; }
 .call-opt.on i { color: rgba(255, 255, 255, 0.82); }
 #callSkip { width: 100%; }
+/* ── The replay as a video ────────────────────────────────────────────
+   A sheet over the whole replay, and over the map: while a video is being
+   made nothing under it may be touched, because a finger on the map would
+   be in the video. It is the navy of the glass on every map screen, in both
+   themes, for the same reason the buttons are: it sits on the ground, not
+   on paper. Nothing in it moves, so there is nothing for Reduce Motion to
+   still; the bar grows as the recording does and no faster. */
+.clip {
+  position: fixed; inset: 0; z-index: 9;
+  display: flex; align-items: flex-end; justify-content: center;
+  padding: calc(var(--safe-t) + 12px) 12px calc(var(--safe-b) + 12px);
+  background: rgba(6, 12, 30, 0.62);
+}
+.clip[hidden] { display: none; }
+.clip-card {
+  width: 100%; max-width: 536px; max-height: 100%; overflow-y: auto;
+  background: rgba(11, 22, 48, 0.95); color: #F4F6FA;
+  border: 1px solid rgba(255, 255, 255, 0.24); border-radius: var(--r);
+  padding: 14px 16px 16px; box-shadow: 0 18px 44px -10px rgba(0, 0, 0, 0.7);
+}
+.clip-card .label { color: #DDB95A; outline: none; }
+.clip-say { margin: 6px 0 12px; font: 500 calc(15 * var(--px))/1.4 var(--body); color: #F4F6FA; overflow-wrap: anywhere; }
+.clip-len { display: flex; gap: 8px; margin-bottom: 12px; }
+.clip-len .db-opt {
+  flex: 1 1 0; min-height: 52px; font-size: calc(17 * var(--px));
+  background: rgba(255, 255, 255, 0.08); border-color: rgba(255, 255, 255, 0.3); color: #F4F6FA;
+}
+.clip-len .db-opt[aria-checked="true"] { background: var(--ember); border-color: #DDB95A; color: #fff; }
+.clip-view { display: flex; justify-content: center; margin: 6px 0 12px; }
+/* The video as it is made, small: tall, as the file is. Both sides are set
+   from the one height, for a phone with no aspect-ratio. */
+.clip-view canvas {
+  height: min(46vh, 420px); width: calc(min(46vh, 420px) * 9 / 16);
+  border-radius: 12px; border: 1px solid rgba(255, 255, 255, 0.26); background: #0B1630;
+}
+.clip-bar { height: 6px; border-radius: 3px; background: rgba(255, 255, 255, 0.2); overflow: hidden; margin-bottom: 8px; }
+.clip-bar i { display: block; height: 100%; width: 0; background: #DDB95A; }
+#clipStatus, #clipDoneSay, #clipHint { text-align: center; }
+#clipHint { margin-top: -6px; color: #DDB95A; }
+/* Save video while a save is already on its way: off, and seen to be. */
+.clip .btn:disabled { opacity: 0.45; cursor: default; }
+#clipCancel { width: 100%; }
 /* ── The wind on the ground ───────────────────────────────────────────
    One picker, in a sheet over the run controls (as the call is) and as a
    row of the debrief: the debrief's own buttons, larger here, because it is

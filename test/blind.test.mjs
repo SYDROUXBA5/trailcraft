@@ -311,7 +311,9 @@ await t('the map marks the find at the end of a blind trail’s track', () => {
 
 await t('every screen that drew the laid trail steps round a blind trail with no line', () => {
   /* Each of these read s.data.trail[0] or graded against the line. */
-  assert.match(bodyOf('openReplay'), /\} else if \(noLineYet\(s\.data\)\) \{/);
+  /* What a replay stands on is drawn by one function now, shared with the video (clip.js). */
+  assert.match(bodyOf('openReplay'), /\n  drawReplayGround\(s\);/);
+  assert.match(bodyOf('drawReplayGround'), /\} else if \(noLineYet\(s\.data\) \|\| !\(s\.data\.trail\?\.length > 1\)\) \{/);
   assert.match(bodyOf('showOnMap'), /const noLine = noLineYet\(s\.data\);\s*\n\s*if \(noLine\) \{/);
   assert.match(js, /const blindTrail = noLineYet\(s\.data\);\s*\n\s*if \(blindTrail && s\.data\.track\) return toast/);
   assert.match(js, /if \(blindTrail\) \{[\s\S]{0,200}\} else if \(t\.kind === 'person'\) \{\s*\n\s*\/\/ Only the start of the trail/);
