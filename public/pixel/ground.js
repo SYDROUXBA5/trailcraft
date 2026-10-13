@@ -1,207 +1,171 @@
 /* The ground under it all, painted a band of rows at a time and pixel by
-   pixel: big quiet tonal shapes first (mown and long grass, drifts of leaf
-   litter, lawn and cobbles, rock and wind-packed snow), then the water, then
-   the trail on top of it, then the small things that lie on the ground.
+   pixel: big quiet tonal shapes first (mown and long grass, sun pools on a
+   forest floor, moss and deep shade), then the water and the hard ground,
+   then the trail on top of it, then the small things that lie on the ground.
 
    Every pixel is a function of where it is and nothing else, so a tile
-   paints the same rows the same way whatever is painted around it. */
+   paints the same rows the same way whatever is painted around it. How deep
+   a row is (layout.levelAt) drives all of it: the field opens out, the wood
+   closes in, the trail narrows and frays. */
 
 import { bayer, clamp, hash, hexToRgb, mix, R, smooth } from './core.js';
+import { castOf, GRAVEL, LANDS, ROAD, surfaceOf, TARMAC, trailHalf, trailRough } from './lands.js';
 import { RAMPS } from './ramps.js';
 import { fbm, vnoise } from './terrain.js';
 import { gateX, pathRange, streamY } from './layout.js';
 
 const rgb = (ramp) => ramp.map(hexToRgb);
 const one = hexToRgb;
-const M = RAMPS.meadow, WD = RAMPS.wood, TN = RAMPS.town, CL = RAMPS.climb;
+const FI = LANDS.field, FO = LANDS.forest, OL = LANDS.old, AN = LANDS.ancient;
 
 /* Each land's ground in tones. A ramp has no tone between `base` and
-   `shade`, and a large area needs one (long grass, a lee slope): those are
+   `shade`, and a large area needs one (long grass, deep shade): those are
    mixed here, once. */
-const HOT = { g: rgb(M.grass), long: one(mix(M.grass[2], M.grass[1], 0.55)), path: rgb(M.path), water: rgb(M.water), bank: one(M.grass[0]) };
-const WARM = { g: rgb(WD.litter), deep: one(mix(WD.litter[2], WD.litter[1], 0.5)), path: rgb(WD.path), water: rgb(WD.water), bank: one(WD.litter[0]) };
-const TOWN = {
-  lawn: rgb(TN.lawn), cob: rgb(TN.cobble), stone: rgb(TN.stone),
-  cobMid: one(mix(TN.cobble[2], TN.cobble[1], 0.5)), cobDim: one(mix(TN.cobble[1], TN.cobble[2], 0.35)),
-  flag: one(mix(TN.stone[2], TN.stone[1], 0.35)), flagHi: one(TN.stone[2]),
-  lawnMid: one(mix(TN.lawn[1], TN.lawn[2], 0.55)),
-};
-const ALP = {
-  snow: rgb(CL.snow), lee: one(mix(CL.snow[2], CL.snow[1], 0.5)), rock: rgb(CL.rock), path: rgb(CL.track), sky: rgb(CL.sky), aurora: rgb(CL.aurora),
-  far: one('#2a3768'), farLit: one('#44548c'), farSnow: one('#aebfe2'), star: one('#fff3c4'), starLo: one('#93a8de'),
-  glow: one('#d2f6e2'), tar: one('#3a4460'), tarHi: one('#4c5876'), tarLo: one('#1e2740'), paint: one('#e4ecf7'),
-  rut: one(mix(CL.track[0], CL.track[1], 0.55)), slush: one('#7c8aa8'),
-};
+const FIELD = { g: rgb(FI.floor), long: one(mix(FI.floor[2], FI.floor[1], 0.55)), path: rgb(FI.path) };
+const FOR = { g: rgb(FO.floor), deep: one(mix(FO.floor[2], FO.floor[1], 0.5)), path: rgb(FO.path) };
+const OLD = { g: rgb(OL.floor), mid: one(mix(OL.floor[1], OL.floor[2], 0.5)), path: rgb(OL.path), moss: [one(OL.mossLo), one(OL.moss)] };
+const ANC = { g: rgb(AN.floor), mid: one(mix(AN.floor[1], AN.floor[2], 0.45)), path: rgb(AN.path), moon: rgb(AN.moon), black: one('#060a12') };
+const WATER = { field: rgb(FI.water), edge: rgb(FI.water), forest: rgb(FO.water), old: rgb(OL.water), ancient: rgb(AN.water) };
+const BANK = { field: FIELD.g[0], edge: FIELD.g[0], forest: FOR.g[0], old: OLD.g[0], ancient: ANC.g[0] };
+const PATH = { field: FIELD.path, edge: FIELD.path, forest: FOR.path, old: OLD.path, ancient: ANC.path };
+const GRV = rgb(GRAVEL), TAR = rgb(TARMAC);
+
+/* In the dark lands the floor is a tone lighter beside the trail, so the
+   trail lies in a soft corridor of what light there is and never against
+   black. This is each floor tone's next one up. */
+const UP = new Map();
+[[OLD.g[0], OLD.g[1]], [OLD.g[1], OLD.mid], [OLD.mid, OLD.g[2]], [OLD.g[2], OLD.g[3]], [OLD.moss[0], OLD.moss[1]],
+  [ANC.black, ANC.g[0]], [ANC.g[0], ANC.g[1]], [ANC.g[1], ANC.mid], [ANC.mid, ANC.g[2]], [ANC.g[2], ANC.g[3]]].forEach(([a, b]) => UP.set(a, b));
 
 /* A short upright tick (a blade of grass) or a short flat one (a leaf):
    two pixels, never one, so the texture is clusters and not noise. */
 const tickV = (x, y, s) => hash((x * 7919 + s * 31) ^ ((y >> 1) * 104729));
 const tickH = (x, y, s) => hash(((x >> 1) * 7919 + s * 31) ^ (y * 104729));
 
-/* What the shaders say about a pixel besides its colour. */
-let VERGE = null, OPEN = true;
-/* The northern lights over the summit are for whoever gets there: until
-   then the sky is dark, with only a glimmer of them. */
-let AURORA = true;
+/* What the shaders say about a pixel besides its colour: the tone of the
+   trail's verge there, whether a trail can be worn into it, and whether it
+   is hard ground (a road keeps no path). LV is the depth of the row. */
+let VERGE = null, OPEN = true, HARD = null, LV = 1;
+/* The moon comes fully into the glade at the heart of the wood for whoever
+   gets there: until then it is only a glimmer. */
+let GLADE = true;
 
-/** The meadow's patches: above 0.6 mown and sunlit, below 0.37 long grass. */
-export const meadowField = (x, y) => fbm(x, y, 44, 1) + (vnoise(x, y, 5, 2) - 0.5) * 0.14;
+/** The field's patches: above 0.6 mown and sunlit, below 0.37 long grass. */
+const meadowField = (x, y) => fbm(x, y, 44, 1) + (vnoise(x, y, 5, 2) - 0.5) * 0.14;
 
-function hotPx(x, y) {
-  const n = meadowField(x, y), G = HOT.g;
+function fieldPx(x, y) {
+  /* The first field is nearly all mown and in the sun; the long grass
+     comes in as the wood gets nearer, and stands thick at its edge. */
+  const n = meadowField(x, y) + smooth((9 - LV) / 6) * 0.2 - smooth((LV - 10) / 5) * 0.1, G = FIELD.g;
   VERGE = G[3];
   if (n > 0.6) return tickV(x, y, 1) < 0.045 ? G[2] : n > 0.66 && tickH(x, y, 2) < 0.03 ? G[4] : G[3];
-  if (n < 0.37) { const k = tickV(x, y, 3); return k < 0.17 ? G[1] : k > 0.93 ? G[2] : HOT.long; }
+  if (n < 0.37) { const k = tickV(x, y, 3); return k < 0.17 ? G[1] : k > 0.93 ? G[2] : FIELD.long; }
   const k = tickV(x, y, 4);
-  return k < 0.04 ? HOT.long : k > 0.975 ? G[3] : G[2];
+  return k < 0.04 ? FIELD.long : k > 0.975 ? G[3] : G[2];
 }
 
-/** The wood's floor lies in long bands down the light: 0..1. */
-export const woodField = (x, y) => fbm((x * 0.86 + y * 0.51) / 2.3, -x * 0.51 + y * 0.86, 24, 3);
+/** The forest's floor lies in long bands down the light: 0..1. */
+const woodField = (x, y) => fbm((x * 0.86 + y * 0.51) / 2.3, -x * 0.51 + y * 0.86, 24, 3);
 
-function warmPx(x, y) {
-  const n = woodField(x, y), G = WARM.g, k = tickH(x, y, 5);
-  VERGE = G[3];
-  if (n > 0.6) return k < 0.06 ? G[4] : k > 0.93 ? G[2] : G[3];
-  if (n < 0.38) return k < 0.06 ? G[0] : k > 0.94 ? G[2] : n < 0.3 ? G[1] : WARM.deep;
-  return k < 0.05 ? G[3] : k > 0.95 ? WARM.deep : G[2];
+function forestPx(x, y) {
+  /* Shade is the rule and the sun comes down in pools, broken into
+     leaf-sized dapples, fewer of them the deeper it goes. */
+  const d = clamp((LV - 15) / 30, 0, 1);
+  const n = woodField(x, y), G = FOR.g, k = tickH(x, y, 5);
+  VERGE = G[2];
+  if (n > 0.56 + d * 0.1) { const dap = vnoise(x, y, 5, 41); return dap > 0.42 ? (k < 0.07 ? G[4] : G[3]) : G[2]; }
+  if (n < 0.38 + d * 0.13) return k < 0.06 ? G[0] : k > 0.95 ? G[2] : n < 0.3 + d * 0.1 ? G[1] : FOR.deep;
+  return k < 0.05 ? G[3] : k > 0.94 ? FOR.deep : G[2];
 }
 
-/* Setts in running bond, three rows to a course. */
-function cobble(x, y, main) {
-  const row = Math.floor(y / 3), off = (row & 1) * 2, col = Math.floor((x + off) / 4);
-  const joint = y % 3 === 2 || (x + off) % 4 === 3, k = hash(row * 7919 + col * 104729);
-  const C = TOWN.cob;
-  if (main) return joint ? C[1] : k < 0.14 ? C[3] : k < 0.34 ? TOWN.cobMid : C[2];
-  return joint ? C[0] : k < 0.2 ? TOWN.cobMid : k < 0.5 ? C[1] : TOWN.cobDim;
+function oldPx(x, y) {
+  /* Deep shade, cushions of moss, a rare pool of light. */
+  const d = clamp((LV - 45) / 30, 0, 1);
+  const n = fbm(x, y, 30, 5), G = OLD.g, k = tickH(x, y, 6);
+  VERGE = G[1];
+  /* The pools of light close and the deep shade spreads, level by level:
+     the old forest is darker at its far end than where it starts. */
+  if (n > 0.66 + d * 0.16) return vnoise(x, y, 5, 43) > 0.5 ? (k < 0.07 ? G[4] : G[3]) : G[2];
+  if (vnoise(x, y * 1.5, 8, 44) > 0.8 - (1 - d) * 0.03) return k < 0.12 ? OLD.moss[1] : OLD.moss[0];
+  if (n < 0.44 + d * 0.2) return k < 0.05 ? G[2] : n < 0.34 + d * 0.2 ? G[0] : G[1];
+  return k < 0.04 ? G[2] : k > 0.95 ? G[1] : OLD.mid;
 }
 
-/* The square's flags: bigger, paler, laid square. */
-function flags(x, y) {
-  const row = Math.floor(y / 5), off = (row & 1) * 4, col = Math.floor((x + off) / 8);
-  if (y % 5 === 4 || (x + off) % 8 === 7) return TOWN.stone[1];
-  return hash(row * 131 + col * 7919) < 0.25 ? TOWN.flagHi : TOWN.flag;
-}
-
-function townPx(x, y, crs) {
-  VERGE = null;
-  for (let i = 0; i < crs.length; i++) {
-    const cr = crs[i];
-    if (cr.kind === 'street') {
-      const dy = y - cr.y, a = Math.abs(dy);
-      if (a <= 6) return cobble(x, y, false);
-      if (a === 7) return dy < 0 ? TOWN.stone[2] : TOWN.stone[1];
-      if (dy === 8) return TOWN.cob[0];
-    } else if (cr.kind === 'square') {
-      const ax = Math.abs(x - cr.x) - 34, ay = Math.abs(y - cr.y) - 16;
-      const q = Math.hypot(Math.max(ax, 0), Math.max(ay, 0));
-      if (q <= 9) return flags(x, y);
-      if (q <= 10) return y > cr.y + 16 ? TOWN.stone[1] : TOWN.stone[2];
-      if (q <= 11 && y > cr.y) return TOWN.cob[0];
+function ancientPx(layout, x, y) {
+  const G = ANC.g, k = tickH(x, y, 8), ht = layout.heart;
+  VERGE = G[1];
+  if (ht) {
+    /* The glade: moonlight on moss, brightest round the last stone, its
+       edge the ragged shadow of the trees that ring it. */
+    const q = ((x - ht.x) * (x - ht.x)) / (ht.rx * ht.rx) + ((y - ht.y) * (y - ht.y)) / (ht.ry * ht.ry) + (vnoise(x, y, 9, 95) - 0.5) * 0.36;
+    if (q < 1) {
+      const Mo = ANC.moon, lit = GLADE ? 0 : 0.3;
+      VERGE = Mo[1];
+      if (q + lit < 0.3) return k < 0.08 ? Mo[3] : vnoise(x, y, 4, 96) > 0.6 ? Mo[2] : Mo[1];
+      if (q + lit < 0.62) return k < 0.05 ? Mo[2] : vnoise(x, y, 5, 97) > 0.55 ? Mo[1] : Mo[0];
+      return bayer(x, y) < (1 - q) * 2.2 ? Mo[0] : G[3];
     }
+    /* Beyond it the wood closes over: nothing comes down through that. */
+    const up = (ht.y - ht.ry - y) / 46;
+    if (up > 0 && bayer(x, y) < up * 0.95 + (vnoise(x, y, 11, 98) - 0.5) * 0.5) { OPEN = false; return ANC.black; }
   }
-  const n = fbm(x, y, 34, 5), L = TOWN.lawn, k = tickV(x, y, 6);
-  // Mown and unmown, a tone apart: at two tones apart the lawns were
-  // camouflage and the houses floated on them.
-  if (n < 0.4) return k < 0.05 ? L[2] : n < 0.3 && k > 0.9 ? L[1] : TOWN.lawnMid;
-  return k < 0.035 ? L[3] : k > 0.955 ? L[1] : L[2];
+  /* Almost no light reaches the floor, and less of it the further in. */
+  const n = fbm(x, y, 28, 11), d = clamp((LV - 76) / 22, 0, 1);
+  if (n > 0.72 + d * 0.12) return k < 0.06 ? G[3] : G[2];
+  if (n < 0.46 + d * 0.14) return k < 0.04 ? G[1] : G[0];
+  return k < 0.05 ? G[2] : k > 0.96 ? G[0] : ANC.mid;
 }
 
-/* The summit's sky: bands, far peaks, three curtains of the northern
-   lights and the stars between them. */
-function skyPx(layout, x, y) {
-  const { W, sky } = layout, S = ALP.sky;
-  const peaks = [[W * 0.13, sky.y + 10], [W * 0.88, sky.y + 22], [W * 0.31, sky.y + 34], [W * 0.7, sky.y + 40], [W * 0.5, sky.y + 52]];
-  let far = 1e9, lit = false;
-  for (const p of peaks) { const f = p[1] + Math.abs(x - p[0]) * 0.85; if (f < far) { far = f; lit = x < p[0]; } }
-  if (y >= far) return y < far + 4 + R(vnoise(x, 0, 4, 9) * 5) ? ALP.farSnow : lit ? ALP.farLit : ALP.far;
-  const f = clamp(y / (sky.y + sky.drop), 0, 0.999) * 4;
-  const i = Math.floor(f), frac = f - i;
-  let col = S[i < 3 && frac > 0.45 && bayer(x, y) < (frac - 0.45) / 0.55 ? i + 1 : i];
-  /* A curtain hangs from a wavy lower edge and fades upward in rays. */
-  let best = 0;
-  for (let j = 0; j < 3; j++) {
-    const edge = 30 + j * 15 + 7 * Math.sin(x / (19 + j * 6) + j * 2.1) + 3 * Math.sin(x / 7 + j);
-    const up = edge - y;
-    if (up < 0 || up > 22) continue;
-    const ray = 0.45 + 0.55 * vnoise(x, j * 50, 3, 40 + j);
-    const v = (1 - up / 22) * ray * (j === 1 ? 1 : 0.8) * (AURORA ? 1 : 0.34);
-    if (v > best) best = v;
-  }
-  if (best > 0.12) {
-    const A = ALP.aurora, b = bayer(x, y);
-    if (best > 0.74) col = b < (best - 0.74) * 6 ? A[4] : A[3];
-    else if (best > 0.5) col = b < (best - 0.5) * 4.2 ? A[3] : A[2];
-    else if (best > 0.3) col = b < (best - 0.3) * 5 ? A[2] : A[1];
-    else if (b < (best - 0.12) * 5.5) col = A[1];
-  }
-  if (best < 0.3) {
-    const st = hash(x * 7919 + y * 104729);
-    if (st < 0.006) col = st < 0.0022 ? ALP.star : ALP.starLo;
-  }
-  return col;
+/* Rolled road stone: paler where the wheels do not run, darker in the two
+   ruts, a few bigger stones catching the light. `a` is how far from the
+   middle, in pixels. */
+function gravelPx(x, y, a) {
+  const k = hash(x * 131 + y * 7919);
+  if (a > 1.6 && a < 3.6) return k < 0.3 ? GRV[2] : GRV[1];
+  return k < 0.05 ? GRV[4] : k < 0.3 ? GRV[3] : k > 0.94 ? GRV[1] : GRV[2];
 }
 
-/* The mountain: moonlit rock by the town wall, snow from half way, both
-   modelled as a height field lit from the upper left so drifts and ribs
-   have a bright side and a blue one. */
-function alpPx(layout, x, y, crs) {
-  const { sky } = layout;
-  if (sky && y < layout.skyAt(x)) { OPEN = false; return skyPx(layout, x, y); }
-  for (let i = 0; i < crs.length; i++) {
-    const cr = crs[i];
-    if (cr.kind !== 'road') continue;
+function tarmacPx(x, y) {
+  const k = hash(x * 131 + y * 7919);
+  return vnoise(x, y * 2, 7, 93) > 0.76 ? TAR[3] : k < 0.05 ? TAR[1] : TAR[2];
+}
+
+/* What lies across the board there, or null: the forestry track (a gravel
+   road that wanders a little) and the lane (tarmac, ruled, with its white
+   edge lines and a broken line down the middle). */
+function bandPx(cr, x, y, bank) {
+  if (cr.kind === 'track') {
+    const a = Math.abs(y - cr.y - R(2.4 * Math.sin(x / 23 + cr.level)));
+    const rag = vnoise(x, y, 4, 91) > 0.5 ? 1 : 0;
+    if (a > 6 + rag) return null;
+    HARD = 'track';
+    return a > 5 ? bank : gravelPx(x, y, a);
+  }
+  if (cr.kind === 'lane') {
     const dy = y - cr.y, a = Math.abs(dy);
-    // A ploughed road: banks of thrown snow each side, ragged, the far one
-    // in the light and the near one in its own shade; slush where the
-    // wheels run, and a dusting the plough left behind.
-    const rag = vnoise(x, cr.y + (dy < 0 ? 0 : 50), 4, 91) > 0.55 ? 1 : 0;
-    if (a <= 5 - (a === 5 ? rag : 0)) {
-      VERGE = null;
-      if (dy === 0 && x % 12 < 6) return ALP.paint;
-      if ((a === 3 || a === 2) && vnoise(x, y, 5, 92) > 0.45) return a === 3 ? ALP.slush : ALP.tarHi;
-      return vnoise(x, y * 2, 7, 93) > 0.78 ? ALP.tarHi : hash(x * 31 + y * 7919) < 0.04 ? ALP.tarLo : ALP.tar;
-    }
-    if (a <= 7 + rag) { VERGE = null; return dy < 0 ? (a >= 7 ? ALP.snow[3] : ALP.snow[4]) : a === 5 || a === 6 ? ALP.snow[0] : ALP.snow[1]; }
+    if (a > 8 || dy === -8) return null;
+    HARD = 'lane';
+    if (a === 8) return bank;
+    if (a === 7) return TAR[0];
+    if (a === 6) return x % 23 < 20 ? TAR[4] : TAR[2];
+    if (dy === 0 && x % 14 < 7) return TAR[4];
+    return tarmacPx(x, y);
   }
-  const wall = layout.bosses[2] ? layout.bosses[2].y : layout.H, topY = sky ? sky.y : 0;
-  const a = smooth(((wall - y) / Math.max(1, wall - topY) - 0.04) / 0.36);
-  // The snow line is made of patches, each a solid shape: lying deeper on
-  // the left of every hollow, with a lit lip along its top and its own blue
-  // shade along its foot. (Dithered, every edge of it was a checkerboard.)
-  const lies = (px, py) => {
-    const b = smooth(((wall - py) / Math.max(1, wall - topY) - 0.04) / 0.36);
-    return b >= 1 || (b > 0 && b * 1.1 + 0.9 * (0.7 * vnoise(px, py, 14, 14) + 0.3 * vnoise(px + 40, py, 5, 15) - 0.5) > 0.5);
-  };
-  let snow = a >= 1, lip = 0;
-  if (!snow && a > 0) {
-    snow = lies(x, y);
-    if (snow) lip = !lies(x, y - 1) ? 1 : !lies(x, y + 1) || !lies(x + 1, y + 1) ? -1 : 0;
-    else if (lies(x, y - 1) || lies(x - 1, y - 1)) lip = 2;
-  }
-  /* A few ribs of rock stand through the snow on the way up. */
-  if (snow && a >= 1 && vnoise(x * 0.55, y, 20, 16) > 0.83 && y > topY + 150) snow = false;
-  const hgt = fbm(x, y * 1.7, 30, 11), slope = fbm(x + 2, (y + 2) * 1.7, 30, 11) - hgt;
-  if (snow) {
-    const S = ALP.snow;
-    VERGE = S[3];
-    /* Near the top the aurora is on the snow's highlights. */
-    // It fades out down the slope through an ordered dither: cut on a row,
-    // it drew a ruled line across the last screen of the game.
-    const hi = AURORA && sky && bayer(x, y) >= (y - sky.y - 100) / 90 ? ALP.glow : S[3];
-    if (lip === 1) return S[4];
-    if (lip === -1) return S[1];
-    if (slope < -0.05) return S[1];
-    if (slope < -0.022) return ALP.lee;
-    if (slope > 0.03) return hash(x * 131 + y * 7919) < 0.03 ? S[4] : hi;
-    return tickH(x, y, 7) < 0.02 ? ALP.lee : S[2];
-  }
-  const K = ALP.rock, k = tickH(x, y, 8);
-  VERGE = K[3];
-  if (lip === 2) return K[0];
-  if (slope < -0.03) return k < 0.1 ? K[0] : K[1];
-  if (slope > 0.035) return k < 0.08 ? K[4] : K[3];
-  return k < 0.07 ? K[1] : k > 0.95 ? K[3] : K[2];
+  return null;
+}
+
+/* The car park: a gravel bay beside the road, kerbed with logs on the
+   three sides away from it, its bays marked off by a line of pale stone. */
+function parkPx(p, x, y) {
+  const ax = Math.abs(x - p.x) - p.rx, ay = Math.abs(y - p.y) - p.ry;
+  const q = Math.hypot(Math.max(ax + 4, 0), Math.max(ay + 4, 0)) - 4;
+  if (q > 1) return null;
+  HARD = 'park';
+  if (q > 0) return (x - p.x) * p.side < -p.rx + 2 ? gravelPx(x, y, 0) : y < p.y ? OLD.g[4] : OLD.g[0];
+  if (q > -1.2 && (x - p.x) * p.side > -p.rx + 2) return y < p.y - p.ry + 2 || (x - p.x) * p.side > p.rx - 2 ? one('#8a6a48') : one('#4a3626');
+  const bay = ((x - p.x + p.rx) % 15 + 15) % 15;
+  if (bay === 14 && ay < -3 && ay > -p.ry * 2 + 3 && y % 3 !== 2 && y < p.y + 3) return GRV[4];
+  return gravelPx(x, y, 0);
 }
 
 /* A band of water across the board, or null where there is none. */
@@ -216,57 +180,79 @@ function waterPx(w, x, y, P, bank) {
   return s > 0.8 ? P[4] : s > 0.62 ? P[3] : s < 0.25 ? P[1] : P[2];
 }
 
+/* Through its last ten levels the old forest's floor goes over to the
+   ancient wood's in patches that grow and join, so the wood has been
+   darkening for a long way by the hamlet's wall and does not drop to black
+   behind it. */
+const deepening = (L, x, y) => (LV > 65.5 && vnoise(x, y, 13, 88) + (bayer(x, y) - 0.5) * 0.1 < (LV - 65.5) / 9.5 * 0.66 ? ancientPx(L, x, y) : oldPx(x, y));
+const FLOOR = { field: (L, x, y) => fieldPx(x, y), edge: (L, x, y) => fieldPx(x, y), forest: (L, x, y) => forestPx(x, y), old: deepening, ancient: ancientPx };
+
 function groundPixels(layout, y0, y1) {
   const { W, H, bosses, stones, xAt } = layout;
   const h = y1 - y0, img = new ImageData(W, h), d = img.data;
-  const hedge = bosses[0] && bosses[0].kind === 'stile' ? bosses[0].y : null;
   for (let r = 0; r < h; r++) {
     const y = y0 + r;
     const rowLand = layout.landAt(y);
+    LV = layout.levelAt(y);
+    const half = trailHalf(LV), rough = trailRough(LV);
     const tx = xAt[clamp(y, 0, H)], ta = xAt[clamp(y - 2, 0, H)], tb = xAt[clamp(y + 2, 0, H)];
     const lean = ta === ta && tb === tb ? (ta - tb) / 4 : 0;
     const cosF = 1 / Math.sqrt(1 + lean * lean);
     const near = stones.filter(s => !s.boss && Math.abs(s.y - y) <= 7);
-    const crs = layout.crossings.filter(cr => Math.abs(cr.y - y) <= 30);
+    const crs = layout.crossings.filter(cr => cr.kind !== 'brook' && Math.abs(cr.y - y) <= 10);
     const waters = layout.waters.filter(w => Math.abs(w.y - y) <= w.half + 7);
+    const park = layout.park && Math.abs(layout.park.y - y) <= layout.park.ry + 2 ? layout.park : null;
+    /* One land gives way to the next in tongues, over two dozen rows each
+       side of the boss that stands between them, never on a line. */
+    let seam = null;
+    for (let k = 0; k < bosses.length - 1; k++) if (Math.abs(y - bosses[k].y) < 24) seam = { y: bosses[k].y, lo: layout.landAt(bosses[k].y + 30), hi: layout.landAt(bosses[k].y - 30), k };
     for (let x = 0; x < W; x++) {
       let land = rowLand;
-      /* The meadow gives way to the wood in tongues, not on a line. */
-      if (hedge !== null && Math.abs(y - hedge) < 22) land = (hedge - y) / 13 + (vnoise(x, y, 9, 77) - 0.5) * 2 > 0 ? 'warm' : 'hot';
-      OPEN = true;
-      let col = land === 'hot' ? hotPx(x, y) : land === 'warm' ? warmPx(x, y) : land === 'town' ? townPx(x, y, crs) : alpPx(layout, x, y, crs);
+      if (seam) land = (seam.y - y) / 13 + (vnoise(x, y, 9, 77 + seam.k) - 0.5) * 2 > 0 ? seam.hi : seam.lo;
+      OPEN = true; HARD = null;
+      let col = FLOOR[land](layout, x, y);
+      for (let i = 0; i < crs.length; i++) { const bc = bandPx(crs[i], x, y, BANK[land]); if (bc) { col = bc; VERGE = null; } }
+      if (park) { const pc = parkPx(park, x, y); if (pc) { col = pc; VERGE = null; } }
       let wet = false;
       for (let i = 0; i < waters.length; i++) {
         const w = waters[i];
-        const wc = waterPx(w, x, y, w.land === 'hot' ? HOT.water : WARM.water, w.land === 'hot' ? HOT.bank : WARM.bank);
+        const wc = waterPx(w, x, y, WATER[w.land], BANK[w.land]);
         if (wc) { col = wc; wet = true; }
       }
       if (OPEN && !wet && tx === tx) {
         const dd = Math.abs(x - tx) * cosF;
-        if (land === 'town') {
-          const e = 7 - dd;
-          if (e >= 0) col = e < 1 ? TOWN.cob[1] : cobble(x, y, true);
-          else if (e >= -1) col = TOWN.stone[3];
-          else if (e >= -2) col = TOWN.cob[0];
-        } else {
-          const P = land === 'hot' ? HOT.path : land === 'warm' ? WARM.path : ALP.path;
-          let e = 4.7 - dd;
+        /* The road's surface changes over a few rows, not on one. */
+        const surf = LV > ROAD.gravel[0] - 0.2 && LV < ROAD.tarmac[1] + 0.2 ? surfaceOf(LV + (bayer(x, y) - 0.5) * 0.1) : 'earth';
+        if (HARD === 'lane' || HARD === 'track') {
+          /* Nothing is worn into a road: where the trail goes over one there
+             is only the dirt feet have carried on to it. */
+          if (dd < 2.2 && bayer(x, y) < 0.55 - dd * 0.12) col = PATH[land][2];
+        } else if (surf === 'gravel') {
+          const e = ROAD.half - dd + (vnoise(x, y, 4, 33) - 0.5) * 1.2;
+          if (e >= 0) col = e < 1 ? GRV[1] : gravelPx(x, y, dd);
+          else if (HARD !== 'park' && VERGE && e > -1.6) col = VERGE;
+        } else if (surf === 'tarmac') {
+          const e = ROAD.half - dd;
+          if (e >= 0) col = e < 0.9 ? TAR[0] : e < 1.9 ? (y % 11 < 9 ? TAR[4] : TAR[2]) : tarmacPx(x, y);
+          else if (HARD !== 'park' && e > -1.2) col = TAR[0];
+        } else if (HARD !== 'park') {
+          const P = PATH[land];
+          /* The trail narrows and its edges fray as the wood closes in. */
+          let e = half - dd + (rough ? (vnoise(x, y, 4, 33) - 0.5) * 1.9 * rough : 0);
           /* Feet have worn the ground bare round every stone. */
           for (let i = 0; i < near.length; i++) {
             const s = near[i], q = Math.sqrt(((x - s.x) * (x - s.x)) / 121 + ((y - s.y) * (y - s.y)) / 36);
             if (q < 1.3) e = Math.max(e, (1 - q) * 6);
           }
-          if (land === 'alp') e += 0.6;
-          if (e >= 0 && land === 'alp') {
-            // The packed track is a trench trodden into the snow: darker
-            // and bluer than any drift, its far bank white where the moon
-            // catches it, its near bank in shadow. Pale on pale, it was lost.
-            const k = hash(x * 131 + y * 7919), lit = x > tx;
-            col = e < 1.1 ? (lit ? ALP.snow[4] : P[0]) : e < 2.3 && !lit ? ALP.rut : k < 0.03 ? P[0] : dd < 1.7 && vnoise(x, y, 4, 31) > 0.45 ? P[2] : P[1];
-          } else if (e >= 0) {
+          if (e >= 0) {
             const k = hash(x * 131 + y * 7919);
-            col = e < 1.25 ? P[1] : k < 0.02 ? P[1] : k > 0.985 ? P[4] : dd < 1.8 && vnoise(x, y, 4, 31) > 0.4 ? P[3] : P[2];
-          } else if (VERGE && e > -(1 + 1.7 * vnoise(x, y, 3, 32))) col = VERGE;
+            col = e < (half < 4 ? 0.8 : 1.25) ? P[1] : k < 0.02 ? P[1] : k > 0.985 ? P[4] : dd < 1.8 && vnoise(x, y, 4, 31) > 0.4 ? P[3] : P[2];
+          } else {
+            if (VERGE && e > -(1 + 1.7 * vnoise(x, y, 3, 32))) col = VERGE;
+            /* The corridor of light the trail lies in, in the dark lands:
+               solid beside it, breaking up over a dozen pixels. */
+            else if (LANDS[land].dark && e > -13) { const up = UP.get(col); if (up && bayer(x, y) < 1.25 + e / 10) col = up; }
+          }
         }
       }
       const i = (r * W + x) * 4;
@@ -290,16 +276,21 @@ function eachCell(y0, y1, W, cw, ch, seed, fn) {
 const hex = (c, col, x, y, w, h) => { c.fillStyle = col; c.fillRect(x, y, w, h); };
 
 function decals(c, layout, y0, y1) {
-  const { W, landAt, pathDist } = layout;
+  const { W, landAt, levelAt, pathDist } = layout;
   const wet = (x, y) => layout.waters.some(w => Math.abs(y - streamY(w, x)) <= w.half + 2);
-  const off = (x, y, d) => pathDist(x, y) > d && !wet(x, y);
-  const G = M.grass, P = M.poppy, B = M.buttercup;
-  /* The meadow: flowers in drifts, each kind keeping to its own ground. */
+  const hard = (x, y) => layout.crossings.some(cr => cr.kind !== 'brook' && Math.abs(y - cr.y) < 11) ||
+    (layout.park && Math.abs(x - layout.park.x) < layout.park.rx + 4 && Math.abs(y - layout.park.y) < layout.park.ry + 4);
+  const off = (x, y, d) => pathDist(x, y) > d && !wet(x, y) && !hard(x, y);
+  const meadow = (y) => { const l = landAt(y); return l === 'field' || l === 'edge'; };
+  const G = RAMPS.meadow.grass, P = RAMPS.meadow.poppy, B = RAMPS.meadow.buttercup;
+  /* The field: flowers in drifts, each kind keeping to its own ground. The
+     first field has only a few; they thicken towards the wood. */
   eachCell(y0, y1, W, 5, 5, 1, (x, y, k) => {
-    if (landAt(y) !== 'hot' || landAt(y - 10) !== 'hot' || !off(x, y, 9)) return;
-    if (fbm(x, y, 36, 21) > 0.63 && k < 0.6) {
+    if (!meadow(y) || !meadow(y - 10) || !off(x, y, 9)) return;
+    const few = levelAt(y) < 8 ? 0.2 : 0.6;
+    if (fbm(x, y, 36, 21) > 0.63 && k < few) {
       hex(c, G[1], x, y + 1, 1, 2); hex(c, P[2], x - 1, y - 1, 3, 2); hex(c, P[3], x - 1, y - 1, 2, 1); hex(c, P[0], x, y, 1, 1);
-    } else if (fbm(x + 300, y, 30, 22) > 0.65 && k < 0.7) {
+    } else if (fbm(x + 300, y, 30, 22) > 0.65 && k < few + 0.1) {
       hex(c, B[2], x, y, 2, 1); hex(c, B[3], x, y, 1, 1); hex(c, G[1], x, y + 1, 1, 1);
     } else if (fbm(x, y + 500, 28, 23) > 0.68 && k < 0.5) {
       hex(c, '#ffffff', x, y, 2, 1); hex(c, B[2], x + 1, y, 1, 1); hex(c, '#eef4e0', x, y - 1, 1, 1); hex(c, G[1], x, y + 1, 1, 1);
@@ -307,52 +298,72 @@ function decals(c, layout, y0, y1) {
   });
   /* Tussocks: three blades, in the long grass mostly. */
   eachCell(y0, y1, W, 9, 7, 2, (x, y, k) => {
-    const land = landAt(y);
-    if (land === 'hot') {
-      const n = fbm(x, y, 44, 1);
-      if ((n < 0.4 ? k < 0.75 : k < 0.2) && off(x, y, 7)) {
-        const col = n > 0.6 ? G[2] : G[1];
-        hex(c, col, x, y, 1, 2); hex(c, col, x + 1, y - 1, 1, 2); hex(c, col, x + 2, y, 1, 2); hex(c, n > 0.6 ? G[4] : G[3], x + 1, y - 2, 1, 1);
-      }
-    } else if (land === 'town' && k < 0.12 && off(x, y, 12)) {
-      const L = TN.lawn;
-      hex(c, L[3], x, y, 1, 2); hex(c, L[3], x + 2, y, 1, 2); hex(c, L[4], x + 1, y - 1, 1, 1);
+    if (!meadow(y)) return;
+    const n = meadowField(x, y);
+    if ((n < 0.4 ? k < 0.75 : k < 0.2) && off(x, y, 7)) {
+      const col = n > 0.6 ? G[2] : G[1];
+      hex(c, col, x, y, 1, 2); hex(c, col, x + 1, y - 1, 1, 2); hex(c, col, x + 2, y, 1, 2); hex(c, n > 0.6 ? G[4] : G[3], x + 1, y - 2, 1, 1);
     }
   });
-  /* The wood: fallen leaves in drifts, a twig here and there. */
-  const LV = [WD.amber[3], WD.russet[2], WD.amber[4], WD.russet[3], WD.amber[2]];
+  /* The forest: fallen leaves in drifts, a twig here and there. */
+  const LEAF = FO.leaf, FF = FO.floor;
   eachCell(y0, y1, W, 5, 4, 3, (x, y, k) => {
-    if (landAt(y) !== 'warm' || landAt(y + 6) !== 'warm' || wet(x, y)) return;
+    if (landAt(y) !== 'forest' || landAt(y + 6) !== 'forest' || wet(x, y) || hard(x, y)) return;
     const on = pathDist(x, y) < 6;
-    if (fbm(x, y, 22, 24) > (on ? 0.66 : 0.47) && k < 0.7) {
-      const col = LV[Math.floor(k * 7) % 5];
-      hex(c, WD.litter[0], x + 1, y + 1, 2, 1); hex(c, col, x, y, 2, 1); hex(c, col, x + 1, y - 1, 1, 1);
+    if (fbm(x, y, 22, 24) > (on ? 0.7 : 0.56) && k < 0.6) {
+      const col = LEAF[Math.floor(k * 9) % 5];
+      hex(c, FF[0], x + 1, y + 1, 2, 1); hex(c, col, x, y, 2, 1); hex(c, col, x + 1, y - 1, 1, 1);
     } else if (k > 0.985 && !on) {
-      hex(c, WD.trunk[1], x, y, 3, 1); hex(c, WD.trunk[1], x + 3, y - 1, 2, 1); hex(c, WD.trunk[3], x + 1, y - 1, 1, 1);
+      hex(c, '#3a2a20', x, y, 3, 1); hex(c, '#3a2a20', x + 3, y - 1, 2, 1); hex(c, '#86623e', x + 1, y - 1, 1, 1);
     }
   });
-  /* The climb: boot and paw prints down the packed track, stones on the scree. */
-  eachCell(y0, y1, W, 11, 9, 4, (x, y, k) => {
-    // Scree lies where it fell, in a few spills, not evenly over the snow
-    // like pepper: most of the slope is left clean.
-    if (landAt(y) !== 'alp' || k > 0.5 || fbm(x, y, 38, 61) < 0.64 || !off(x, y, 9) || (layout.sky && y < layout.skyAt(x) + 8)) return;
-    const K = CL.rock, big = k < 0.16;
-    hex(c, CL.snow[1], x + 1, y + 1, big ? 4 : 3, 1); hex(c, K[1], x, y, big ? 4 : 3, 1); hex(c, K[3], x, y - (big ? 1 : 0), big ? 3 : 2, 1); hex(c, K[4], x, y - (big ? 1 : 0), 1, 1);
+  /* Ferns: a rosette of fronds, in every wood, in its own greens; and in
+     the ancient wood pale fungi that seem to glow, in twos and threes. */
+  const fern = (x, y, F) => {
+    hex(c, F[0], x - 3, y, 7, 1); hex(c, F[1], x - 3, y - 1, 2, 1); hex(c, F[1], x + 2, y - 1, 2, 1); hex(c, F[1], x - 1, y - 2, 1, 2); hex(c, F[1], x + 1, y - 2, 1, 2);
+    hex(c, F[2], x - 3, y - 2, 1, 1); hex(c, F[2], x, y - 3, 1, 2); hex(c, F[2], x + 3, y - 2, 1, 1);
+  };
+  eachCell(y0, y1, W, 13, 9, 6, (x, y, k) => {
+    const land = landAt(y);
+    if (land === 'field' || land === 'edge' || landAt(y - 8) !== land || landAt(y + 8) !== land || !off(x, y, 9)) return;
+    if (land === 'forest') { if (fbm(x, y, 26, 62) < 0.5 && k < 0.5) fern(x, y, FO.fern); return; }
+    if (land === 'old') { if (k < 0.42) fern(x, y, OL.fern); return; }
+    const ht = layout.heart;
+    if (ht && y < ht.y - ht.ry - 6) return;
+    if (k < 0.22) fern(x, y, AN.fern);
+    else if (k > 0.86) { const U = AN.fungus; hex(c, U[0], x, y, 2, 1); hex(c, U[1], x, y - 1, 1, 1); hex(c, U[0], x + 4, y + 1, 1, 1); hex(c, U[1], x + 4, y, 1, 1); }
   });
+  /* Roots across the trail in the old woods: the going gets rough. */
   const [i0, i1] = pathRange(layout, y0 - 8, y1 + 8);
-  for (let i = i0 - (i0 % 7); i <= i1; i += 7) {
-    const p = layout.path[i], q = layout.path[Math.min(layout.path.length - 1, i + 1)];
-    if (!p || landAt(p.y) !== 'alp' || layout.stones.some(s => Math.abs(s.y - p.y) < 9)) continue;
-    const tx = q.x - p.x, ty = q.y - p.y, n = Math.hypot(tx, ty) || 1, side = (i / 7) % 2 ? 2 : -2;
-    const x = R(p.x - ty / n * side), y = R(p.y + tx / n * side);
-    c.fillStyle = CL.track[0];
-    if ((i / 7) % 2) { c.fillRect(x - 1, y, 3, 2); c.fillRect(x - 1, y - 2, 1, 1); c.fillRect(x + 1, y - 2, 1, 1); } else { c.fillRect(x - 1, y - 2, 2, 2); c.fillRect(x - 1, y + 1, 2, 1); }
+  for (let i = i0 - (i0 % 9); i <= i1; i += 9) {
+    const p = layout.path[i];
+    if (!p) continue;
+    const land = landAt(p.y), lv = levelAt(p.y);
+    if ((land !== 'old' && land !== 'ancient') || surfaceOf(lv) !== 'earth' || hard(p.x, p.y) || layout.stones.some(s => Math.abs(s.y - p.y) < 10)) continue;
+    const h = hash(i * 13 + 5);
+    if (h > (land === 'ancient' ? 0.75 : 0.25 + (lv - 46) / 80)) continue;
+    const K = LANDS[land].root, side = h * 40 % 2 < 1 ? -1 : 1;
+    const x = R(p.x), y = R(p.y), len = 9 + R(h * 60 % 6);
+    for (let k = 0; k < len; k++) {
+      const rx = x + side * (k - 3), ry = y + R(1.6 * Math.sin(k / 2.2 + h * 9)) + (k > len - 3 ? 1 : 0);
+      hex(c, K[0], rx, ry + 1, 1, 1); hex(c, K[1], rx, ry, 1, 1);
+      if (k % 3 !== 2) hex(c, K[2], rx, ry - 1, 1, 1);
+    }
+  }
+  /* The glade's ring of pale fungi round the last stone: a fairy ring. */
+  if (layout.heart) {
+    const ht = layout.heart, s = layout.stones[layout.stones.length - 1], U = AN.fungus;
+    if (s.y + 24 > y0 && s.y - 24 < y1) for (let k = 0; k < 22; k++) {
+      const a = k / 22 * Math.PI * 2 + 0.2, x = R(s.x + Math.cos(a) * 27), y = R(s.y + 2 + Math.sin(a) * 13);
+      if (pathDist(x, y) < 6 || Math.abs(x - ht.x) > ht.rx) continue;
+      hex(c, U[0], x, y + 1, 2, 1); hex(c, U[k % 3 ? 1 : 2], x, y, 2, 1); if (k % 2) hex(c, U[2], x, y - 1, 1, 1);
+    }
   }
 }
 
 /* Stepping stones where the trail fords a brook. */
 function ford(c, layout, w) {
-  const S = w.land === 'hot' ? M.stone : WD.stone, P = w.land === 'hot' ? M.water : WD.water;
+  const S = LANDS[w.land].rock, P = LANDS[w.land].water;
   for (let k = -1; k <= 1; k++) {
     const y = w.y + k * 3 + 1, xx = layout.xAt[clamp(y, 0, layout.H)];
     const x = R(xx === xx ? xx : w.x) + (k === 0 ? 1 : -1);
@@ -363,9 +374,10 @@ function ford(c, layout, w) {
 
 /* The footbridge's deck over the stream: planks, a rail each side, and
    its shadow on the water downstream of it. */
+const TIMBER = RAMPS.meadow.trunk;
 function deck(c, layout, b) {
-  const bx = gateX(layout, b), top = b.y - 16, h = 19, T = WD.trunk;
-  c.fillStyle = 'rgba(48,20,44,0.42)';
+  const bx = gateX(layout, b), top = b.y - 16, h = 19, T = TIMBER;
+  c.fillStyle = castOf('forest');
   c.fillRect(bx + 11, top + 4, 4, h - 6); c.fillRect(bx - 8, top + h, 20, 2);
   hex(c, T[0], bx - 10, top - 1, 21, h + 2);
   for (let j = 0; j < h; j++) {
@@ -384,11 +396,15 @@ function deck(c, layout, b) {
   }
 }
 
+/** The ground for rows y0..y1. o.glade: whether the moon is full in the
+    glade at the heart of the wood (it is, for a team that has finished).
+    o.at: the row of the canvas that row y0 goes on. */
 export function paintGround(c, layout, y0, y1, o) {
-  AURORA = !o || o.aurora !== false;
-  /* putImageData takes no notice of the canvas's transform: the caller has
-     moved row y0 to the top, so that is where these rows go. */
-  c.putImageData(groundPixels(layout, y0, y1), 0, 0);
+  GLADE = !o || o.glade !== false;
+  /* putImageData takes no notice of the canvas's transform: the caller says
+     which row of the canvas row y0 is on (o.at; the top one, unless a tile
+     is being painted a part at a time). */
+  c.putImageData(groundPixels(layout, y0, y1), 0, (o && o.at) || 0);
   decals(c, layout, y0, y1);
 }
 

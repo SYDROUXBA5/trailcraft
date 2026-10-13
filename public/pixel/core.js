@@ -246,18 +246,27 @@ export function bayer(x, y) {
 export function clump(c, cx, cy, rx, ry, ramp, seed = 0, o) {
   const rough = o && o.rough != null ? o.rough : 0.3;
   for (let y = -ry - 1; y <= ry + 1; y++) {
-    for (let x = -rx - 1; x <= rx + 1; x++) {
-      const nx = x / (rx + 0.5), ny = y / (ry + 0.5);
-      // A ragged edge: the outline wanders by a pixel.
-      const wob = 1 + 0.16 * Math.sin((x + seed) * 1.9 + y * 0.7) * rough / 0.3;
-      const d = (nx * nx + ny * ny) / wob;
-      if (d > 1) continue;
-      const lit = -(nx * 0.62 + ny * 0.78) + rough * Math.sin((x + seed * 3) * 0.9 + 1) * Math.cos((y - seed) * 1.1);
-      let tone = lit > 0.62 ? 3 : lit > 0.05 ? 2 : 1;
-      if (d > 0.74 && nx * 0.6 + ny * 0.8 > 0.12) tone = 0;
-      else if (tone === 3 && lit > 0.98 && rough > 0.2) tone = 4;
-      c.fillStyle = ramp[tone];
-      c.fillRect(cx + x, cy + y, 1, 1);
+    /* A row is laid in runs of one tone, not pixel by pixel: a big crown is
+       two thousand pixels and a few hundred runs, and a wood is baked a
+       crown at a time while the first tiles wait. */
+    let run = -1, from = 0;
+    for (let x = -rx - 1; x <= rx + 2; x++) {
+      let tone = -1;
+      if (x <= rx + 1) {
+        const nx = x / (rx + 0.5), ny = y / (ry + 0.5);
+        // A ragged edge: the outline wanders by a pixel.
+        const wob = 1 + 0.16 * Math.sin((x + seed) * 1.9 + y * 0.7) * rough / 0.3;
+        const d = (nx * nx + ny * ny) / wob;
+        if (d <= 1) {
+          const lit = -(nx * 0.62 + ny * 0.78) + rough * Math.sin((x + seed * 3) * 0.9 + 1) * Math.cos((y - seed) * 1.1);
+          tone = lit > 0.62 ? 3 : lit > 0.05 ? 2 : 1;
+          if (d > 0.74 && nx * 0.6 + ny * 0.8 > 0.12) tone = 0;
+          else if (tone === 3 && lit > 0.98 && rough > 0.2) tone = 4;
+        }
+      }
+      if (tone === run) continue;
+      if (run >= 0) { c.fillStyle = ramp[run]; c.fillRect(cx + from, cy + y, x - from, 1); }
+      run = tone; from = x;
     }
   }
 }

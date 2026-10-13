@@ -279,7 +279,7 @@ html[data-motion="off"] .sheet { transition: visibility 0s; }
 <div class="boss-card" id="boss-card" role="dialog" aria-label="Hot stage cleared">
   <small>Hot stage cleared · level 15</small>
   <strong>Trail Hound</strong>
-  <p>Rémi &amp; Rex showed the find at the stile. The amber wood is open: Seeker I is next.</p>
+  <p>Rémi &amp; Rex showed the find at the stile. The forest is open: Seeker I is next.</p>
   <div class="row">
     <button type="button" id="b-share">Share picture</button>
     <button type="button" class="ghost" data-later>Certificate</button>
@@ -308,6 +308,11 @@ html[data-motion="off"] .sheet { transition: visibility 0s; }
   </div>
   <h3>View</h3>
   <div class="opts" id="o-scene"></div>
+  <h3>Close-up land</h3>
+  <div class="opts" id="o-land"></div>
+  <div class="opts">
+    <button class="opt go" type="button" id="b-finale">Finale: Mission Ready</button>
+  </div>
   <h3>Dog's coat</h3>
   <div class="opts" id="o-coat"></div>
   <h3>Handler's jacket</h3>
@@ -322,7 +327,7 @@ html[data-motion="off"] .sheet { transition: visibility 0s; }
 
 <script type="module">
 import {
-  createTeam, COATS, JACKETS, HATS, ICONS, TEAM, ANCHOR, REACH, MOMENTS, CLOSE,
+  createTeam, COATS, JACKETS, HATS, ICONS, TEAM, ANCHOR, REACH, MOMENTS, CLOSE, CLOSE_KINDS, LANDS, landOfLevel,
   boardLayout, drawBoard, drawHedge, hedgeBand, trailPoint, ringArt, stamp,
   plaqueSize, drawPlaque, lockedWood, unlockWood, gateOpen, duskify, crispURL,
 } from './pixel-team.js';
@@ -368,6 +373,9 @@ const S = {
   theme: q.get('theme') || store.get('theme') || 'auto',
   freezeAt: q.has('t') ? Math.max(0, Number(q.get('t')) || 0) : null,
   level: 7,
+  /* The land the close-up shows: one of the Deep Wood's five, or 'here' for
+     the one the sample's team stands in. */
+  land: CLOSE_KINDS.indexOf(q.get('land')) >= 0 ? q.get('land') : 'here',
 };
 S.shot = S.freezeAt != null && !q.has('motion');
 const reduced = () => !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
@@ -452,10 +460,11 @@ function buildBoard() {
     boardEl.appendChild(b);
   }
   const st = (lv) => layout.stones[lv - 1];
-  addSign('hot', 'Red meadow · Hot', st(1).y + 30);
+  addSign('hot', 'Open field · Hot', st(1).y + 30);
+  if (layout.edgeY > 0) addSign('hot', 'The wood’s edge · Hot', layout.edgeY - 6);
   addSign('boss', 'Boss · First Trail', layout.hedgeY - 62);
-  addSign('warm', 'Amber wood · Warm', layout.hedgeY - 104);
-  addSign('mist', 'The wood goes on to level 45', 16);
+  addSign('warm', 'The forest · Warm', layout.hedgeY - 104);
+  addSign('mist', 'The forest goes on to level 45', 16);
   ribbon = document.createElement('div');
   ribbon.className = 'ribbon'; ribbon.setAttribute('aria-hidden', 'true');
   boardEl.appendChild(ribbon);
@@ -647,7 +656,11 @@ function setHeader(level, oldName, newName, flipped) {
 }
 
 /* ── The team ── */
-const look = () => ({ coat: S.coat, jacket: S.jacket, hat: S.hat, stage: 'hot' });
+/* The board's team is in the open field or at the wood's edge. The close-up
+   can be taken anywhere in the Deep Wood: its harness wears that land's stage. */
+const look = () => ({ coat: S.coat, jacket: S.jacket, hat: S.hat, stage: 'hot', land: landOfLevel(S.level) });
+const closeLand = () => (S.land === 'here' ? landOfLevel(S.level) : S.land);
+const closeLook = () => ({ coat: S.coat, jacket: S.jacket, hat: S.hat, stage: LANDS[closeLand()].stage, land: closeLand() });
 const team = createTeam(teamCanvas, { scene: 'team', scale: SCALE, look: look(), motion: motionOn(), state: 'waiting', onFrame: (t) => onTeamFrame(t), onEnd: () => onMomentEnd() });
 let close = null;
 let busy = false, buzzed = false, currentState = 'waiting';
@@ -662,6 +675,13 @@ const CAPTIONS = {
   night: 'Night: head torch on.',
   levelup: 'Level up: level 8, Line Puller III.',
   boss: 'Boss: the First Trail. Hot is cleared.',
+  heart: 'Finale: the great tree at the heart of the ancient wood. Mission Ready.',
+};
+/* What the boss's close-up says in each land: its gate, and what is beyond it. */
+const BOSS_CAPTIONS = {
+  field: 'Boss: the First Trail. The field gate into the wood.', edge: 'Boss: the First Trail. The field gate into the wood.',
+  forest: 'Boss: the Fork. The footbridge into the old forest.', old: 'Boss: the Town. The hamlet’s gateway into the ancient wood.',
+  ancient: 'Boss: the Town. The hamlet’s gateway into the ancient wood.',
 };
 
 function onTeamFrame(t) {
@@ -800,7 +820,8 @@ function play(state) {
   setNow();
   document.getElementById('boss-card').classList.remove('on');
   boardEl.classList.toggle('is-night', state === 'night' && S.scene !== 'close');
-  if (S.scene === 'close') { openClose(state); return; }
+  // The finale is only ever seen in the close-up: this board stops at level 20.
+  if (S.scene === 'close' || state === 'heart') { openClose(state); return; }
   closeSpot();
   if (state === 'levelup' || state === 'boss') {
     resetLevel(false);
@@ -848,11 +869,11 @@ function openClose(state) {
   /* Two CSS pixels to the art pixel, as on the board behind it: one pixel
      size on a screen. A phone narrower than the picture crops its sides. */
   const scale = 2;
-  if (!close) close = createTeam(closeCanvas, { scene: 'close', scale, look: look(), motion: motionOn(), state });
-  else close.set({ scale, look: look(), motion: motionOn() });
+  if (!close) close = createTeam(closeCanvas, { scene: 'close', scale, look: closeLook(), motion: motionOn(), state });
+  else close.set({ scale, look: closeLook(), motion: motionOn() });
   close.play(state);
   if (S.freezeAt != null) close.freeze(S.freezeAt);
-  const cap = CAPTIONS[state].split(':');
+  const cap = (state === 'boss' ? BOSS_CAPTIONS[closeLand()] : CAPTIONS[state]).split(':');
   document.getElementById('spot-cap').innerHTML = '<b>' + (state === 'boss' ? 'Share picture' : cap[0]) + '</b>:' + cap.slice(1).join(':');
   team.set({ motion: false });
 }
@@ -906,6 +927,10 @@ function renderOpts() {
     S.scene = id; renderOpts();
     play(currentState === 'levelup' || currentState === 'boss' ? 'waiting' : currentState);
   });
+  opts('o-land', [{ id: 'here', name: 'Where the team is' }].concat(CLOSE_KINDS.map(k => ({ id: k, name: LANDS[k].name }))), S.land, (id) => {
+    S.land = id; renderOpts();
+    if (close && spot.classList.contains('open')) close.set({ look: closeLook() });
+  });
   opts('o-coat', COATS.map(c => ({ id: c.id, name: c.name, dot: c.pal.b === c.pal.u ? c.pal.s : c.pal.b })), S.coat, (id) => { S.coat = id; store.set('coat', id); relook(); });
   opts('o-jacket', JACKETS.map(j => ({ id: j.id, name: j.name, dot: j.colour })), S.jacket, (id) => { S.jacket = id; store.set('jacket', id); relook(); });
   opts('o-hat', HATS.map(h => ({ id: h.id, name: h.name })), S.hat, (id) => { S.hat = id; store.set('hat', id); relook(); });
@@ -929,10 +954,12 @@ if (window.matchMedia) {
 function relook() {
   renderOpts();
   team.set({ look: look() });
-  if (close) close.set({ look: look() });
+  if (close) close.set({ look: closeLook() });
 }
 document.getElementById('b-levelup').addEventListener('click', () => { sheet.classList.remove('open'); S.scene = 'board'; renderOpts(); play('levelup'); });
 document.getElementById('b-boss').addEventListener('click', () => { sheet.classList.remove('open'); S.scene = 'board'; renderOpts(); play('boss'); });
+/* The finale is at level 100, far above this sample's board: it is shown in the close-up. */
+document.getElementById('b-finale').addEventListener('click', () => { sheet.classList.remove('open'); openClose('heart'); });
 document.getElementById('b-reset').addEventListener('click', () => { busy = false; resetLevel(); play('waiting'); renderOpts(); homeScroll(true); });
 if (window.matchMedia) {
   const mq = matchMedia('(prefers-reduced-motion: reduce)');

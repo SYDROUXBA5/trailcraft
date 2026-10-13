@@ -4,11 +4,16 @@
 
 import { clamp, R } from './core.js';
 import { ANCHOR, REACH, TEAM } from './states.js';
+import { LAND_ORDER } from './lands.js';
 
-/* The lands in the order the trail climbs them, and the boss that closes each. */
-export const LAND_ORDER = ['hot', 'warm', 'town', 'alp'];
+/* The boss that closes each stage: the stile where the field meets the wood,
+   the footbridge at the fork, the gate of the foresters' hamlet, and the
+   great tree at the heart of the ancient wood. */
+const BOSS_KINDS = ['stile', 'bridge', 'hamlet', 'heart'];
 
-const BOSS_KINDS = ['stile', 'bridge', 'wall', 'cairn'];
+/* The field ends, and the wood's edge begins, half way between these two
+   stones. No boss stands there: the trees just start. */
+const EDGE_AFTER = 10;
 
 /* The trail is a curve through the stones, 40 points to each stretch. */
 const PATH_N = 40;
@@ -16,12 +21,14 @@ const PATH_N = 40;
 /**
  * Lay the board out: the first level at the bottom, climbing upward on a
  * winding trail. levels: [{ level, stage, boss }]. W in art pixels.
- * opts: { spacing, top, bottom, summit }. With `summit` the trail ends at the
- * last stone, under a night sky; otherwise it runs on off the top.
+ * opts: { spacing, top, bottom, heart }. With `heart` the trail ends at the
+ * last stone, in the glade at the heart of the wood (`heart`); otherwise it
+ * runs on off the top.
  *
  * Besides the stones and the path it says where each boss stands
  * (`bosses`, bottom to top, each { level, x, y, lock, kind }: y is the line
- * the land changes on), which land a row is in (`landAt`), and how far a point
+ * the land changes on), which land a row is in (`landAt`), how deep a row is
+ * (`levelAt`: the level it belongs to, with its fraction) and how far a point
  * is from the trail (`pathDist`).
  */
 export function boardLayout(W, levels, opts = {}) {
@@ -39,13 +46,19 @@ export function boardLayout(W, levels, opts = {}) {
   levels.forEach((lv, i) => { lifts.push(lift); if (lv.boss && i < levels.length - 1) lift += gateRoom; });
   const H = top + bottom + (levels.length - 1) * spacing + lift;
   const amp = Math.round(W * 0.25), cx = Math.round(W / 2);
+  /* The trail runs nearly straight across the field and winds more the
+     deeper it goes; in the old woods it also wanders off its own swing. */
+  const swing = (i) => {
+    const wide = clamp(0.16 + i * 0.07, 0.16, 1), deep = clamp((i - 44) / 30, 0, 1);
+    return clamp(wide * Math.sin(i * 0.95 + 0.4) + deep * 0.2 * Math.sin(i * 2.3 + 1.1), -1.04, 1.04);
+  };
   const stones = levels.map((lv, i) => ({
     ...lv,
-    x: lv.boss ? cx : R(cx + amp * Math.sin(i * 0.95 + 0.4)),
+    x: lv.boss ? cx : R(cx + amp * swing(i)),
     y: H - bottom - i * spacing - lifts[i],
   }));
   const last = stones[stones.length - 1];
-  const ctrl = [[stones[0].x - 6, H + 6]].concat(stones.map(s => [s.x, s.y]), opts.summit ? [] : [[cx, -8]]);
+  const ctrl = [[stones[0].x - 6, H + 6]].concat(stones.map(s => [s.x, s.y]), opts.heart ? [] : [[cx, -8]]);
   const path = [];
   for (let i = 0; i < ctrl.length - 1; i++) {
     const p0 = ctrl[Math.max(0, i - 1)], p1 = ctrl[i], p2 = ctrl[i + 1], p3 = ctrl[Math.min(ctrl.length - 1, i + 2)];
@@ -55,7 +68,7 @@ export function boardLayout(W, levels, opts = {}) {
       path.push({ x: f(p0[0], p1[0], p2[0], p3[0]), y: f(p0[1], p1[1], p2[1], p3[1]), seg: i - 1 + u });
     }
   }
-  if (opts.summit) path.push({ x: last.x, y: last.y, seg: stones.length - 1 });
+  if (opts.heart) path.push({ x: last.x, y: last.y, seg: stones.length - 1 });
 
   /* Where the trail is on each row: it only ever climbs, so one x a row
      answers "how far is this from the trail" without walking the path. */
@@ -67,16 +80,19 @@ export function boardLayout(W, levels, opts = {}) {
       xAt[y] = yb === ya ? p.x : p.x + (q.x - p.x) * (y - p.y) / (q.y - p.y);
     }
   }
+  /* Asked for every tree that is tried and every pixel of every track, so
+     it is squares compared and one root at the end (Math.hypot each time
+     was a good part of what a board cost to open). */
   const pathDist = (x, y) => {
-    let best = 1e9;
+    let best = 1e18;
     y = R(y);
-    for (let yy = Math.max(0, y - 14); yy <= Math.min(H, y + 14); yy += 2) {
+    for (let yy = Math.max(0, y - 14), y1 = Math.min(H, y + 14); yy <= y1; yy += 2) {
       const px = xAt[yy];
       if (px !== px) continue;
-      const d = Math.hypot(px - x, yy - y);
+      const dx = px - x, dy = yy - y, d = dx * dx + dy * dy;
       if (d < best) best = d;
     }
-    return best;
+    return best === 1e18 ? 1e9 : Math.sqrt(best);
   };
 
   /* A boss's line is where its land ends: just under its stone, and a little
@@ -88,19 +104,28 @@ export function boardLayout(W, levels, opts = {}) {
     const y = s.y + (kind === 'bridge' ? 7 : 3);
     return { level: s.level, x: s.x, y, lock: y - (kind === 'bridge' ? 15 : 0), kind, index: k };
   });
-  /* The rows above boss k's line are the next land, up to the last one. */
+  /* The rows above boss k's line are the next land, up to the last one. The
+     first stage holds two: the field, then the wood's edge. */
+  const edgeY = stones[EDGE_AFTER] ? R((stones[EDGE_AFTER - 1].y + stones[EDGE_AFTER].y) / 2) : -1e9;
   const landAt = (y) => {
     let k = 0;
-    while (k < bosses.length && k < LAND_ORDER.length - 1 && y < bosses[k].y) k++;
-    return LAND_ORDER[k];
+    while (k < bosses.length && k < LAND_ORDER.length - 2 && y < bosses[k].y) k++;
+    return k ? LAND_ORDER[k + 1] : y > edgeY ? 'field' : 'edge';
   };
-  /* The summit: a peak under the last stone, and sky over it. */
-  /* The top is flat for as far as the team reaches when it stands there,
-     so the dog has snow under it, and falls away outside that. */
-  const sky = opts.summit ? { x: last.x, y: last.y - 16, drop: 44, flat: 30 } : null;
-  const skyAt = (x) => (sky ? sky.y + sky.drop * Math.pow(Math.max(0, Math.abs(x - sky.x) - sky.flat) / (W / 2 - sky.flat), 1.5) : -1e9);
+  /* How deep each row is: 1 at the foot, the last level at the top, and the
+     fraction of the way from one stone to the next between them. */
+  const depth = new Float32Array(H + 1);
+  for (let yy = H, i = 0; yy >= 0; yy--) {
+    while (i < stones.length - 1 && stones[i + 1].y >= yy) i++;
+    const s = stones[i], n = stones[i + 1];
+    depth[yy] = yy >= s.y || !n ? s.level : s.level + clamp((s.y - yy) / Math.max(1, s.y - n.y), 0, 1);
+  }
+  const levelAt = (y) => depth[clamp(R(y), 0, H)];
+  /* The glade at the heart of the wood, round the last stone: open ground
+     under the moon, wide enough for the team to stand in facing either way. */
+  const heart = opts.heart ? { x: last.x, y: last.y - 8, rx: R(W * 0.46), ry: 42 } : null;
 
-  const layout = { W, H, stones, path, xAt, pathDist, bosses, landAt, sky, skyAt, spacing, bottom,
+  const layout = { W, H, stones, path, xAt, pathDist, bosses, landAt, levelAt, edgeY, heart, spacing, bottom,
     hedgeY: bosses.length ? bosses[0].y : -100 };
   // Where the team stands at each stone (facing the next one): scenery keeps out.
   // The team faces the next stone, unless the board's edge is in the way:
@@ -112,6 +137,9 @@ export function boardLayout(W, levels, opts = {}) {
     return left;
   });
   layout.clear = stones.map((s, i) => teamRect(s, layout.faceLeft[i]));
+  /* The great tree stands beside the last stone, on the side the team has
+     its back to, so the two of them share the glade. */
+  if (heart) { heart.tx = clamp(last.x + (layout.faceLeft[stones.length - 1] ? 38 : -38), 30, W - 30); heart.ty = last.y - 14; }
   /* The trailhead, where a team that has passed nothing waits (board.js). */
   { const pt = trailPoint(layout, 0, -0.62); layout.clear.push(teamRect({ x: pt[0], y: pt[1] }, layout.faceLeft[0])); }
   /* And just through each gate, where a team that has beaten the boss waits. */
@@ -120,35 +148,46 @@ export function boardLayout(W, levels, opts = {}) {
     const pt = trailPoint(layout, b.level - 1, throughGate(b.kind));
     layout.clear.push(teamRect({ x: pt[0], y: pt[1] }, layout.faceLeft[b.level - 1]));
   }
-  /* What lies across the trail, half way between two stones: a dry-stone
-     wall and a brook in the meadow, a brook in the wood, the town's cross
-     streets and its square, and the mountain road in the wave that works
-     beside traffic. Each is { kind, y, x (the trail there), land, level }. */
+  /* What lies across the trail, half way between two stones: brooks, the
+     forestry track of the "Surfaces" wave, and the lane through the ancient
+     wood in the wave that works beside traffic. Each is
+     { kind, y, x (the trail there), land, level }. */
   layout.crossings = [];
-  for (const [level, kind, land] of CROSSINGS) {
+  for (const [level, kind] of CROSSINGS) {
     const s = stones[level - 1], n = stones[level];
     if (!s || !n || s.boss || n.boss) continue;
-    const y = kind === 'square' ? s.y : R((s.y + n.y) / 2);
-    if (landAt(y) !== land || landAt(y - 24) !== land || landAt(y + 24) !== land) continue;
+    const y = R((s.y + n.y) / 2), land = landAt(y);
+    if (landAt(y - 24) !== land || landAt(y + 24) !== land) continue;
     const x = xAt[y];
     layout.crossings.push({ kind, y, x: R(x === x ? x : s.x), land, level });
   }
-  const road = layout.crossings.find(cr => cr.kind === 'road');
-  layout.roadY = road ? road.y : null;
+  const lane = layout.crossings.find(cr => cr.kind === 'lane');
+  layout.roadY = lane ? lane.y : null;
   /* Running water, each a band across the board: the stream under the
      footbridge and the brooks. { y, half, land, kind, seed }. */
-  layout.waters = bosses.filter(b => b.kind === 'bridge').map(b => ({ y: b.y - 7, half: 5, land: 'warm', kind: 'stream', seed: 1, x: gateX(layout, b) }))
+  layout.waters = bosses.filter(b => b.kind === 'bridge').map(b => ({ y: b.y - 7, half: 5, land: 'forest', kind: 'stream', seed: 1, x: gateX(layout, b) }))
     .concat(layout.crossings.filter(cr => cr.kind === 'brook').map(cr => ({ y: cr.y, half: 4, land: cr.land, kind: 'brook', seed: cr.level, x: cr.x })));
+  /* The car park where the forestry road becomes the lane: a gravel bay
+     beside the trail, on whichever side has the room. */
+  {
+    const s = stones[PARK_AFTER - 1], n = stones[PARK_AFTER];
+    layout.park = null;
+    if (s && n && !s.boss && !n.boss) {
+      const y = R((s.y + n.y) / 2), tx = xAt[y], side = tx > W / 2 ? -1 : 1;
+      layout.park = { x: R(tx + side * 31), y, side, rx: 23, ry: 15, level: PARK_AFTER };
+    }
+  }
   return layout;
 }
 
-/* [after this level, what, in which land]. */
+/* [after this level, what]. */
 const CROSSINGS = [
-  [5, 'wall', 'hot'], [10, 'brook', 'hot'],
-  [23, 'brook', 'warm'],
-  [49, 'street', 'town'], [54, 'street', 'town'], [60, 'square', 'town'], [66, 'street', 'town'], [71, 'street', 'town'],
-  [88, 'road', 'alp'],
+  [13, 'brook'],
+  [23, 'brook'], [37, 'brook'], [39, 'track'],
+  [57, 'brook'],
+  [88, 'lane'],
 ];
+const PARK_AFTER = 70;
 
 /** The middle row of a piece of water at x: it wanders a little. */
 export function streamY(w, x) {
@@ -158,7 +197,7 @@ export function streamY(w, x) {
 /** How far past a boss's stone the team stands once it is through, as a
     share of the way to the next stone. Half-way, on a board laid out with
     `gateRoom`, puts its feet above the top of the stile's arch, the bridge's
-    rails and the town wall, and still a body's height short of the next
+    rails and the hamlet's gate, and still a body's height short of the next
     stone. (0.35 of an ordinary step left it behind the arch from the chest
     down, which is the picture a team keeps until its next pass.) */
 export const throughGate = () => 0.5;

@@ -147,8 +147,14 @@ Plus an optional **birth date** on the dog.
 
 ## The board
 
-- **The trail board.** A game map scrolled upwards, one winding trail climbing three landscapes: a sunny red meadow (Hot), amber woodland at dusk (Warm), and a blue town at night then a snowy summit (Cold).
-- **Stones and landmarks.** Levels are stepping stones, each with an icon for its hard part (ruler, clock, bent arrow, crossed-out eye, crossed paths, cobbles, moon, compass). Bosses are landmarks: a stile (15), a footbridge (45), the town (75), the summit cairn (100). Passed stones carry a gold paw, and stones ahead are dimmed.
+- **The trail board (Deep Wood, 2026-10-12).** A game map scrolled upwards, one winding trail going deeper into a wood. Difficulty is depth: the picture gets darker, closer and more walked-over as the levels rise. Five lands:
+  - **Open field** (1–10, Hot): sunlit grass, an open gate, a wide near-straight path and nothing else.
+  - **The wood's edge** (11–15, Hot): young trees, a brook, the first line of boot prints at level 12.
+  - **The forest** (16–45, Warm): walls of trees, dappled light, ferns, a walker and their terrier on a side path.
+  - **The old forest** (46–75, Cold): giant mossy trunks, mist, roots across a thinner trail, a tent and campfire, litter. Levels 66–75 are hard ground: a gravel forestry road, a car park, then a tarmac lane to the foresters' hamlet.
+  - **The ancient wood** (76–100, Cold): near black, dead trees, pale fungi, shafts of moonlight, eyes beside trunks, stray dogs. A tarmac lane with passing headlights crosses at 88–89.
+- **Contamination.** What other feet, paws, hooves and wheels left across the trail is drawn on the ground, each maker with its own mark (boots, paws, deer slots, horseshoes, a bike tyre, cart ruts, a herd's way, footpaths). None before level 12 (a line of boot prints, then a dog's at 14), from one every other level to more than one a level through the forest, about two in the old forest, three or more at the top; the waves are followed where they name it (split and decoy 41–45, five whole crossing lines at cross-tracks 61–65, other dogs at 95). The true trail stays the widest, palest, calmest line, in a paler corridor in the dark lands: nothing is printed on it, every print is darker than it, and a worn path always stops short of it.
+- **Stones and landmarks.** Levels are stepping stones, each with an icon for its hard part (ruler, clock, bent arrow, crossed-out eye, crossed paths, cobbles, moon, compass). Bosses are landmarks: the field gate and stile in the hedge where the field meets the wood (15, First Trail), the footbridge over the stream past a fork of paths (45, The Fork), the gateway in the hamlet's dry-stone wall (75, The Town), and the great tree in a moonlit glade at the heart of the ancient wood (100, Mission Ready). Passed stones carry a gold paw, and stones ahead are dimmed. The stage colours (Hot red, Warm amber, Cold blue) stay on the harness, the bar and the chips; signs name the land and its stage ("The old forest · Cold").
 - **The team on the board.** The pixel team stands on its stone. Footprints lead to the next stone.
 - **The card pinned at the bottom** shows:
   - the next level and its name, with what's new in gold;
@@ -179,7 +185,7 @@ Plus an optional **birth date** on the dog.
   3. The new name flips in.
   4. The team trots to the next stone.
   5. The dog indicates on the person, and the phone buzzes.
-- **Boss (about 8 s):** the landscape sweeps into the next stage's colours, the gate opens, the title card appears, and a share picture and the certificate are offered.
+- **Boss (about 8 s):** the land beyond the gate lights up from the gate upward (the forest at 15, the old forest at 45, the ancient wood at 75), the gate opens, the team goes through, the title card appears, and a share picture and the certificate are offered. The last boss has no gate: at the great tree the banner turns gold, the moon finds the glade and the wood's fireflies come to the tree.
 - **Motion setting.** A new **Animations: Auto / On / Off** setting, plus `?motion=on`, because Rémi's own devices have Reduce Motion on. With motion reduced: still poses and soft fades.
 - **Performance.** One small canvas (about 343 × 200) for the sprites, 30 fps at most, running only while the board is visible. About 25 KB of code.
 

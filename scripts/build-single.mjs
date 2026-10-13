@@ -27,8 +27,8 @@ const MODULES = ['native', 'params', 'geo', 'colours', 'mvt', 'ground', 'debrief
   /* The team levels: the engine, its words, the pixel art, then the board that draws with all three.
      The art is a folder of modules behind the one door, pixel-team: each needs only the ones before it. */
   'levels', 'teams',
-  'pixel/core', 'pixel/ramps', 'pixel/paint', 'pixel/terrain', 'pixel/dog', 'pixel/human', 'pixel/props', 'pixel/rope', 'pixel/states', 'pixel/moments', 'pixel/stones', 'pixel/layout',
-  'pixel/scenery', 'pixel/landmarks', 'pixel/scene', 'pixel/ground', 'pixel/board-art', 'pixel/close', 'pixel/fx', 'pixel/ambient', 'pixel/team', 'pixel/player',
+  'pixel/core', 'pixel/ramps', 'pixel/lands', 'pixel/paint', 'pixel/terrain', 'pixel/dog', 'pixel/human', 'pixel/props', 'pixel/rope', 'pixel/states', 'pixel/moments', 'pixel/stones', 'pixel/layout',
+  'pixel/scenery', 'pixel/tracks', 'pixel/landmarks', 'pixel/scene', 'pixel/ground', 'pixel/board-art', 'pixel/close', 'pixel/fx', 'pixel/ambient', 'pixel/team', 'pixel/player',
   'pixel-team', 'board'];
 
 /** Inline-script safety: a literal "</script>" inside JS would end the tag.

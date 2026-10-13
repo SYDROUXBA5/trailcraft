@@ -55,13 +55,13 @@ import { MOTIONS, motionChoice, motionOn, COAT_IDS, teamLook, makeTeam, putTeam,
          levelChip, chipStage, proven, meterWords, teamTitle, earnedName, pairName, stageBar, levelCard, tryRows, teamStates,
          levelFields, levelNeeds, stickyLevel, stickyLevelFrom, tryStamp, LEFT_AGO, leftAgoLabel,
          shownLevel, withShown, momentFor, takenBack, beforeMoment, resultLine, levelsSaid, debriefWouldFix } from './teams.js';
-import { createTeam, COATS, JACKETS, HATS, MOMENTS, drawAmbient } from './pixel-team.js';
+import { createTeam, COATS, JACKETS, HATS, MOMENTS, drawAmbient, landOfLevel } from './pixel-team.js';
 import { mountBoard } from './board.js';
 import { searchWords, logRows, recentRuns, runAt, midnight, facets, filterRows, groupRows, foldersOf, inFolder, folderList, folderNamed,
          cleanFolderName, putMany, toggleFolder, renameIn, dropFrom, mergeFolders, emptyHeld, folderPatch } from './log.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-10-12a';
+const BUILD = '2026-10-12b';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true,
@@ -8342,14 +8342,17 @@ function closeMoment() {
 
 /* ── A new team, and an existing one edited ── */
 
-/** The stage whose colour the harness wears while the look is tried on. */
-function formStage() {
+/** Where the look is tried on: the stage whose colour the harness wears,
+    and the land of the Deep Wood the preview stands the team in (the one
+    the team is in, or the one the chosen start is in). */
+function formPlace() {
+  const level = presetById(teamForm.preset ?? 'new').startLevel;
   if (teamForm.edit) {
     const d = db.dogs.byId(teamForm.dogId);
     const lv = d ? levelOf(d, teamForm.handlerId) : null;
-    if (lv) return lv.stage;
+    if (lv) return { stage: lv.stage, land: landOfLevel(lv.level) };
   }
-  return levelSpec(presetById(teamForm.preset ?? 'new').startLevel).stage;
+  return { stage: levelSpec(level).stage, land: landOfLevel(level) };
 }
 
 /** Where an existing team can be started from instead: the presets above
@@ -8378,7 +8381,7 @@ function openTeamForm({ handlerId = null, dogId = null, edit = false } = {}) {
   go('scrTeamNew');
   paintTeamForm();      // once the screen is up, so the chosen chips can be brought into view
   /* And the pixel team after that, so its canvas has a size to be drawn at. */
-  const player = { look: { ...look, stage: formStage() }, motion: teamMotion(), state: 'waiting' };
+  const player = { look: { ...look, ...formPlace() }, motion: teamMotion(), state: 'waiting' };
   if (teamForm.player) teamForm.player.set(player);
   /* Two CSS pixels to the art pixel, as on the board: one pixel size on
      every team screen. */
@@ -8433,7 +8436,7 @@ function paintTeamForm() {
   $('tnSave').textContent = f.edit ? 'Save' : 'New team';
   $('tnSave').disabled = taken;
   for (const id of ['tnHandlers', 'tnDogs', 'tnCoats', 'tnJackets', 'tnHats']) showSelectedChip($(id));
-  teamForm.player?.set({ look: { coat: f.coat, jacket: f.jacket, hat: f.hat, stage: formStage() } });
+  teamForm.player?.set({ look: { coat: f.coat, jacket: f.jacket, hat: f.hat, ...formPlace() } });
 }
 const CHECK_MARK = '<span class="check-mark" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span>';
 

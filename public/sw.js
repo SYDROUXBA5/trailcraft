@@ -1,6 +1,6 @@
 /* Offline shell. Trails happen where there is no signal, so the app itself must
    survive with none. Map tiles cache opportunistically as you pan an area. */
-const V = 'trailcraft-v123';
+const V = 'trailcraft-v124';
 /* Every module the app cannot start without. app.js is an ES module and its
    imports are separate requests — listing only app.js precaches a shell that
    cannot boot, which shows up as a working app that dies the first time it is
@@ -15,8 +15,8 @@ const SHELL = [
   'sync-core.js', 'sync.js', 'firebase-config.js', 'share.js', 'pdf.js', 'coach.js', 'native.js', 'backup.js',
   'levels.js', 'teams.js', 'pixel-team.js', 'board.js',
   /* The pixel art, a module to a subject behind pixel-team.js. Each is its own request, so each is listed. */
-  'pixel/core.js', 'pixel/ramps.js', 'pixel/paint.js', 'pixel/terrain.js', 'pixel/dog.js', 'pixel/human.js', 'pixel/props.js', 'pixel/rope.js', 'pixel/states.js', 'pixel/moments.js', 'pixel/stones.js',
-  'pixel/layout.js', 'pixel/scenery.js', 'pixel/landmarks.js', 'pixel/scene.js', 'pixel/ground.js', 'pixel/board-art.js', 'pixel/close.js', 'pixel/fx.js', 'pixel/ambient.js',
+  'pixel/core.js', 'pixel/ramps.js', 'pixel/lands.js', 'pixel/paint.js', 'pixel/terrain.js', 'pixel/dog.js', 'pixel/human.js', 'pixel/props.js', 'pixel/rope.js', 'pixel/states.js', 'pixel/moments.js', 'pixel/stones.js',
+  'pixel/layout.js', 'pixel/scenery.js', 'pixel/tracks.js', 'pixel/landmarks.js', 'pixel/scene.js', 'pixel/ground.js', 'pixel/board-art.js', 'pixel/close.js', 'pixel/fx.js', 'pixel/ambient.js',
   'pixel/team.js', 'pixel/player.js',
   'vendor/qrcode.js', 'vendor/jsQR.js',
 ];

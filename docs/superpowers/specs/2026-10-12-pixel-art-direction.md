@@ -122,8 +122,8 @@ stone; the ladder becomes about 5,400 rows, 22 tiles.
   contour gives that on grass and litter; on the night lands add a 1-pixel
   `glint` rim along the top-left edges (moonlight), which separates dark
   coats from navy.
-- **Dither** only for: sky bands, light pools, aurora, shadow edges, snow
-  sparkle. Never to shade a sprite.
+- **Dither** only for: sky bands, light pools, shadow edges, the trail's
+  corridor of light and the edge of a moonbeam. Never to shade a sprite.
 - **Clusters**: no single stray pixels except eye lights, stars, sparks and
   ticking on a springer. A tone change is at least 2 pixels.
 
@@ -265,8 +265,6 @@ letter per slot; extend it to tones, not to more hand-mixed hexes
 | ramp | ink | shade | base | light | glint |
 |---|---|---|---|---|---|
 | sky | `#060a24` | `#0c1440` | `#16205a` | `#24306e` | `#fff3c4` |
-| aurora | `#16405e` | `#1f6a8a` | `#2fa8a0` | `#5fe0a8` | `#b4f8c8` |
-| snow | `#5a6aa0` | `#9fb2dc` | `#dbe6f6` | `#f4f8ff` | `#ffffff` |
 | track | `#4a5a90` | `#8094c4` | `#b4c4e4` | `#d6e2f4` | `#f0f6ff` |
 | rock | `#1c2240` | `#38426a` | `#5a688e` | `#8492b4` | `#b8c4dc` |
 | pine | `#0e2228` | `#183a3c` | `#285a50` | `#3e7c66` | `#c8f4e0` |
@@ -411,11 +409,12 @@ are unchanged.
 - **Boss, 8.8 s**: arrive 1700, toss 2700, sweep 3100 (1.3 s), gate 4400
   (sparks one step later), aside 5000, through 5300, title 7100 (gold
   confetti, twice), buzz 7180, hold to 8800.
-- **Summit, 8.8 s** (the last boss; the board picks it, the page still
-  calls it a boss): as a level-up to the cairn (trot 1700, arrive 3700),
-  then flag 4100 (it turns gold, sparks), flare 4700 (aurora, three falling
-  stars; the dog sings, the fist stays up), title 6400 (gold confetti),
-  buzz 6480, hold to 8800.
+- **Heart of the wood, 8.8 s** (`MOMENTS.heart`; the last boss; the board
+  picks it, the page still calls it a boss): as a level-up to the great
+  tree (trot 1700, arrive 3700), then banner 4100 (it turns gold, sparks),
+  moon 4700 (the glade lights, the beam comes down, the fireflies come to
+  the tree; the dog sings, the fist stays up), title 6400 (gold confetti),
+  buzz 6480, hold to 8800. See section 13.
 - **No sliding feet**: `SPEED` (pixel/states.js) is the ground speed each
   gait's stride implies (trail about 18 px/s, run about 39). The close-up
   scrolls at it; the board moves the team along the trail by distance and
@@ -448,19 +447,14 @@ are unchanged.
   wood or slate; the next ring is two tones of gold with a broken glow, the
   ring on a stone being read is white.
 - **Scale**: houses 38 to 52 wide in three roof kinds with window light on
-  the ground, lamps 26 tall with a three-ring pool, cars 30 long and parked
-  on the cross streets, sheep, deer, snowman, tent and boulders redrawn to
-  stand beside a 48-pixel dog. Gates are five-bar and 18 wide; the town
-  wall has a gatehouse and a tower with a lit clock; the cairn is 32 tall
-  under a 15-wide flag (its band is 62 rows, as the wall's).
-- **Climb**: the track is a trench darker than any drift with a lit far
-  bank; scree lies in a few spills; the snow line is solid patches with a
-  lit lip; the road has ploughed banks; the aurora's tint on the snow fades
-  through an ordered dither, and the lights themselves only come on when
-  the summit is reached (`state.aurora`, at the summit's `flare` cue).
+  the ground, lamps 26 tall with a three-ring pool, cars 30 long, deer,
+  tent and boulders drawn to stand beside a 48-pixel dog. Gates are
+  five-bar and 18 wide. (The town wall's gatehouse and clock tower, the
+  cairn, the snowman and the whole snowy climb went with the Deep Wood:
+  section 13.)
 - **Ambient**: grass leans in waves, butterflies with real wings, a dozen
-  tumbling leaves, every lit window, smoke in columns, 74 snowflakes in two
-  sizes with a gust, light in clusters on the water.
+  tumbling leaves, every lit window, smoke in columns, light in clusters on
+  the water. (Per land, since the Deep Wood: section 13.)
 - **Moments**: the team pulls up to one side when the find would not fit
   the board (`endShift`), confetti is outlined paper in colours each land
   is not, the lit trail is a solid line with a star at its head, signs step
@@ -472,6 +466,12 @@ are unchanged.
   art, a dithered change of ground between town and climb.
 
 ## 8. The lands
+
+**Superseded on 2026-10-12 by the Deep Wood (section 13):** the four lands
+below, the town at night, the snowy climb, the summit and their ambient
+table are no longer in the app. What still holds from this section is the
+method: big quiet shapes first, then what stands on them, then decals; the
+trail's crown, ruts and verge; and the ambient layer's budget.
 
 Each land has a far, a middle and a near: big quiet tonal shapes first
 (40 to 120 pixels across), then the things standing on them, then decals.
@@ -584,7 +584,7 @@ import only from it. Behind it:
 | module | what | owner |
 |---|---|---|
 | `pixel/core.js` | colour maths, noise, canvases, `bake`, `blit`, `stamp`, `outlined`, shapes, `shadow`, `bayer` | shared: **add** exports at the end, never change what is there |
-| `pixel/ramps.js` | `RAMPS`, `TONE`, `CAST` | nobody: read only |
+| `pixel/ramps.js` | `RAMPS`, `TONE` (the lands' own ramps and shadows are in `pixel/lands.js`) | nobody: read only |
 | `pixel/dog.js` | coats, builds, heads, ears, tail, harness, the dog's rig | characters |
 | `pixel/human.js` | jackets, hats, handler rig, the person at the find | characters |
 | `pixel/props.js` | bowl, rucksack, bush, heart, "?", sparks | characters |
@@ -597,7 +597,7 @@ import only from it. Behind it:
 | `pixel/scenery.js` | `BOARD_LANDS`, trees, houses, lamps, landmarks | landscapes |
 | `pixel/scene.js` | what is placed where | landscapes |
 | `pixel/ground.js` | ground, stream, sky, the trail | landscapes |
-| `pixel/landmarks.js` | stile, bridge, town gate, cairn, `drawBarrier` | landscapes |
+| `pixel/landmarks.js` | stile, bridge, hamlet gate, the great tree's banner, `drawBarrier` | landscapes |
 | `pixel/stones.js` | stones, icons, digits, plaques, the ring | landscapes |
 | `pixel/board-art.js` | `drawBoard`, the locked land, `duskify`, `crispURL` | landscapes |
 | `pixel/close.js` | `CLOSE`, the close-up's sky, far land and ground | landscapes |
@@ -645,3 +645,90 @@ $S/sheet.sh OUT w:h:x:y A B C  # the same crop from several shots, side by side 
 - Always pass `t=`: an unfrozen shot differs from run to run. Read the PNG to
   see it; crop and zoom small sprites with `sheet.sh`. Run at most six
   Chromes at once (twelve hung one). Before shots: `$S/art/before-*.png`.
+
+## 13. Deep Wood (2026-10-12)
+
+Rémi chose it from three drafts: **difficulty is depth.** One wood, entered
+from an open field and walked into until it is nearly black. The stages keep
+their colours (harness, bar, chips); the lands are named in plain words.
+
+| land | levels | stage | what it is |
+|---|---|---|---|
+| Open field | 1–10 | Hot | sun, grass, an open gate, a wide straight path, nothing else |
+| The wood's edge | 11–15 | Hot | young trees, a brook, the first boot prints (12) |
+| The forest | 16–45 | Warm | tree walls, dappled light, ferns, side paths |
+| The old forest | 46–75 | Cold | giant mossy trunks, mist, roots, camp and litter; 66–75 gravel road, car park, tarmac lane, hamlet |
+| The ancient wood | 76–100 | Cold | near black: snags, pale fungi, moon shafts, eyes, strays; a lane with headlamps at 88–89 |
+
+- **Where it lives.** `pixel/lands.js` holds every land's ramps, its
+  shadow, `landOfLevel`, and the curves for the trail (`trailHalf`,
+  `trailRough`, `surfaceOf`). `pixel/tracks.js` is contamination. Nothing
+  reads `RAMPS.wood / town / climb` or `CAST` any more: they are deleted.
+- **Bosses.** 15 the field gate and stile in the hedge; 45 the footbridge
+  past a fork of paths; 75 the gateway in the hamlet's wall; 100 the great
+  tree in its glade (no gate: `MOMENTS.heart`, cues `banner` and `moon`).
+- **Contamination is art, not noise.** Each maker has one mark and one hue
+  (boot: a 4 by 7 sole and heel, tan; paw: a 7 by 6 pad under four toes,
+  rust; deer: a 5 by 4 split slot, sage; horse: a 5 by 5 open shoe, plum;
+  bike: one line; cart: two ruts; herd: a 4-wide trampled band; footpath:
+  3 of worn earth). Prints are drawn in eight headings, left foot then
+  right at an uneven stride with one in ten missing, on a scuffed line
+  (trodden pale in grass): a ruled row of small marks is stitching.
+  - **How much:** none before 12 (boots) and 14 (a dog); 0.5 a level rising
+    to 1.3 through the forest, 1.5 to 2.3 through the old forest, 2.6 to 3.5
+    in the ancient wood. "Cross-tracks" (61–65) is five whole lines from
+    edge to edge that cross each other, not a crowd of short ones.
+  - **The trail wins:** every tint is darker than the body of that land's
+    trail; nothing at all is printed on the trail (prints, tyres and ruts
+    stop at its edge and go on beyond; worn paths stop short of it); no
+    track lies within 40 degrees of the trail's own line where they meet;
+    and the trail is never under 7 wide (`trailHalf`).
+  - **Cost:** a track is drawn once into a list of pixels and copied into
+    each tile from there (`paintTracks`), never as canvas calls.
+- **Dark lands** (`LANDS[x].dark`): the trail lies in a dithered paler
+  corridor, plates are slate with a pale edge, the team is rimmed with
+  light, and the dark theme leaves them as they are (it gives the forest
+  only half the dusk the field gets, `DUSK`, so the forest stays lighter
+  than the old forest behind it). Where the next stone is straight above
+  the waiting team its plate goes beside the stone, not on the handler's
+  head (`plates()` in board.js).
+- **Depth inside the dark lands.** A thin shade over ground and trees
+  deepens every few rows from 46 to 99 (`shadeAt`), and through 66–75 the
+  old forest's floor goes over to the ancient wood's in growing patches.
+  A locked dark land sinks to its own blue-black under grey mist, not to
+  the violet dusk the forest gets (`lockPixels`, `deep`).
+- **The close-up** (`pixel/close.js`) has the same five lands by the same
+  names (`CLOSE_KINDS`): sky or the light between far trunks, a far rank
+  (0.2), a rank on the horizon (0.45), the ground in five bands, a rank of
+  trunks standing on the ground (0.76; none in the field), and a near layer
+  (2). The dark woods' trunks are painted there (`bole`), not borrowed from
+  the board. Tracks are drawn each frame, a row at a time at that row's
+  speed, so a line of prints leans as it passes. `drawGate` is the three
+  gates from the side (stile, footbridge over the stream, the hamlet's
+  stone posts and lantern); `heartTree` is the finale's tree, pool and beam.
+  Night is the day land's own strips gone to navy; the dark woods have none.
+- **The finale** on the board: banner gold with a ring of sparks, the tiles
+  repainted with the glade lit, `moonbeam` (a thread of white for two
+  frames, then three bands of thin light one inside the other, only the
+  outer edge dithered, opening to 46 wide on the glade between team and
+  tree, with a pool at its foot) and `gather`
+  (22 fireflies winding in to ring the trunk), then the title under gold.
+- **Ambient, per land** (same budget as section 8):
+
+| land | always | sometimes |
+|---|---|---|
+| field, edge | grass leaning in waves, water | butterflies, a cloud's shadow (field only), a leaf or two at the edge; fireflies in the dark theme |
+| forest | falling leaves, water | dust in the sun shafts, fireflies from 35 |
+| old forest | fireflies, mist sliding along its own wisps | the campfire, the hamlet's lanterns, windows and smoke |
+| ancient wood | motes rising, moon shafts breathing | eyes that blink, a car through the lane every nine seconds |
+
+- **The lane's car** is in the tile only when nothing moves (`traffic`);
+  with Animations on the ambient layer drives it, from a sprite baked once.
+- **Animations Off / Reduce Motion**: no ambient, no effects layer, moments
+  shown at their last frame (the glade lit, the banner gold), the close-up
+  a still with its mist and tracks in place.
+- **Not done**: the "Counts" footstep (a run that counts but passes nothing
+  still has no moment: it would need its own "played once" record on the
+  run), the boss's unrolling banner, cottages before the gate on a 320 px
+  board.
+

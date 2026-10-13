@@ -5,8 +5,10 @@
    Run with `node test/board.test.mjs`. */
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { boardLayout, boardTiles, tilesNear, trailPoint, throughGate, gateX, barrierBand, lockPixels, ICONS, TEAM, MOMENTS, STILL_AT, SPEED, STATES, frame, confetti, burst, createTeam } from '../public/pixel-team.js';
+import { drawBoard, drawBarrier, drawAmbient, boardLayout, boardTiles, tilesNear, trailPoint, throughGate, gateX, barrierBand, lockPixels, ICONS, TEAM, MOMENTS, LANDS, LAND_ORDER, landOfLevel, tracksOf, surfaceOf, trailHalf, trailRough, STILL_AT, SPEED, STATES, frame, confetti, burst, createTeam, CLOSE_KINDS, RAMPS, moonbeam, gather, drawGate } from '../public/pixel-team.js';
+import * as PIXEL from '../public/pixel-team.js';
 import { BOARD_LEVELS, TILE, BOARD_MAX_W, GATE_ROOM, WAVE_ICON, layoutFor, boardView, teamSeat, teamBox } from '../public/board.js';
+import { paintTracks } from '../public/pixel/tracks.js';
 import { LADDER_V1, newTeam, teamLevel, levelSpec } from '../public/levels.js';
 import { shownLevel, withShown, momentFor, beforeMoment, resultLine, standing, stoneStatus } from '../public/teams.js';
 
@@ -21,7 +23,7 @@ const at = (passed, preset = 'new') => ({ ...fresh(preset), passed, level: Math.
    Pro Max, and the widest the board goes. */
 const WIDTHS = [320, 375, 390, 430, 480, 1024];
 
-t('the board has a stone for every level, climbing from the meadow to the summit', () => {
+t('the board has a stone for every level, going from the open field to the heart of the wood', () => {
   for (const w of WIDTHS) {
     const L = layoutFor(w);
     assert.equal(L.stones.length, 100);
@@ -34,31 +36,33 @@ t('the board has a stone for every level, climbing from the meadow to the summit
       assert.ok(L.pathDist(s.x, s.y) < 1.5);
     });
     assert.ok(L.stones[0].y < L.H && L.stones[99].y > 0);
-    // The trail ends on the last stone: nothing leads on from the summit.
+    // The trail ends on the last stone: nothing leads on from the heart of the wood.
     const end = L.path[L.path.length - 1];
     assert.deepEqual([Math.round(end.x), Math.round(end.y)], [L.stones[99].x, L.stones[99].y]);
   }
 });
 
-t('four lands, each closed by its boss: stile, footbridge, town wall, cairn', () => {
+t('five lands, deeper and darker: the field, the wood\'s edge, and three woods each closed by its boss', () => {
   const L = layoutFor(375);
-  assert.deepEqual(L.bosses.map(b => [b.level, b.kind]), [[15, 'stile'], [45, 'bridge'], [75, 'wall'], [100, 'cairn']]);
+  assert.deepEqual(L.bosses.map(b => [b.level, b.kind]), [[15, 'stile'], [45, 'bridge'], [75, 'hamlet'], [100, 'heart']]);
   assert.deepEqual(L.bosses.map(b => b.level), LADDER_V1.bosses.map(b => b.level));
   /* A boss's stone is in its gateway, on the line itself: the land it closes
      is the one just under it. */
   const land = (n) => L.landAt(L.stones[n - 1].y + (L.stones[n - 1].boss ? 8 : 0));
   for (let n = 1; n <= 100; n++) {
-    const want = n <= 15 ? 'hot' : n <= 45 ? 'warm' : n <= 75 ? 'town' : 'alp';
+    const want = n <= 10 ? 'field' : n <= 15 ? 'edge' : n <= 45 ? 'forest' : n <= 75 ? 'old' : 'ancient';
     assert.equal(land(n), want, `stone ${n} stands in the ${want}`);
-    // The first two lands are the first two stages, and Cold has the last two.
-    assert.equal(levelSpec(n).stage, want === 'town' || want === 'alp' ? 'cold' : want);
+    assert.equal(landOfLevel(n), want, `and level ${n} is counted in it`);
+    // The field and the wood's edge are Hot, the forest Warm, and Cold has the two old woods.
+    assert.equal(LANDS[want].stage, levelSpec(n).stage);
   }
-  // The sky is over the summit only, and the last stone has snow under it.
+  /* The trees just start: no boss stands where the field ends. */
+  assert.ok(L.edgeY < L.stones[9].y && L.edgeY > L.stones[10].y);
+  // The trail ends in a glade at the heart of the wood, with the great tree beside the last stone.
   const top = L.stones[99];
-  assert.ok(L.skyAt(top.x) < top.y, 'the cairn stands on the mountain');
-  assert.ok(L.skyAt(top.x + 40) < top.y, 'and so does the dog beside it');
-  assert.ok(L.skyAt(top.x) > 0, 'with sky above');
-  assert.equal(L.landAt(0), 'alp');
+  assert.ok(L.heart && Math.abs(L.heart.x - top.x) < 2 && Math.abs(L.heart.y - top.y) < 20, 'the glade is round the last stone');
+  assert.ok(Math.abs(L.heart.tx - top.x) >= 24 && L.heart.tx >= 30 && L.heart.tx <= L.W - 30, 'the great tree stands beside it, on the board');
+  assert.equal(L.landAt(0), 'ancient');
   // Each boss's own art keeps inside the board, and the bands do not meet.
   L.bosses.forEach((b, k) => {
     const [y0, y1] = barrierBand(L, k);
@@ -68,15 +72,102 @@ t('four lands, each closed by its boss: stile, footbridge, town wall, cairn', ()
   });
 });
 
+t('the deeper the wood, the more has crossed the trail: nothing in the field, three and more at the top', () => {
+  for (const w of WIDTHS) {
+    const L = layoutFor(w), T = tracksOf(L);
+    const per = (a, b) => T.filter(x => x.level >= a && x.level <= b).length / (b - a + 1);
+    assert.equal(per(1, 11), 0, 'the open field is clean');
+    // The wood's edge: a line of boot prints, then a dog's, and nothing else.
+    assert.deepEqual(T.filter(x => x.level <= 15).map(x => [x.level, x.kind]), [[12, 'boot'], [14, 'paw']]);
+    /* It climbs inside each land as well as from one to the next. */
+    assert.ok(per(16, 30) >= 0.4 && per(16, 30) < 0.9, `one every other level where the forest starts (${per(16, 30)})`);
+    assert.ok(per(31, 45) >= 0.9 && per(31, 45) < 1.5, `about one a level deep in it (${per(31, 45)})`);
+    assert.ok(per(46, 60) >= 1.4 && per(46, 60) < 2.4, `nearer two in the old forest (${per(46, 60)})`);
+    assert.ok(per(76, 90) >= 2.4, `nearer three in the ancient wood (${per(76, 90)})`);
+    assert.ok(per(91, 99) >= 3, `three and more at the top (${per(91, 99)})`);
+    assert.ok(per(31, 45) > per(16, 30) && per(46, 60) > per(31, 45) && per(76, 90) > per(46, 60) && per(91, 99) > per(76, 90));
+    /* The ladder's own waves show: a path forks off every stretch of
+       "Split + decoy" that has room for one; "Cross-tracks" is one line to
+       a level, each whole from edge to edge, some leaning each way (a crowd of
+       short ones was litter); and by 95 other dogs
+       have been through. */
+    assert.ok(T.filter(x => x.fork).length >= 3 && T.filter(x => x.fork).every(x => x.level >= 41 && x.level <= 44 && x.kind === 'path'));
+    const crowd = T.filter(x => x.level >= 61 && x.level <= 65);
+    assert.equal(crowd.length, 5);
+    for (const x of crowd) assert.ok(x.s0 === -x.reach && x.s1 === x.reach, `level ${x.level} is crossed by a whole line`);
+    for (const lean of [1, -1]) assert.ok(crowd.filter(x => Math.sign(x.ang * x.dir) === lean).length >= 2, 'and they cross each other');
+    assert.ok(per(61, 65) < per(91, 99), 'the top of the wood is still the most trodden');
+    assert.ok(T.some(x => x.kind === 'paw' && x.level >= 93 && x.level <= 96));
+    /* Each maker turns up at its own depth and never before it. */
+    const first = (k) => Math.min(...T.filter(x => x.kind === k).map(x => x.level));
+    for (const [k, lv] of [['boot', 12], ['paw', 14], ['deer', 18], ['bike', 22], ['path', 27], ['horse', 33], ['ruts', 46], ['herd', 52]]) assert.ok(first(k) >= lv, `${k} from level ${lv}`);
+    for (const x of T) {
+      /* A track crosses the trail; one that ran along it would be a second trail. */
+      assert.ok(Math.abs(x.ang) <= 0.9 + 1e-9, `level ${x.level} ${x.kind} crosses at ${x.ang}`);
+      /* A track crosses the trail, never runs along it: 40 degrees between
+         them at the least, where they meet. */
+      if (!x.fork) {
+        const a0 = trailPoint(L, x.level - 1, 0.38), a1 = trailPoint(L, x.level - 1, 0.62);
+        const d = ((((x.ang * x.dir - Math.atan2(a1[1] - a0[1], a1[0] - a0[0])) % Math.PI) + Math.PI) % Math.PI);
+        assert.ok(Math.min(d, Math.PI - d) > 0.5, `level ${x.level} ${x.kind} lies ${Math.min(d, Math.PI - d).toFixed(2)} off the trail's own line`);
+      }
+      // Nothing crosses in a boss's gateway (the dog's prints before the
+      // stile are set by hand, low and clear of it), on a brook's ford or
+      // on the road's own crossing.
+      assert.ok(!L.stones[x.level - 1].boss && (!L.stones[x.level].boss || x.level === 14));
+      assert.ok(!L.crossings.some(cr => cr.level === x.level));
+      assert.ok(L.pathDist(x.x, x.y) < 2, 'and each is hung on the trail itself');
+    }
+    assert.equal(tracksOf(L), T, 'worked out once for a layout');
+  }
+});
+
+t('hard ground where the ladder works on it: forestry road, car park, the lane to the hamlet, and a lane across the ancient wood', () => {
+  for (let n = 1; n <= 100; n++) {
+    const want = n >= 66 && n <= 70 ? 'gravel' : n >= 71 && n <= 75 ? 'tarmac' : 'earth';
+    assert.equal(surfaceOf(n), want, `stone ${n} is on ${want}`);
+  }
+  for (const w of WIDTHS) {
+    const L = layoutFor(w);
+    // The car park is where the gravel turns to tarmac, beside the trail and on the board.
+    assert.ok(L.park && L.park.y < L.stones[69].y && L.park.y > L.stones[70].y);
+    assert.ok(L.park.x - L.park.rx >= 0 && L.park.x + L.park.rx <= L.W && Math.abs(L.park.x - L.xAt[L.park.y]) > L.park.rx - 2);
+    // The lane with the headlights crosses in the wave that works beside traffic.
+    assert.ok(L.roadY < L.stones[85].y && L.roadY > L.stones[89].y, 'between stones 86 and 90');
+    assert.ok(L.waters.some(wa => wa.kind === 'stream' && wa.land === 'forest'), 'the fork\'s stream');
+    assert.ok(L.crossings.every(cr => L.landAt(cr.y) === cr.land));
+  }
+});
+
+t('the trail is worn thinner and rougher the deeper it goes, and every land has its colours', () => {
+  for (let n = 2; n <= 100; n++) {
+    assert.ok(trailHalf(n) <= trailHalf(n - 1) + 1e-9 && trailRough(n) >= trailRough(n - 1) - 1e-9, `level ${n}`);
+  }
+  assert.ok(trailHalf(1) > 5 && trailHalf(100) >= 3, 'a broad path in the field, and still the widest line in the ancient wood');
+  assert.equal(trailRough(1), 0);
+  assert.deepEqual(LAND_ORDER, ['field', 'edge', 'forest', 'old', 'ancient']);
+  assert.deepEqual(LAND_ORDER.map(k => [LANDS[k].name, LANDS[k].stage, LANDS[k].dark]),
+    [['Open field', 'hot', false], ['The wood’s edge', 'hot', false], ['The forest', 'warm', false], ['The old forest', 'cold', true], ['The ancient wood', 'cold', true]]);
+  for (const k of LAND_ORDER) {
+    const L = LANDS[k];
+    for (const ramp of ['floor', 'path', 'water', 'rock', 'sign']) assert.equal(L[ramp].length, 5, `${k}.${ramp} is five tones`);
+    assert.equal(L.tag.length, 4);
+    for (const c of [...L.floor, ...L.path, ...L.rock, ...L.tag, L.tagInk, L.g, L.print, L.cast[0]]) assert.match(c, /^#[0-9a-f]{6}$/);
+  }
+  /* The heart of the wood has no gate, so its stone is painted and wears the ring. */
+  assert.match(readFileSync(new URL('../public/board.js', import.meta.url), 'utf8'), /x\.kind !== 'heart'/);
+  assert.match(readFileSync(new URL('../public/pixel/board-art.js', import.meta.url), 'utf8'), /s\.boss && !\(layout\.heart && s === stones\[stones\.length - 1\]\)/);
+});
+
 t('the old sample board still lays out: twenty levels, one boss, the trail running on', () => {
   const levels = LADDER_V1.levels.slice(0, 20).map(l => ({ level: l.level, stage: l.stage, boss: l.boss }));
   const L = boardLayout(187, levels);
   assert.equal(L.stones.length, 20);
   assert.equal(L.bosses.length, 1);
   assert.equal(L.hedgeY, L.stones[14].y + 3);
-  assert.equal(L.sky, null);
-  assert.ok(L.path[L.path.length - 1].y < L.stones[19].y, 'the trail goes on past the last stone, into the mist');
-  assert.equal(L.landAt(L.stones[17].y), 'warm');
+  assert.equal(L.heart, null);
+  assert.ok(L.path[L.path.length - 1].y < L.stones[19].y, 'the trail goes on past the last stone, into the trees');
+  assert.equal(L.landAt(L.stones[17].y), 'forest');
 });
 
 t('the board is taller than an old iPhone’s canvas, so it is cut into tiles that are not', () => {
@@ -160,7 +251,7 @@ t('the team stands on the last stone it passed, through a beaten gate, or short 
   const placed = teamSeat(fresh('outOfSight'), L);
   assert.deepEqual(standing(fresh('outOfSight')), { before: 16 });
   assert.ok(placed.seg > 14 && placed.seg < 15);
-  // A finished team stands on the summit, beside the cairn.
+  // A finished team stands on the last stone, under the great tree.
   const done = teamSeat(at(100), L);
   assert.equal(done.seg, 99);
   assert.deepEqual(done.pt, stone(100));
@@ -286,9 +377,51 @@ t('the moment is kept as shown before it plays, and only plays over a result tha
   assert.match(html, /<button type="button" class="res-level" id="resLevel" hidden><\/button>/);
 });
 
+t('tracks reach a tile as pixels, not as canvas calls, and the crown of the trail is never printed on', () => {
+  const had = { document: globalThis.document, ImageData: globalThis.ImageData };
+  let sheet = null;
+  globalThis.ImageData = class { constructor(w, h) { this.width = w; this.height = h; this.data = new Uint8ClampedArray(w * h * 4); } };
+  globalThis.document = { createElement: () => ({ width: 0, height: 0, getContext: () => ({ putImageData(img) { sheet = img; } }) }) };
+  try {
+    for (const w of [320, 390]) {
+      const L = layoutFor(w), n = { fill: 0, copy: 0, px: 0 };
+      const c = { set fillStyle(v) {}, fillRect() { n.fill++; }, drawImage() { n.copy++; } };
+      for (const tile of boardTiles(L.H, TILE)) {
+        sheet = null;
+        paintTracks(c, L, tile.y0, tile.y1);
+        if (!sheet) continue;
+        for (let i = 3; i < sheet.data.length; i += 4) {
+          if (!sheet.data[i]) continue;
+          const x = ((i - 3) / 4) % L.W, y = tile.y0 + Math.floor((i - 3) / 4 / L.W);
+          n.px++;
+          assert.ok(L.pathDist(x, y) > trailHalf(L.levelAt(y)) - 2, `a track's pixel on the trail's crown at ${x}, ${y} (level ${L.levelAt(y).toFixed(1)})`);
+        }
+      }
+      assert.equal(n.fill, 0, 'not one fillRect');
+      assert.ok(n.copy >= 10 && n.px > 20000, `${n.copy} tiles took ${n.px} pixels`);
+    }
+    // The trail is the widest line on the board, wherever it is.
+    for (let lv = 1; lv <= 100; lv++) assert.ok(trailHalf(lv) * 2 >= 7, `the trail is ${(trailHalf(lv) * 2).toFixed(1)} wide at ${lv}`);
+  } finally {
+    globalThis.document = had.document; globalThis.ImageData = had.ImageData;
+  }
+});
+
 t('the board draws only tiles near the screen, and its stones are labelled buttons', () => {
   const board = src('board.js');
-  assert.match(board, /for \(const i of tilesNear\(tiles, top, bottom, TILE \/ 2\)\) paintTile\(i\);/);
+  /* Now, the tiles on screen; a turn at a time between frames, the ones a
+     tile's height past it; and each of those half a tile to a turn. */
+  assert.match(board, /for \(const i of tilesNear\(tiles, top, bottom, 0\)\) paintTile\(i\);\s*\n\s*paintAhead\(\);/);
+  assert.match(board, /for \(const i of tilesNear\(tiles, top, bottom, TILE\)\) \{/);
+  assert.match(board, /ahead = setTimeout\(\(\) => \{/);
+  assert.match(board, /if \(ahead\) clearTimeout\(ahead\);/, 'and not after the board is gone');
+  // One layout to a width, so its scene, its tracks and its painted land are worked out once.
+  assert.equal(layoutFor(390), layoutFor(390));
+  assert.match(board, /if \(layouts\.size >= 3\) layouts\.delete\(layouts\.keys\(\)\.next\(\)\.value\);/, 'and three widths at the most are kept');
+  /* The wood under a tile's stones is painted once and kept: a stone
+     turning gold copies it. */
+  assert.match(board, /const land = landRows\(i, a, b\);/);
+  assert.match(board, /c\.drawImage\(land, 0, at, layout\.W, h, 0, at, layout\.W, h\);\s*\n\s*drawStones\(/);
   assert.match(board, /host\.addEventListener\('scroll', onScroll, \{ passive: true \}\);/);
   assert.doesNotMatch(board, /pixelCanvas\([a-z]+, layout\.W, layout\.H\)/, 'never one canvas for the whole board');
   assert.match(board, /const b = el\('button', 'tb-stone'\);\s*\n\s*b\.type = 'button';/);
@@ -330,8 +463,8 @@ t('just through a gate there is room to stand: clear of the arch, short of the n
       const seat = teamSeat(at(b.level), L);
       const [y0] = barrierBand(L, L.bosses.indexOf(b));
       /* The stile's arch and the bridge's rails are drawn within their band;
-         the wall's is taller for its tower, which stands to one side. */
-      if (b.kind !== 'wall') assert.ok(seat.pt[1] <= y0 + 8, `${b.kind} at ${w} px: feet at ${seat.pt[1]}, the gate's art from ${y0 + 7}`);
+         the hamlet's is taller for its cottages, which stand to each side. */
+      if (b.kind !== 'hamlet') assert.ok(seat.pt[1] <= y0 + 8, `${b.kind} at ${w} px: feet at ${seat.pt[1]}, the gate's art from ${y0 + 7}`);
       assert.ok(seat.pt[1] - 24 > next.y + 8 || Math.abs(seat.pt[0] - next.x) > 20, 'and the handler is not standing on the next stone');
     }
     /* The other stones keep their step, and the trail still only climbs. */
@@ -393,11 +526,11 @@ t('a moment watched to its end leaves no loop running, and a destroyed team asks
   }
 });
 
-t('the summit has a finale of its own, as long as a boss, and every moment ends on a frame that can be held', () => {
+t('the heart of the wood has a finale of its own, as long as a boss, and every moment ends on a frame that can be held', () => {
   /* The page allows a boss's length for the last level (it calls it a boss),
-     so the summit's moment is exactly as long. */
-  assert.equal(MOMENTS.summit.duration, MOMENTS.boss.duration);
-  for (const kind of ['levelup', 'boss', 'summit']) {
+     so the finale at the great tree is exactly as long. */
+  assert.equal(MOMENTS.heart.duration, MOMENTS.boss.duration);
+  for (const kind of ['levelup', 'boss', 'heart']) {
     const m = MOMENTS[kind], at = Object.values(m.cues);
     assert.ok(at.every((v, i) => i === 0 || v > at[i - 1]), `${kind}: the cues come in order`);
     assert.ok(at[at.length - 1] < m.duration - 500, `${kind}: there is a hold after the last cue`);
@@ -405,13 +538,16 @@ t('the summit has a finale of its own, as long as a boss, and every moment ends 
     // The cues the page hangs its haptics and its card on are still there.
     assert.ok('buzz' in m.cues && ('name' in m.cues || 'title' in m.cues));
   }
-  for (const k of ['flag', 'flare', 'title']) assert.ok(k in MOMENTS.summit.cues);
+  /* The banner on the great tree, then the moon, then the title. Nothing of
+     the old summit (its flag, its aurora) is left for a caller to ask for. */
+  for (const k of ['banner', 'moon', 'title']) assert.ok(k in MOMENTS.heart.cues);
+  assert.equal(MOMENTS.summit, undefined);
   const board = src('board.js');
-  assert.match(board, /const kind = gated \? 'boss' : summit \? 'summit' : 'levelup';/);
+  assert.match(board, /const kind = gated \? 'boss' : finale \? 'heart' : 'levelup';/);
   assert.match(board, /team\.set\(\{ motion: true, look: lookHere\(m\.before\), env, state: mm\.kind \}\);/);
 });
 t('every state and moment is a pure function of its clock, at any time and any stride', () => {
-  for (const state of STATES.concat(['levelup', 'boss', 'summit'])) {
+  for (const state of STATES.concat(['levelup', 'boss', 'heart'])) {
     for (let ms = 0; ms <= 9200; ms += 33) {
       const a = frame(state, ms, { stride: 0.7, stride2: 1.4 }), b = frame(state, ms, { stride: 0.7, stride2: 1.4 });
       assert.ok(a.dog && a.handler && a.handler.o, `${state} at ${ms}: a dog and a handler`);
@@ -447,6 +583,79 @@ t('a moment’s effects are drawn from the clock alone, and only with Animations
   assert.match(board, /sweepCanvas\.style\.display = 'none'; fxCanvas\.style\.display = 'none';/);
   assert.match(board, /const ambientOn = \(\) => typeof o\.ambient === 'function' && o\.motion && ambSeen && !document\.hidden && !!layout;/);
   assert.match(src('app.js'), /onPick: pickStone, ambient: drawAmbient \};/);
+});
+
+t('every tile of the board paints, and every band of it moves, in all five lands and both themes', () => {
+  /* Not the pixels (those are looked at in a browser): that no painter of
+     any land throws. A name used before it was made, in the field's
+     butterflies, stopped the whole board's ambient life and no test said so. */
+  const ctx = () => new Proxy({}, { get: (o, k) => (k in o ? o[k]
+    : k === 'getImageData' || k === 'createImageData' ? (...a) => ({ data: new Uint8ClampedArray(a[a.length - 2] * a[a.length - 1] * 4), width: a[a.length - 2], height: a[a.length - 1] })
+    : () => ({ addColorStop() {} })), set: (o, k, v) => { o[k] = v; return true; } });
+  const canvas = () => { const c = { width: 0, height: 0, style: {}, getContext: () => (c.x2d ||= ctx()), toDataURL: () => '' }; return c; };
+  const had = { document: globalThis.document, ImageData: globalThis.ImageData };
+  globalThis.document = { hidden: false, addEventListener() {}, removeEventListener() {}, createElement: () => canvas() };
+  globalThis.ImageData = class { constructor(a, b, c) { if (typeof a === 'number') { this.width = a; this.height = b; this.data = new Uint8ClampedArray(a * b * 4); } else { this.data = a; this.width = b; this.height = c; } } };
+  try {
+    for (const w of [320, 390]) {
+      const L = layoutFor(w), tiles = boardTiles(L.H, TILE);
+      for (const state of [{ current: 0, next: 1 }, { current: 59, start: 20, next: 60, prints: [58, 59] }, { current: 100, next: null, glade: true }, { current: 99, next: 100, glade: false }]) {
+        for (const tile of tiles) drawBoard(canvas().getContext('2d'), L, state, tile);
+      }
+      L.bosses.forEach((b, k) => { for (const open of [0, 0.5, 1]) drawBarrier(canvas().getContext('2d'), L, k, open, open === 1); });
+      for (const dark of [false, true]) for (const clock of [0, 133, 950, 4321, 60000]) {
+        for (const tile of tiles) drawAmbient(canvas().getContext('2d'), L, { y0: tile.y0, y1: tile.y1, dark, lock: -1, current: 100 }, clock);
+      }
+    }
+  } finally {
+    globalThis.document = had.document; globalThis.ImageData = had.ImageData;
+  }
+});
+
+t('the close-up shows the same five lands, each gate and the finale, at any instant of any state', () => {
+  assert.deepEqual(CLOSE_KINDS, LAND_ORDER, 'one close-up for each land of the board, by the same names');
+  const ctx = () => new Proxy({}, { get: (o, k) => (k in o ? o[k]
+    : k === 'getImageData' || k === 'createImageData' ? (...a) => ({ data: new Uint8ClampedArray(a[a.length - 2] * a[a.length - 1] * 4), width: a[a.length - 2], height: a[a.length - 1] })
+    : () => ({ addColorStop() {} })), set: (o, k, v) => { o[k] = v; return true; } });
+  const canvas = () => { const c = { width: 0, height: 0, style: {}, getContext: () => (c.x2d ||= ctx()), toDataURL: () => '' }; return c; };
+  const had = { document: globalThis.document, window: globalThis.window, raf: globalThis.requestAnimationFrame, caf: globalThis.cancelAnimationFrame };
+  globalThis.document = { hidden: false, addEventListener() {}, removeEventListener() {}, createElement: () => canvas() };
+  globalThis.window = { devicePixelRatio: 1 };
+  globalThis.requestAnimationFrame = () => 0; globalThis.cancelAnimationFrame = () => {};
+  try {
+    for (const land of LAND_ORDER) {
+      for (const state of STATES.concat(['levelup', 'boss', 'heart'])) {
+        const team = createTeam(canvas(), { scene: 'close', scale: 2, state, motion: true, look: { coat: 'bloodhound-red', jacket: 'navy', hat: 'cap', stage: LANDS[land].stage, land }, env: { stride: 1 } });
+        /* The middle of the boss's sweep, the gate ajar, the moon's first
+           frames and the hold are all in here. */
+        for (const ms of [0, 300, 1800, 3700, 4500, 4800, 5400, 7200, 8800]) team.freeze(ms);
+        team.set({ motion: false });
+        team.destroy();
+      }
+    }
+    for (const kind of ['stile', 'bridge', 'hamlet']) for (const part of ['back', 'front', 'all']) drawGate(canvas().getContext('2d'), kind, 100, 0.5, part);
+  } finally {
+    globalThis.document = had.document; globalThis.window = had.window; globalThis.requestAnimationFrame = had.raf; globalThis.cancelAnimationFrame = had.caf;
+  }
+  /* The finale's light is the clock's alone, like every other effect. */
+  const seen = (fn) => { const out = []; fn({ set fillStyle(v) { this.f = v; }, fillRect(...a) { out.push([this.f].concat(a)); } }); return out; };
+  assert.equal(seen(c => moonbeam(c, 60, 96, 0, -1)).length, 0, 'no moon before its cue');
+  const thread = seen(c => moonbeam(c, 60, 96, 0, 67)), beam = seen(c => moonbeam(c, 60, 96, 0, 2000));
+  const width = (list) => Math.max(...list.map(v => v[1] + v[3])) - Math.min(...list.map(v => v[1]));
+  assert.ok(thread.length > 20 && beam.length > thread.length && width(beam) > width(thread) + 10, 'a thread of light, then the beam opened out');
+  assert.deepEqual(beam, seen(c => moonbeam(c, 60, 96, 0, 2000)), 'the same frame twice');
+  assert.ok(seen(c => gather(c, 60, 90, 2600, 22)).length >= 22, 'every firefly has come to the tree');
+  assert.deepEqual(seen(c => gather(c, 60, 90, 900, 22)), seen(c => gather(c, 60, 90, 900, 22)));
+});
+t('nothing of the town at night or the snowy climb is left to draw from', () => {
+  for (const k of ['wood', 'town', 'climb']) assert.equal(RAMPS[k], undefined, `RAMPS.${k} is gone`);
+  for (const k of ['CAST', 'skyFlare', 'shootingStars']) assert.equal(PIXEL[k], undefined, `${k} is gone`);
+  const art = ['ambient', 'board-art', 'close', 'fx', 'ground', 'landmarks', 'lands', 'layout', 'moments', 'player', 'scene', 'scenery', 'stones', 'team', 'tracks']
+    .map(f => src(`pixel/${f}.js`)).join('\n') + src('board.js');
+  for (const word of ['aurora', 'cairn', 'summit', 'snow', 'fountain', 'RAMPS.town', 'RAMPS.climb', 'RAMPS.wood']) assert.ok(!art.includes(word), `no "${word}" in the board's art or its moments`);
+  /* With motion on, the lane's car is the ambient layer's to drive; still, it is in the picture. */
+  assert.match(src('board.js'), /const traffic = \(\) => !\(o\.motion && typeof o\.ambient === 'function'\);/);
+  assert.match(src('pixel/scene.js'), /if \(!st \|\| st\.traffic !== false\) car\(/);
 });
 
 console.log(`\nboard: ${pass} checks passed`);

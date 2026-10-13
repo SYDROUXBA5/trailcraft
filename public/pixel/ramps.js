@@ -6,9 +6,12 @@
    which is what makes flat colours read as lit; at night the lights lean
    to the moon instead, and only lamplight is warm.
 
-   Three artists draw from this one table so that a red jacket is the same
+   Every module draws from this one table so that a red jacket is the same
    red beside any dog on any land. It is not to be edited to suit one sprite:
-   a tone that is missing belongs in the module that needs it. */
+   a tone that is missing belongs in the module that needs it. The lands of
+   the Deep Wood have their own ramps, and their own shadows, in lands.js;
+   `meadow` here is the open field's daylight, which the field, the wood's
+   edge and every timber gate are painted from. */
 
 /** The five tones by name: RAMPS.fur.red[TONE.shade]. */
 export const TONE = Object.freeze({ ink: 0, shade: 1, base: 2, light: 3, glint: 4 });
@@ -87,48 +90,4 @@ export const RAMPS = Object.freeze({
     poppy: Object.freeze(['#6a1c22', '#a82c26', '#d9412b', '#f27a5c', '#ffb49a']),
     buttercup: Object.freeze(['#8a6a1c', '#c89a2a', '#f3d34a', '#fff0a0', '#ffffff']),
   }),
-  wood: Object.freeze({
-    sky: Object.freeze(['#3a2a52', '#7a3e58', '#c8643a', '#f0a848', '#ffd37a']),
-    litter: Object.freeze(['#4a2430', '#7e4428', '#b06e30', '#d6953c', '#f4c45c']),
-    path: Object.freeze(['#5e3c2c', '#9a6c44', '#c89a62', '#e6c084', '#f8dea6']),
-    amber: Object.freeze(['#5a2420', '#9a3c1c', '#d06c1e', '#f09c30', '#ffd060']),
-    russet: Object.freeze(['#4a1c22', '#7e2a1e', '#b04a22', '#d8742c', '#f4a444']),
-    pine: Object.freeze(['#14262c', '#1f3c34', '#2f5a3a', '#4c7c40', '#d89a3a']),
-    trunk: Object.freeze(['#2a1a22', '#46292a', '#6a4030', '#96623a', '#c88e4a']),
-    water: Object.freeze(['#2a2850', '#4a4a86', '#7a6ea8', '#e09a6a', '#ffe0a0']),
-    stone: Object.freeze(['#3e3040', '#6a5a62', '#94847e', '#c2ae96', '#eed8ae']),
-    mushroom: Object.freeze(['#5a1820', '#96241e', '#c8302a', '#ee6a4a', '#fff4e0']),
-  }),
-  town: Object.freeze({
-    sky: Object.freeze(['#060a1e', '#0b1430', '#132244', '#1c3258', '#eef0dc']),
-    lawn: Object.freeze(['#0e1830', '#182a4c', '#24406a', '#32568a', '#4a74a8']),
-    cobble: Object.freeze(['#1a2140', '#3a4670', '#5d6c98', '#8e9cc0', '#c4d0e8']),
-    foliage: Object.freeze(['#0c1c2c', '#16344a', '#235a68', '#368088', '#5aaaa0']),
-    trunk: Object.freeze(['#120e1e', '#221a30', '#382a40', '#524058', '#74607a']),
-    plaster: Object.freeze(['#1e1838', '#3a2e5c', '#5a4a7a', '#7c6c9c', '#a898c0']),
-    brick: Object.freeze(['#2a1630', '#4a2a44', '#6e4458', '#946270', '#bc8a90']),
-    roof: Object.freeze(['#10142a', '#1c2240', '#2e3760', '#46528a', '#6a7ab4']),
-    lamp: Object.freeze(['#7a3e1c', '#c8742a', '#ffd36a', '#fff4c2', '#ffffff']),
-    water: Object.freeze(['#0a1430', '#16305e', '#2a5a9a', '#5a9ad8', '#c8ecff']),
-    stone: Object.freeze(['#1c2038', '#3c4464', '#68708e', '#98a0b8', '#ccd2e0']),
-  }),
-  climb: Object.freeze({
-    sky: Object.freeze(['#060a24', '#0c1440', '#16205a', '#24306e', '#fff3c4']),
-    aurora: Object.freeze(['#16405e', '#1f6a8a', '#2fa8a0', '#5fe0a8', '#b4f8c8']),
-    snow: Object.freeze(['#5a6aa0', '#9fb2dc', '#dbe6f6', '#f4f8ff', '#ffffff']),
-    track: Object.freeze(['#4a5a90', '#8094c4', '#b4c4e4', '#d6e2f4', '#f0f6ff']),
-    rock: Object.freeze(['#1c2240', '#38426a', '#5a688e', '#8492b4', '#b8c4dc']),
-    pine: Object.freeze(['#0e2228', '#183a3c', '#285a50', '#3e7c66', '#c8f4e0']),
-    trunk: Object.freeze(['#1a1420', '#2e2430', '#4a3a40', '#6a5654', '#8e7a70']),
-    ice: Object.freeze(['#16305e', '#2a5c9a', '#5a9ad0', '#a8dcf0', '#f0fcff']),
-    lantern: Object.freeze(['#7a3e1c', '#c8742a', '#ffd36a', '#fff4c2', '#ffffff']),
-  }),
-});
-
-/** What a cast shadow is made of on each land: never black. [colour, strength 0 to 1]. */
-export const CAST = Object.freeze({
-  meadow: Object.freeze(['#1c3440', 0.30]),
-  wood: Object.freeze(['#30142c', 0.36]),
-  town: Object.freeze(['#06081e', 0.46]),
-  climb: Object.freeze(['#3c5496', 0.30]),
 });

@@ -1831,7 +1831,7 @@ html[data-motion="off"] .lu { transition-duration: 120ms; }
 /* A moment's effects (the paw, its sparks, the confetti) go over the team
    and the gates. */
 .tb-fx { z-index: 8; top: 0; }
-/* What moves on the land by itself (grass, water, smoke, snow): over the
+/* What moves on the land by itself (grass, water, leaves, mist, motes): over the
    picture, under everything that stands on it. */
 .tb-ambient { z-index: 1; top: 0; }
 /* A boss's landmark: behind the team until the team is through it. */
@@ -1871,10 +1871,13 @@ html[data-motion="on"] .tb-stone[aria-pressed="true"] .tb-pointer { animation: t
 }
 /* A sign steps aside for the team (board.js): it fades, it does not jump. */
 .tb-sign.away { opacity: 0; visibility: hidden; transition: opacity 180ms ease, visibility 0s 180ms; }
+.tb-sign.away.now { transition: none; }
 .tb-sign b {
   display: block; padding: 2px; background: var(--w0); clip-path: var(--px-c2);
   font-size: calc(11 * var(--px)); font-weight: 800; letter-spacing: 0.1em; line-height: 1; text-transform: uppercase; white-space: nowrap;
 }
+.tb-sign.tight b { font-size: calc(10 * var(--px)); letter-spacing: 0.04em; }
+.tb-sign.tight b > span { gap: 4px; padding: 5px 5px 5px; }
 .tb-sign b > span {
   display: flex; align-items: center; gap: 6px; padding: 5px 7px 5px; background: var(--w2); color: #FFF3D6;
   box-shadow: inset 0 2px 0 var(--w3), inset 0 -2px 0 var(--w1); text-shadow: 0 2px 0 var(--w0);
