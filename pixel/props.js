@@ -29,6 +29,3 @@ export const PROP_PALS = {
   query: { w: '#ffffff' },
   spark: { g: '#f2c14e', w: '#fff8dc' },
 };
-
-/* Kept for whoever still asks for the old name. */
-export const BUSH_PAL = { v: '#4c8236', y: '#6ea447', p: '#d9412b', V: '#35602a' };

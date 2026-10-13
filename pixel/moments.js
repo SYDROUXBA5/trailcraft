@@ -1,4 +1,4 @@
-/* The one-shot moments: the level-up, the boss and the summit, with the
+/* The one-shot moments: the level-up, the boss and the heart of the wood, with the
    cues the board and the page hang their own effects on. Each is a pure
    function of its clock, like the states, so a skip is just its last frame.
 
@@ -20,15 +20,16 @@ export const MOMENTS = {
      land beyond lights up; gate: it opens; aside: the person steps away;
      through: the team goes through; title: the title card; buzz. */
   boss: { duration: 8800, cues: { arrive: 1700, toss: 2700, sweep: 3100, gate: 4400, aside: 5000, through: 5300, title: 7100, buzz: 7180 } },
-  /* The last stone. As a level passed up to the arrival, then its own
-     finale: flag: the flag goes up gold; flare: the aurora flares and the
-     stars fall; title: Master Trailer; buzz. It lasts as long as a boss,
-     which is what the page allows for it. */
-  summit: { duration: 8800, cues: { tick: 150, paw: 650, cheer: 800, name: 1150, trot: 1700, arrive: 3700, flag: 4100, flare: 4700, title: 6400, buzz: 6480 } },
+  /* The last stone, at the great tree in the heart of the ancient wood. As
+     a level passed up to the arrival, then its own finale: banner: the
+     banner on the tree turns gold; moon: the moon finds the glade, and
+     every firefly in the wood comes to the tree; title: Mission Ready;
+     buzz. It lasts as long as a boss, which is what the page allows for it. */
+  heart: { duration: 8800, cues: { tick: 150, paw: 650, cheer: 800, name: 1150, trot: 1700, arrive: 3700, banner: 4100, moon: 4700, title: 6400, buzz: 6480 } },
 };
 
 /** The frame shown when motion is off. */
-export const STILL_AT = { waiting: 300, trailing: 160, lost: 1800, find: 3000, missed: 3200, resting: 900, night: 160, levelup: 4900, boss: 8800, summit: 8800 };
+export const STILL_AT = { waiting: 300, trailing: 160, lost: 1800, find: 3000, missed: 3200, resting: 900, night: 160, levelup: 4900, boss: 8800, heart: 8800 };
 
 /* The gate, in the boss: its shut-to-open steps, with an overshoot. */
 const GATE_STEPS = [0, 0.45, 1.12, 1.12, 0.94, 1];
@@ -130,18 +131,19 @@ export function frameBoss(t, env) {
   return { handler, dog, line: 56, fx };
 }
 
-/* The summit: the last stone stamped, the climb to the cairn, then the two
-   of them under the sky: the dog sits and sings at it, the handler's fist
-   stays up, and they turn to look at each other for the hold. */
-export function frameSummit(t, env) {
-  const c = MOMENTS.summit.cues;
+/* The heart of the wood: the last stone stamped, the run to the great
+   tree, then the two of them in the glade as the moon comes through: the
+   dog sits and sings at it, the handler's fist stays up, and they turn to
+   look at each other for the hold. */
+export function frameHeart(t, env) {
+  const c = MOMENTS.heart.cues;
   if (t < c.trot - 67) return stamped(t, c);
   if (t < c.arrive) return running(t, c.trot, c.arrive, env);
   const T = t - c.arrive, w = wagAt(t, 100);
   let dog;
   if (T < 268) dog = sitDown(T, { x: DX, y: dogY });
   else if (t < c.title) {
-    // Head back, muzzle to the sky, in three long calls.
+    // Head back, muzzle to the moon, in three long calls.
     const call = step(T - 268, 400) % 3 < 2;
     dog = { x: DX, y: dogY, body: 'sit', head: 'up', pitch: call ? -14 : 0, na: call ? -6 : 0, mouth: call, ear: [call ? -1.5 : 0, call ? 1 : 0], tail: w[0] * 14, tailTip: w[1] * 16 };
   } else {
@@ -149,7 +151,7 @@ export function frameSummit(t, env) {
     dog = { x: DX, y: dogY, body: 'sit', head: 'up', headTo: 'back', hk: a < 67 ? 0.4 : a < 134 ? 0.8 : 1, ear: [a < 300 ? -1.5 : 0, 0], tail: w[0] * 14, tailTip: w[1] * 16, mouth: true, tongue: true };
   }
   let handler;
-  const up = t - c.flag;
+  const up = t - c.banner;
   if (up < 0) handler = { x: HX, o: handlerIdle(t, { armN: 'low' }), hold: 'n' };
   else if (up < 268) handler = handlerPump(up);
   else if (t < c.title + 600) handler = { x: HX, hold: 'f', hatLift: step(up, 400) % 2, o: { armN: 'fist', pump: 1, armF: 'feed', bob: step(up, 400) % 2 ? -1 : 0, mouth: true } };

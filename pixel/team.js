@@ -1,15 +1,16 @@
 /* The team put together: handler, line and dog drawn from a frame, with
    their shadows, props and effects (scent, sparks, the torch beam). */
 
-import { bake, blit, ctx2d, ditherOut, hash, hexToRgb, makeCanvas, R } from './core.js';
-import { CAST, RAMPS } from './ramps.js';
+import { bake, blit, ctx2d, ditherOut, hash, hexToRgb, makeCanvas, mix, R } from './core.js';
+import { LANDS } from './lands.js';
+import { RAMPS } from './ramps.js';
 import { ball, colours, contour, develop, dot, sheet, tint } from './paint.js';
 import { coatById, DOG_BOX, dogHeadTop, dogLineIn, dogNose, dogRing, dogSpan, dogToScene, drawDog } from './dog.js';
 import { drawHuman, handOf, humanPose, lampOf, RUNAWAY } from './human.js';
 import { PROP_PALS, PROPS } from './props.js';
 import { drawLine, paintRope } from './rope.js';
 import { DX, frameFind, frameLost, frameMissed, frameNight, frameResting, frameTrailing, frameWaiting, humY, LINE_LEN, step, TEAM } from './states.js';
-import { frameBoss, frameLevelUp, frameSummit } from './moments.js';
+import { frameBoss, frameLevelUp, frameHeart } from './moments.js';
 
 /* Scent has its own colours: nothing in the scenery uses them. */
 const SCENT = ['#bff4ff', '#ffffff'];
@@ -24,7 +25,7 @@ export function frame(state, t, env) {
     case 'night': return frameNight(t);
     case 'levelup': return frameLevelUp(t, env);
     case 'boss': return frameBoss(t, env);
-    case 'summit': return frameSummit(t, env);
+    case 'heart': return frameHeart(t, env);
     default: return frameWaiting(t);
   }
 }
@@ -45,13 +46,15 @@ function teamLayer(W, H) {
    nose of a dog sat at the find. */
 const PERSON_AT = 52;
 
-const LAND_OF = { hot: 'meadow', warm: 'wood', cold: 'town' };
-const landOf = (look) => look.land || LAND_OF[look.stage] || 'meadow';
+/* The land the team stands in (lands.js): the board and the close-up say
+   which; a caller that only knows the stage gets that stage's first land. */
+const LAND_OF = { hot: 'field', warm: 'forest', cold: 'old' };
+const landOf = (look) => (LANDS[look.land] ? look.land : LAND_OF[look.stage] || 'field');
 
 /* A cast shadow: a flat ellipse of the land's own shadow colour, a pixel
    right of centre (the light is upper left), its two ends broken up. */
 function castShadow(c, cx, gy, w, land) {
-  const [hex, a] = CAST[land] || CAST.meadow;
+  const [hex, a] = LANDS[land].cast;
   const [r, g, b] = hexToRgb(hex);
   c.fillStyle = `rgba(${r},${g},${b},${a})`;
   const x0 = R(cx - w / 2) + 1;
@@ -70,9 +73,11 @@ const BUSH = { w: 24, h: 18 };
 function bushArt(land) {
   let cv = bushes.get(land);
   if (cv) return cv;
-  const L = RAMPS[land] || RAMPS.meadow;
-  const leaf = land === 'wood' ? L.russet : land === 'climb' ? L.pine : land === 'town' ? L.foliage : L.hedge;
-  const berry = land === 'wood' ? L.amber : land === 'climb' ? L.snow : land === 'town' ? L.lamp : L.poppy;
+  /* The field's hedge, the forest's deeper green, and in the dark woods the
+     trees' own leaves with the pale fungus for berries. */
+  const L = LANDS[land], M = RAMPS.meadow;
+  const leaf = L.dark ? [mix(L.treeLo, '#040608', 0.4), L.treeLo, L.tree, L.treeHi, mix(L.treeHi, '#ffffff', 0.25)] : land === 'forest' ? M.foliage : M.hedge;
+  const berry = L.dark ? ['#16403e', '#2a8a86', '#7ae6d2', '#b8fff0', '#ffffff'] : M.poppy;
   const B = sheet(BUSH.w + 4, BUSH.h + 4);
   for (const [x, y, rx, ry] of [[8, 13, 6.5, 6], [20, 14, 6, 5.5], [14, 10, 7.5, 8], [14, 16, 11, 4]]) ball(B, x, y, rx, ry, { m: 1, lit: [-0.35, 0.5] });
   // Leaves: small clumps of light on the sunny side and shade underneath,
@@ -82,7 +87,6 @@ function bushArt(land) {
     tint(B, x, y, up ? 4 : 0, 1); tint(B, x + 1, y, up ? 3 : 1, 1); tint(B, x, y + 1, up ? 3 : 1, 1);
   }
   for (const [x, y] of [[7, 11], [17, 8], [21, 15], [12, 15]]) { if (B.m[y * B.w + x]) { dot(B, x, y, 2, 2); dot(B, x + 1, y, 2, 3); } }
-  if (land === 'climb') for (let x = 6; x < 22; x++) for (let y = 2; y < 6; y++) tint(B, x, y, 3, 1);
   contour(B);
   const img = develop(B, colours([null, leaf, berry]));
   cv = makeCanvas(B.w, B.h);
@@ -107,9 +111,10 @@ export function drawTeam(c, F, t, look, ox, oy, W, H) {
   const coat = coatById(look.coat);
   const stage = look.stage || 'hot';
   const land = landOf(look);
-  // On the night lands, and by torchlight anywhere, the moon rims the top of
-  // both of them: a dark coat and a navy jacket are lost on navy without it.
-  const rim = !!F.torch || land === 'town' || land === 'climb';
+  // In the dark woods, and by torchlight anywhere, what light there is rims
+  // the top of both of them: a dark coat and a navy jacket are lost on a
+  // near-black floor without it.
+  const rim = !!F.torch || LANDS[land].dark;
   const hLook = { jacket: look.jacket || 'navy', hat: look.hat || 'none', torch: !!F.torch, hatLift: F.handler.hatLift || 0, rim };
   const G = oy + TEAM.ground;
   const hx = ox + F.handler.x, hy = oy + humY;
@@ -247,7 +252,7 @@ function drawFx(c, e, t, F, dog, ox, oy, G, S) {
       if (!e.blink) break;
       const top = dogHeadTop(Object.assign({}, dog, { turn: 0, head: 'fwd' }));
       const q = bake(PROPS.query, PROP_PALS.query, 'prop/query');
-      // Its own dark edge, so it reads on snow as on grass.
+      // Its own dark edge, so it reads on pale gravel as on grass.
       c.globalAlpha = 0.55;
       for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) blit(c, bake(PROPS.query, { w: '#1c2240' }, 'prop/query-rim'), top[0] - 2 + dx, top[1] - 12 + dy);
       c.globalAlpha = 1;

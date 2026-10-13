@@ -13,8 +13,8 @@
    board on screen. */
 
 import { createTeam, TEAM, ANCHOR, REACH, MOMENTS, ICONS, gateOpen, boardLayout, boardTiles, tilesNear, drawBoard, drawBarrier, barrierBand,
-         trailPoint, throughGate, gateX, ringArt, stamp, plaqueSize, drawPlaque, lockPixels, unlockWood, duskify, crispURL, BOARD_LANDS, RAMPS, CAST,
-         SPEED, STAGE_GLOW, burst, confetti, flash, trailGlow, stampPaw, skyFlare } from './pixel-team.js';
+         trailPoint, throughGate, gateX, teamRect, ringArt, stamp, plaqueSize, drawPlaque, drawLand, drawStones, lockPixels, unlockWood, duskify, duskOf, DUSK, crispURL, BOARD_LANDS,
+         SPEED, STAGE_GLOW, GREAT, burst, confetti, flash, trailGlow, stampPaw, moonbeam, gather } from './pixel-team.js';
 import { LADDER_V1, levelSpec } from './levels.js';
 import { standing, stoneStatus, stoneLabel, stageLabel } from './teams.js';
 
@@ -43,13 +43,11 @@ export const WAVE_ICON = Object.freeze({
   empty: 'empty', distance: 'far', town: 'car', veryOld: 'moon', operational: 'torch',
 });
 
-/* What each land is called on its sign. */
-const LAND_SIGNS = [
-  { kind: 'hot', land: 'meadow', text: `Red meadow · ${stageLabel('hot')}` },
-  { kind: 'warm', land: 'wood', text: `Amber wood · ${stageLabel('warm')}` },
-  { kind: 'cold', land: 'town', text: `Blue town · ${stageLabel('cold')}` },
-  { kind: 'cold', land: 'climb', text: `The climb · ${stageLabel('cold')}` },
-];
+/* What each land is called on its sign, in plain words, with the stage it
+   is trained in: "The forest · Warm". */
+const landSign = (key) => { const L = BOARD_LANDS[key]; return { kind: L.stage, land: key, text: `${L.name} · ${stageLabel(L.stage)}` }; };
+/* The land each boss stands in, and the one that opens beyond it. */
+const BOSS_LANDS = ['edge', 'forest', 'old', 'ancient'];
 
 /* A stone's number plate and what it says aloud are the same on every board
    this page ever draws, so they are made once: a level-up's own small board
@@ -60,14 +58,40 @@ const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 const el = (tag, cls) => { const n = document.createElement(tag); if (cls) n.className = cls; return n; };
 
 /** The board's layout for a width in CSS pixels: all hundred levels, a
-    trailhead under stone 1 and the summit's sky over stone 100. */
+    trailhead under stone 1 and the heart of the wood round stone 100. */
+const layouts = new Map();
 export function layoutFor(cssWidth) {
+  /* One layout to a width, kept: everything worked out from a layout (where
+     each tree stands, every track, their pixels) is kept against it, and a
+     level-up's own small board, or the same board mounted again, then gets
+     all of that for nothing. A phone has one width, or two. */
+  const W = Math.ceil(clamp(cssWidth, 280, BOARD_MAX_W) / SCALE);
+  if (!layouts.has(W)) {
+    /* Three at the most: a window dragged wider on a desk passes through a
+       hundred widths, and each would keep its whole wood. */
+    if (layouts.size >= 3) layouts.delete(layouts.keys().next().value);
+    layouts.set(W, freshLayout(W));
+  }
+  return layouts.get(W);
+}
+/* The land painted for a layout, a canvas to a tile (mountBoard, landRows):
+   kept against the layout, so every board of that width shares it. */
+const landStore = new WeakMap();
+function landsOf(layout) {
+  let m = landStore.get(layout);
+  if (!m) landStore.set(layout, m = new Map());
+  return m;
+}
+function freshLayout(W) {
   const levels = LADDER_V1.levels.map(l => ({ level: l.level, stage: l.stage, boss: l.boss }));
   /* Room under stone 1 for the trailhead, where a new team waits, and for
-     the meadow's sign below that; room over the last for the night sky. */
+     the field's sign below that; room over the last for the whole of the
+     great tree and a good depth of the wood closing in behind it, so the
+     finale is played near the middle of a phone's screen and not jammed
+     against the top of it. */
   /* An odd width rounds up: half an art pixel off the right edge is not
      seen, a sliver of the page showing down the left is. */
-  return boardLayout(Math.ceil(clamp(cssWidth, 280, BOARD_MAX_W) / SCALE), levels, { bottom: 84, top: 110, summit: true, gateRoom: GATE_ROOM });
+  return boardLayout(W, levels, { bottom: 84, top: 184, heart: true, gateRoom: GATE_ROOM });
 }
 
 /** What the art needs to know of a team: the last stone behind it, the
@@ -155,7 +179,7 @@ function pixelCanvas(c, w, h) {
  *         still     true where the board is only a picture (a level-up
  *                   played over the result): its stones cannot be tapped,
  *         ambient(ctx, layout, view, t)  what moves on the land by itself
- *                   (grass, water, smoke, snow), drawn on a layer of its own
+ *                   (grass, water, leaves, mist, fireflies), drawn on a layer of its own
  *                   under the team; the board is complete without it }
  *
  * Returns { update(opts), select(level | null), home(smooth), play(moment),
@@ -279,8 +303,11 @@ export function mountBoard(host, opts = {}) {
        beside the trail on the side the team is not on. The words are real
        text, so they stay sharp and can be read. */
     const sign = (kind, land, text, y, side) => {
-      const d = el('div', `tb-sign ${kind} ${side}`);
-      const wood = RAMPS && RAMPS[land] && RAMPS[land].trunk, cast = CAST && CAST[land];
+      /* On the narrowest phones the lands' names are set a little tighter:
+         "The ancient wood · Cold" at full size is two thirds of an SE's board. */
+      const cls = `tb-sign ${kind}${layout.W < 180 ? ' tight' : ''} `;
+      const d = el('div', cls + side);
+      const L = BOARD_LANDS && BOARD_LANDS[land], wood = L && L.sign, cast = L && L.cast;
       if (wood) wood.forEach((c, i) => d.style.setProperty('--w' + i, c));
       if (cast) { const [r, g, b] = [1, 3, 5].map(i => parseInt(cast[0].slice(i, i + 2), 16)); d.style.setProperty('--cast', `rgba(${r}, ${g}, ${b}, ${cast[1]})`); }
       const plank = el('b'), words = el('span');
@@ -293,15 +320,49 @@ export function mountBoard(host, opts = {}) {
       /* Beside the trail and clear of it: clear of every row of path the
          sign is level with, and of any stone and its number plate there.
          Never off the board. */
-      const w = d.offsetWidth, rows = Math.ceil(d.offsetHeight / SCALE), left = side === 'left';
-      let edge = left ? Infinity : -Infinity;
-      const reach = (x, half) => { edge = left ? Math.min(edge, x - half) : Math.max(edge, x + half); };
-      for (let r = y - 2; r <= y + rows + 2; r++) reach(layout.xAt[clamp(Math.round(r), 0, layout.H)], 6);
-      /* A stone's number plate hangs under it, a boss's lower still: a stone
-         up to 24 rows above the sign is still in its way. */
-      for (const st of layout.stones) if (st.y > y - 24 && st.y < y + rows + 12) reach(st.x, 14);
-      const x = (left ? edge - 5 : edge + 5) * SCALE - (left ? w : 0);
-      d.style.left = clamp(Math.round(x / SCALE) * SCALE, 4, Math.max(4, layout.W * SCALE - w - 4)) + 'px';
+      const w = d.offsetWidth, rows = Math.ceil(d.offsetHeight / SCALE);
+      const lo = 4, hi = Math.max(4, layout.W * SCALE - w - 4);
+      /* Where the sign would stand on one side, and by how much it would
+         not fit there (it is then pushed back in, over the trail). */
+      const stand = (left, y) => {
+        let edge = left ? Infinity : -Infinity, stone = edge;
+        const reach = (x, half) => { if (x === x) edge = left ? Math.min(edge, x - half) : Math.max(edge, x + half); };
+        /* A stone's number plate hangs under it, a boss's lower still: a stone
+           up to 24 rows above the sign is still in its way. */
+        for (const st of layout.stones) if (st.y > y - 24 && st.y < y + rows + 12) reach(st.x, 14);
+        stone = edge;
+        for (let r = y - 2; r <= y + rows + 2; r++) reach(layout.xAt[clamp(Math.round(r), 0, layout.H)], 6);
+        /* Above the last stone there is no trail to keep clear of: the sign
+           goes to the board's edge. */
+        if (!Number.isFinite(edge)) return { x: left ? lo : hi, over: 0, bad: 0, left, y };
+        const want = (e) => (left ? e - 5 : e + 5) * SCALE - (left ? w : 0);
+        const over = (x) => (left ? Math.max(0, lo - x) : Math.max(0, x - hi));
+        const x = want(edge), o = over(x);
+        /* Lying over a stone is far worse than lying over a little trail. */
+        return { x: clamp(Math.round(x / SCALE) * SCALE, lo, hi), over: o, bad: o + (Number.isFinite(stone) ? over(want(stone)) * 1000 : 0), left, y };
+      };
+      /* Where it was asked for, if it fits. "The ancient wood · Cold" is
+         longer than the lands' names used to be, and beside a stone in the
+         middle of a narrow board it fits on neither side: it lay across the
+         stone and its ring. So it tries the other side, and then the rows
+         just above and below (between two stones there is only the trail
+         to clear), and takes the nearest place that holds it, or failing
+         that the one where it covers no stone and the least trail. */
+      let at = null;
+      for (let k = 0; k <= 14 && !(at && at.over === 0); k++) {
+        const yy = y + (k % 2 ? 1 : -1) * Math.ceil(k / 2) * 4;
+        for (const left of [side === 'left', side !== 'left']) {
+          const c = stand(left, yy);
+          if (!at || c.bad < at.bad) at = c;
+          if (at.over === 0) break;
+        }
+      }
+      if (at.left !== (side === 'left')) d.className = cls + (at.left ? 'left' : 'right');
+      if (at.y !== y) { d.style.top = at.y * SCALE + 'px'; d.dataset.y = at.y; }
+      d.style.left = at.x + 'px';
+      /* The rows and columns it fills, plank and post, in art pixels: a
+         sign steps aside when the team stands in front of it (signs()). */
+      d.dataset.box = [Math.floor(at.x / SCALE), at.y, Math.ceil((at.x + w) / SCALE), at.y + rows + 6].join(',');
       return d;
     };
     const away = (y) => (layout.xAt[clamp(Math.round(y), 0, layout.H)] > layout.W / 2 ? 'left' : 'right');
@@ -310,18 +371,32 @@ export function mountBoard(host, opts = {}) {
     const k = (layout.spacing || 40) / 40, up = (n) => Math.round(n * k);
     /* The first land's sign stands in its own grass at the foot of the
        board, not on a strip of flat colour under it. */
-    { const y = Math.min(stoneAt(1).y + up(72) - 6, layout.H - 20); sign(LAND_SIGNS[0].kind, LAND_SIGNS[0].land, LAND_SIGNS[0].text, y, away(y + 6)); }
+    { const y = Math.min(stoneAt(1).y + up(72) - 6, layout.H - 20), s = landSign('field'); sign(s.kind, s.land, s.text, y, away(y + 6)); }
+    /* No boss stands where the field gives way to the wood's edge: its sign
+       is all that says so. */
+    if (layout.edgeY > 0) { const y = layout.edgeY - 6, s = landSign('edge'); sign(s.kind, s.land, s.text, y, away(y + 6)); }
     layout.bosses.forEach((b, i) => {
       const last = i === layout.bosses.length - 1;
       const name = `Boss · ${levelSpec(b.level).bossName}`;
-      const here = LAND_SIGNS[Math.min(i, LAND_SIGNS.length - 1)].land;
-      /* The summit has only sky above it: its sign stands on the snow just
-         below the last stone. */
-      if (last) { const y = b.y + 30; sign('boss', here, name, y, away(y + 6)).dataset.boss = b.level; return; }
-      /* The team waits just through the gate, facing on: the sign goes behind it. */
-      sign('boss', here, name, b.y - up(b.kind === 'wall' ? 80 : 60) - 6, layout.faceLeft[b.level - 1] ? 'right' : 'left').dataset.boss = b.level;
-      const land = LAND_SIGNS[i + 1], y = b.y - up(b.kind === 'wall' ? 122 : 102) - 6;
-      if (land) sign(land.kind, land.land, land.text, y, away(y + 6));
+      const here = BOSS_LANDS[Math.min(i, BOSS_LANDS.length - 1)];
+      /* The heart of the wood has no gate for a sign to stand by, and the
+         team fills the glade once it is there: the sign stands among the
+         trunks at the glade's top edge, on the side the great tree is not. */
+      if (b.kind === 'heart') {
+        const ht = layout.heart, y = ht ? Math.max(4, Math.round(ht.y - ht.ry - 12)) : b.y - 60;
+        sign('boss', here, name, y, ht && ht.tx < b.x ? 'right' : 'left').dataset.boss = b.level;
+        return;
+      }
+      /* A boss's name stands at its own gate, on the near side of it and
+         beside the trail (it stood sixty rows beyond, among the first stones
+         of the next land and under that land's own sign). It steps aside
+         when the team comes up to the gate (signs()). The next land's name
+         is past the gate, higher behind the hamlet's roofs than behind a
+         hedge. */
+      const tall = b.kind === 'hamlet';
+      { const y = b.y + 6; sign('boss', here, name, y, away(y + 6)).dataset.boss = b.level; }
+      const next = !last && BOSS_LANDS[i + 1] ? landSign(BOSS_LANDS[i + 1]) : null, y = b.y - up(tall ? 104 : 84) - 6;
+      if (next) sign(next.kind, next.land, next.text, y, away(y + 6));
     });
   }
 
@@ -330,42 +405,127 @@ export function mountBoard(host, opts = {}) {
   /* The row the lit land ends on: everything above the boss still to beat. */
   const lockLine = () => {
     const b = layout.bosses.find(x => x.level === shown.boss);
-    // Nothing lies beyond the last boss: the sky over the summit is never dimmed.
-    return b && b.kind !== 'cairn' ? b.lock : -1;
+    // Nothing lies beyond the last boss: the heart of the wood is never dimmed.
+    return b && b.kind !== 'heart' ? b.lock : -1;
   };
-  const artKey = () => [shown.current, shown.start, shown.next, shown.boss, shown.prints, shown.aurora, o.dark, layout.W].join('/');
+  /* The row the dark woods start on: above it a locked land sinks to
+     blue-black, not violet, and the dark theme adds no dusk. */
+  const deepLine = () => (layout.bosses[1] ? layout.bosses[1].y : -1);
+  /* The car on the lane is part of the picture only when nothing moves:
+     with the ambient layer running, cars are driven along it there. */
+  const traffic = () => !(o.motion && typeof o.ambient === 'function');
+  const artKey = () => [shown.current, shown.start, shown.next, shown.boss, shown.prints, shown.glade, o.dark, traffic(), layout.W].join('/');
 
-  /* Dark theme: the day lands go to dusk. The town is night already, and
-     keeps its lights. `c` is a canvas whose top row is board row y0. */
-  function dusk(c, y0, h) {
-    const far = layout.bosses[2], near = layout.bosses[1];
-    const a = far && near ? clamp(far.y - y0, 0, h) : h, b = far && near ? clamp(near.y - y0, 0, h) : h;
-    if (a > 0) duskify(c, layout.W, a, 0);
-    if (h - b > 0) duskify(c, layout.W, h - b, b);
+  /* Dark theme: the field and the forest go to dusk. The old forest and the
+     ancient wood are dark already, and darker still would lose the trail:
+     they are left as they are. `c` is a canvas whose top row is board row y0. */
+  function dusk(c, y0, h, at = 0) {
+    const a = clamp(deepLine() - y0, 0, h), b = clamp((layout.bosses[0] ? layout.bosses[0].y : -1) - y0, a, h);
+    duskify(c, layout.W, b - a, at + a, DUSK.forest);
+    duskify(c, layout.W, h - b, at + b, DUSK.field);
   }
 
-  function paintTile(i) {
-    const t = tiles[i], key = artKey();
+  /* The land under a tile's stones (ground, tracks, trees) is the same
+     whatever the team has done: it is painted once, half a tile at a time,
+     and kept with the layout, so the level-up's own small board finds it
+     painted already. A moment changes the stones four or five times, and
+     each time every tile on screen was painted again from the ground up,
+     in one frame. Only the tiles the glade is on know whether the moon is
+     in it, and only the lane's whether a car is standing on it: those are
+     kept once for each. */
+  const halfOf = (t) => t.y0 + ((t.y1 - t.y0) >> 1);
+  function landRows(i, a, b) {
+    const t = tiles[i], mid = halfOf(t), ht = layout.heart, road = layout.roadY;
+    const glade = shown.glade !== false || !(ht && t.y0 < ht.y + ht.ry + 80);
+    const parked = traffic() || !(road != null && road > t.y0 - 30 && road < t.y1 + 30);
+    const key = [i, glade, parked].join('/'), store = landsOf(layout);
+    let L = store.get(key);
+    if (!L) { L = { cv: el('canvas'), done: [false, false] }; L.cv.width = layout.W; L.cv.height = t.y1 - t.y0; store.set(key, L); }
+    const c = L.cv.getContext('2d');
+    [[t.y0, mid], [mid, t.y1]].forEach(([p, q], k) => {
+      if (L.done[k] || q <= a || p >= b) return;
+      /* Whatever stands across the edge of these rows is drawn whole and
+         cut off at it, as it is at the edge of a tile. */
+      c.save();
+      c.beginPath(); c.rect(0, p - t.y0, layout.W, q - p); c.clip();
+      c.clearRect(0, p - t.y0, layout.W, q - p);
+      drawLand(c, layout, { glade, traffic: parked }, { y0: p, y1: q, top: t.y0 });
+      c.restore();
+      L.done[k] = true;
+    });
+    return L.cv;
+  }
+
+  /* Rows a..b of tile i, painted and put through the lock and the dusk. */
+  function paintRows(i, a, b) {
+    const t = tiles[i], at = a - t.y0, h = b - a;
     let cv = tileEls[i];
-    if (cv && cv.dataset.key === key) return;
     if (!cv) {
       cv = tileEls[i] = el('canvas', 'tb-art');
       cv.setAttribute('aria-hidden', 'true');
       cv.style.top = t.y0 * SCALE + 'px';
+      pixelCanvas(cv, layout.W, t.y1 - t.y0);
       board.insertBefore(cv, board.firstChild);
     }
-    const h = t.y1 - t.y0;
-    const c = pixelCanvas(cv, layout.W, h);
-    drawBoard(c, layout, { current: shown.current, start: shown.start, next: shown.next, icons, hedge: false, aurora: shown.aurora !== false,
-      prints: shown.prints == null ? null : [shown.prints, shown.prints + 1] }, t);
+    const c = cv.getContext('2d');
+    c.imageSmoothingEnabled = false;
+    c.setTransform(1, 0, 0, 1, 0, 0);
+    const land = landRows(i, a, b);
+    c.save();
+    c.beginPath(); c.rect(0, at, layout.W, h); c.clip();
+    c.clearRect(0, at, layout.W, h);
+    c.drawImage(land, 0, at, layout.W, h, 0, at, layout.W, h);
+    drawStones(c, layout, { current: shown.current, start: shown.start, next: shown.next, icons, hedge: false,
+      prints: shown.prints == null ? null : [shown.prints, shown.prints + 1] }, { y0: a, y1: b, top: t.y0 });
+    c.restore();
     const line = lockLine();
-    if (line > t.y0) {
-      const im = c.getImageData(0, 0, layout.W, h);
-      lockPixels(im.data, layout.W, t.y0, line);
-      c.putImageData(im, 0, 0);
+    if (line > a) {
+      const im = c.getImageData(0, at, layout.W, h);
+      lockPixels(im.data, layout.W, a, line, deepLine());
+      c.putImageData(im, 0, at);
     }
-    if (o.dark) dusk(c, t.y0, h);
-    cv.dataset.key = key;
+    if (o.dark) dusk(c, a, h, at);
+  }
+  /* A tile, whole and now: one that is on screen. If paintAhead has done
+     half of it already, only the other half is left to do. */
+  function paintTile(i) {
+    const t = tiles[i], key = artKey(), cv = tileEls[i];
+    if (cv && cv.dataset.key === key) return;
+    const part = cv ? cv.dataset.part : '';
+    if (part === key + '|0') paintRows(i, halfOf(t), t.y1);
+    else if (part === key + '|1') paintRows(i, t.y0, halfOf(t));
+    else paintRows(i, t.y0, t.y1);
+    tileEls[i].dataset.key = key;
+    tileEls[i].dataset.part = '';
+  }
+  /* The tiles just off screen are painted before they are scrolled to, half
+     a tile at a time and each half in a turn of its own between frames: a
+     tile painted inside the scroll's own frame, or two of them at once, is
+     a frame dropped on an old phone. `lead` is which half goes first: the
+     one nearer the screen. */
+  let ahead = 0, dead = false;
+  function paintAhead() {
+    if (ahead || dead || !layout) return;
+    ahead = setTimeout(() => {
+      ahead = 0;
+      if (dead) return;
+      const [top, bottom] = rowsOnScreen(), key = artKey(), mid = (top + bottom) / 2;
+      let best = -1;
+      for (const i of tilesNear(tiles, top, bottom, TILE)) {
+        if (tileEls[i] && tileEls[i].dataset.key === key) continue;
+        if (best < 0 || Math.abs((tiles[i].y0 + tiles[i].y1) / 2 - mid) < Math.abs((tiles[best].y0 + tiles[best].y1) / 2 - mid)) best = i;
+      }
+      if (best < 0) return;
+      const t = tiles[best], cv = tileEls[best], part = cv ? cv.dataset.part : '';
+      if (part === key + '|0' || part === key + '|1') paintTile(best);
+      else {
+        const lead = (t.y0 + t.y1) / 2 < mid ? 1 : 0;
+        if (lead) paintRows(best, halfOf(t), t.y1); else paintRows(best, t.y0, halfOf(t));
+        tileEls[best].dataset.key = '';
+        tileEls[best].dataset.part = key + '|' + lead;
+      }
+      paintAhead();
+    }, 0);
   }
 
   /* The rows on screen, in art pixels. A board not laid out yet (its screen
@@ -379,7 +539,8 @@ export function mountBoard(host, opts = {}) {
   function paintTiles() {
     queued = 0;
     const [top, bottom] = rowsOnScreen();
-    for (const i of tilesNear(tiles, top, bottom, TILE / 2)) paintTile(i);
+    for (const i of tilesNear(tiles, top, bottom, 0)) paintTile(i);
+    paintAhead();
     /* Number plates too are only made for the stones near the screen: a
        hundred little images up front is what a slow phone would feel. */
     buttons.forEach((b, i) => {
@@ -395,11 +556,10 @@ export function mountBoard(host, opts = {}) {
      dusk the tiles get. */
   function margins(row) {
     const y = clamp(Math.round(row), 0, layout.H - 1);
-    const land = BOARD_LANDS[layout.landAt(y)];
-    const hex = layout.sky && y < layout.sky.y + layout.sky.drop ? land.sky[0] : land.snow && y < layout.bosses[2].y - 400 ? land.snow : land.g;
+    const land = BOARD_LANDS[layout.landAt(y)], hex = land.g;
     const px = new Uint8ClampedArray([parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16), 255]);
-    if (y < lockLine()) lockPixels(px, 1, 0, 1e9);
-    if (o.dark && layout.landAt(y) !== 'town') for (let k = 0; k < 3; k++) px[k] = Math.round((px[k] * 0.74 + [26, 36, 70][k] * 0.26) * 0.94);
+    if (y < lockLine()) lockPixels(px, 1, 0, 1e9, land.dark ? 1e9 : -1);
+    if (o.dark) for (let k = 0; k < 3; k++) px[k] = duskOf(px[k], DUSK[land.key], k);
     const colour = `rgb(${px[0]}, ${px[1]}, ${px[2]})`;
     if (host.dataset.land !== colour) { host.dataset.land = colour; host.style.background = colour; }
   }
@@ -457,10 +617,10 @@ export function mountBoard(host, opts = {}) {
       c.setTransform(1, 0, 0, 1, 0, 0);
       if (b.lock < line) {
         const im = c.getImageData(0, 0, layout.W, g.y1 - g.y0);
-        lockPixels(im.data, layout.W, g.y0, 1e9);
+        lockPixels(im.data, layout.W, g.y0, 1e9, deepLine());
         c.putImageData(im, 0, 0);
       }
-      if (o.dark && b.kind !== 'wall') duskify(c, layout.W, g.y1 - g.y0);
+      if (o.dark) duskify(c, layout.W, g.y1 - g.y0, 0, DUSK[layout.landAt(b.y + 8)]);
     });
   }
 
@@ -487,6 +647,7 @@ export function mountBoard(host, opts = {}) {
       if (!labels.has(lk)) labels.set(lk, stoneLabel(l, view, { imperial: o.imperial }));
       if (b.dataset.label !== lk) { b.dataset.label = lk; b.setAttribute('aria-label', labels.get(lk)); }
     });
+    plates();
     /* The gold ring on the next stone (a boss's gate is its own mark), the
        white one and the pointer on the stone being read. */
     const wear = (im, level, ok) => {
@@ -500,30 +661,68 @@ export function mountBoard(host, opts = {}) {
       const stop = clamp(rover ?? selected ?? shown.next ?? Math.max(1, shown.current), 1, buttons.length);
       buttons.forEach((b, i) => { const ti = i + 1 === stop ? 0 : -1; if (b.tabIndex !== ti) b.tabIndex = ti; });
     }
-    const next = shown.next, nextBoss = next != null && stoneAt(next).boss;
-    wear(ring.small, next, !nextBoss); wear(ring.big, next, !nextBoss);
-    wear(ring.sel, selected, selected !== next && selected != null && !stoneAt(selected).boss);
+    /* The heart of the wood has no gate: its stone is a stone like the
+       others, and wears the ring. */
+    const gated = (level) => level != null && layout.bosses.some(x => x.level === level && x.kind !== 'heart');
+    const next = shown.next;
+    wear(ring.small, next, !gated(next)); wear(ring.big, next, !gated(next));
+    wear(ring.sel, selected, selected !== next && selected != null && !gated(selected));
     wear(ring.pointer, selected, true);
   }
 
+  /* A stone's number plate hangs under it. Where the next stone is nearly
+     straight above the one the team waits on, that is where the handler's
+     head is: the plate hung across the cap (and, put in front of the team
+     instead, the handler wore it). There the plate goes beside its stone,
+     on the side the trail does not leave by, and back under it once the
+     team has moved on. Not during a moment, when the team runs to that
+     stone. Returns the side it went to, for whoever asks. */
+  function plates() {
+    const seat = !moment && shown.next != null ? teamSeat(o.lv, layout) : null;
+    buttons.forEach((b, i) => {
+      const s = layout.stones[i], pl = plaqueEls[i];
+      let side = 0;
+      const [pw, ph] = plaqueSize(s.level);
+      if (seat && s.level === shown.next) {
+        const hx = seat.pt[0], hy = seat.pt[1];
+        if (Math.abs(s.x - hx) < (pw >> 1) + 8 && s.y + 9 < hy - 22 && s.y + 22 > hy - 41) {
+          const nx = layout.stones[i + 1], want = nx && nx.x > s.x ? -1 : 1;
+          const fits = (d) => (d > 0 ? s.x + 17 + pw <= layout.W : s.x - 17 - pw >= 0);
+          side = fits(want) ? want : -want;
+        }
+      }
+      if ((pl.dataset.side || '0') === String(side)) return;
+      pl.dataset.side = side;
+      pl.style.left = (HIT / 2 - 1 + (side > 0 ? 16 : side < 0 ? -16 - pw : -(pw >> 1)) * SCALE) + 'px';
+      pl.style.top = (HIT / 2 - 1 + (side ? -(ph >> 1) : s.boss ? 10 : 11) * SCALE) + 'px';
+    });
+  }
+
   /* A sign steps aside for the team: a boss's own sign while the team
-     stands at its gate or just through it (it lay across the handler), and
-     every sign near a moment while it plays (the title landed on one). */
+     stands at its gate or just through it (it lay across the handler), any
+     sign the team is standing in front of (the dog wore one across its
+     back), and every sign near a moment while it plays (the title landed
+     on one). */
   function signs() {
+    const seat = teamSeat(o.lv, layout), tb = teamRect({ x: seat.pt[0], y: seat.pt[1] }, seat.left);
     board.querySelectorAll('.tb-sign').forEach((d) => {
       const boss = Number(d.dataset.boss) || 0;
       let hide = false;
       if (moment) hide = true;
       else if (boss && boss < layout.stones.length) hide = shown.current >= boss - 1 && shown.current <= boss + 1;
+      /* Standing in front of it, not beside it: a sign at the team's feet
+         (the field's own, at the trailhead) stays where it is. */
+      if (!hide && d.dataset.box) { const b = d.dataset.box.split(',').map(Number); hide = b[0] < tb[2] - 4 && b[2] > tb[0] + 4 && b[1] < tb[3] - 9 && b[3] > tb[1] + 6; }
       d.classList.toggle('away', hide);
+      // During a moment they are gone at once, not faded: the first frames are the team's.
+      d.classList.toggle('now', !!moment);
     });
   }
 
   function teamSpot() { return teamSeat(o.lv, layout); }
   /* The team's look, with the land it stands on: its shadow is that land's
-     shadow, and the cold stage is the town or the climb. */
-  const LAND_NAME = { hot: 'meadow', warm: 'wood', town: 'town', alp: 'climb' };
-  const lookHere = (lv = o.lv) => Object.assign({}, o.look, { land: LAND_NAME[layout.landAt(teamSeat(lv, layout).pt[1])] || 'meadow' });
+     shadow, and in the dark woods it is rimmed with light. */
+  const lookHere = (lv = o.lv) => Object.assign({}, o.look, { land: layout.landAt(teamSeat(lv, layout).pt[1]) });
   function placeAt(box, left) {
     if (facing !== left) { facing = left; team.set({ flip: left }); }
     teamCanvas.style.left = box[0] * SCALE + 'px';
@@ -540,7 +739,7 @@ export function mountBoard(host, opts = {}) {
   function render() {
     if (!moment) {
       shown = boardView(o.lv);
-      shown.aurora = shown.current >= layout.stones.length;
+      shown.glade = shown.current >= layout.stones.length;
       const seat = teamSpot();
       shown.prints = shown.next == null ? null : Math.floor(seat.seg + 1e-6);
     }
@@ -629,14 +828,14 @@ export function mountBoard(host, opts = {}) {
   /* A level passed: the paw lands on its stone with a flash and a ring of
      sparks, the new name pops up over it, the trail lights up towards it,
      the team runs there, and the stone after it takes the ring under a
-     burst of confetti. The summit is the same as far as the arrival, then
-     has a finale of its own. */
+     burst of confetti. The last level is the same as far as the arrival,
+     then has the finale at the heart of the wood. */
   function levelUpAt(m, t) {
-    const sum = m.kind === 'summit';
+    const sum = m.kind === 'heart';
     const c = MOMENTS[m.kind].cues;
     const top = stoneAt(m.after.current);
     show(Object.assign({ current: t >= c.paw ? m.after.current : m.before.current, next: t >= c.arrive ? m.after.next : m.before.next,
-      boss: t >= c.arrive ? m.after.boss : m.before.boss }, sum ? { aurora: t >= c.flare } : {}));
+      boss: t >= c.arrive ? m.after.boss : m.before.boss }, sum ? { glade: t >= c.moon } : {}));
     if (t >= c.name) cue(m, 'name');
     const titleAt = sum ? c.title : c.arrive + 250;
     if (m.title && t >= titleAt) cue(m, 'title');
@@ -659,9 +858,10 @@ export function mountBoard(host, opts = {}) {
     const left = u <= 0 ? m.seatA.left : u >= 1 ? m.endLeft : m.goLeft;
     placeAt(teamBox(pt, left), left);
     if (o.motion && u > 0 && u < 1) scrollTo(pt[1], 0.62, false);
-    /* The summit has no gate to open: its flag turns gold once the team is
-       up there (at the cue of its own, in the finale). */
-    if (m.bossK != null) { gateState = { k: m.bossK, open: 1, passed: t >= (sum ? c.flag : c.arrive) }; paintGates(); }
+    /* The heart of the wood has no gate to open: the banner on the great
+       tree turns gold once the team is under it (at the cue of its own, in
+       the finale). */
+    if (m.bossK != null) { gateState = { k: m.bossK, open: 1, passed: t >= (sum ? c.banner : c.arrive) }; paintGates(); }
     if (t >= c.buzz) cue(m, 'buzz');
     if (!o.motion) return;
     const g = fxBegin(), glow = glowOf();
@@ -676,10 +876,19 @@ export function mountBoard(host, opts = {}) {
       if (!sum) confetti(g, pt[0] + (left ? -34 : 34), pt[1] - 30, t - c.arrive, { n: 38, stage: (o.look && o.look.stage) || 'hot', spread: 64, seed: m.after.current, life: 1350 });
     }
     if (sum) {
-      if (t >= c.flag) burst(g, m.gateX + (layout.faceLeft[layout.bosses[m.bossK].level - 1] ? 33 : -13), layout.bosses[m.bossK].y - 44, t - c.flag, STAGE_GLOW.cold, { round: true });
-      // The flare keeps to the sky over the team's heads.
-      if (layout.sky && t >= c.flare) skyFlare(g, layout.W, 4, Math.max(20, layout.sky.y - 52), t - c.flare);
-      if (t >= c.flare) burst(g, top.x, top.y - 4, t - c.flare, [GOLD_SPARK, '#ffffff', '#b4f8c8', '#fff0b0'], { round: true });
+      /* The finale. The banner on the great tree goes gold; then the moon
+         finds the tree (the tiles are painted again with the glade lit, and
+         the beam comes down on top of them), and every firefly on screen
+         winds in to it and rings its trunk; then the title under gold. */
+      const ht = layout.heart, bx = ht.tx + GREAT.hw - 5, by = ht.ty - 29;
+      if (t >= c.banner) burst(g, bx, by, t - c.banner, [GOLD_SPARK, '#fff0b0', GOLD_SPARK, '#ffffff'], { round: true });
+      if (t >= c.moon) {
+        /* On the glade between the team and the tree, not down the far
+           side of the trunk. */
+        moonbeam(g, Math.round((top.x * 2 + ht.tx) / 3), top.y + 7, Math.max(0, fxTop), t - c.moon, 46);
+        burst(g, top.x, top.y - 4, t - c.moon, [GOLD_SPARK, '#ffffff', '#b4f8c8', '#fff0b0'], { round: true });
+        gather(g, ht.tx, ht.ty - 8, t - c.moon, 22, Math.min(layout.W * 0.5, 96), GREAT.th - 14);
+      }
       if (t >= c.title) {
         confetti(g, top.x, top.y - 70, t - c.title, { n: 40, gold: true, spread: 80, seed: 7, life: 1500 });
         confetti(g, top.x, top.y - 70, t - c.title - 500, { n: 24, gold: true, spread: 60, seed: 11, life: 1500 });
@@ -751,7 +960,7 @@ export function mountBoard(host, opts = {}) {
     const c = cv.getContext('2d');
     drawBoard(c, layout, { current: view.current, start: view.start, next: view.next, icons, hedge: false, prints: null }, { y0, y1: b.lock });
     const im = c.getImageData(0, 0, layout.W, rows);
-    lockPixels(im.data, layout.W, y0, b.lock);
+    lockPixels(im.data, layout.W, y0, b.lock, deepLine());
     c.putImageData(im, 0, 0);
     if (o.dark) dusk(c, y0, rows);
     sweepCanvas.style.top = y0 * SCALE + 'px';
@@ -790,14 +999,12 @@ export function mountBoard(host, opts = {}) {
     const seatA = teamSeat(m.before, layout), seatB = teamSeat(m.after, layout);
     const bossK = layout.bosses.findIndex(b => b.level > before.current && b.level <= after.current);
     const b = bossK >= 0 ? layout.bosses[bossK] : null;
-    /* The last boss stands on the summit with no gate and no land beyond,
-       so it is played as a level passed, with its title. */
-    const gated = m.kind === 'boss' && b && b.kind !== 'cairn';
-    /* The last boss stands on the summit with no gate and no land beyond:
-       it is played as a level passed as far as the cairn, and then has the
-       summit's own finale. */
-    const summit = !!b && b.kind === 'cairn';
-    const kind = gated ? 'boss' : summit ? 'summit' : 'levelup';
+    /* The last boss is the great tree at the heart of the wood, with no
+       gate and no land beyond: it is played as a level passed as far as the
+       tree, and then has a finale of its own. */
+    const gated = m.kind === 'boss' && b && b.kind !== 'heart';
+    const finale = !!b && b.kind === 'heart';
+    const kind = gated ? 'boss' : finale ? 'heart' : 'levelup';
     moment = { kind, before, after, seatA, seatB, lvAfter: m.after, name: m.name || '', title: m.title || '',
       bossK: b ? bossK : null, gateX: b ? gateX(layout, b) : 0,
       onCue: m.onCue || null, onEnd: m.onEnd || null, fired: {}, locked: null, tick: null };
@@ -806,9 +1013,14 @@ export function mountBoard(host, opts = {}) {
     let env;
     if (gated) {
       const s = stoneAt(b.level);
-      mm.gateLeft = stoneAt(b.level - 1).x > s.x;
       // At the gate: the gap between the dog and the person sits in the gateway.
       mm.gateFor = (l) => [mm.gateX - (l ? TEAM.w - 1 - REACH.gate : REACH.gate) + (l ? 2 : 0), b.y + 4 - TEAM.ground];
+      /* The team comes to the gate facing the way it came, unless that
+         puts more of it off the edge of the board than the other way would
+         (a team is 136 wide; the narrowest board is 140). */
+      const off = (l) => { const x = mm.gateFor(l)[0]; return Math.max(0, -x - 2, x + TEAM.w - layout.W - 2); };
+      const came = stoneAt(b.level - 1).x > s.x;
+      mm.gateLeft = off(came) <= off(!came) ? came : !came;
       const home = teamBox(seatA.pt, mm.gateLeft), gate = mm.gateFor(mm.gateLeft);
       const out = mm.gateFor(seatB.left), beyond = teamBox(seatB.pt, seatB.left);
       env = { stride: strideFor(Math.hypot(gate[0] - home[0], gate[1] - home[1]), cues.arrive),
@@ -821,8 +1033,8 @@ export function mountBoard(host, opts = {}) {
          way keeps them on the board, and turns to how it will stand once
          the moment is over. */
       const over = (l) => (l ? Math.max(0, FIND_REACH - seatB.pt[0]) : Math.min(0, layout.W - FIND_REACH - seatB.pt[0]));
-      mm.endLeft = summit || Math.abs(over(seatB.left)) <= Math.abs(over(!seatB.left)) ? seatB.left : !seatB.left;
-      mm.endShift = summit ? 0 : over(mm.endLeft);
+      mm.endLeft = finale || Math.abs(over(seatB.left)) <= Math.abs(over(!seatB.left)) ? seatB.left : !seatB.left;
+      mm.endShift = finale ? 0 : over(mm.endLeft);
       // A light every six pixels or so of the way, for the trail to come on by.
       mm.dots = [];
       for (let d = 8; d < mm.way.len - 6; d += 6) { const q = along(mm.way, d); q.d = d; q.i = mm.dots.length; mm.dots.push(q); }
@@ -830,7 +1042,7 @@ export function mountBoard(host, opts = {}) {
     }
     mm.tick = (t) => (mm.kind === 'boss' ? bossAt(mm, t) : levelUpAt(mm, t));
     o.lv = m.before;
-    shown = Object.assign({}, before, { prints: null, aurora: before.current >= layout.stones.length });
+    shown = Object.assign({}, before, { prints: null, glade: before.current >= layout.stones.length });
     stones(); paintTiles(); paintGates(); signs();
     if (gated) {
       /* Still, it goes straight to the gate; moving, it starts on the team
@@ -881,6 +1093,8 @@ export function mountBoard(host, opts = {}) {
     destroy() {
       moment = null;
       if (queued) cancelAnimationFrame(queued);
+      if (ahead) clearTimeout(ahead);
+      dead = true;
       host.removeEventListener('scroll', onScroll);
       document.removeEventListener('visibilitychange', ambientKick);
       if (ambWatch) ambWatch.disconnect();
@@ -907,7 +1121,7 @@ export function mountBoard(host, opts = {}) {
   });
   build();
   /* Go to the team before anything is painted, so the first tiles made are
-     the ones it stands on, not the summit's. */
+     the ones it stands on, not the ones at the top. */
   scrollTo(teamSpot().pt[1], 0.68, false);
   render();
   ambientKick();

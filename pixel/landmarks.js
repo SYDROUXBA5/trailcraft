@@ -1,21 +1,19 @@
-/* The bosses' landmarks, one where each land ends: the stile in the hedge,
-   the footbridge over the stream, the gate in the town wall and the cairn
-   on the summit. */
+/* The bosses' landmarks, one where each stage ends: the stile in the hedge
+   where the field meets the wood, the footbridge over the stream at the
+   fork, the gate of the foresters' hamlet, and the banner on the great tree
+   at the heart of the ancient wood. */
 
 import { bayer, disc, hash, mix, R, STAGES, stamp, thick } from './core.js';
+import { castOf } from './lands.js';
 import { gateX } from './layout.js';
-import { BOARD_LANDS } from './scenery.js';
-import { CAST, RAMPS } from './ramps.js';
+import { GREAT, house } from './scenery.js';
+import { RAMPS } from './ramps.js';
 
 /* Everything here is outlined in the ink of what it is made of: timber's
-   own dark brown, the wall's own dark blue. One near-black line round all
+   own dark brown, the wall's own dark stone. One near-black line round all
    of it is what made the gates look stuck on to the land. */
 const OUTLINE = '#33200f';
 const LEAF = '#1c3a22';
-const castOf = (key) => {
-  const [hex, a] = CAST[key], n = parseInt(hex.slice(1), 16);
-  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
-};
 
 export const WOOD = { wood: '#8a5a32', hi: '#b07a46', lo: '#5e3a1e' };
 
@@ -149,7 +147,7 @@ function hedgeArt(c, layout, b, gate, passed) {
     bumps.push([R(cx + 1 - Math.cos(a) * 16), R(g - 30 - Math.sin(a) * 7), k % 2 ? 3 : 4]);
   }
   // The hedge's shadow lies on the field in front of it.
-  c.fillStyle = castOf('meadow');
+  c.fillStyle = castOf('edge');
   for (let x = 0; x < W; x++) { if (gap(x - 2)) continue; c.fillRect(x, hedgeY + 3, 1, 3); if (bayer(x, hedgeY + 6) < 0.5) c.fillRect(x, hedgeY + 6, 1, 1); }
   const F = RAMPS.meadow.foliage;
   for (const [x, y, r] of bumps) disc(c, x, y + 1, r + 1, LEAF);
@@ -167,7 +165,7 @@ function hedgeArt(c, layout, b, gate, passed) {
   mirrored(c, layout, b, () => bossGate(c, cx, g, gate, passed));
 }
 
-/* The footbridge that closes the wood: a gate at its near end, the Warm
+/* The footbridge that closes the forest: a gate at its near end, the Warm
    banner beside it. The deck and the stream are part of the ground. */
 function bridgeArt(c, layout, b, gate, passed) {
   const g = b.y + 3, bx = gateX(layout, b);
@@ -193,184 +191,91 @@ function bridgeArt(c, layout, b, gate, passed) {
   });
 }
 
-/* The town wall that closes the town: battlements across the board, an
-   arched gate, and a clock tower beside it. */
-function wallArt(c, layout, b, gate, passed) {
+/* The foresters' hamlet that closes the old forest: a dry-stone wall
+   across the board, a cottage behind it each side of the lane, two stone
+   gateposts with a field gate between them and a lantern on one, lit once
+   the way is open. */
+const WALL = ['#1a2024', '#3c4648', '#66726e', '#94a098', '#c8d0c0'];
+
+function hamletArt(c, layout, b, gate, passed) {
   const { W } = layout;
-  const T = RAMPS.town, K = T.stone;
-  const OUTLINE = K[0];
-  const cx = b.x, g = b.y + 3, wh = 21;
-  const stone = K[2], hi = K[3], lo = K[1], joint = mix(K[1], K[2], 0.45);
-  const arch = (x) => x >= cx - 14 && x <= cx + 14;
-  // Its shadow on the street side, then the wall: courses of stone, each
-  // lit along its top, a walk along the wall's head and merlons on it.
-  c.fillStyle = castOf('town');
-  for (let x = 0; x < W; x++) { c.fillRect(x, g + 1, 1, 4); if (bayer(x, g + 5) < 0.5) c.fillRect(x, g + 5, 1, 1); }
-  c.fillStyle = OUTLINE; c.fillRect(-1, g - wh - 1, W + 2, wh + 2);
-  c.fillStyle = stone; c.fillRect(0, g - wh, W, wh);
-  c.fillStyle = lo; c.fillRect(0, g - 3, W, 3);
-  for (let j = 0; j < wh - 3; j += 5) {
-    const y = g - wh + j, off = (j / 5) % 2 ? 5 : 0;
-    c.fillStyle = hi; c.fillRect(0, y, W, 1);
-    c.fillStyle = joint; c.fillRect(0, y + 4, W, 1);
-    for (let x = off - 2; x < W; x += 10) {
-      c.fillStyle = joint; c.fillRect(x, y + 1, 1, 3);
-      if (hash(x * 7 + j) > 0.7) { c.fillStyle = lo; c.fillRect(x + 2, y + 2, 5, 2); }
-      else if (hash(x * 3 + j) > 0.8) { c.fillStyle = K[4]; c.fillRect(x + 1, y, 4, 1); }
+  const cx = b.x, g = b.y + 3, K = WALL;
+  /* The cottages first: the wall crosses their feet. As wide as the board
+     leaves room for, each side of the lane. */
+  const w = Math.max(30, Math.min(44, cx - 22));
+  house(c, cx - 19 - (w >> 1), g - 6, w, 17, 31);
+  house(c, cx + 20 + (w >> 1), g - 6, w, 17, 12);
+  // The wall: courses of field stone, a coping along its top, moss on it.
+  const gap = (x) => x > cx - 13 && x < cx + 13;
+  c.fillStyle = castOf('old');
+  for (let x = 0; x < W; x++) { if (gap(x - 2)) continue; c.fillRect(x, g + 1, 1, 2); if (bayer(x, g + 3) < 0.5) c.fillRect(x, g + 3, 1, 1); }
+  for (let x = 0; x < W; x++) {
+    if (gap(x)) continue;
+    c.fillStyle = K[0]; c.fillRect(x, g - 9, 1, 10);
+    for (let j = 0; j < 8; j++) {
+      const row = j >> 1, off = (row & 1) * 3, joint = (x + off) % 6 === 5 || j % 2 === 1 && hash(x * 7 + row) > 0.86;
+      const k = hash(Math.floor((x + off) / 6) * 31 + row * 7);
+      c.fillStyle = joint ? K[1] : j === 0 ? K[3] : k < 0.3 ? K[3] : k > 0.8 ? K[1] : K[2];
+      c.fillRect(x, g - 8 + j, 1, 1);
     }
-  }
-  for (let x = 1; x < W; x += 9) {
-    if (arch(x) || arch(x + 5)) continue;
-    c.fillStyle = OUTLINE; c.fillRect(x - 1, g - wh - 7, 7, 7);
-    c.fillStyle = stone; c.fillRect(x, g - wh - 6, 5, 6);
-    c.fillStyle = hi; c.fillRect(x, g - wh - 6, 5, 1); c.fillRect(x, g - wh - 6, 1, 6);
-    c.fillStyle = lo; c.fillRect(x + 4, g - wh - 5, 1, 5);
-  }
-  // The gatehouse: the wall stands a little taller over the arch, with a
-  // dressed stone ring round a dark way through.
-  c.fillStyle = OUTLINE; c.fillRect(cx - 16, g - wh - 6, 33, wh + 7);
-  c.fillStyle = stone; c.fillRect(cx - 15, g - wh - 5, 31, wh + 5);
-  c.fillStyle = hi; c.fillRect(cx - 15, g - wh - 5, 31, 1); c.fillRect(cx - 15, g - wh - 5, 1, wh + 4);
-  c.fillStyle = lo; c.fillRect(cx + 14, g - wh - 4, 2, wh + 4);
-  c.fillStyle = K[4]; c.fillRect(cx - 13, g - 19, 27, 1); c.fillRect(cx - 13, g - 19, 2, 19); c.fillRect(cx + 12, g - 19, 2, 19);
-  c.fillStyle = OUTLINE; c.fillRect(cx - 11, g - 16, 23, 17); c.fillRect(cx - 9, g - 18, 19, 2);
-  c.fillStyle = passed || gate > 0.5 ? BOARD_LANDS.alp.g : '#0c1228'; c.fillRect(cx - 10, g - 15, 21, 16); c.fillRect(cx - 8, g - 17, 17, 2);
-  if (passed || gate > 0.5) { c.fillStyle = RAMPS.climb.track[2]; c.fillRect(cx - 4, g - 15, 9, 16); c.fillStyle = RAMPS.climb.rock[1]; c.fillRect(cx - 10, g - 15, 21, 2); }
-  // Torches either side of it, each with its light on the stone.
-  for (const tx of [cx - 20, cx + 20]) {
-    for (let dy = -6; dy <= 6; dy++) for (let dx = -6; dx <= 6; dx++) {
-      const d = Math.hypot(dx, dy);
-      if (d <= 6 && bayer(tx + dx, g - 13 + dy) < (6.6 - d) * 0.16) { c.fillStyle = 'rgba(255,214,120,0.5)'; c.fillRect(tx + dx, g - 13 + dy, 1, 1); }
-    }
-    c.fillStyle = OUTLINE; c.fillRect(tx - 1, g - 12, 3, 8);
-    c.fillStyle = '#7a4a22'; c.fillRect(tx, g - 11, 1, 6);
-    c.fillStyle = T.lamp[2]; c.fillRect(tx - 1, g - 15, 3, 3);
-    c.fillStyle = T.lamp[4]; c.fillRect(tx, g - 16, 1, 3);
+    if (hash(x * 13 + 5) > 0.82) { c.fillStyle = '#62a848'; c.fillRect(x, g - 9, 2, 1); }
+    else if (x % 4 < 3) { c.fillStyle = K[4]; c.fillRect(x, g - 9, 1, 1); }
   }
   mirrored(c, layout, b, () => {
-    // The clock tower, tall enough to be seen from the street below: the
-    // moon down its left side, its face lit from inside.
-    const tx = cx + 22, tw = 19, th = 45;
-    c.fillStyle = castOf('town'); for (let k = 0; k < 12; k++) c.fillRect(tx + tw, g - k, 12 - k, 1);
-    c.fillStyle = OUTLINE; c.fillRect(tx - 1, g - th - 1, tw + 2, th + 2);
-    c.fillStyle = stone; c.fillRect(tx, g - th, tw, th);
-    c.fillStyle = hi; c.fillRect(tx, g - th, 3, th);
-    c.fillStyle = K[4]; c.fillRect(tx, g - th, 1, th);
-    c.fillStyle = lo; c.fillRect(tx + tw - 4, g - th, 4, th);
-    for (let j = 7; j < th - 2; j += 5) {
-      c.fillStyle = joint; c.fillRect(tx + 3, g - th + j, tw - 7, 1);
-      c.fillStyle = joint; c.fillRect(tx + 5 + ((j / 5) & 1) * 5, g - th + j + 1, 1, 4);
+    banner(c, cx - 21, g, STAGES.cold.colour, STAGES.cold.light, passed);
+    // Two gateposts of dressed stone, capped.
+    const pillar = (x) => {
+      c.fillStyle = castOf('old'); c.fillRect(x + 4, g, 5, 1); c.fillRect(x + 6, g + 1, 4, 1);
+      c.fillStyle = K[0]; c.fillRect(x - 1, g - 21, 7, 22); c.fillRect(x - 2, g - 23, 9, 3);
+      c.fillStyle = K[2]; c.fillRect(x, g - 20, 5, 20);
+      c.fillStyle = K[3]; c.fillRect(x, g - 20, 2, 20); c.fillRect(x - 1, g - 22, 7, 1);
+      c.fillStyle = K[4]; c.fillRect(x, g - 20, 1, 19); c.fillRect(x - 1, g - 22, 4, 1);
+      c.fillStyle = K[1]; c.fillRect(x + 4, g - 19, 1, 19); for (let j = 4; j < 20; j += 5) c.fillRect(x, g - j, 4, 1);
+    };
+    const hinge = cx - 13;
+    pillar(hinge); pillar(cx + 9);
+    gateLeaf(c, hinge + 2, g - 17, 15, 17, [3, 7, 11, 15], gate);
+    // The lantern on the far gatepost.
+    const lx = cx + 10;
+    c.fillStyle = '#14181c'; c.fillRect(lx, g - 31, 5, 7); c.fillRect(lx + 1, g - 32, 3, 1); c.fillRect(lx + 2, g - 24, 1, 2);
+    c.fillStyle = passed ? '#ffd36a' : '#5a4a2a'; c.fillRect(lx + 1, g - 30, 3, 5);
+    if (passed) {
+      c.fillStyle = '#fff4c2'; c.fillRect(lx + 2, g - 29, 1, 3);
+      for (let dy = -7; dy <= 7; dy++) for (let dx = -8; dx <= 8; dx++) {
+        const d = Math.hypot(dx, dy);
+        if (d > 3.4 && d <= 8 && bayer(lx + 2 + dx, g - 28 + dy) < (8.4 - d) * 0.12) { c.fillStyle = 'rgba(255,214,120,0.55)'; c.fillRect(lx + 2 + dx, g - 28 + dy, 1, 1); }
+      }
     }
-    c.fillStyle = OUTLINE; c.fillRect(tx - 2, g - th - 2, tw + 4, 3);
-    c.fillStyle = hi; c.fillRect(tx - 1, g - th - 1, tw + 2, 1);
-    // A pointed roof, its left slope in the moon.
-    const R0 = T.roof, mid = tx + 9;
-    for (let j = 0; j < 12; j++) {
-      const half = R((j + 1) * 0.95);
-      c.fillStyle = R0[0]; c.fillRect(mid - half - 1, g - th - 14 + j, half * 2 + 3, 2);
-    }
-    for (let j = 0; j < 12; j++) {
-      const half = R((j + 1) * 0.95);
-      c.fillStyle = R0[3]; c.fillRect(mid - half, g - th - 13 + j, half, 1);
-      c.fillStyle = R0[1]; c.fillRect(mid, g - th - 13 + j, half + 1, 1);
-      c.fillStyle = R0[4]; c.fillRect(mid - half, g - th - 13 + j, 1, 1);
-    }
-    c.fillStyle = OUTLINE; c.fillRect(mid, g - th - 19, 1, 6);
-    c.fillStyle = passed ? '#f2c14e' : STAGES.cold.colour; c.fillRect(mid + 1, g - th - 19, 5, 3);
-    // The clock: a lit face with its glow on the stone round it.
-    const cy = g - th + 11;
-    for (let dy = -10; dy <= 10; dy++) for (let dx = -9; dx <= 9; dx++) {
-      const d = Math.hypot(dx, dy);
-      if (d > 6 && d <= 10 && dx + mid >= tx && dx + mid < tx + tw && bayer(mid + dx, cy + dy) < (10.4 - d) * 0.14) { c.fillStyle = 'rgba(255,224,150,0.5)'; c.fillRect(mid + dx, cy + dy, 1, 1); }
-    }
-    disc(c, mid, cy, 7, OUTLINE);
-    disc(c, mid, cy, 6, T.lamp[2]);
-    disc(c, mid - 1, cy - 1, 4, T.lamp[3]);
-    c.fillStyle = T.lamp[0];
-    c.fillRect(mid, cy - 6, 1, 1); c.fillRect(mid, cy + 6, 1, 1); c.fillRect(mid - 6, cy, 1, 1); c.fillRect(mid + 6, cy, 1, 1);
-    c.fillStyle = '#1c1430'; c.fillRect(mid, cy - 4, 1, 5); c.fillRect(mid, cy, 4, 1);
-    // A lit window under it and a door at its foot.
-    c.fillStyle = OUTLINE; c.fillRect(mid - 3, g - th + 23, 7, 10); c.fillRect(mid - 2, g - th + 22, 5, 1);
-    c.fillStyle = T.lamp[2]; c.fillRect(mid - 2, g - th + 24, 5, 8);
-    c.fillStyle = T.lamp[3]; c.fillRect(mid - 2, g - th + 24, 2, 4);
-    c.fillStyle = OUTLINE; c.fillRect(mid, g - th + 24, 1, 8); c.fillRect(mid - 2, g - th + 28, 5, 1);
-    c.fillStyle = OUTLINE; c.fillRect(mid - 3, g - 9, 7, 9);
-    c.fillStyle = T.trunk[3]; c.fillRect(mid - 2, g - 8, 5, 8);
-    c.fillStyle = T.trunk[4]; c.fillRect(mid - 2, g - 8, 1, 8);
-    // The gate in the arch: timber, swinging open.
-    if (gate < 1.2) {
-      c.save();
-      c.beginPath(); c.rect(cx - 10, g - 17, 21, 18); c.clip();
-      const OUT = '#33200f';
-      c.fillStyle = OUT; c.fillRect(cx - 13, g - 17, 3, 18);
-      gateLeaf(c, cx - 13, g - 16, 21, 16, [3, 8, 13], gate);
-      c.restore();
-    }
-    // The banner flies from the wall beyond the tower, clear of the gateway.
-    banner(c, tx + tw + 20, g - wh + 12, STAGES.cold.colour, STAGES.cold.light, passed);
   });
 }
 
-/* The summit cairn: stones piled by everyone who got here, and a flag. */
-export const CAIRN = { off: 23, flag: 44 };
-
-function cairnArt(c, layout, b, passed) {
-  const K = ['#27304e', '#4c5a80', '#8090b2', '#b8c4dc', '#f0f5fc'];
-  const left = layout.faceLeft[b.level - 1];
-  const x = b.x + (left ? CAIRN.off : -CAIRN.off), g = b.y + 2;
-  const tiers = [23, 21, 18, 15, 12, 9, 7, 4];
-  c.fillStyle = castOf('climb');
-  for (let k = 0; k < 4; k++) c.fillRect(x - 9 + k * 3, g + k, 26, 1);
-  tiers.forEach((w, k) => {
-    const y = g - 4 - k * 4, x0 = x - (w >> 1) + (k % 2 ? 1 : 0);
-    c.fillStyle = K[0]; c.fillRect(x0 - 1, y - 1, w + 2, 6);
-    // Each course is two or three stones, no two the same.
-    let px = x0, i = 0;
-    while (px < x0 + w) {
-      const sw = Math.min(x0 + w - px, 5 + Math.floor(hash(k * 13 + i * 7) * 5));
-      c.fillStyle = (k + i) % 2 ? K[2] : mix(K[2], K[3], 0.4); c.fillRect(px, y, sw, 4);
-      c.fillStyle = K[3]; c.fillRect(px, y, sw - 1, 1); c.fillRect(px, y, 1, 3);
-      c.fillStyle = K[1]; c.fillRect(px + 1, y + 3, sw - 1, 1); c.fillRect(px + sw - 1, y + 1, 1, 3);
-      if (px + sw < x0 + w) { c.fillStyle = K[0]; c.fillRect(px + sw, y, 1, 4); }
-      px += sw + 1; i++;
-    }
-  });
-  // Snow lying on the ledges, and at its foot.
-  c.fillStyle = '#ffffff';
-  c.fillRect(x - 2, g - 4 - 7 * 4 - 1, 4, 1); c.fillRect(x - 6, g - 4 - 5 * 4 - 1, 5, 1); c.fillRect(x + 3, g - 4 - 3 * 4 - 1, 5, 1); c.fillRect(x - 11, g - 4 - 4 - 1, 6, 1);
-  c.fillRect(x - 14, g, 8, 1); c.fillRect(x + 7, g, 7, 1);
-  // The flag: Cold's blue until the last boss is beaten, gold after.
-  const top = g - 4 - 7 * 4;
-  const col = passed ? '#f2c14e' : STAGES.cold.colour, hi = passed ? '#fff0b0' : STAGES.cold.light;
-  c.fillStyle = K[0]; c.fillRect(x - 1, top - 20, 4, 20);
-  c.fillStyle = '#b89a6a'; c.fillRect(x, top - 19, 2, 19);
-  c.fillStyle = '#e8d6ac'; c.fillRect(x, top - 19, 1, 19);
-  c.fillStyle = mix(col, '#0c1030', 0.6); c.fillRect(x + 2, top - 21, 17, 13);
-  c.fillStyle = col; c.fillRect(x + 3, top - 20, 15, 11);
-  c.fillStyle = hi; c.fillRect(x + 3, top - 20, 15, 1); c.fillRect(x + 8, top - 19, 2, 9);
-  c.fillStyle = mix(col, '#0c1030', 0.35); c.fillRect(x + 3, top - 11, 15, 2); c.fillRect(x + 12, top - 19, 2, 9);
-  c.clearRect(x + 17, top - 16, 2, 3);
-  stamp(c, ['.w.w.', 'w...w', '.www.', '.www.'], x + 6, top - 17, { w: passed ? '#7a4a10' : '#ffffff' }, 'rgba(0,0,0,0)');
+/* The heart of the wood has no gate: the last boss's banner hangs on the
+   great tree (scenery.js paints the tree itself, in the board's tiles).
+   Cold's blue until the last boss is beaten, gold after. */
+function heartArt(c, layout, b, passed) {
+  const ht = layout.heart;
+  if (!ht) return;
+  banner(c, ht.tx + GREAT.hw + 3, ht.ty + 3, STAGES.cold.colour, STAGES.cold.light, passed);
 }
 
 /**
  * Draw boss k's landmark (k counts from the bottom: the stile, the
- * footbridge, the town wall, the cairn). gate: 0 shut … 1 open.
+ * footbridge, the hamlet's gate, the great tree's banner). gate: 0 shut … 1 open.
  */
 export function drawBarrier(c, layout, k, gate, passed) {
   const b = layout.bosses[k];
   if (!b) return;
   if (b.kind === 'stile') hedgeArt(c, layout, b, gate, passed);
   else if (b.kind === 'bridge') bridgeArt(c, layout, b, gate, passed);
-  else if (b.kind === 'wall') wallArt(c, layout, b, gate, passed);
-  else cairnArt(c, layout, b, passed);
+  else if (b.kind === 'hamlet') hamletArt(c, layout, b, gate, passed);
+  else heartArt(c, layout, b, passed);
 }
 
 /** The rows boss k's landmark covers. */
 export function barrierBand(layout, k) {
   const b = layout.bosses[k];
   if (!b) return [0, 0];
-  return [Math.max(0, b.y - (b.kind === 'wall' || b.kind === 'cairn' ? 62 : 40)), b.y + 8];
+  return [Math.max(0, b.y - (b.kind === 'hamlet' || b.kind === 'heart' ? 62 : 40)), b.y + 8];
 }
 
 /** The hedgerow that closes the Hot stage, drawn on its own so the page can

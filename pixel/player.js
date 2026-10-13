@@ -4,10 +4,10 @@
 import { bayer, clamp, ctx2d, makeCanvas, R } from './core.js';
 import { REACH, SPEED, TEAM } from './states.js';
 import { gateOpen, MOMENTS, STILL_AT } from './moments.js';
-import { drawStile } from './landmarks.js';
-import { aurora, CLOSE, foreground, landscape } from './close.js';
+import { LANDS } from './lands.js';
+import { CLOSE, drawGate, foreground, heartTree, landscape } from './close.js';
 import { drawTeam, frame } from './team.js';
-import { burst, confetti, flareOf, shootingStars, STAGE_GLOW } from './fx.js';
+import { burst, confetti, gather, moonbeam, STAGE_GLOW } from './fx.js';
 
 /**
  * createTeam(canvas, opts) draws the team into `canvas`.
@@ -64,26 +64,27 @@ export function createTeam(canvas, opts = {}) {
     return F.moving ? (F.speed || SPEED.trail) * t / 1000 : 0;
   }
 
-  /* The land the close-up shows: the team's stage, the climb for a team up
-     in the snow, and night over a day land for the night state. */
-  function kindOf(look, state) {
-    if (look.stage === 'cold') return look.land === 'climb' || look.land === 'alp' ? 'climb' : 'town';
-    if (state === 'night') return 'night';
-    return look.stage === 'warm' ? 'warm' : 'hot';
-  }
-  const NEXT_KIND = { hot: 'warm', warm: 'town', town: 'climb', climb: 'climb', night: 'warm' };
-  const LAND_OF_KIND = { hot: 'meadow', warm: 'wood', town: 'town', climb: 'climb', night: 'meadow' };
+  /* The land the close-up shows: the one the board says the team stands in,
+     or, for a caller that only knows the stage, that stage's first land. */
+  const kindOf = (look) => (LANDS[look.land] ? look.land : look.stage === 'cold' ? 'old' : look.stage === 'warm' ? 'forest' : 'field');
+  /* What lies beyond each land's gate, and which gate it is: the field
+     gate into the wood (level 15), the footbridge (45), the hamlet's
+     gateway (75). The open field has no gate of its own: its boss is the
+     wood's edge's. */
+  const NEXT_KIND = { field: 'forest', edge: 'forest', forest: 'old', old: 'ancient', ancient: 'ancient' };
+  const GATE_KIND = { field: 'stile', edge: 'stile', forest: 'bridge', old: 'hamlet', ancient: 'hamlet' };
 
   function drawClose(c, F, t, look, state) {
     const ox = 6, oy = CLOSE.ground - TEAM.ground;
-    const kind = kindOf(look, state);
+    const kind = kindOf(look);
+    const night = state === 'night';
     const scroll = passed(state, F, t);
     // Nothing drifts or flickers in a still picture, unless the clock is
     // held on purpose (a screenshot of one instant).
     const live = o.motion || frozen != null ? t : null;
-    const teamLook = Object.assign(look, { stage: state === 'night' ? 'cold' : look.stage, land: LAND_OF_KIND[kind] });
+    const teamLook = Object.assign(look, { stage: night ? 'cold' : look.stage, land: kind });
     if (state === 'boss') {
-      const cu = MOMENTS.boss.cues, next = NEXT_KIND[kind];
+      const cu = MOMENTS.boss.cues, next = NEXT_KIND[kind], gk = GATE_KIND[kind];
       const p = clamp((t - cu.sweep) / 1300, 0, 1);
       if (p <= 0) landscape(c, W, H, kind, scroll, live);
       else if (p >= 1) landscape(c, W, H, next, scroll, live);
@@ -93,35 +94,46 @@ export function createTeam(canvas, opts = {}) {
       const gate = R(ox + REACH.gate + passed(state, F, cu.arrive) - scroll);
       if (F.person) F.person.x = gate + 12 - ox;
       const open = gateOpen(t);
+      /* Beyond the gate the team stands in the next land's light: its rim
+         and its shadow change as it goes through. */
+      if (t >= cu.through) teamLook.land = next;
       if (t >= cu.through) {
         // Through the open gate: it is behind the team now.
-        drawStile(c, gate, CLOSE.ground, open, false, 'all');
+        drawGate(c, gk, gate, open, 'all');
         drawTeam(c, F, t, teamLook, ox, oy, W, H);
       } else {
-        drawStile(c, gate, CLOSE.ground, open, false, 'back');
+        drawGate(c, gk, gate, open, 'back');
         drawTeam(c, F, t, teamLook, ox, oy, W, H);
-        drawStile(c, gate, CLOSE.ground, open, false, 'front');
+        drawGate(c, gk, gate, open, 'front');
       }
       foreground(c, p >= 0.5 ? next : kind, scroll, live);
       if (t >= cu.title) confetti(c, W / 2, 30, t - cu.title, { n: 28, gold: true, spread: 70, seed: 3 });
       return;
     }
-    landscape(c, W, H, kind, scroll, live);
-    if (state === 'summit') {
-      const cu = MOMENTS.summit.cues;
-      if (t >= cu.flare) { aurora(c, t, 1 + flareOf(t - cu.flare)); shootingStars(c, W, t - cu.flare); }
+    if (state === 'heart') {
+      /* The finale is the ancient wood's whoever asks for it: the great
+         tree comes into the picture as the team runs up, and stands behind
+         the two of them. It moves with the ground it stands on. */
+      const cu = MOMENTS.heart.cues, lit = t >= cu.moon;
+      const tx = R(ox + 70 + (passed(state, F, cu.arrive) - scroll) * 0.76);
+      teamLook.land = 'ancient';
+      landscape(c, W, H, 'ancient', scroll, live, false, true);
+      heartTree(c, tx, lit);
+      if (lit && live != null) moonbeam(c, tx + 6, CLOSE.ground + 2, 0, t - cu.moon, 30);
+      drawTeam(c, F, t, teamLook, ox, oy, W, H);
+      foreground(c, 'ancient', scroll, live);
+      burst(c, ox + 16, CLOSE.ground + 1, t - cu.paw, STAGE_GLOW.cold);
+      if (live != null) gather(c, tx, CLOSE.ground - 22, t - cu.moon, 16, 80, 34);
+      if (t >= cu.title) confetti(c, W / 2, 26, t - cu.title, { n: 36, gold: true, spread: 76, seed: 5 });
+      return;
     }
+    landscape(c, W, H, kind, scroll, live, night);
     drawTeam(c, F, t, teamLook, ox, oy, W, H);
-    foreground(c, kind, scroll, live);
+    foreground(c, kind, scroll, live, night);
     if (state === 'levelup') {
       const cu = MOMENTS.levelup.cues;
       burst(c, ox + 16, CLOSE.ground + 1, t - cu.paw, STAGE_GLOW[look.stage] || STAGE_GLOW.hot);
       if (t >= cu.arrive) confetti(c, ox + 60, CLOSE.ground - 44, t - cu.arrive, { n: 16, stage: look.stage, spread: 46, seed: 1 });
-    }
-    if (state === 'summit') {
-      const cu = MOMENTS.summit.cues;
-      burst(c, ox + 16, CLOSE.ground + 1, t - cu.paw, STAGE_GLOW.cold);
-      if (t >= cu.title) confetti(c, W / 2, 26, t - cu.title, { n: 36, gold: true, spread: 76, seed: 5 });
     }
   }
 
