@@ -401,9 +401,19 @@ export function stretchMetres(pts, letters, i0, i1) {
 
 /** Rows for a card: surfaces that were crossed, longest first, with their share. */
 export function surfaceRows(metres) {
-  const total = Object.values(metres || {}).reduce((a, b) => a + b, 0);
+  /* The metres come from a stored record, and a record can arrive from a
+     backup file or another phone. A row id ends up in the page's markup, so
+     only the known surface ids are let through: anything else is counted as
+     Not mapped, and only finite, positive distances count at all. */
+  const sum = new Map();
+  for (const [k, m] of Object.entries(metres && typeof metres === 'object' ? metres : {})) {
+    if (typeof m !== 'number' || !Number.isFinite(m) || m <= 0) continue;
+    const id = BY_ID.has(k) ? k : 'u';
+    sum.set(id, (sum.get(id) ?? 0) + m);
+  }
+  const total = [...sum.values()].reduce((a, b) => a + b, 0);
   if (!(total > 0)) return [];
-  return Object.entries(metres)
+  return [...sum]
     .filter(([, m]) => m >= 0.5)
     .sort((a, b) => b[1] - a[1])
     .map(([id, m]) => ({ id, label: surfaceById(id).label, metres: m, share: m / total }));

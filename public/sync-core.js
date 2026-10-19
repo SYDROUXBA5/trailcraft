@@ -242,8 +242,10 @@ export function mergeTeams(win, lose, gone = null) {
     cloud's business: which copy a save was made from (baseAt), and when the
     server stored it (syncedAt). Neither belongs on the phone. */
 export function fromCloudRecord(data) {
-  const { baseAt, syncedAt, ...rest } = data || {};
-  return fromCloud(rest);
+  const { baseAt, syncedAt, ...rest } = data && typeof data === 'object' ? data : {};
+  /* A record is a map, and toCloud never packs a map, so the record itself
+     is never read as packed content, whatever fields it holds. */
+  return fromCloudMap(rest);
 }
 
 /** What the app should actually see: tombstones are bookkeeping, not rows. */
@@ -283,6 +285,8 @@ const tidy = (k, v) => (ROUND[k] && typeof v === 'number' && Number.isFinite(v)
    `_seen` and anything else beginning with an underscore. They mean nothing
    tomorrow and nothing on another phone, so they are the one thing not kept. */
 const working = (k) => k.startsWith('_');
+/* The names that mark packed content in the cloud (packPoints, toCloud). */
+const reserved = (k) => k === '__pts' || k === '__json';
 
 /** Points as parallel columns: lossless, and far smaller than an array of
     small objects, which Firestore bills and limits by the byte.
@@ -295,7 +299,7 @@ export function packPoints(pts, { compact = false } = {}) {
   const out = { __pts: pts.length };
   const keys = [...POINT_KEYS];
   for (const p of pts) {
-    for (const k of Object.keys(p || {})) if (!working(k) && !keys.includes(k)) keys.push(k);
+    for (const k of Object.keys(p || {})) if (!working(k) && !reserved(k) && !keys.includes(k)) keys.push(k);
   }
   for (const k of keys) {
     if (!pts.some(p => p?.[k] != null)) continue;
@@ -353,6 +357,9 @@ function squeeze(k, col) {
 
 function spread(col) {
   if (Array.isArray(col) || !col || typeof col !== 'object' || !Array.isArray(col.d)) return col;
+  /* squeeze only writes steps that are numbers. Anything else would be added
+     up as text, so the column is left out rather than half-read. */
+  if (!col.d.every(v => typeof v === 'number' && Number.isFinite(v))) return null;
   const s = Number.isFinite(col.s) && col.s > 0 ? col.s : 1;
   const out = [];
   let n = 0;
@@ -380,6 +387,12 @@ export function toCloud(value) {
          one refused field stops the batch it is in. Nothing the app writes
          looks like either, so anything that does came from somewhere else. */
       if (!k || /^__.*__$/.test(k)) continue;
+      /* The two names the reader takes as packed content. A record that
+         carries one as an ordinary field did not get it from the app (a
+         backup file, say), and sent up as it is, every phone reading it back
+         would take that text for the whole value — the whole record, at the
+         top. So they never leave the phone as plain fields. */
+      if (reserved(k)) continue;
       out[k] = toCloud(v);
     }
     return out;
@@ -387,16 +400,43 @@ export function toCloud(value) {
   return value === undefined ? null : value;
 }
 
+/* What toCloud writes, and nothing looser.
+   `{ __json: text }` — that one key, and the text of a list (toCloud packs
+   only lists of lists that way). `{ __pts: n, column… }` — a whole count,
+   and every other key a column: a list, or squeeze's `{ d, s }`. A map that
+   merely holds one of the names is not packed content: it is read as an
+   ordinary map with the name left out. A document is written by whichever
+   phone saved it, and a value read wrongly must cost that value, never the
+   whole pull (sync.js readTable). */
+const isColumn = (c) => Array.isArray(c) || (!!c && typeof c === 'object' && !Array.isArray(c)
+  && Array.isArray(c.d) && Object.keys(c).every(k => k === 'd' || k === 's'));
+const isPacked = (v) => Number.isInteger(v.__pts) && v.__pts >= 0
+  && Object.keys(v).every(k => k === '__pts' || isColumn(v[k]));
+const isJsonText = (v) => Object.keys(v).length === 1 && '__json' in v;
+
+function readJsonText(text) {
+  if (typeof text !== 'string') return null;
+  try {
+    const v = JSON.parse(text);
+    return Array.isArray(v) ? v : null;
+  } catch { return null; }
+}
+
 export function fromCloud(value) {
   if (Array.isArray(value)) return value.map(fromCloud);
   if (value && typeof value === 'object') {
-    if ('__pts' in value) return unpackPoints(value);
-    if ('__json' in value) return JSON.parse(value.__json);
-    const out = {};
-    for (const [k, v] of Object.entries(value)) out[k] = fromCloud(v);
-    return out;
+    if (isJsonText(value)) return readJsonText(value.__json);
+    if ('__pts' in value && isPacked(value)) return unpackPoints(value);
+    return fromCloudMap(value);
   }
   return value;
+}
+
+/* An ordinary map: every field read in turn, the marker names left out. */
+function fromCloudMap(value) {
+  const out = {};
+  for (const [k, v] of Object.entries(value)) if (!reserved(k)) out[k] = fromCloud(v);
+  return out;
 }
 
 /** Roughly how many bytes a document will be, to catch the megabyte ceiling
@@ -431,7 +471,9 @@ export const DOC_LIMIT = 1_000_000;
     same fifty the store keeps. */
 export function mergeCalibration(localRows = [], remoteRows = [], cap = 50) {
   const seen = new Map();
-  for (const r of [...(remoteRows || []), ...(localRows || [])]) {
+  /* Rows are a list; anything else in a document is no rows, not a failed pull. */
+  const list = (x) => (Array.isArray(x) ? x : []);
+  for (const r of [...list(remoteRows), ...list(localRows)]) {
     if (!r || !Number.isFinite(r.t)) continue;
     const key = `${r.t}|${r.k}`;
     /* A row set aside on either phone, when its run was deleted there, stays
@@ -447,8 +489,10 @@ export function mergeCalibration(localRows = [], remoteRows = [], cap = 50) {
     never sent. */
 export function calibrationDiffers(rows = [], remoteRows = []) {
   const key = (r) => `${r?.t}|${r?.k}|${r?.skip === true ? 1 : 0}`;
-  const theirs = new Set((remoteRows || []).map(key));
-  return (rows || []).length !== (remoteRows || []).length || (rows || []).some(r => !theirs.has(key(r)));
+  const list = (x) => (Array.isArray(x) ? x : []);
+  const mine = list(rows), cloud = list(remoteRows);
+  const theirs = new Set(cloud.map(key));
+  return mine.length !== cloud.length || mine.some(r => !theirs.has(key(r)));
 }
 
 /* ── Accounts by email ────────────────────────────────────────────────
@@ -470,6 +514,31 @@ export function syncPlan(owner, uid, hasRecords = false) {
   if (!uid) return 'signed-out';
   if (owner) return owner === uid ? 'sync' : 'other';
   return hasRecords ? 'ask' : 'adopt';
+}
+
+/** An account made with an email and a password, whose address has not
+    been confirmed. Anyone can type someone else's address into Create
+    account, so until the link in the mail is tapped the account proves
+    nothing about whose it is: nothing is backed up into it, read from it or
+    shared live under it, and this phone's records are not handed to it.
+    Google and Apple confirm the address themselves before they sign anyone
+    in, so an account that came only through them is never held back. */
+export function emailUnproven(user) {
+  if (!user || user.emailVerified === true) return false;
+  return (user.providerData || []).some(p => p?.providerId === 'password');
+}
+
+/** The account's photo address, only if it is one the page may load.
+    Google serves profile photos from lh3 (now and then lh4 to lh6) on
+    googleusercontent.com, the only photo hosts the page's policy allows
+    (index.html, img-src). Anything else would be refused by the browser and
+    show as a broken image, so the initials are drawn instead. */
+export function profilePhoto(url) {
+  if (typeof url !== 'string') return null;
+  let u;
+  try { u = new URL(url); } catch { return null; }
+  return u.protocol === 'https:' && /^lh[3-6]\.googleusercontent\.com$/.test(u.hostname) && !u.port && !u.username
+    ? u.href : null;
 }
 
 export const AUTH_MIN_PASSWORD = 8;

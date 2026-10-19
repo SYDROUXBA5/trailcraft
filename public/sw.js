@@ -1,6 +1,6 @@
 /* Offline shell. Trails happen where there is no signal, so the app itself must
    survive with none. Map tiles cache opportunistically as you pan an area. */
-const V = 'trailcraft-v125';
+const V = 'trailcraft-v126';
 /* Every module the app cannot start without. app.js is an ES module and its
    imports are separate requests — listing only app.js precaches a shell that
    cannot boot, which shows up as a working app that dies the first time it is
@@ -27,11 +27,17 @@ const SHELL = [
    this cache holds (see sameBuild), so a cache without it is simply never
    assumed to match the server. */
 const EXTRAS = ['token.js', 'manifest.webmanifest', 'build.txt'];
+/* The map libraries now ship with the app (public/vendor/, see npm run vendor),
+   each under a folder named for its exact version, so a file there never
+   changes. They stay out of SHELL on purpose: 2.5 MB that every update would
+   fetch again, all or nothing. Kept once in the cache updates leave alone,
+   as they were when they came from the CDNs. Firebase's copy is kept the same
+   way the first time it loads (see pinned). */
 const VENDOR = [
-  'https://api.mapbox.com/mapbox-gl-js/v3.14.0/mapbox-gl.js',
-  'https://api.mapbox.com/mapbox-gl-js/v3.14.0/mapbox-gl.css',
-  'https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.min.js',
-  'https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.min.css',
+  'vendor/mapbox-gl-3.14.0/mapbox-gl.js',
+  'vendor/mapbox-gl-3.14.0/mapbox-gl.css',
+  'vendor/maplibre-gl-4.7.1/maplibre-gl.js',
+  'vendor/maplibre-gl-4.7.1/maplibre-gl.css',
 ];
 
 /* Map tiles, and the pinned map and sign-in libraries, live apart from the app
@@ -86,20 +92,26 @@ self.addEventListener('activate', (e) => {
          store) is not this worker's to clear. */
       const keys = await caches.keys();
       await Promise.all(keys.filter(k => k.startsWith('trailcraft-v') && k !== V).map(k => caches.delete(k)));
+      await dropRetired();
     }
     await trimTiles();
     await self.clients.claim();
   })());
 });
 
-const cacheable = (url) =>
+/* One of this app's own libraries, in a folder named for its exact version
+   (vendor/mapbox-gl-3.14.0/…): it never changes, so it is served cache-first
+   from the cache updates leave alone. Firebase is among them, so signing in
+   never stands between a handler and a trail offline. */
+const pinned = (url) =>
+  url.origin === location.origin && /\/vendor\/[a-z-]+-\d+\.\d+\.\d+\//.test(url.pathname);
+
+const cacheable = (url) => pinned(url) || (
   /* Mapbox's count of the map being opened is a question, not a file. Kept in
      a cache that now outlives updates, it would be answered from the phone
      for good and the opens never counted. */
-  !url.pathname.startsWith('/map-sessions/') && (
-    /mapbox|openstreetmap|jsdelivr|fonts\.(googleapis|gstatic)\.com/.test(url.hostname)
-    // The Firebase SDK, so signing in never stands between a handler and a trail offline.
-    || (url.hostname === 'www.gstatic.com' && url.pathname.startsWith('/firebasejs/')));
+  !url.pathname.startsWith('/map-sessions/')
+    && /mapbox|openstreetmap|fonts\.(googleapis|gstatic)\.com/.test(url.hostname));
 
 /* Mapbox adds a billing token (sku) to every tile address, and makes a new one
    each time the map opens. Kept in the address, yesterday's tiles never matched
@@ -118,6 +130,23 @@ function tileKey(req) {
 function isPicture(address) {
   const path = new URL(address).pathname;
   return /\/\d+\/\d+\/\d+(@\d+x)?(\.\w+)+$/.test(path) || path.includes('/static/');
+}
+
+/* The CDN copies of the libraries that builds before the vendored ones kept
+   beside the tiles. Nothing asks for those addresses any more, and trimTiles
+   only ever takes pictures, so without this some 3 MB stayed on every phone
+   for good. By path, not by host: Mapbox's tiles (/v4/, /styles/) and the
+   fonts on fonts.gstatic.com are not libraries and must survive. */
+function isRetired(address) {
+  const u = new URL(address);
+  return u.hostname === 'cdn.jsdelivr.net'
+    || (u.hostname === 'api.mapbox.com' && u.pathname.startsWith('/mapbox-gl-js/'))
+    || (u.hostname === 'www.gstatic.com' && u.pathname.startsWith('/firebasejs/'));
+}
+
+async function dropRetired() {
+  const c = await caches.open(TILES);
+  await Promise.all((await c.keys()).filter(r => isRetired(r.url)).map(r => c.delete(r)));
 }
 
 async function trimTiles() {
@@ -197,7 +226,7 @@ self.addEventListener('fetch', (e) => {
   // Never cache weather — a stale reading in a training record is worse than none.
   if (url.hostname === 'api.open-meteo.com') return;
 
-  if (url.origin === location.origin) {
+  if (url.origin === location.origin && !pinned(url)) {
     /* The build stamp is a question for the server. A cached answer would
        only ever say that nothing has changed. */
     if (url.pathname.endsWith('/build.txt')) return;

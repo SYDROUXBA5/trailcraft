@@ -11,13 +11,14 @@ import { trailModel, liveMeta } from '../public/share.js';
 import { unpackPoints } from '../public/sync-core.js';
 import * as fake from './fake-firebase.mjs';
 
-/* sync.js loads Firebase from Google's CDN, and its config from a file that
+/* sync.js loads Firebase from its copy in public/vendor/, and its config from a file that
    may be empty. Both addresses are pointed at stand-ins, for this run only. */
 const HOOKS = `
 let fakeUrl;
 export async function initialize(data) { fakeUrl = data.fakeUrl; }
 export async function resolve(specifier, context, next) {
-  if (specifier.startsWith('https://www.gstatic.com/firebasejs/')) return { url: fakeUrl, shortCircuit: true };
+  if (/^\\.\\/vendor\\/firebase-[\\d.]+\\/firebase-(app|auth|firestore)\\.js$/.test(specifier)
+      && /\\/public\\/sync\\.js(\\?|$)/.test(context.parentURL || '')) return { url: fakeUrl, shortCircuit: true };
   if (specifier === './firebase-config.js' && /\\/public\\/sync\\.js(\\?|$)/.test(context.parentURL || '')) {
     return { shortCircuit: true, url: 'data:text/javascript,' + encodeURIComponent(
       'export const firebaseConfig = { projectId: "test" }; export const appleSignInEnabled = false;') };
@@ -33,7 +34,7 @@ Date.now = () => (now += 1);
 const later = (ms) => { now += ms; };
 
 const ALICE = { uid: 'alice', displayName: 'Alice', email: 'alice@example.com', photoURL: null,
-  providerData: [{ providerId: 'password' }] };
+  emailVerified: true, providerData: [{ providerId: 'password' }] };
 
 const memory = () => {
   const m = new Map();
@@ -46,7 +47,7 @@ async function until(what, ok) {
   throw new Error(`waited for ${what}`);
 }
 const done = (p) => until(`the sync to finish (still ${p.s.sync.status})`,
-  () => ['synced', 'partial', 'error', 'other', 'ask', 'signed-out'].includes(p.s.sync.status));
+  () => ['synced', 'partial', 'error', 'other', 'ask', 'verify', 'signed-out'].includes(p.s.sync.status));
 
 let count = 0;
 async function phone({ user = ALICE, setup } = {}) {
@@ -80,6 +81,7 @@ function fresh() {
   fake.cloud.baseRule = true;
   fake.cloud.fail = null;
   fake.cloud.beforeBatch = null;
+  fake.cloud.unreadable.clear();
 }
 
 let pass = 0;
@@ -444,6 +446,108 @@ await t('a live run that started after its run ended is taken back', async () =>
   assert.equal(A.s.liveNow(), null);
   await tick();
   assert.equal(fake.cloudDoc(`live/${id}`), null, 'nobody had the link, so nothing is left behind');
+});
+
+await t('an account whose address is not confirmed gets nothing from this phone, and reads nothing into it', async () => {
+  /* Someone typed Carol's address into Create account before she did, and
+     left a session in it. */
+  fake.seed('users/carol/sessions/planted', { ...trail('planted'), updatedAt: 5 });
+  const CAROL = { uid: 'carol', displayName: 'Carol', email: 'carol@example.com', photoURL: null,
+    emailVerified: false, providerData: [{ providerId: 'password' }] };
+  const P = await phone({ user: CAROL, setup: st => { st.addSession(trail('mine')); } });
+  assert.equal(P.s.sync.status, 'verify');
+  assert.ok(local(P, 'mine'), 'the phone’s own records are untouched');
+  assert.equal(local(P, 'planted'), undefined, 'nothing stored under the address reaches the phone');
+  assert.equal(P.store.kv.get('ownerUid', null), null, 'the phone is not handed to the account');
+  assert.equal(fake.cloudDoc('users/carol/sessions/mine'), null, 'nothing is sent up');
+  assert.equal(await P.s.adoptRecords(), false, 'and “these are mine” is refused');
+  assert.equal(P.store.kv.get('ownerUid', null), null);
+  assert.equal(await P.s.useThisAccount(), false, 'as is clearing the phone for it');
+  assert.ok(local(P, 'mine'));
+  await assert.rejects(P.s.startLive({ trail: walk(3) }, { waitMs: 50 }), /Confirm your email/);
+  P.store.addSession(trail('later'));
+  await tick(); await tick();
+  assert.equal(fake.cloudDoc('users/carol/sessions/later'), null, 'a save made meanwhile is not backed up');
+
+  assert.equal(await P.s.resendConfirmation(), true);
+  assert.deepEqual(fake.mailed.slice(-1), ['carol@example.com']);
+  assert.equal(await P.s.checkConfirmed(), false, 'not confirmed yet: still held back');
+  assert.equal(P.s.sync.status, 'verify');
+
+  /* Carol taps the link. Her phone already had records, so it asks whose
+     they are, as for any account. */
+  fake.confirm('carol');
+  assert.equal(await P.s.checkConfirmed(), true);
+  assert.equal(P.s.sync.status, 'ask');
+});
+
+await t('an unconfirmed account that signed in on an empty phone owns what is made there once confirmed: no question, no copies', async () => {
+  /* Erin reinstalls the app. Her account already holds her handler and dog
+     from her last phone, but she never confirmed its address. */
+  fake.seed('users/erin/handlers/h0', { id: 'h0', name: 'Erin', updatedAt: 5 });
+  fake.seed('users/erin/dogs/d0', { id: 'd0', handlerId: 'h0', name: 'Moss', updatedAt: 5 });
+  const ERIN = { uid: 'erin', displayName: 'Erin', email: 'erin@example.com', photoURL: null,
+    emailVerified: false, providerData: [{ providerId: 'password' }] };
+  const P = await phone({ user: ERIN });
+  assert.equal(P.s.sync.status, 'verify');
+  assert.equal(P.store.kv.get('pendingOwnerUid', null), 'erin', 'the empty phone is marked for her');
+  assert.equal(P.store.kv.get('ownerUid', null), null, 'but not handed over yet');
+  assert.equal(P.store.handlers.raw().length, 0, 'nothing is read from the account meanwhile');
+
+  /* She uses the app for now, and makes a session. A restart keeps the mark. */
+  P.store.addSession(trail('new1', { handlerId: 'h0', dogId: 'd0' }));
+  await P.s.checkConfirmed();
+  assert.equal(P.store.kv.get('pendingOwnerUid', null), 'erin', 'records made since do not undo it');
+  assert.equal(fake.cloudDoc('users/erin/sessions/new1'), null, 'still nothing sent up');
+
+  fake.confirm('erin');
+  assert.equal(await P.s.checkConfirmed(), true);
+  assert.equal(P.s.sync.status, 'synced', 'straight to backing up, not “whose are these?”');
+  assert.equal(P.store.kv.get('ownerUid', null), 'erin');
+  assert.equal(P.store.kv.get('pendingOwnerUid', null), null, 'the mark is spent');
+  assert.deepEqual(P.store.handlers.raw().map(h => h.id), ['h0'], 'her handler came back, once');
+  assert.deepEqual(P.store.dogs.raw().map(d => d.id), ['d0']);
+  assert.ok(fake.cloudDoc('users/erin/sessions/new1'), 'and the session made meanwhile is backed up');
+});
+
+await t('a phone that already had records when an unconfirmed account signed in still asks, and signing out drops the mark', async () => {
+  const FAY = { uid: 'fay', displayName: 'Fay', email: 'fay@example.com', photoURL: null,
+    emailVerified: false, providerData: [{ providerId: 'password' }] };
+  const P = await phone({ user: FAY, setup: st => { st.addSession(trail('before')); } });
+  assert.equal(P.store.kv.get('pendingOwnerUid', null), null, 'made before anyone signed in: not hers to take');
+  fake.confirm('fay');
+  assert.equal(await P.s.checkConfirmed(), true);
+  assert.equal(P.s.sync.status, 'ask');
+
+  const Q = await phone({ user: { ...FAY, uid: 'gus', email: 'gus@example.com', emailVerified: false } });
+  assert.equal(Q.store.kv.get('pendingOwnerUid', null), 'gus');
+  await Q.s.signOut();
+  await until('signed out', () => Q.s.sync.status === 'signed-out');
+  assert.equal(Q.store.kv.get('pendingOwnerUid', null), null, 'signing out takes the mark with it');
+});
+
+await t('a Google account is confirmed by Google and syncs straight away', async () => {
+  const DAN = { uid: 'dan', displayName: 'Dan', email: 'dan@example.com', photoURL: null,
+    emailVerified: false, providerData: [{ providerId: 'google.com' }] };
+  const P = await phone({ user: DAN });
+  assert.equal(P.s.sync.status, 'synced');
+});
+
+await t('one document that cannot be read is set aside; the rest of the pull still arrives', async () => {
+  fake.seed('users/alice/handlers/h1', { id: 'h1', name: 'Alice', updatedAt: 5 });
+  fake.seed('users/alice/handlers/bad', { id: 'bad', name: 'x', updatedAt: 5 });
+  fake.cloud.unreadable.add('users/alice/handlers/bad');
+  fake.seed('users/alice/dogs/d1', { id: 'd1', name: 'Bo', updatedAt: 5, junk: { __json: '{' } });
+  fake.seed('users/alice/sessions/s9', { ...trail('s9'), id: 'elsewhere', updatedAt: 5 });
+  const P = await phone({ setup: st => st.kv.set('ownerUid', 'alice') });
+  assert.notEqual(P.s.sync.status, 'error', P.s.sync.error || '');
+  assert.ok(P.store.handlers.raw().some(h => h.id === 'h1'), 'the readable handler arrived');
+  assert.equal(P.store.handlers.raw().some(h => h.id === 'bad'), false);
+  const dog = P.store.dogs.raw().find(d => d.id === 'd1');
+  assert.ok(dog, 'a later table is still read');
+  assert.equal(dog.junk, null, 'a value the encoder never wrote costs that value only');
+  assert.ok(local(P, 's9'), 'a record is kept under its document’s name');
+  assert.equal(local(P, 'elsewhere'), undefined);
 });
 
 console.log(`\n${pass} passed total\n`);

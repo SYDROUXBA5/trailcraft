@@ -4,7 +4,7 @@
 
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { encodeTrail, decodeTrail, maxDeviation , cardUrl, cardFromText, walkedPlanFor, inflate } from '../public/card.js';
+import { encodeTrail, decodeTrail, maxDeviation , cardUrl, cardFromText, walkedPlanFor, sameCard, inflate } from '../public/card.js';
 import { simplify, dist, pathLen } from '../public/geo.js';
 
 let pass = 0;
@@ -262,6 +262,29 @@ await t('a walked card goes back to the plan it walked, not the newest one waiti
   assert.deepEqual(walkedPlanFor(old, [B, A], B.id), { id: B.id }, 'unless the handler said which plan it was for');
   assert.deepEqual(walkedPlanFor(old, [{ ...B, run: false }, A]), { id: A.id }, 'one run waiting: that one');
   assert.deepEqual(walkedPlanFor(old, []), { id: null }, 'nothing waiting: nothing');
+  /* From a link rather than the handler's own camera, even the only plan
+     waiting is named and asked about before anyone's line replaces it. */
+  assert.deepEqual(walkedPlanFor(old, [A], null, { askAlways: true }), { id: null, ask: [A.id] });
+  assert.deepEqual(walkedPlanFor(old, [], null, { askAlways: true }), { id: null });
+  assert.deepEqual(walkedPlanFor(card, [B, A], null, { askAlways: true }), { id: null, ask: [A.id] },
+    'from a link, a card that names its plan still has that plan asked about: the id can be copied');
+  assert.deepEqual(walkedPlanFor(card, [B, A], A.id, { askAlways: true }), { id: A.id }, 'unless the handler already picked it');
+  assert.deepEqual(walkedPlanFor(card, [B], null, { askAlways: true }), { id: null, why: 'other' }, 'and a plan not here is still nobody’s');
+});
+
+await t('the same card twice is found as the trail already taken from it', async () => {
+  const pts = [{ lat: 51.2094, lon: -2.6449, t: 1_700_000_000_000 },
+               { lat: 51.2099, lon: -2.6445, t: 1_700_000_030_000 },
+               { lat: 51.2103, lon: -2.6441, t: 1_700_000_060_000 }];
+  const c = await decodeTrail(await encodeTrail({ points: pts, waypoints: [], from: 'Remi' }));
+  const kept = { id: 's1', startedAt: c.started, data: { trail: c.points, imported: { from: 'Remi', at: 1 } } };
+  assert.equal(sameCard(kept, c), true);
+  assert.equal(sameCard({ ...kept, data: { trail: c.points } }, c), false, 'only a trail taken from a card');
+  assert.equal(sameCard({ ...kept, startedAt: c.started + 1000 }, c), false, 'laid at another time is another trail');
+  assert.equal(sameCard({ ...kept, deleted: true }, c), false);
+  const other = await decodeTrail(await encodeTrail({ points: pts.map(p => ({ ...p, lat: p.lat + 0.01 })), waypoints: [] }));
+  assert.equal(sameCard(kept, other), false, 'another line is another trail');
+  assert.equal(sameCard(kept, null), false);
 });
 
 await t('a card in a QR is a link, so the phone camera opens the app not Google', async () => {

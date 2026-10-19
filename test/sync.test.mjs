@@ -7,7 +7,8 @@ import {
   mergeRecords, visible, tombstone, pruneTombstones,
   packPoints, unpackPoints, toCloud, fromCloud, approxBytes, DOC_LIMIT, mergeCalibration,
   checkAuthFields, authMessage, AUTH_MIN_PASSWORD, syncPlan, RUN_FIELDS,
-  mergeOne, calibrationDiffers, syncMessage, fromCloudRecord,
+  mergeOne, calibrationDiffers, syncMessage, fromCloudRecord, emailUnproven,
+  profilePhoto,
 } from '../public/sync-core.js';
 
 let pass = 0;
@@ -473,6 +474,78 @@ t('two copies that agree are left alone, and a deleted handler\'s team does not 
   /* A deleted dog stays deleted, teams or no teams. */
   assert.equal(mergeOne(tombstone('d1', 2000), there).keep.deleted, true);
   assert.equal(mergeOne(there, tombstone('d1', 100)).keep, there);
+});
+
+t('the codec: a record cannot carry the marks the reader trusts, and only what toCloud writes is unpacked', () => {
+  const pts = Array.from({ length: 12 }, (_, i) => ({ lat: 51 + i * 1e-4, lon: -2 + i * 1e-4, t: 1000 * i }));
+  const grid = [[1, 2], [3, 4]];
+  /* Every shape the encoder writes still comes back exactly. */
+  const good = { id: 's1', updatedAt: 5, data: { trail: pts, grid, list: [1, 'a'], m: { a: 1 } } };
+  assert.deepEqual(fromCloudRecord(JSON.parse(JSON.stringify(toCloud(good)))), good);
+  const compact = packPoints(pts, { compact: true });
+  assert.ok(compact.lat && !Array.isArray(compact.lat), 'a step-written column is in play');
+  assert.deepEqual(fromCloud({ p: compact }).p.map(p => p.t), pts.map(p => p.t));
+
+  /* A local record holding the names as plain fields: they never go up. */
+  const forged = { id: 'h1', name: 'A', updatedAt: 1000,
+    __json: JSON.stringify({ id: 'h2', name: 42, updatedAt: 9e15, deleted: true }),
+    junk: { __json: '{' }, pts: { __pts: 3, lat: [1] } };
+  const up = toCloud(forged);
+  assert.ok(!JSON.stringify(up).includes('__json') && !JSON.stringify(up).includes('"__pts"'));
+  assert.deepEqual(fromCloudRecord(up), { id: 'h1', name: 'A', updatedAt: 1000, junk: {}, pts: { lat: [1] } });
+  /* A point field by the name of the count cannot overwrite it. */
+  const odd = packPoints([{ lat: 1, lon: 2, __pts: 'x' }, { lat: 1, lon: 2 }]);
+  assert.equal(odd.__pts, 2);
+
+  /* And a document already holding them (sent by an older phone) is read as
+     the ordinary record around them, never replaced by them. */
+  const doc = { ...forged, baseAt: 1, syncedAt: 2 };
+  const rec = fromCloudRecord(doc);
+  assert.equal(rec.id, 'h1'); assert.equal(rec.name, 'A'); assert.equal(rec.updatedAt, 1000);
+  assert.equal(rec.deleted, undefined);
+  assert.equal('__json' in rec, false);
+  assert.equal(fromCloudRecord({ __json: '[[1]]' }).__json, undefined, 'a record is never unpacked whole');
+  assert.equal(Array.isArray(fromCloudRecord({ __pts: 1, lat: [1], lon: [2] })), false);
+
+  /* A value that is not what the encoder writes costs that value, never a throw. */
+  assert.doesNotThrow(() => fromCloudRecord({ id: 'x', a: { __json: '{' } }));
+  assert.equal(fromCloudRecord({ id: 'x', a: { __json: '{' } }).a, null);
+  assert.equal(fromCloud({ __json: '{"id":"h2"}' }), null, 'only a list is ever packed as text');
+  assert.equal(fromCloud({ __json: 5 }), null);
+  assert.deepEqual(fromCloud({ __pts: 'many', lat: [1] }), { lat: [1] }, 'a bad count is not packed content');
+  assert.deepEqual(fromCloud({ __pts: 2, lat: [1, 2], uid: 'x' }), { lat: [1, 2], uid: 'x' }, 'nor is a map with other fields');
+  const sneaky = fromCloud({ __pts: 2, lat: { d: ['51', 1], s: 1 }, lon: [1, 2] });
+  assert.ok(sneaky.every(p => p.lat === undefined), 'a step column of text is left out, not added up as text');
+  assert.doesNotThrow(() => fromCloud({ __pts: 1e12, lat: [1] }));
+});
+
+t('calibration rows that are not a list are no rows, not a failed pull', () => {
+  assert.deepEqual(mergeCalibration([{ t: 1, k: 'a' }], 5), [{ t: 1, k: 'a' }]);
+  assert.deepEqual(mergeCalibration({ a: 1 }, true), []);
+  assert.equal(calibrationDiffers([{ t: 1 }], { length: 1 }), true);
+  assert.equal(calibrationDiffers([], 7), false);
+});
+
+t('only a password account with an unconfirmed address is held back', () => {
+  const pw = [{ providerId: 'password' }], g = [{ providerId: 'google.com' }];
+  assert.equal(emailUnproven({ emailVerified: false, providerData: pw }), true);
+  assert.equal(emailUnproven({ providerData: pw }), true, 'no answer is not a yes');
+  assert.equal(emailUnproven({ emailVerified: true, providerData: pw }), false);
+  assert.equal(emailUnproven({ emailVerified: false, providerData: g }), false, 'Google confirms the address itself');
+  assert.equal(emailUnproven({ emailVerified: false, providerData: [{ providerId: 'apple.com' }] }), false);
+  assert.equal(emailUnproven({ emailVerified: false, providerData: [...g, ...pw] }), true, 'a password added later still has to be confirmed');
+  assert.equal(emailUnproven(null), false);
+});
+
+t('only a Google profile photo is drawn: the page may load nothing else', () => {
+  const g = 'https://lh3.googleusercontent.com/a/ACg8ocK=s96-c';
+  assert.equal(profilePhoto(g), g);
+  assert.equal(profilePhoto('https://lh5.googleusercontent.com/x'), 'https://lh5.googleusercontent.com/x');
+  for (const bad of ['http://lh3.googleusercontent.com/a', 'https://evil.example/a.png', 'https://lh3.googleusercontent.com.evil.example/a',
+                     'https://storage.googleusercontent.com/a', 'https://lh3.googleusercontent.com:8443/a', 'javascript:alert(1)',
+                     'data:image/png;base64,AA', '', null, undefined, 42]) {
+    assert.equal(profilePhoto(bad), null, String(bad));
+  }
 });
 
 console.log(`\n${pass} passed total\n`);

@@ -233,8 +233,8 @@ t('"backed up" means backed up', () => {
   for (const where of ['forgetSkipped();                 // those records', 'if (!u) { forgetSkipped();']) {
     assert.ok(syncJs.includes(where), `the list is forgotten: ${where.slice(0, 30)}`);
   }
-  assert.match(js, /\['synced', 'partial', 'other', 'ask'\]\.includes\(st\.status\)/,
-    'a partial backup still lets them off the sign-in screen');
+  assert.match(js, /\['synced', 'partial', 'other', 'ask', 'verify'\]\.includes\(st\.status\)/,
+    'a partial backup, or an address still to confirm, still lets them off the sign-in screen');
   assert.match(js, /forgetSkipped\(\);    \/\/ and the list/, 'wiping the phone forgets it too');
 });
 
@@ -408,8 +408,9 @@ t('a re-grade is for the dog that ran, not the one picked on Home', () => {
     'a run being recorded now is the picked dog’s, and is graded as that dog');
   assert.match(stop, /const patch = \{\s*\n\s*dogId,/, 'and saved under the same dog it was graded for');
   assert.match(js, /Nothing is banked to \$\{d\?\.name \?\? 'this dog'\}/, 'the provisional note names the run’s dog');
-  assert.match(js, /function takeWalked[\s\S]{0,300}x\.data\.plan && !x\.data\.walked && ownRun\(x\)/,
+  assert.match(js, /function waitingPlans\(\)[\s\S]{0,120}x\.data\.plan && !x\.data\.walked && ownRun\(x\)/,
     'a walked card from the camera never re-grades a run kept from someone else');
+  assert.match(js, /function takeWalked[\s\S]{0,200}walkedPlanFor\(card, waitingPlans\(\)/, 'and takeWalked chooses only among those');
 });
 
 /* Only the drawn plan was ever held back, so coached runs, revealed runs and
@@ -557,8 +558,15 @@ t('the privacy page names who runs it, how to reach them, and every service the 
   assert.match(privacy, /mailto:contact@naifubushcraft\.com/);
   const named = {
     'api.mapbox.com': 'Mapbox', 'tile.openstreetmap.org': 'OpenStreetMap', 'api.open-meteo.com': 'Open-Meteo',
-    'fonts.googleapis.com': 'Google Fonts', 'fonts.gstatic.com': 'Google Fonts', 'cdn.jsdelivr.net': 'jsDelivr',
-    'www.gstatic.com': 'Firebase', 'firestore.googleapis.com': 'Firebase', 'sydrouxba5.github.io': 'GitHub Pages',
+    'fonts.googleapis.com': 'Google Fonts', 'fonts.gstatic.com': 'Google Fonts',
+    'firestore.googleapis.com': 'Firebase', 'sydrouxba5.github.io': 'GitHub Pages',
+    /* Named in the page's Content-Security-Policy: the services the map and
+       sign-in software that ships with the app talk to. */
+    'events.mapbox.com': 'Mapbox', 'identitytoolkit.googleapis.com': 'Firebase',
+    'securetoken.googleapis.com': 'Firebase', 'apis.google.com': 'Google’s sign-in helper',
+    'trailcraft-51b80.firebaseapp.com': 'Google’s sign-in helper',
+    /* The Google profile photo on the account card (sync-core.js profilePhoto). */
+    ...Object.fromEntries([3, 4, 5, 6].map(n => [`lh${n}.googleusercontent.com`, 'your Google profile photo'])),
   };
   const dir = new URL('../public/', import.meta.url);
   const hosts = new Set();
@@ -843,10 +851,102 @@ t('a walked card names its plan, and one that does not is asked about', () => {
   assert.match(fnSrc('async function renderShareQr(s)'), /kind: 1, ageMin: s\.data\.ageMin \?\? 10, planId: s\.data\.planOf \?\? s\.id/,
     'the plan card says which plan it is');
   assert.match(fnSrc('async function keepWalk()'), /kind: 2,\s*\n\s*drawn: trail\.length < 2, planId: walk\.card\.planId \?\? null/, 'the walked card says it back');
-  const take = fnSrc('function takeWalked(card, asked)');
-  assert.match(take, /walkedPlanFor\(card, plans, asked\)/);
+  const take = fnSrc('function takeWalked(card, asked, { fromLink = false } = {})');
+  assert.match(take, /walkedPlanFor\(card, waitingPlans\(\), asked, \{ askAlways: fromLink \}\)/, 'from a link, even one plan is asked about');
   assert.match(take, /pick\.ask \? askWhichPlan\(pick\.ask\) : pick\.id/, 'with several plans and no name, the handler picks');
-  assert.match(fnSrc('async function handleCard(data)'), /return takeWalked\(card, asked\);/);
+  assert.match(fnSrc('async function handleCard(data, { fromLink = false } = {})'), /return takeWalked\(card, asked, \{ fromLink \}\);/);
+});
+
+t('a Trail Card in a link is shown first, and nothing is saved or started until it is taken', () => {
+  const link = fnSrc('async function importFromLink()');
+  assert.ok(!/handleCard\(|addSession|startRun|startWalk|takeWalked/.test(link), 'the link itself acts on nothing');
+  assert.match(link, /offerCardLink\(text, card\);/);
+  const offer = fnSrc('function offerCardLink(text, card)');
+  assert.ok(!/handleCard\(|addSession|startRun|startWalk|takeWalked|innerHTML/.test(offer), 'showing it changes nothing, and writes no markup');
+  assert.match(offer, /go\('scrCardIn'\)/);
+  /* The note says what Go will really do: it asks walkedPlanFor the same
+     question takeWalked will, and promises a question only when one comes. */
+  assert.match(offer, /walkedPlanFor\(card, waitingPlans\(\), null, \{ askAlways: true \}\)/);
+  assert.match(offer, /\$\('btnCardInGo'\)\.hidden = card\.kind === 2 && !pick\?\.ask\?\.length && !pick\?\.id;/,
+    'a walk with no plan here to go to offers only Not now');
+  assert.ok(!/asked which plan/.test(offer), 'the screen itself never promises a question');
+  const note = fnSrc('function walkedNote(pick, named, dog)');
+  const lines = note.split('\n');
+  const askLine = lines.findIndex(l => /asked which plan/.test(l));
+  assert.ok(askLine > 0 && lines.slice(0, askLine).some(l => /if \(named\) return/.test(l))
+    && lines.slice(0, askLine).some(l => /why === 'other'/.test(l)),
+    '“asked which plan” is only the last answer, once the plan is not named and not missing');
+  assert.match(fnSrc('function cardLinkGo()'), /handleCard\(text, \{ fromLink: true \}\);/, 'only the tap takes it');
+  assert.ok(!/handleCard|addSession/.test(fnSrc('function cardLinkNo()')));
+  assert.match(js, /\$\('btnCardInGo'\)\.addEventListener\('click', cardLinkGo\);/);
+  assert.match(js, /\$\('btnCardInNo'\)\.addEventListener\('click', cardLinkNo\);/);
+  /* The same card twice is the trail already here, not a second copy. */
+  const hc = fnSrc('async function handleCard(data, { fromLink = false } = {})');
+  assert.ok(hc.indexOf('sameCard(x, card)') > 0 && hc.indexOf('sameCard(x, card)') < hc.indexOf('db.addSession(s)'),
+    'a card already taken is found before a new session is made');
+});
+
+t('the ground card writes only escaped surface ids into its markup', () => {
+  const g = fnSrc('function groundHtml(s, { edit = false } = {})');
+  assert.ok(!/gs-\$\{r\.id\}/.test(g), 'no raw surface id in a class');
+  assert.equal((g.match(/gs-\$\{esc\(r\.id\)\}/g) || []).length, 2);
+});
+
+t('an account whose address is not confirmed is asked to confirm it, and shares nothing live', () => {
+  const card = fnSrc('function renderAccount()');
+  assert.match(card, /sync\.status === 'verify'/);
+  assert.match(card, /Confirm your email/);
+  assert.match(card, /data-account="confirmed"/);
+  assert.match(card, /data-account="resend"/);
+  assert.match(js, /b\.dataset\.account === 'resend'[\s\S]{0,120}resendConfirmation\(\)/);
+  assert.match(js, /b\.dataset\.account === 'confirmed'[\s\S]{0,120}checkConfirmed\(\)/);
+  assert.match(fnSrc('function paintLiveBtn()'), /sync\.status === 'verify'/, 'no Share live button');
+  assert.match(fnSrc('async function goLive()'), /sync\.status === 'verify'/);
+  assert.match(syncJs, /if \(emailUnproven\(u\)\) \{\s*\n\s*forgetSkipped\(\);[\s\S]{0,200}sync\.status = 'verify'; sync\.error = null; emit\(\); return;/,
+    'the sync stops before anything is read or written');
+  const apply = syncJs.slice(syncJs.indexOf('async function applyUser('));
+  assert.ok(apply.indexOf("sync.status = 'verify'") < apply.indexOf('syncPlan('), 'and before the phone is offered to the account');
+});
+
+t('a first launch with an unconfirmed address waits on the sign-in screen, never in onboarding', () => {
+  const on = js.slice(js.indexOf('onSync((st) => {'), js.indexOf('/* ── Self-update'));
+  const verifyFirst = on.indexOf("if (st.status === 'verify' && signInFirstLaunch) return;");
+  assert.ok(verifyFirst > 0, 'the verify branch returns on a first launch');
+  assert.ok(verifyFirst < on.indexOf("db.kv.set('signInAnswered', true)"), 'before sign-in counts as answered');
+  const verifyBranch = on.slice(on.indexOf("if (st.status === 'verify') {"), on.indexOf("if (st.status === 'other' || st.status === 'ask')"));
+  assert.ok(verifyBranch.length > 0 && !/boot\(\)/.test(verifyBranch), 'and never boots into onboarding');
+  assert.match(on, /paintSignInVerify\(\);/);
+  const paint = fnSrc('function paintSignInVerify()');
+  assert.match(paint, /const v = !!sync\.user && sync\.status === 'verify';/);
+  assert.match(paint, /\$\('signInVerify'\)\.hidden = !v;\s*\n\s*\$\('signInMain'\)\.hidden = v;/);
+  assert.match(paint, /Use without an account for now/);
+  assert.match(fnSrc('function openSignIn('), /paintSignInVerify\(\);\s*\n\s*go\('scrSignIn'\);/, 'painted before the screen shows');
+  assert.match(js, /\$\('btnVerifyDone'\)\.addEventListener\('click', async \(e\) => \{[\s\S]{0,120}checkConfirmed\(\)/);
+  assert.match(js, /\$\('btnVerifyResend'\)\.addEventListener\('click', async \(e\) => \{[\s\S]{0,120}resendConfirmation\(\)/);
+  assert.match(js, /\$\('btnVerifyOut'\)\.addEventListener\('click', \(\) => signOut\(\)/);
+  for (const id of ['signInVerify', 'signInMain', 'signInVerifyTo', 'btnVerifyDone', 'btnVerifyResend', 'btnVerifyOut']) {
+    assert.ok(htmlIds.has(id), id);
+  }
+  /* The account's mark on an empty phone, so confirming does not ask whose
+     the new records are (sync-flow.test.mjs runs it). */
+  assert.match(syncJs, /const owner = db\.kv\.get\('ownerUid', null\) \?\? \(pending === u\.uid \? u\.uid : null\);/);
+});
+
+t('a backup paused for an unconfirmed address is said on Home and in a toast, on a normal launch too', () => {
+  const on = js.slice(js.indexOf('onSync((st) => {'), js.indexOf('/* ── Self-update'));
+  assert.ok(on.indexOf('noticeBackupPaused(st);') > 0 && on.indexOf('noticeBackupPaused(st);') < on.indexOf("!$('scrSignIn').hidden) {"),
+    'outside the sign-in screen branch, so it runs with the sign-in screen hidden');
+  const n = fnSrc('function noticeBackupPaused(st)');
+  assert.match(n, /const paused = !!st\.user && st\.status === 'verify';/);
+  assert.match(n, /\$\('homeBackupPaused'\)\.hidden = !paused;/, 'on Home for as long as it lasts');
+  assert.match(n, /if \(paused && lastSyncStatus !== 'verify' && !verifyNoticed && \$\('scrSignIn'\)\.hidden\) \{/);
+  assert.match(n, /toast\('Backup paused: confirm your email \(Settings → Account\)'\)/);
+  assert.ok(!/db\.kv/.test(n), 'remembered for this launch only, so it comes back at the next');
+  assert.match(js, /^let verifyNoticed = false;$/m);
+  assert.match(js, /\$\('homeBackupPaused'\)\.addEventListener\('click', openAccountCard\);/);
+  assert.match(fnSrc('function openAccountCard()'), /renderSettings\(\);\s*\n\s*go\('scrSettings'\);\s*\n\s*\$\('accountCard'\)\?\.scrollIntoView/);
+  assert.ok(htmlIds.has('homeBackupPaused'));
+  assert.match(html, /<button type="button" class="home-alert" id="homeBackupPaused" hidden>/, 'hidden until there is something to say');
 });
 
 t('a web recording keeps the screen awake after the page has been hidden', () => {

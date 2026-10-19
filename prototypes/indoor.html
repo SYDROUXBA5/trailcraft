@@ -7,7 +7,11 @@
 <meta name="description" content="A look at Mapbox's indoor airport floor plans, before Trailcraft builds an indoor search on them.">
 <link href="https://api.mapbox.com/mapbox-gl-js/v3.32.0/mapbox-gl.css" rel="stylesheet">
 <script src="https://api.mapbox.com/mapbox-gl-js/v3.32.0/mapbox-gl.js"></script>
-<script src="token.js"></script>
+<!-- A prototype, kept out of public/ on purpose: it loads Mapbox from the
+     CDN with no integrity check, so it must never be published on the app's
+     own address or copied into the iPhone app. Open it from the repository
+     (e.g. `npx http-server .` then /prototypes/indoor.html). -->
+<script src="../public/token.js"></script>
 <style>
   :root {
     --paper: #F6F7FA; --card: #FFFFFF; --ink: #0F1F3D; --muted: #5B6A85;

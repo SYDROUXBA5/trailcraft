@@ -20,3 +20,6 @@ build/
 .review-batch2-finish.json
 .review-batch3.json
 token.web*.js
+
+# Firebase CLI cache (npm run rules:publish)
+.firebase/

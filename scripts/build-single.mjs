@@ -7,9 +7,15 @@
    maths into the spring physics — so each module becomes an IIFE namespace
    (__geo, __gesture, …) and every import statement becomes a destructuring
    from the right namespace. The vendored QR libraries inline as the classic
-   scripts they already are. Mapbox stays on its CDN: the map needs the
-   network for tiles anyway, so inlining 1.7 MB would fatten the file without
-   buying any offline ability.
+   scripts they already are. The map and sign-in libraries load from their
+   makers' CDNs here, at the same pinned versions the app ships in vendor/:
+   the map needs the network for tiles anyway, so inlining 2.4 MB would fatten
+   the file without buying any offline ability, and file:// cannot import the
+   Firebase modules from disk. For the same reason this copy drops the page's
+   Content-Security-Policy: every script in it is inline, so a policy would
+   have to allow inline script, which is what it is there to stop. This file
+   only ever opens from this Mac's own disk; the website and the iPhone app
+   keep the policy and the vendored copies.
 
    Run: node scripts/build-single.mjs   (or: npm run build) */
 
@@ -109,11 +115,17 @@ function appBody() {
   return `${preludes.join('\n')}\n${src}`;
 }
 
-const bundle = [
+/* sync.js imports Firebase from its copy in vendor/, which a page opened from
+   disk cannot do; here it comes from Google's CDN, at the same version. */
+const LOCAL_SDK = "const SDK = './vendor/firebase-12.3.0';";
+const CDN_SDK = "const SDK = 'https://www.gstatic.com/firebasejs/12.3.0';";
+let bundle = [
   `/* Trailcraft single-file build — generated ${new Date().toISOString().slice(0, 16)}Z. Source of truth: the modules in public/. */`,
   ...MODULES.map(toNamespace),
   appBody(),
 ].join('\n\n');
+if (bundle.split(LOCAL_SDK).length !== 2) throw new Error('sync.js: the Firebase SDK address changed; update build-single.mjs');
+bundle = bundle.replace(LOCAL_SDK, () => CDN_SDK);
 
 let html = pub('index.html');
 
@@ -132,11 +144,26 @@ html = html.replace(
   /<link rel="stylesheet" href="app\.css">/,
   () => `<style>\n${pub('app.css')}\n</style>`);
 
+html = html.replace(/<!-- What this page may load and run\.[\s\S]*?-->\n<meta http-equiv="Content-Security-Policy"[^>]*>\n?/, '');
+
+/* The pinned libraries, from the CDNs that publish the same versions. */
+const CDN = {
+  'vendor/mapbox-gl-3.14.0/mapbox-gl.js': 'https://api.mapbox.com/mapbox-gl-js/v3.14.0/mapbox-gl.js',
+  'vendor/mapbox-gl-3.14.0/mapbox-gl.css': 'https://api.mapbox.com/mapbox-gl-js/v3.14.0/mapbox-gl.css',
+  'vendor/maplibre-gl-4.7.1/maplibre-gl.js': 'https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.js',
+  'vendor/maplibre-gl-4.7.1/maplibre-gl.css': 'https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.css',
+};
+for (const [local, cdn] of Object.entries(CDN)) {
+  const before = html;
+  html = html.replace(`"${local}"`, () => `"${cdn}"`);
+  if (html === before) throw new Error(`index.html no longer loads ${local}: update CDN in build-single.mjs`);
+}
+
 html = html.replace(/<script src="vendor\/qrcode\.js"><\/script>/, () => `<script>\n${safe(pub('vendor/qrcode.js'))}\n</script>`);
 html = html.replace(/<script src="vendor\/jsQR\.js"><\/script>/, () => `<script>\n${safe(pub('vendor/jsQR.js'))}\n</script>`);
 html = html.replace(/<script src="app\.js" type="module"><\/script>/, () => `<script type="module">\n${safe(bundle)}\n</script>`);
 
-for (const leftover of ['href="app.css"', 'src="app.js"', 'vendor/qrcode.js"', 'vendor/jsQR.js"']) {
+for (const leftover of ['href="app.css"', 'src="app.js"', 'vendor/qrcode.js"', 'vendor/jsQR.js"', '"vendor/', '<meta http-equiv="Content-Security-Policy"']) {
   if (html.includes(leftover)) throw new Error(`assembly incomplete: ${leftover} still referenced`);
 }
 

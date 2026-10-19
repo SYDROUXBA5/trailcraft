@@ -182,6 +182,21 @@ t('ground along a trail: metres per surface, and a road crossed between two fixe
   assert.deepEqual(surfaceRows(undefined), []);
 });
 
+t('ground rows: a stored key that is not a known surface never reaches the markup', () => {
+  /* A record restored from someone else's backup file, or pulled from the
+     cloud, can carry any key under surfM; the row id is written into a class
+     attribute, so only the seven known ids may come out. */
+  const evil = 'u"><img src=x onerror="document.title=1">';
+  const rows = surfaceRows({ [evil]: 5, g: 10, zz: 2, w: 'lots', h: NaN, c: -3, s: Infinity });
+  const known = new Set(SURFACES.map(x => x.id));
+  assert.ok(rows.every(r => known.has(r.id)), 'every id is one of ours');
+  assert.deepEqual(rows.map(r => r.id), ['g', 'u'], 'unknown keys are counted as Not mapped');
+  assert.equal(rows[1].metres, 7, 'and their metres are added together');
+  assert.ok(Math.abs(rows.reduce((a, r) => a + r.share, 0) - 1) < 1e-9);
+  assert.deepEqual(surfaceRows({ w: '5' }), [], 'a distance that is not a number counts for nothing');
+  assert.deepEqual(surfaceRows('gg'), []);
+});
+
 t('ground along a trail: one stray sample at an edge is the GPS, three in a row is a road', () => {
   // A ground that answers 'h' for exactly one 2 m sample: a 1 m wide sliver of paved path crossed square on.
   const sliver = buildGround([{ kind: 'streets', box: everywhere,

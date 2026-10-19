@@ -40,15 +40,34 @@ server certificate signed by it. You install the authority on the phone **once**
 
 On the iPhone, with `npm run dev:lan` running:
 
-1. Open **`https://<your-lan-ip>:2777/ca.crt`** — accept the warning this once.
-2. Safari says a profile was downloaded. Go to
-   **Settings → General → VPN & Device Management → Trailcraft Local CA → Install**
-   (enter your passcode, then Install again).
-3. **This step is the one everyone misses:** go to
+1. Open **`https://<your-lan-ip>:2777/ca.crt`** and accept the warning this once.
+   That warning means nothing has checked who answered yet, so step 2 is
+   the check.
+2. **Compare the fingerprint before you install anything.** `npm run dev:lan`
+   and `npm run cert` both print the authority's SHA-256 fingerprint, a line of
+   32 pairs like `02 2D 73 3F …`. On the phone go to
+   **Settings → General → VPN & Device Management → Trailcraft Local CA →
+   More Details**, open the certificate and find **SHA-256** under
+   Fingerprints. Every pair must match. If even one differs, someone else on
+   the Wi-Fi answered: tap **Remove** and do not install it. If you would
+   rather not rely on the Wi-Fi at all, AirDrop `certs/ca.pem` to the phone or
+   copy it over a cable, then carry on from step 3.
+3. Back on the profile, tap **Install** (enter your passcode, then Install again).
+4. **This step is the one everyone misses:** go to
    **Settings → General → About → Certificate Trust Settings** and switch
    **Trailcraft Local CA** on.
-4. Reopen `https://<your-lan-ip>:2777`. No warning, and Location will now ask
+5. Reopen `https://<your-lan-ip>:2777`. No warning, and Location will now ask
    properly instead of refusing.
+
+To remove it later: **Settings → General → VPN & Device Management →
+Trailcraft Local CA → Remove Profile**.
+
+An authority made by `npm run cert` from 2026-10-19 on can only vouch for
+`localhost`, `.local` names and private addresses, so even if this Mac's copy
+of its key leaked it could not stand in for a real website. One made before
+then has no such limit. It still works; to swap it for the limited one, delete
+`certs/ca.pem` and `certs/ca-key.pem`, run `npm run cert`, remove the old
+profile from the phone and install the new one as above.
 
 If the phone had already refused location for this address, clear it first:
 tap **aA** in Safari's address bar → **Website Settings → Location → Ask**.
@@ -155,6 +174,14 @@ No build step, no dependencies, no bundler.
 
 A Mapbox token ships in Settings. Restrict it to your own URLs — public tokens
 ship inside the page.
+
+## Database rules
+
+`firestore.rules` is what the Firebase server enforces for sign-in, backup and
+live sharing. Publish it from here, never by pasting into the console:
+`npm run rules:check`, then `npm run rules:publish` (one-off
+`npx --yes firebase-tools@15.32.1 login` first). Full steps in
+`docs/SIGN-IN-SETUP.md`, "Publishing the rules".
 
 ## Honest limits
 

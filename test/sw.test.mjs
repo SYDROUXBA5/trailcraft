@@ -157,7 +157,10 @@ t('an update installs the whole shell straight from the server, or none of it', 
   for (const u of w.read('SHELL')) assert.equal(await shell.text(u), files[abs(u).slice(BASE.length)], `${u} is kept`);
   /* The browser's own cache holds files for ten minutes: an install taken
      partly from it can hold two builds. */
-  const shellFetches = w.world.fetched.filter(f => f.url.startsWith(BASE));
+  // The pinned libraries are not the shell: a version never changes, so the
+  // copy the page itself just loaded is as good as the server's.
+  const pinnedLibs = new Set(w.read('VENDOR').map(abs));
+  const shellFetches = w.world.fetched.filter(f => f.url.startsWith(BASE) && !pinnedLibs.has(f.url));
   assert.ok(shellFetches.length >= w.read('SHELL').length);
   assert.ok(shellFetches.every(f => f.cache === 'reload'), 'every shell file comes from the server itself');
 
@@ -183,6 +186,34 @@ t('an update clears only its own old versions, and the map tiles outlive it', as
   await w.lifecycle('activate');
   assert.deepEqual([...w.stores.keys()].sort(), ['mapbox-tiles', TILES, V].sort());
   assert.equal(await (await w.cache(TILES)).text(tile), 'tile', 'the tile panned over last night is still here');
+});
+
+t('an update clears the CDN copies of the libraries older builds kept, and only those', async () => {
+  const w = worker();
+  const TILES = w.read('TILES');
+  const tiles = await w.cache(TILES);
+  const gone = [
+    'https://api.mapbox.com/mapbox-gl-js/v3.14.0/mapbox-gl.js',
+    'https://api.mapbox.com/mapbox-gl-js/v3.14.0/mapbox-gl.css',
+    'https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.min.js',
+    'https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.min.css',
+    'https://www.gstatic.com/firebasejs/12.3.0/firebase-app.js',
+    'https://www.gstatic.com/firebasejs/12.3.0/firebase-firestore.js',
+  ];
+  const kept = [
+    'https://api.mapbox.com/v4/mapbox.satellite/17/64000/42000@2x.webp?access_token=pk.x',
+    'https://api.mapbox.com/styles/v1/mapbox/satellite-streets-v12?access_token=pk.x',
+    'https://fonts.gstatic.com/s/roboto/v30/KFOmCnqEu92Fr1Mu4mxK.woff2',
+    'https://fonts.googleapis.com/css2?family=Roboto',
+    'https://tile.openstreetmap.org/15/16000/10500.png',
+  ];
+  for (const u of [...gone, ...kept]) await tiles.put(u, new Response('x'));
+  w.world.net = serve(buildOf(w, 'A'));
+  await w.lifecycle('install');
+  await w.lifecycle('activate');
+  const left = new Set((await tiles.keys()).map((r) => r.url));
+  for (const u of gone) assert.ok(!left.has(u), `dropped: ${u}`);
+  for (const u of kept) assert.ok(left.has(u), `kept: ${u}`);
 });
 
 t('an old version is kept while the new one is incomplete', async () => {
@@ -224,7 +255,7 @@ t('the tile cache is bounded, and never trims what the map cannot draw without',
   assert.ok(!left.includes(tile(0)), 'the oldest go first');
   assert.ok(left.includes(tile(99999)), 'the newest stays');
   assert.ok(left.includes(style) && left.includes(glyphs), 'the style and fonts are never trimmed');
-  for (const u of w.read('VENDOR')) assert.ok(left.includes(u), `${u} is never trimmed`);
+  for (const u of w.read('VENDOR')) assert.ok(left.includes(abs(u)), `${u} is never trimmed`);
 });
 
 /* ── The app on a bad connection ──────────────────────────────────── */
@@ -296,6 +327,50 @@ t('the build stamp, the weather and Mapbox counting an open always go to the net
   assert.ok((await w.ask('https://api.open-meteo.com/v1/forecast?x=1')).passedThrough, 'weather is never cached');
   assert.ok((await w.ask('https://api.mapbox.com/map-sessions/v1?access_token=pk.x')).passedThrough,
     'nor Mapbox counting a map being opened, now that tiles are kept for good');
+});
+
+/* ── The libraries that ship with the app ─────────────────────────── */
+
+t('the map libraries are kept at install, from the app itself, and are no part of the shell', async () => {
+  const w = await installed();
+  const vendor = [...w.read('VENDOR')];
+  assert.deepEqual(vendor, [
+    'vendor/mapbox-gl-3.14.0/mapbox-gl.js', 'vendor/mapbox-gl-3.14.0/mapbox-gl.css',
+    'vendor/maplibre-gl-4.7.1/maplibre-gl.js', 'vendor/maplibre-gl-4.7.1/maplibre-gl.css',
+  ]);
+  const html = readFileSync(new URL('../public/index.html', import.meta.url), 'utf8');
+  for (const u of vendor) {
+    assert.ok(html.includes(`"${u}"`), `index.html loads ${u}`);
+    assert.ok(readFileSync(new URL(`../public/${u}`, import.meta.url)).length > 1000, `${u} is in public/`);
+  }
+  for (const u of w.read('SHELL')) assert.ok(!u.startsWith('vendor/') || u.endsWith('qrcode.js') || u.endsWith('jsQR.js'), `${u}: 2.5 MB of maps is not shell`);
+  const tiles = await w.cache(w.read('TILES'));
+  for (const u of vendor) assert.equal(await tiles.text(u), 'pinned library');
+});
+
+t('a pinned library, Firebase too, is served from the phone once it has loaded, with no signal', async () => {
+  const w = await installed();
+  const fb = 'vendor/firebase-12.3.0/firebase-auth.js';
+  w.world.net = serve({ [fb]: 'firebase auth' });
+  assert.equal(await bodyOf(await w.ask(fb)), 'firebase auth');
+  w.world.net = serve({}, { down: true });
+  assert.equal(await bodyOf(await w.ask(fb)), 'firebase auth', 'offline, from the kept copy');
+  assert.equal(await bodyOf(await w.ask('vendor/mapbox-gl-3.14.0/mapbox-gl.js')), 'pinned library');
+  // The QR libraries are unversioned shell files: they still go through the shell.
+  const qr = await w.ask('vendor/qrcode.js');
+  assert.ok(!qr.passedThrough);
+  assert.equal(await (await w.cache(w.read('TILES'))).text('vendor/qrcode.js'), undefined);
+});
+
+t('the CDNs the libraries used to come from are no longer kept', async () => {
+  const w = await installed();
+  for (const u of ['https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.min.js',
+                   'https://www.gstatic.com/firebasejs/12.3.0/firebase-app.js']) {
+    assert.equal(w.read(`cacheable(new URL(${JSON.stringify(u)}))`), false, u);
+  }
+  assert.equal(w.read(`cacheable(new URL('https://api.mapbox.com/v4/mapbox.satellite/1/1/1@2x.webp'))`), true);
+  assert.equal(w.read(`pinned(new URL('https://elsewhere.test/vendor/mapbox-gl-3.14.0/mapbox-gl.js'))`), false,
+    'only this app\'s own copy is pinned');
 });
 
 for (const [name, fn] of tests) {

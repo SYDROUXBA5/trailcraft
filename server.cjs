@@ -11,10 +11,12 @@ const https = require('https');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const crypto = require('crypto');
 
 const PORT = process.env.PORT || 2777;
 const ROOT = path.join(__dirname, 'public');
-const CERT_DIR = path.join(__dirname, 'certs');
+// CERT_DIR lets a test point the server at throwaway certificates.
+const CERT_DIR = process.env.CERT_DIR || path.join(__dirname, 'certs');
 const LOOPBACK = '127.0.0.1';
 
 const TYPES = {
@@ -33,6 +35,19 @@ function lanAddress() {
     if (iface && iface.family === 'IPv4' && !iface.internal) return iface.address;
   }
   return null;
+}
+
+/* The local authority's SHA-256 fingerprint, written as the spaced pairs iOS
+   shows under the certificate's More Details. The phone fetches the authority
+   over a connection nothing vouches for yet, so this is what tells the real one
+   from a look-alike handed out by someone else on the Wi-Fi. Null when the
+   text is not a certificate. */
+function caFingerprint(pem) {
+  try {
+    return new crypto.X509Certificate(pem).fingerprint256.replace(/:/g, ' ');
+  } catch {
+    return null;
+  }
 }
 
 /** Every interface when the environment asks for the LAN, this Mac alone otherwise. */
@@ -102,7 +117,7 @@ const handler = (req, res) => {
   });
 };
 
-module.exports = { handler, bindHost, ROOT };
+module.exports = { handler, bindHost, caFingerprint, ROOT };
 
 // Listen only when run as a program; the test requires this file for the handler.
 if (require.main === module) {
@@ -120,12 +135,19 @@ if (require.main === module) {
   server.listen(PORT, host, () => {
     const scheme = secure ? 'https' : 'http';
     console.log(`\n  Trailcraft  →  ${scheme}://localhost:${PORT}`);
+    let fp = null;
+    try { fp = caFingerprint(fs.readFileSync(path.join(CERT_DIR, 'ca.pem'))); } catch { /* no authority yet */ }
     if (host === LOOPBACK) {
       console.log('  This Mac only. To test on your phone: npm run dev:lan');
     } else {
       const lan = lanAddress();
       if (lan) console.log(`  On your phone →  ${scheme}://${lan}:${PORT}`);
+      if (lan && fp) console.log(`  Certificate   →  ${scheme}://${lan}:${PORT}/ca.crt`);
       if (!secure) console.log('  ! No certs/ — GPS will not work off localhost. Run: npm run cert');
+    }
+    if (fp) {
+      console.log('  Authority SHA-256 — the phone must show exactly this before you trust it:');
+      console.log(`    ${fp}`);
     }
     console.log('');
   });

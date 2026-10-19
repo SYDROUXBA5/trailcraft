@@ -21,6 +21,7 @@ export const cloud = {
   read: 0,                // documents handed out by queries
   pauses: new Map(),      // table → { reached, release } for a read to wait on
   beforeBatch: null,      // runs once, just before the next batch is applied
+  unreadable: new Set(),  // paths whose data() throws, as a document no reader can decode
 };
 export const phones = [];   // one { auth, fs } per initializeApp, newest last
 
@@ -87,7 +88,15 @@ export function holdReauth() {
   reauthGate = { gate, reached };
   return { hit, release: () => { reauthGate = null; release(); } };
 }
-export const EmailAuthProvider = { credential: (email, password) => ({ email, password }) };
+/* Confirming an address: the link is tapped on the server's side (confirm),
+   and a phone only learns of it by reading the account again (reload). */
+export const confirmed = new Set();
+export const mailed = [];
+export const confirm = (uid) => confirmed.add(uid);
+export async function sendEmailVerification(user) { mailed.push(user.email); }
+export async function reload(user) { if (confirmed.has(user.uid)) user.emailVerified = true; }
+
+export const EmailAuthProvider ={ credential: (email, password) => ({ email, password }) };
 export async function reauthenticateWithCredential() {
   if (reauthGate) { reauthGate.reached(); await reauthGate.gate; }
 }
@@ -133,8 +142,9 @@ const snapOf = (path, d, fs) => ({
   id: path.split('/').pop(),
   ref: { fs, path, id: path.split('/').pop() },
   exists: () => !!d,
-  data: () => (d ? { ...clone(d.data), ...(d.syncedAt != null ? { syncedAt: new Timestamp(d.syncedAt) } : {}) } : undefined),
+  data: () => { if (cloud.unreadable.has(path)) throw err('data-loss'); return snapData(d); },
 });
+const snapData = (d) => (d ? { ...clone(d.data), ...(d.syncedAt != null ? { syncedAt: new Timestamp(d.syncedAt) } : {}) } : undefined);
 
 /* The documents a query matches in one set of them: the cloud's, or the
    phone's own copy of what it has seen. */

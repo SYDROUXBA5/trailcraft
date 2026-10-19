@@ -251,6 +251,24 @@ await t('no key in a file reaches an object’s prototype, and no id is one', ()
   assert.equal({}.polluted, undefined);
 });
 
+await t('the cloud’s packed-content marks never ride in on a restored row', () => {
+  /* __json and __pts mark packed content in the cloud. A row carrying one as
+     a field would be read back by every signed-in phone as that text — the
+     whole record, at the top — past every check made here. */
+  const inner = JSON.stringify({ id: 'h2', name: 42, updatedAt: NOW * 10, deleted: true });
+  const text = wrap({
+    handlers: [{ id: 'h1', name: 'A', updatedAt: 1000, __json: inner, junk: { __json: '{' }, pts: { __pts: 3, lat: [1] } }],
+    sessions: [{ id: 's', startedAt: NOW, data: { trail, surfM: { __pts: 1 }, extra: [{ __json: '[1]' }] } }],
+  });
+  const file = readBackup(text, { now: NOW });
+  const h = file.handlers[0];
+  assert.equal(h.id, 'h1');
+  assert.ok(!JSON.stringify(file).includes('__json'), 'no __json anywhere');
+  assert.ok(!JSON.stringify(file).includes('__pts'), 'no __pts anywhere');
+  assert.deepEqual(h.junk, {});
+  assert.deepEqual(file.sessions[0].data.extra, [{}]);
+});
+
 await t('rows of the wrong shape are left out and counted, and the rest still restore', () => {
   const good = { id: 'ok', startedAt: NOW, summary: 'fine', data: { trail } };
   const bad = [

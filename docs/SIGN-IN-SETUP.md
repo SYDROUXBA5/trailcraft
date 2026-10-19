@@ -64,8 +64,10 @@ from inside an app's built-in browser, so the app hides that button there.
 2. **Location: `europe-west2 (London)`**. This is permanent and cannot be
    changed later — London keeps your clients' records in the UK.
 3. Start in **production mode** → **Create**.
-4. Open the **Rules** tab, delete what is there, paste in the contents of
-   `firestore.rules` from the project, and **Publish**.
+4. Publish the rules from the project — see **Publishing the rules** at the
+   end of this guide. (Pasting `firestore.rules` into the **Rules** tab and
+   pressing **Publish** does the same, but nothing then records which version
+   is live.)
 
    Those rules mean a signed-in account can read and write its own records
    and nothing else. Skip this step and the database refuses everything.
@@ -118,7 +120,7 @@ Firebase project. It works as soon as you are signed in, with two things set
 up once:
 
 1. **Rules.** `firestore.rules` in this repo has grown a `live` section.
-   Firestore → **Rules** → paste the whole file again → **Publish**.
+   Publish it again — see **Publishing the rules** below.
 
    The rules check what a live run holds. Builds after 2026-09-24a also
    give each live run a `deleteAt` field, which the clean-up below needs.
@@ -145,3 +147,32 @@ up once:
 What a viewer sees: the laid trail and the dog's track as it happens, on a
 plain web page, no app and no account needed. The link is 20 random
 characters — nobody can guess it, and nothing is ever listed.
+
+---
+
+## Publishing the rules
+
+The rules in the Firebase console are the only thing the server checks, so
+they must be exactly `firestore.rules` from the project. `firebase.json` and
+`.firebaserc` tie the project to Firebase project `trailcraft-51b80`, so the
+file can be published from here instead of pasted by hand.
+
+Once, on the Mac:
+
+```bash
+npx --yes firebase-tools@15.32.1 login
+```
+
+That opens Google in the browser; sign in with the account that owns the
+Firebase project. Then, whenever `firestore.rules` changes:
+
+```bash
+cd ~/Projects/trailcraft
+npm run rules:check     # compiles the rules on Firebase, publishes nothing
+npm run rules:publish   # publishes firestore.rules, replacing what is live
+```
+
+Afterwards, Firestore → **Rules** shows the new text with today's date at the
+top of its history. If the console ever shows something different from the
+file, run `npm run rules:publish` again rather than editing it there.
+
