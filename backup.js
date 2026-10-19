@@ -74,9 +74,13 @@ const idOrNull = (v) => v == null || okId(v);
 
 /* Keys that would write onto an object's prototype, or that the cloud refuses
    and that would stop a whole backup batch (sync-core.js toCloud), and the
-   cloud's own bookkeeping, which never belongs on the phone. */
+   cloud's own bookkeeping, which never belongs on the phone. __json and
+   __pts are the cloud's marks for packed content (sync-core.js fromCloud):
+   nothing the app keeps on the phone holds either, and a field by that name
+   would be read back from the cloud as the whole record or list it sits in,
+   past every check made here. */
 const dropKey = (k) => !k || k === '__proto__' || k === 'constructor' || k === 'prototype'
-  || /^__.*__$/.test(k);
+  || /^__.*__$/.test(k) || k === '__json' || k === '__pts';
 const CLOUD_ONLY = new Set(['baseAt', 'syncedAt']);
 
 class Damaged extends Error {}

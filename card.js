@@ -233,19 +233,38 @@ export async function decodeTrail(str) {
     to choose between: with several plans waiting, the wrong one would have
     its dog graded against someone else's walk and banked into its
     calibration. So { ask } lists the ones to ask about, likeliest first. */
-export function walkedPlanFor(card, plans = [], asked = null) {
+export function walkedPlanFor(card, plans = [], asked = null, { askAlways = false } = {}) {
   if (card?.planId) {
     const its = plans.filter(p => p.id === card.planId || p.planOf === card.planId);
     const hit = its.find(p => p.id === asked) ?? its.find(p => p.run) ?? its[0];
-    return hit ? { id: hit.id } : { id: null, why: 'other' };
+    if (!hit) return { id: null, why: 'other' };
+    /* From a link, a plan id proves nothing: anyone who has seen the plan's
+       QR can copy it into a card of their own. So the plan is named and asked
+       about, unless the handler already said which plan it was for. */
+    return askAlways && hit.id !== asked ? { id: null, ask: [hit.id] } : { id: hit.id };
   }
   if (asked) return { id: asked };
   const ran = plans.filter(p => p.run);
   const pool = ran.length ? ran : plans;
-  if (pool.length <= 1) return { id: pool[0]?.id ?? null };
+  /* askAlways: the card came in a link, not from the handler's own camera,
+     so even a single waiting plan is named and asked about before a
+     stranger's line can replace it. */
+  if (pool.length <= 1 && !(askAlways && pool.length)) return { id: pool[0]?.id ?? null };
   const from = card?.points?.[0];
   const away = (p) => (from && p.start ? dist(from, p.start) : Infinity);
   return { id: null, ask: [...pool].sort((a, b) => away(a) - away(b)).map(p => p.id) };
+}
+
+/** Whether a session on this phone is a trail already taken from this card:
+    imported, laid at the same moment, along the same line. Opening the same
+    card link twice must not add the trail twice. */
+export function sameCard(session, card) {
+  const t = session?.data?.trail;
+  const pts = card?.points;
+  if (!session?.data?.imported || !Array.isArray(t) || !Array.isArray(pts) || !pts.length) return false;
+  if (session.deleted || session.startedAt !== card.started || t.length !== pts.length) return false;
+  const near = (a, b) => !!a && !!b && Math.abs(a.lat - b.lat) < 1e-6 && Math.abs(a.lon - b.lon) < 1e-6;
+  return near(t[0], pts[0]) && near(t[t.length - 1], pts[pts.length - 1]);
 }
 
 /** Worst-case distance from any original point to the decoded POLYLINE — used

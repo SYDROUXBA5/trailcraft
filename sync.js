@@ -11,12 +11,16 @@
 
 import { firebaseConfig, appleSignInEnabled } from './firebase-config.js';
 import { isNative } from './native.js';
-import { syncPlan,
+import { syncPlan, emailUnproven,
          mergeRecords, mergeOne, mergeCalibration, calibrationDiffers, toCloud, fromCloud, fromCloudRecord,
          approxBytes, DOC_LIMIT, packPoints, unpackPoints,
          authMessage, syncMessage } from './sync-core.js';
 
-const SDK = 'https://www.gstatic.com/firebasejs/12.3.0';
+/* The Firebase SDK ships inside the app (npm run vendor), not from gstatic:
+   in the iPhone app this page also holds the bridge to location and files, so
+   script fetched at run time would run with all of that. Relative to this
+   module, so it resolves the same on the LAN, on GitHub Pages and in the app. */
+const SDK = './vendor/firebase-12.3.0';
 const TABLES = ['handlers', 'dogs', 'layers', 'sessions'];
 
 export const sync = {
@@ -145,7 +149,9 @@ export async function signUpWithEmail({ name, email, password }) {
       /* The sign-in event can fire before the name is set: carry it over. */
       if (sync.user?.uid === cred.user.uid) { sync.user = { ...sync.user, name: n }; emit(); }
     }
-    f.sendEmailVerification(cred.user).catch(() => { /* the account works without it */ });
+    /* Nothing is backed up into the account until this link is tapped
+       (applyUser): anyone can type someone else's address here. */
+    f.sendEmailVerification(cred.user).catch(() => { /* Resend on the account card */ });
     return cred.user;
   } catch (e) {
     sync.error = plain(e); emit();
@@ -180,6 +186,43 @@ export async function resetPassword(email) {
   }
 }
 
+/** Send the confirmation link again. False, with sync.error saying why, if
+    it could not be sent. */
+export async function resendConfirmation() {
+  const f = await authReady();
+  const u = auth?.currentUser;
+  if (!f || !u) return false;
+  try {
+    await f.sendEmailVerification(u);
+    return true;
+  } catch (e) {
+    sync.error = plain(e); emit();
+    return false;
+  }
+}
+
+/** "I've confirmed it": the phone only learns the link was tapped by asking
+    again, so the account is read afresh. True once the address is
+    confirmed, and backing up then starts as for any other sign-in. */
+export async function checkConfirmed() {
+  const f = await authReady();
+  const u = auth?.currentUser;
+  if (!f || !u) return false;
+  try {
+    await f.reload(u);
+  } catch (e) {
+    sync.error = plain(e); emit();
+    return false;
+  }
+  const now = auth.currentUser ?? u;
+  if (emailUnproven(now)) return false;
+  /* The sign-in pass in hand was issued before the link was tapped and still
+     says the address is unconfirmed; a fresh one says it is. */
+  try { await now.getIdToken?.(true); } catch { /* the hourly refresh brings it */ }
+  await onUser(now);
+  return sync.status !== 'verify';
+}
+
 const hasRecords = () => !!(db?.rawSessions?.().length || db?.handlers?.raw?.().length || db?.dogs?.raw?.().length);
 
 /** "These are mine": the records already on the phone become this account's
@@ -187,7 +230,8 @@ const hasRecords = () => !!(db?.rawSessions?.().length || db?.handlers?.raw?.().
     takes a tap to say so. */
 export async function adoptRecords() {
   const u = auth?.currentUser;
-  if (!u) return false;
+  /* Not to an address nobody has confirmed: it may not be this person's. */
+  if (!u || emailUnproven(u)) return false;
   db.kv.set('ownerUid', u.uid);
   await onUser(u);
   return sync.status !== 'ask';
@@ -199,7 +243,7 @@ export async function adoptRecords() {
     database shut down — so the caller reloads the app afterwards. */
 export async function useThisAccount() {
   const u = auth?.currentUser;
-  if (!u) return false;
+  if (!u || emailUnproven(u)) return false;
   try {
     stopMirror?.(); stopMirror = null;
     forgetSkipped();                 // those records are not this phone's any more
@@ -272,11 +316,33 @@ export function resync() {
   /* Not while the account is being deleted or the phone wiped: a pull would
      put the mirror back, and send saves into what is being taken away. */
   if (!u || !db || pulling || deleting || wiping || sync.user?.uid !== u.uid) return false;
-  if (!['syncing', 'synced', 'partial', 'error'].includes(sync.status)) return false;
+  if (!['syncing', 'synced', 'partial', 'error', 'verify'].includes(sync.status)) return false;
   if (Date.now() - lastPull < RESYNC_EVERY) return false;
   lastPull = Date.now();
+  /* Back from the mail app, most likely having tapped the link: ask whether
+     the address is confirmed now, which starts backing up if it is. */
+  if (sync.status === 'verify') { checkConfirmed().catch(() => {}); return true; }
   onUser(u, { resume: true });
   return true;
+}
+
+/** Who will own this phone's records once an unconfirmed address is
+    confirmed. Signed in on an empty phone, everything made here afterwards
+    was made under this account, as it is when a confirmed account takes an
+    empty phone ('adopt'); without this mark, confirming the address found
+    the new handler and dog "already on this phone" and asked whose they
+    were, and "These are mine" then merged them in beside the ones already
+    backed up. A phone that already had records when the account signed in
+    keeps the question: they were made before anyone signed in. The mark
+    only ever names the account signed in now, and goes on sign-out. */
+function pendingOwner(uid) {
+  const was = db.kv.get('pendingOwnerUid', null);
+  if (was === uid) return uid;
+  return !db.kv.get('ownerUid', null) && !hasRecords() ? uid : null;
+}
+
+function forgetPending() {
+  if (db.kv.get('pendingOwnerUid', null)) db.kv.set('pendingOwnerUid', null);
 }
 
 async function applyUser(u, { resume = false } = {}) {
@@ -284,12 +350,28 @@ async function applyUser(u, { resume = false } = {}) {
   stopMirror?.(); stopMirror = null;
   sync.user = u ? { uid: u.uid, name: u.displayName, email: u.email, photo: u.photoURL,
     password: (u.providerData || []).some(p => p.providerId === 'password') } : null;
-  if (!u) { forgetSkipped(); sync.status = 'signed-out'; emit(); return; }
+  if (!u) { forgetSkipped(); forgetPending(); sync.status = 'signed-out'; emit(); return; }
+
+  /* An address nobody has confirmed yet: whoever typed it may not own it, and
+     whatever is already stored under it may have been put there by them.
+     Nothing is read, written or claimed until the link in the mail is tapped
+     (checkConfirmed). The phone's own records are untouched and stay usable. */
+  if (emailUnproven(u)) {
+    forgetSkipped();
+    const pending = pendingOwner(u.uid);
+    if (pending !== db.kv.get('pendingOwnerUid', null)) db.kv.set('pendingOwnerUid', pending);
+    sync.status = 'verify'; sync.error = null; emit(); return;
+  }
 
   /* Records already belonging to another account are never merged into this
      one (sync-core.js syncPlan). Nothing is read or written until the handler
-     says what to do with them — renderAccount asks. */
-  const plan = syncPlan(db.kv.get('ownerUid', null), u.uid, hasRecords());
+     says what to do with them — renderAccount asks. An account that was
+     waiting for its address to be confirmed when this phone was still empty
+     owns what has been made here since (pendingOwner). */
+  const pending = db.kv.get('pendingOwnerUid', null);
+  forgetPending();
+  const owner = db.kv.get('ownerUid', null) ?? (pending === u.uid ? u.uid : null);
+  const plan = syncPlan(owner, u.uid, hasRecords());
   if (plan === 'other' || plan === 'ask') { forgetSkipped(); sync.status = plan; sync.error = null; emit(); return; }
 
   /* A pull on coming back reads only what changed since the last one. After
@@ -395,6 +477,7 @@ async function removeAccount(u, password) {
     /* Only if these records were this account's. Deleting a different account
        must not un-own them, or the next sign-in would take them up. */
     if (db.kv.get('ownerUid', null) === u.uid) db.kv.set('ownerUid', null);
+    if (db.kv.get('pendingOwnerUid', null) === u.uid) db.kv.set('pendingOwnerUid', null);
   } catch (e) {
     /* The account is still there, so put its backup back in step with the phone. */
     onUser(auth.currentUser);
@@ -405,6 +488,10 @@ async function removeAccount(u, password) {
   return { ok: true };
 }
 
+/* Lists the collection before deleting it, so deleting an account needs
+   read access to its own records. Keep it that way in firestore.rules even
+   while the address is unconfirmed: "Delete my account" is offered then too,
+   and a rule that gated reads on a confirmed address would stop it half way. */
 async function removeAll(col) {
   const snap = await fb.getDocs(col);
   for (let i = 0; i < snap.docs.length; i += 400) {
@@ -470,14 +557,25 @@ async function readTable(uid, name, partial) {
   const snap = await fb.getDocs(since === undefined ? userCol(uid, name)
     : fb.query(userCol(uid, name), fb.where('syncedAt', '>', fb.Timestamp.fromMillis(since))));
   let mark = since ?? 0;
-  const rows = snap.docs.map((d) => {
-    const raw = d.data();
-    mark = Math.max(mark, raw.syncedAt?.toMillis?.() ?? 0);
-    const rec = fromCloudRecord(raw);
-    if (rec.id == null) rec.id = d.id;
-    setKnown(`${name}/${d.id}`, stampOf(rec));
-    return rec;
-  });
+  const rows = [];
+  for (const d of snap.docs) {
+    /* Each document on its own: one that cannot be read is set aside and
+       named, and every other record still arrives. A single bad one used to
+       end the whole pull, and every pull after it, with backup left off. */
+    try {
+      const raw = d.data();
+      mark = Math.max(mark, raw?.syncedAt?.toMillis?.() ?? 0);
+      /* The document's name is the record's id, as the single-record repair
+         (mendNow) already holds it: a record claiming another id inside
+         would sit on the phone as a second copy that no save could reach. */
+      const rec = fromCloudRecord(raw);
+      if (rec.id == null || String(rec.id) !== d.id) rec.id = d.id;
+      setKnown(`${name}/${d.id}`, stampOf(rec));
+      rows.push(rec);
+    } catch {
+      refused.set(d.id, 'the copy in the cloud could not be read');
+    }
+  }
   /* With no signal the answer comes from the phone's own copy of the cloud,
      which holds this phone's saves but not what other phones sent meanwhile.
      Marking the table read up to the newest save in it would skip theirs for
@@ -734,6 +832,7 @@ export async function startLive(meta, { waitMs = LIVE_WAIT } = {}) {
   if (sync.status === 'other' || sync.status === 'ask') {
     throw new Error('Settle whose records these are (Settings → Account) before sharing live');
   }
+  if (sync.status === 'verify') throw new Error('Confirm your email (Settings → Account) before sharing live');
   const f = await loadFirebase();
   const id = liveId();
   const at = Date.now();
@@ -769,7 +868,7 @@ export const liveNow = () => live?.id ?? null;
     the result still reach whoever is watching. Its chunks are unknown, so they
     are simply written again — the same points, the same ids, no duplicates. */
 export function resumeLive(id, startedAt) {
-  if (!fs || !sync.user || !id) return false;
+  if (!fs || !sync.user || !id || sync.status === 'verify') return false;
   live = { id, startedAt: startedAt ?? Date.now(), chunks: new Map(), expiresAt: Date.now() + LIVE_TTL, wpsN: -1 };
   return true;
 }

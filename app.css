@@ -1750,6 +1750,13 @@ body:has(#saveTrouble:not([hidden])) .screen.paper .page { padding-bottom: calc(
 .lvl-words.cold { color: var(--cold-ink); }
 
 /* Home: the picked handler and dog as a team, and the way to its board. */
+.home-alert {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%;
+  margin: 4px 0 12px; padding: 11px 14px; background: var(--card); color: var(--ink);
+  border: 1.5px solid var(--warm-ink); border-radius: 16px; text-align: left; font: inherit; cursor: pointer;
+}
+.home-alert b { font-size: calc(16 * var(--px)); font-weight: 800; }
+.home-alert span { font-size: calc(14 * var(--px)); color: var(--muted); }
 .team-row {
   display: flex; align-items: center; gap: 12px; width: 100%; min-height: 60px; padding: 10px 14px 10px 12px;
   background: var(--card); color: var(--ink); border: 1.5px solid var(--rim); border-radius: 16px;

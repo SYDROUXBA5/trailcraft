@@ -70,7 +70,9 @@ export const verbs = (t) => t.kind === 'person'
    layers [{id,name,photo}] (shared across handlers), sessions (newest first).
    kv: lastHandlerId, lastDogId, lastLayerId, lastTargetId, tutorialDone, layerOnly,
    ownerUid (the account these records belong to, so signing in with another
-   one never uploads them into it — sync-core.js syncPlan). */
+   one never uploads them into it — sync-core.js syncPlan), pendingOwnerUid
+   (an account with an unconfirmed address that signed in on an empty phone,
+   and so owns what is made here once it is confirmed — sync.js pendingOwner). */
 
 const K = {
   handlers: 'tc.handlers', dogs: 'tc.dogs', layers: 'tc.layers',

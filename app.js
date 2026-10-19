@@ -19,7 +19,7 @@ import { FLAT, buildTerrain, stability, regime, flowAt, normOf, rainRate, RAIN_S
          seriesCovers } from './field.js';
 import { predictedOffsets, ScentSim, driftFrom, stepByFlow } from './sim.js';
 import { PARAMS, DIALS, PV, setParam, resetParams, changed, isDefault, tally, dialById, PRESETS, applyPreset } from './params.js';
-import { encodeTrail, decodeTrail, cardUrl, cardFromText, walkedPlanFor } from './card.js';
+import { encodeTrail, decodeTrail, cardUrl, cardFromText, walkedPlanFor, sameCard } from './card.js';
 import { decodeTile, tileOf, tileBox } from './mvt.js';
 import { wallIndex, bandInWalls } from './walls.js';
 import { GROUND_LAYERS, buildGround, surfaceAt, surfaceAlong, surfaceRows, withSurface,
@@ -28,7 +28,7 @@ import { GROUND_LAYERS, buildGround, surfaceAt, surfaceAlong, surfaceRows, withS
          FIX_AS, alongOf, idxAt, makeFix, applyFixes, fixSpan, stretchMetres } from './ground.js';
 import { sync, onSync, initSync, signInWithGoogle, signInWithApple, signOut, deleteAccount, useThisAccount, forgetSkipped,
          adoptRecords, wipeAndSignOut, resync,
-         signUpWithEmail, signInWithEmail, resetPassword,
+         signUpWithEmail, signInWithEmail, resetPassword, resendConfirmation, checkConfirmed,
          startLive, pushLive, endLive, watchLive, resumeLive, dropLive } from './sync.js';
 import { trailModel, encodeShared, decodeShared, sharedUrl, toGpx, fileBase,
          detailSections, headline, notes, liveMeta, liveModel, cleanResult,
@@ -47,7 +47,7 @@ import { isNative, watchBackground, canHaptic, haptic, watchHeading, shareFile, 
          canSpeakNative, nativeVoices, speakNative, stopNativeSpeech, watchNativeVoices } from './native.js';
 import { readBackup, restoreChanges, restoreQuestion, restoreNothing, BACKUP_MAX_BYTES } from './backup.js';
 import { firebaseConfig } from './firebase-config.js';
-import { checkAuthFields, AUTH_MIN_PASSWORD } from './sync-core.js';
+import { checkAuthFields, AUTH_MIN_PASSWORD, profilePhoto } from './sync-core.js';
 import { createStore, migrateV1, TARGETS, ODOURS, targetById, targetText, verbs, uid,
          dogStats, ageBand, AGE_BANDS, LEVELS, levelById, dogAge, patchSession, runAgain,
          planSession, canLayAgain, routeOf, planLine, askDelete, storageWords, APPROACH_V,
@@ -63,7 +63,7 @@ import { searchWords, logRows, recentRuns, runAt, midnight, facets, filterRows, 
          cleanFolderName, putMany, toggleFolder, renameIn, dropFrom, mergeFolders, emptyHeld, folderPatch } from './log.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-10-13a';
+const BUILD = '2026-10-19a';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true,
@@ -246,7 +246,7 @@ const SCREENS = ['scrOnboardHandler', 'scrOnboardDog', 'scrTutorial', 'scrHome',
   'scrConfirm', 'scrShare', 'scrContam', 'scrPick', 'scrScan', 'scrRun', 'scrResult',
   'scrShowMap', 'scrSessions', 'scrSettings', 'scrDraw', 'scrCountdown', 'scrWalk', 'scrWait', 'scrDog',
   'scrSignIn', 'scrShareOut', 'scrShared', 'scrLive', 'scrBench', 'scrReplay', 'scrDebrief', 'scrFix',
-  'scrDelete', 'scrRecover', 'scrTeam', 'scrTeamNew'];
+  'scrDelete', 'scrRecover', 'scrTeam', 'scrTeamNew', 'scrCardIn'];
 
 /* The screens that are transparent chrome over the live map. */
 const MAP_SCREENS = ['scrLay', 'scrConfirm', 'scrContam', 'scrRun', 'scrShowMap', 'scrDraw', 'scrWalk', 'scrLive', 'scrBench', 'scrReplay', 'scrFix'];
@@ -1901,9 +1901,9 @@ function groundHtml(s, { edit = false } = {}) {
   const fixBtn = edit && s.data.trail?.length > 1
     ? `<button type="button" class="btn small" data-fixopen="1">Correct a stretch</button>` : '';
   return `<span class="label">Ground, from the map</span>
-    <div class="surf-bar" aria-hidden="true">${rows.map(r => `<i class="gs-${r.id}" style="flex:${r.share.toFixed(4)}"></i>`).join('')}</div>
+    <div class="surf-bar" aria-hidden="true">${rows.map(r => `<i class="gs-${esc(r.id)}" style="flex:${r.share.toFixed(4)}"></i>`).join('')}</div>
     <div class="surf-rows">${rows.map(r =>
-      `<div><i class="gs-${r.id}"></i><span>${esc(r.label)}</span><b>${fmtKm(r.metres)}</b><em>${Math.round(r.share * 100)}%</em></div>`).join('')}</div>
+      `<div><i class="gs-${esc(r.id)}"></i><span>${esc(r.label)}</span><b>${fmtKm(r.metres)}</b><em>${Math.round(r.share * 100)}%</em></div>`).join('')}</div>
     ${built}${seenHtml(s)}${old}${prev}${fixesHtml(s, edit)}${fixBtn}
     <p class="body small muted">This comes from the map. A yard, a lawn or a track nobody drew shows as Not mapped. Nobody knows yet what tarmac does to scent, so the model treats it like any other ground unless you try the tarmac rule on the bench.</p>`;
 }
@@ -5079,13 +5079,17 @@ function paintWait() {
 let scanWalkedFor = null;    // session id waiting for its walked card
 let scanLineFor = null;      // a blind trail's session id waiting for its laid line
 
-/** A walked card, to the plan it belongs to (walkedPlanFor, card.js). */
-function takeWalked(card, asked) {
-  /* Only this phone's own runs. One kept from someone else's link is
-     their dog on their plan, so a walk laid here never belongs to it. */
-  const plans = db.sessions().filter(x => x.data.plan && !x.data.walked && ownRun(x))
+/** This phone's plans still waiting for their walk, as walkedPlanFor wants
+    them. Only this phone's own runs: one kept from someone else's link is
+    their dog on their plan, so a walk laid here never belongs to it. */
+function waitingPlans() {
+  return db.sessions().filter(x => x.data.plan && !x.data.walked && ownRun(x))
     .map(x => ({ id: x.id, planOf: x.data.planOf ?? null, run: !!x.data.track, start: x.data.trail?.[0] ?? null }));
-  const pick = walkedPlanFor(card, plans, asked);
+}
+
+/** A walked card, to the plan it belongs to (walkedPlanFor, card.js). */
+function takeWalked(card, asked, { fromLink = false } = {}) {
+  const pick = walkedPlanFor(card, waitingPlans(), asked, { askAlways: fromLink });
   const waiting = pick.ask ? askWhichPlan(pick.ask) : pick.id;
   if (!waiting) {
     toast(pick.ask ? 'No plan picked, so the walk was not used'
@@ -6756,7 +6760,7 @@ const liveView = { model: null, tick: 0, fitted: false };
 function paintLiveBtn() {
   const b = $('btnLive');
   if (!b) return;
-  b.hidden = !sync.configured || sync.status === 'other' || sync.status === 'ask';
+  b.hidden = !sync.configured || sync.status === 'other' || sync.status === 'ask' || sync.status === 'verify';
   b.classList.toggle('on', !!liveState);
   b.disabled = liveStarting;
   b.textContent = liveStarting ? 'Going live…' : liveState ? '● Live — send the link again' : 'Share live';
@@ -6767,6 +6771,7 @@ async function goLive() {
   if (sync.status === 'other' || sync.status === 'ask') {
     return toast('Settle whose records are on this phone first (Settings → Account)');
   }
+  if (sync.status === 'verify') return toast('Confirm your email first (Settings → Account)');
   if (!run.session || liveStarting) return;
   if (!liveState) {
     if (navigator.onLine === false) return toast('No signal, so the run cannot go live yet');
@@ -7871,8 +7876,10 @@ async function scanPhoto(file) {
     Three kinds arrive at this door: a PLAN, which tells this phone to walk its
     owner along the line; a WALKED trail, which replaces the plan it came from
     and re-grades the run against the truth on the ground; and a plain laid
-    trail, which is simply run. */
-async function handleCard(data) {
+    trail, which is simply run.
+    `fromLink`: the card came in a link and the handler has just said yes to
+    it on its own screen (offerCardLink), so no scan is in progress. */
+async function handleCard(data, { fromLink = false } = {}) {
   let card;
   try { card = await decodeTrail(cardFromText(data)); }
   catch (err) {
@@ -7909,7 +7916,7 @@ async function handleCard(data) {
     const asked = scanWalkedFor;
     scanWalkedFor = null;
     stopScan();
-    return takeWalked(card, asked);
+    return takeWalked(card, asked, { fromLink });
   }
   if (scanWalkedFor) {
     $('scanState').textContent = 'That is a plan, not a walked trail. Still scanning…';
@@ -7919,6 +7926,17 @@ async function handleCard(data) {
     if (!card.points || card.points.length < 2) return false;
     stopScan();
     startWalk(card);
+    return true;
+  }
+
+  /* The same card a second time — the link opened again, or scanned twice —
+     is the trail already here, not another copy of it. */
+  const had = db.sessions().find(x => sameCard(x, card));
+  if (had) {
+    stopScan();
+    if (had.data.track) { toast('That trail is already here'); openSession(had.id); return true; }
+    toast('That trail is already here — running it');
+    startRun(had);
     return true;
   }
 
@@ -8992,9 +9010,47 @@ function openSignIn({ firstLaunch = false } = {}) {
   $('signInOr').hidden = $('btnGoogle').hidden && $('btnApple').hidden;
   setAuthMode(authMode);
   $('authPassword').value = '';
-  $('btnSkipSignIn').textContent = firstLaunch ? 'Use without an account' : 'Not now';
   $('signInError').hidden = true;
+  paintSignInVerify();
   go('scrSignIn');
+}
+
+/** The sign-in screen while the account's address is unconfirmed: the
+    "Confirm your email" panel in place of the form. On a first launch the
+    person stays here rather than going on to onboarding, because once the
+    address is confirmed their records come back from the account and
+    onboarding would only make copies of them. "Use without an account for
+    now" is still a real answer. */
+function paintSignInVerify() {
+  const v = !!sync.user && sync.status === 'verify';
+  $('signInVerify').hidden = !v;
+  $('signInMain').hidden = v;
+  $('signInVerifyTo').textContent = sync.user?.email || 'your address';
+  $('btnSkipSignIn').textContent = v ? 'Use without an account for now'
+    : signInFirstLaunch ? 'Use without an account' : 'Not now';
+}
+
+/* Backup paused because the address is unconfirmed. Said on Home for as long
+   as it lasts, and once per launch as a toast when it starts: a phone that
+   had been backing up stopped silently after the update that brought this
+   in, and nothing outside Settings said so. Not kept in storage, so it comes
+   back at every launch until the address is confirmed. */
+let verifyNoticed = false;
+let lastSyncStatus = null;
+function noticeBackupPaused(st) {
+  const paused = !!st.user && st.status === 'verify';
+  $('homeBackupPaused').hidden = !paused;
+  if (paused && lastSyncStatus !== 'verify' && !verifyNoticed && $('scrSignIn').hidden) {
+    verifyNoticed = true;
+    toast('Backup paused: confirm your email (Settings → Account)');
+  }
+  lastSyncStatus = st.status;
+}
+
+function openAccountCard() {
+  renderSettings();
+  go('scrSettings');
+  $('accountCard')?.scrollIntoView({ block: 'center' });
 }
 
 /* ── Email accounts ───────────────────────────────────────────────────
@@ -9133,6 +9189,18 @@ function renderAccount() {
     const err = sync.status === 'error' && sync.error ? `<p class="body small signin-error">${esc(sync.error)}</p>` : '';
     card.innerHTML = `<p class="body small muted">Sign in to back up your dogs and trails, and have them on any phone.</p>${err}
       <button type="button" class="btn moss" data-account="signin"${busy ? ' disabled' : ''}>${busy ? 'Connecting…' : 'Sign in'}</button>`;
+  } else if (sync.status === 'verify') {
+    /* A password account whose address nobody has confirmed: nothing is sent
+       to it or read from it until the link in the mail is tapped (sync.js). */
+    const u = sync.user;
+    const err = sync.error ? `<p class="body small signin-error">${esc(sync.error)}</p>` : '';
+    card.innerHTML = `<div class="account-who">${avaHtml({ name: u.name || u.email || '?' })}<div><b>${esc(u.name || 'Signed in')}</b><i>${esc(u.email || '')}</i></div></div>
+      <p class="body"><b>Confirm your email</b></p>
+      <p class="body small">We sent a link to ${esc(u.email || 'your address')}. Tap it, then come back here. Until then nothing is backed up, and your trails stay on this phone.</p>${err}
+      <button type="button" class="btn moss" data-account="confirmed">I’ve confirmed it</button>
+      <button type="button" class="btn ghost" data-account="resend">Resend the link</button>
+      <button type="button" class="btn ghost" data-account="signout">Sign out</button>
+      <button type="button" class="btn ghost small del-link" data-account="delete">Delete my account</button>`;
   } else if (sync.status === 'other' || sync.status === 'ask') {
     /* Signed in, but whose records are on this phone is not settled. Nothing
        has been sent to this account, and nothing will be until it is. */
@@ -9154,8 +9222,9 @@ function renderAccount() {
     const line = sync.status === 'synced' ? `Backed up ${when(sync.lastSync)}`
       : sync.status === 'error' || sync.status === 'partial' ? esc(sync.error || 'Not backed up')
       : 'Backing up…';
-    const face = u.photo
-      ? `<img src="${esc(u.photo)}" alt="" referrerpolicy="no-referrer">`
+    const photo = profilePhoto(u.photo);
+    const face = photo
+      ? `<img src="${esc(photo)}" alt="" referrerpolicy="no-referrer">`
       : avaHtml({ name: u.name || u.email || '?' });
     card.innerHTML = `<div class="account-who">${face}<div><b>${esc(u.name || 'Signed in')}</b><i>${esc(u.email || '')}</i></div></div>
       <div class="sync-line"><span class="sync-dot ${dot}"></span><span>${line}</span></div>
@@ -9164,7 +9233,7 @@ function renderAccount() {
   }
   // The privacy line says what is actually true right now.
   const where = $('dataWhere');
-  const backing = sync.user && sync.status !== 'other' && sync.status !== 'ask';
+  const backing = sync.user && sync.status !== 'other' && sync.status !== 'ask' && sync.status !== 'verify';
   if (where) where.textContent = backing
     ? 'Everything lives on this phone, and is backed up to your account. Only you can read it.'
     : 'Everything lives on this phone. Nothing is uploaded.';
@@ -9172,6 +9241,8 @@ function renderAccount() {
 
 onSync((st) => {
   renderAccount();
+  paintSignInVerify();
+  noticeBackupPaused(st);
   const err = $('signInError');
   /* Only what stopped them signing IN belongs on the sign-in form. A backup
      that skipped a long session is the account card's business. */
@@ -9180,9 +9251,20 @@ onSync((st) => {
   /* Signed in from the sign-in screen and the account had records: they are
      on the phone now, so carry on as if they had always been there. */
   paintLiveBtn();                 // a live link is refused until the records are settled
-  if (st.user && ['synced', 'partial', 'other', 'ask'].includes(st.status) && !$('scrSignIn').hidden) {
+  if (st.user && ['synced', 'partial', 'other', 'ask', 'verify'].includes(st.status) && !$('scrSignIn').hidden) {
+    /* A first launch with an unconfirmed address stays on the sign-in screen,
+       which now asks for the confirmation (paintSignInVerify). Going on to
+       onboarding made a second handler and dog beside the ones the account
+       already had, and nothing is answered until they choose. */
+    if (st.status === 'verify' && signInFirstLaunch) return;
     db.kv.set('signInAnswered', true);
     snap();
+    if (st.status === 'verify') {
+      /* The phone carries on as it is; the account card says what to do. */
+      toast('Signed in. Confirm your email to start backing up (Settings → Account)');
+      renderSettings();
+      return leaveForm('scrSettings');
+    }
     if (st.status === 'other' || st.status === 'ask') {
       /* Straight to the account card, which is where the question is asked. */
       renderSettings();
@@ -10073,6 +10155,8 @@ function wire() {
   });
   $('btnGoogle').addEventListener('click', () => signInWithGoogle());
   $('btnRecoverKeep').addEventListener('click', recoverKeep);
+  $('btnCardInGo').addEventListener('click', cardLinkGo);
+  $('btnCardInNo').addEventListener('click', cardLinkNo);
   $('btnRecoverDrop').addEventListener('click', recoverDrop);
   $('btnDeleteGo').addEventListener('click', submitDelete);
   $('btnDeleteCancel').addEventListener('click', () => { $('delPassword').value = ''; leaveForm('scrSettings'); });
@@ -10096,6 +10180,30 @@ function wire() {
     });
   }
   $('btnApple').addEventListener('click', () => signInWithApple());
+  $('btnVerifyDone').addEventListener('click', async (e) => {
+    const b = e.currentTarget;
+    b.disabled = true;
+    const ok = await checkConfirmed().catch(() => false);
+    b.disabled = false;
+    if (!ok) return toast(sync.error || 'Not confirmed yet. Tap the link in the email, then try again');
+    /* Confirmed: backing up has started, and onSync carries on from here once
+       it settles. If it could not (no signal), the app opens anyway. */
+    if ($('scrSignIn').hidden) return;
+    db.kv.set('signInAnswered', true);
+    snap();
+    if (signInFirstLaunch) return boot();
+    renderSettings();
+    leaveForm('scrSettings');
+  });
+  $('btnVerifyResend').addEventListener('click', async (e) => {
+    const b = e.currentTarget;
+    b.disabled = true;
+    const ok = await resendConfirmation().catch(() => false);
+    b.disabled = false;
+    toast(ok ? `Sent again to ${sync.user?.email || 'your address'}` : (sync.error || 'Could not send it — try again in a moment'));
+  });
+  $('btnVerifyOut').addEventListener('click', () => signOut().catch(() => {}));
+  $('homeBackupPaused').addEventListener('click', openAccountCard);
   $('btnSkipSignIn').addEventListener('click', () => {
     db.kv.set('signInAnswered', true);
     if (signInFirstLaunch) return boot();
@@ -10106,6 +10214,20 @@ function wire() {
     if (!b) return;
     if (b.dataset.account === 'signin') return openSignIn();
     if (b.dataset.account === 'delete') return openDeleteAccount();
+    if (b.dataset.account === 'resend') {
+      b.disabled = true;
+      const ok = await resendConfirmation().catch(() => false);
+      b.disabled = false;
+      return toast(ok ? `Sent again to ${sync.user?.email || 'your address'}` : (sync.error || 'Could not send it — try again in a moment'));
+    }
+    if (b.dataset.account === 'confirmed') {
+      b.disabled = true;
+      const ok = await checkConfirmed().catch(() => false);
+      b.disabled = false;
+      snap();
+      renderSettings();
+      return toast(ok ? 'Email confirmed' : (sync.error || 'Not confirmed yet. Tap the link in the email, then try again'));
+    }
     if (b.dataset.account === 'adopt') {
       const who = sync.user?.email || 'your account';
       if (!confirm(`Back up the ${S.sessions.length} sessions and ${S.dogs.length} dogs on this phone to ${who}? Do this only if they are yours.`)) return;
@@ -10175,7 +10297,7 @@ function wire() {
        to start. */
     if (sync.configured && !sync.user && sync.status === 'loading') return toast('Still connecting to your account. Try again in a moment.');
     const signedIn = !!sync.user;
-    const behind = ['syncing', 'partial', 'error', 'ask'].includes(sync.status) ? ' Not everything here has reached your account yet.' : '';
+    const behind = ['syncing', 'partial', 'error', 'ask', 'verify'].includes(sync.status) ? ' Not everything here has reached your account yet.' : '';
     const backup = signedIn
       ? ` This also signs you out. Your account backup is kept: signing in again brings it back. To delete the backup too, use Delete my account first.${behind}`
       : '';
@@ -10238,15 +10360,76 @@ async function restoreBackup(file) {
 }
 
 /* A link the camera app opened: the card is in the fragment, which never
-   left this phone. Take it, then strip it from the address so a reload does
-   not import the same trail twice and it stops trailing around in history. */
+   left this phone. Strip it from the address so a reload does not offer the
+   same trail again and it stops trailing around in history.
+
+   A link can come from anyone — a message, a web page — not only from the
+   handler's own camera. So, as a shared run already is (openShared), the
+   card is shown first: who laid it, how long, how old, and what taking it
+   will do. Nothing is saved and no run or walk starts until they say so. */
 async function importFromLink() {
   const raw = location.hash || '';
   if (!raw.startsWith('#c=')) return false;
-  const card = cardFromText(raw);
+  const text = cardFromText(raw);
   history.replaceState(null, '', location.pathname + location.search);
-  if (!card.startsWith('TC')) return false;
-  return handleCard(card);
+  if (!text.startsWith('TC')) return false;
+  let card;
+  try { card = await decodeTrail(text); }
+  catch (err) { toast(err.message); return false; }
+  /* Still on Home: they may have moved on while the card was being read. */
+  if (currentScreen !== 'scrHome') return false;
+  offerCardLink(text, card);
+  return true;
+}
+
+let cardLinkText = null;   // the card on the screen below, until it is taken or turned down
+
+function offerCardLink(text, card) {
+  cardLinkText = text;
+  const who = card.from || 'someone';
+  const len = fmtKm(pathLen(card.points));
+  const had = card.kind === 0 && db.sessions().find(x => sameCard(x, card));
+  $('cardInHead').textContent = card.kind === 1 ? `A plan from ${who}`
+    : card.kind === 2 ? `A walked trail from ${who}` : `A trail laid by ${who}`;
+  $('cardInWhat').textContent = card.kind === 1 ? `${len} line to walk.`
+    : card.kind === 2 ? `${len}, walked ${fmtWhen(card.started)} (${when(card.started)}).`
+      : `${len}, laid ${fmtWhen(card.started)} (${when(card.started)})${card.drawn ? ', drawn on a map' : ''}.`;
+  /* The same choice Go will make, so the note says what will really happen:
+     which plan's line is replaced, or that none can be. */
+  const pick = card.kind === 2 ? walkedPlanFor(card, waitingPlans(), null, { askAlways: true }) : null;
+  const named = pick?.ask?.length === 1 ? sessionById(pick.ask[0]) : null;
+  const dog = named && S.dogs.find(d => d.id === named.dogId)?.name;
+  $('cardInNote').textContent = had
+    ? (had.data.track ? 'This trail is already on this phone.' : 'This trail is already on this phone, not run yet.')
+    : card.kind === 1 ? 'Walking it starts a guided walk along the line, using this phone’s location.'
+      : card.kind === 2 ? walkedNote(pick, named, dog)
+        : 'Running it adds it to your sessions and starts the run, using this phone’s location.';
+  $('btnCardInGo').textContent = had ? (had.data.track ? 'Open it' : 'Run it')
+    : card.kind === 1 ? 'Walk this plan' : card.kind === 2 ? 'Use this walk' : 'Run this trail';
+  /* A walk with no plan here to go to has nothing to do: only Not now. */
+  $('btnCardInGo').hidden = card.kind === 2 && !pick?.ask?.length && !pick?.id;
+  go('scrCardIn');
+}
+
+/** What taking a walked card from a link will do, from walkedPlanFor's pick. */
+function walkedNote(pick, named, dog) {
+  if (pick?.why === 'other') return 'This walk is for a plan that is not on this phone, so there is nothing to use it for.';
+  if (!pick?.ask?.length && !pick?.id) return 'No plan on this phone is waiting for a walk, so there is nothing to use it for.';
+  if (named) return `Using it replaces the line of ${dog ? `${dog}’s` : 'the'} plan from ${fmtWhen(named.startedAt)} with this walk, and re-grades any run on it. You will be asked to confirm.`;
+  return 'Using it replaces the line of a plan on this phone with this walk, and re-grades any run on that plan. You will be asked which plan.';
+}
+
+function cardLinkGo() {
+  const text = cardLinkText;
+  cardLinkText = null;
+  if (!text) return leaveForm('scrHome');
+  go('scrHome');
+  handleCard(text, { fromLink: true });
+}
+
+function cardLinkNo() {
+  cardLinkText = null;
+  leaveForm('scrHome');
 }
 
 /* ── Boot ─────────────────────────────────────────────────────────── */
