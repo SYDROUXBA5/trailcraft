@@ -32,7 +32,8 @@ import { sync, onSync, initSync, signInWithGoogle, signInWithApple, signOut, del
          startLive, pushLive, endLive, watchLive, resumeLive, dropLive } from './sync.js';
 import { trailModel, encodeShared, decodeShared, sharedUrl, toGpx, fileBase,
          detailSections, headline, notes, liveMeta, liveModel, cleanResult,
-         resultSentence, sessionFromModel, keptSession, peopleOf, parseGpx, blindSummary, GPX_MAX_BYTES } from './share.js';
+         resultSentence, sessionFromModel, keptSession, peopleOf, parseGpx, gpxTracks, blindSummary, GPX_MAX_BYTES } from './share.js';
+import { dogTrackCheck, dogTrackPatch, dogTrackOf, dogAt, dogTrackUntil, fitDogTrack, DOG_TRACK_GONE, DOG_GPS_ACC_M, DOG_NOISE_FLOOR_M } from './dogtrack.js';
 import { buildPdf, jpegSize } from './pdf.js';
 import { coachStep, initialCoach, coachPhrase, coachLine, TOL_OPTIONS, COACH_DEFAULTS,
          rankVoices, pickVoice, voiceQuality, voiceLabel, voiceRate, voiceName, voiceAccent, voiceHint, speaksThroughWebKit, speechLang, SAMPLE_CALL,
@@ -63,7 +64,7 @@ import { searchWords, logRows, recentRuns, runAt, midnight, facets, filterRows, 
          cleanFolderName, putMany, toggleFolder, renameIn, dropFrom, mergeFolders, emptyHeld, folderPatch } from './log.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-10-19a';
+const BUILD = '2026-10-21a';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true,
@@ -542,7 +543,7 @@ function setMapStyle(key) {
 const EMPTY = { type: 'FeatureCollection', features: [] };
 let map, mapReady = false;
 let GL = mapboxgl;   // every control/bounds must come from the SAME library
-const srcData = { runner: EMPTY, steps: EMPTY, dog: EMPTY, paws: EMPTY, wps: EMPTY, drift: EMPTY, start: EMPTY, hides: EMPTY, contam: EMPTY, plan: EMPTY, nose: EMPTY,
+const srcData = { runner: EMPTY, steps: EMPTY, dog: EMPTY, handler: EMPTY, paws: EMPTY, wps: EMPTY, drift: EMPTY, start: EMPTY, hides: EMPTY, contam: EMPTY, plan: EMPTY, nose: EMPTY,
                   fix: EMPTY, fixEnds: EMPTY, bandWall: EMPTY,
                   routeDone: EMPTY, routeAhead: EMPTY, puck: EMPTY, scent: EMPTY, contamScent: EMPTY, wind: EMPTY,
                   flow: EMPTY, flowPulse: EMPTY, air: EMPTY, acc: EMPTY };
@@ -758,6 +759,11 @@ function addOverlays() {
                   'icon-rotation-alignment': 'map', 'icon-pitch-alignment': 'map',
                   'icon-allow-overlap': true, 'icon-ignore-placement': true },
         paint: { 'icon-color': '#F5D14A', 'icon-halo-color': '#0B1630', 'icon-halo-width': 1.4, 'icon-opacity': 0.98 } });
+  /* The handler's own walk, drawn only when the dog's own GPS track is the
+     dog's line (dogtrack.js): thin and pale under it, to compare with. */
+  add({ id: 'handler-line', type: 'line', source: 'handler',
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: { 'line-color': '#FFFFFF', 'line-width': 2, 'line-opacity': 0.6 } });
   add({ id: 'dog-casing', type: 'line', source: 'dog',
         layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: { 'line-color': '#0B1630', 'line-width': 8, 'line-opacity': 0.55 } });
@@ -3186,7 +3192,7 @@ function openReplay(s) {
   paintMarkTools();
 
   go('scrReplay');
-  fitTo(s.data.trail || s.data.hides || [], track, s.data.planTrail || []);
+  fitTo(s.data.trail || s.data.hides || [], track, dogTrackOf(s.data) || [], s.data.planTrail || []);
   paintReplay();
 }
 
@@ -3249,9 +3255,17 @@ function paintReplay() {
   // The dog's track, only as far as it had got by then.
   let i = 0;
   while (i < track.length && track[i].t <= at) i++;
-  const sofar = track.slice(0, Math.max(2, i));
+  const handlerSofar = track.slice(0, Math.max(2, i));
+  /* With the dog's own GPS track, that is the dog's line, and the phone's
+     is the handler's walk, drawn thin beside it. */
+  const dogPts = dogTrackOf(s.data);
+  const sofar = dogPts ? dogTrackUntil(dogPts, at) : handlerSofar;
   setDogTrack(sofar);
-  setSrc('nose', pointsOf([sofar[sofar.length - 1]]));
+  setSrc('handler', dogPts ? lineOf(handlerSofar) : EMPTY);
+  /* Before a collar's first fix (one switched on after Start) the dog has
+     no place yet: no nose, and no distance from the line said for it. */
+  const here = sofar.length ? sofar[sofar.length - 1] : null;
+  setSrc('nose', here ? pointsOf([here]) : EMPTY);
 
   // Marks appear when they were pressed, not before. Being placed, all of them show.
   setSrc('wps', pointsOf(marksOf(s).filter(w => replay.mark || w.t <= at), 'kind'));
@@ -3273,8 +3287,7 @@ function paintReplay() {
   }
 
   const ageMin = Math.max(0, Math.round((at - s.startedAt) / 60000));
-  const here = sofar[sofar.length - 1];
-  const off = s.data.trail?.length > 1
+  const off = here && s.data.trail?.length > 1
     ? signedOffsets(s.data.trail, [here]).filter(Number.isFinite)[0] : null;
   $('repHudText').textContent = fmtDur(at - replay.from);
   const laid = targetById(s.targetId).kind === 'hide' ? 'Hides' : 'Trail';
@@ -3444,16 +3457,20 @@ function clipHost(s) {
   /* The level a team has earned, never the one it was only placed at. */
   const lv = kind === 'person' && dog ? levelOf(dog, s.handlerId) : null;
   const track = s.data.track;
+  /* The dog's own GPS track, when it has one, is the route the video draws
+     and measures; the handler's walk goes thin beside it. */
+  const dogPts = dogTrackOf(s.data);
+  const route = dogPts ?? track;
   const hidden = withoutAnswer(s);
   const day = (t) => new Date(t).toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' });
   const dp = trackPalette(settings.dogColor);
   return {
     from: replay.from, to: replay.to,
-    points: [track, s.data.trail, s.data.hides, s.data.planTrail].filter(Array.isArray).flat()
+    points: [track, dogPts, s.data.trail, s.data.hides, s.data.planTrail].filter(Array.isArray).flat()
       .filter(p => Number.isFinite(p?.lat) && Number.isFinite(p?.lon)),
     reveal: answerPlan(s, kind),
     revealWords: kind === 'hide' ? 'Where the hides were' : 'The laid trail',
-    lines: clipLines({ dog: name, track, level: lv && proven(lv) ? earnedName(lv) : null, imperial: imp(), day }),
+    lines: clipLines({ dog: name, track: route, level: lv && proven(lv) ? earnedName(lv) : null, imperial: imp(), day }),
     closing: clipClosing(s, { dog: name, units: unitsForText(), kind }),
     /* The credit the live map is showing, read off it, and Mapbox's
        wordmark with it, out of the map's own stylesheet. */
@@ -3463,7 +3480,8 @@ function clipHost(s) {
       ? cssUrl(getComputedStyle($('map').querySelector('.mapboxgl-ctrl-logo')).backgroundImage) : null,
     /* The route again, for the video to draw over the laid trail's scent
        and footprints, which the map puts on top of it. */
-    route: () => track,
+    route: () => route,
+    route2: () => (dogPts ? track : null),
     dog: { colour: dp.base, casing: dp.casing },
     answer(show) {
       const was = replay.s;
@@ -3734,6 +3752,11 @@ function paintMarkTools() {
   $('repEdit').hidden = !s || !marksEditable(sessionById(s.id) ?? s);
   $('repClip').hidden = !clipOffered({ run: s?.data?.track?.length > 1, marking: !!m });
   $('repEditRow').hidden = !!m || !s || ($('repEdit').hidden && $('repClip').hidden);
+  /* The dog's own GPS track, from the replay too: where the handler sees
+     how far the estimate of the dog was from where it really went. Taken
+     off from the result card, where it says what the run is graded on. */
+  const now = s && (sessionById(s.id) ?? s);
+  $('repDogRow').hidden = !!m || !now || !dogTrackable(now) || !!dogTrackOf(now.data);
   paintMarkList();
 }
 
@@ -4724,7 +4747,10 @@ function saveContam() {
   const points = contamTimed(s.data.trail, contam.pts, order);
   const laidAt = points[0]?.t ?? Date.now();
   const list = [...(s.data.contamination || []), { who, order, laidAt, points }];
-  db.updateSession(s.id, { data: { contamination: list } });
+  /* Thinned, never dropped, here: the run's grade was made on the dog's
+     track and nothing is graded again when contamination is added. */
+  const refit = refitDogTrack(patchSession(s, { data: { contamination: list } }));
+  db.updateSession(s.id, { data: { contamination: list, ...(refit?.dogTrack ? refit : {}) } });
   snap();
   closeContam();
   pendingSession = db.sessions().find(x => x.id === s.id);
@@ -5179,10 +5205,17 @@ async function applyLine(sessionId, line) {
   for (const q of check.ask) if (!confirm(q)) return false;
 
   const patch = linePatch(s, line, Date.now());
+  /* The line makes the session bigger: a dog's track kept on a blind trail
+     is thinned to leave it room, or, when there is none, left off and the
+     run graded on the phone, rather than a run that never syncs again. */
+  const refit = refitDogTrack(patchSession(s, patch));
+  if (refit) patch.data = { ...patch.data, ...refit };
+  const dogTrackDropped = !!refit && refit.dogTrack === null;
   /* The layer's watch left running at the hide, or on the walk back, is
      common: what it recorded after the dog set off is left out, and said. */
   const cutWords = check.cut > 0 ? ' Only the part recorded before the dog set off is used.' : '';
-  toast((line.via === 'gpx' ? 'Laid trail added from the file. Grading the run…' : `Laid trail added from ${line.from || 'the layer'}’s card. Grading the run…`) + cutWords);
+  toast((line.via === 'gpx' ? 'Laid trail added from the file. Grading the run…' : `Laid trail added from ${line.from || 'the layer'}’s card. Grading the run…`) + cutWords
+    + (dogTrackDropped ? ' The dog’s track no longer fits beside it, so the run is graded on the phone’s track.' : ''));
   /* Graded on the lined copy in memory first, and the line saved with its
      grade in one go. Saved apart, a grade that failed or was cut short left
      a run with a line and no result: no longer waiting for its line, so
@@ -5234,6 +5267,200 @@ async function takeGpxFile(sessionId, file) {
     return toast(e?.plain ? e.message : 'Could not read that file.');
   }
   await applyLine(sessionId, line);
+}
+
+/* ── The dog's own GPS track, imported after the run ──────────────────
+   The phone records the handler, and the grade has only ever had an
+   estimate of the dog a line ahead (lineCorrect). A GPS collar records the
+   dog: Garmin Explore exports its track as a GPX file, usually with the
+   handheld's walk and every dog's collar in it as named tracks. The dog's
+   is picked, cut to this run's clock and kept on the session (dogtrack.js),
+   and the run is graded again on it as a felt wind grades it again
+   (regradeInWind): in the same queue, banked only when teachesDrift allows,
+   and what it banked before put right rather than added to. */
+
+/** Whether a dog's track can be imported for (or taken off) a session: a
+    kept run of this phone's own with a run recorded. Never one kept from
+    someone else's link, which stays as they sent it, and never while a
+    recording is going, which a re-grade must not reach into. */
+const dogTrackable = (s) => !!s && !rec.on && ownRun(s) && s.data?.track?.length > 1
+  && db.sessions().some(x => x.id === s.id);
+
+/** One line per track for the picker: what tells a handheld from a collar,
+    and one collar from another. */
+function dogPickFacts(tr) {
+  const when = tr.timed ? `started ${fmtWhen(tr.startT)}` : 'no times';
+  return `${tr.count} points · ${when} · ${fmtKm(tr.lengthM)}`;
+}
+
+/* The picker's answer, while it is open. */
+let dogPickDone = null;
+
+/** Ask which of a file's tracks is the dog's. Resolves to the track, or to
+    null when the handler cancels. */
+function pickDogTrack(tracks) {
+  dogPickDone?.(null);
+  return new Promise((resolve) => {
+    const back = document.activeElement;
+    dogPickDone = (v) => {
+      dogPickDone = null;
+      $('dogPick').hidden = true;
+      $('dogPickList').textContent = '';
+      back?.focus?.({ preventScroll: true });
+      resolve(v);
+    };
+    /* Only the file's own words go in escaped: a track name is a stranger's text. */
+    $('dogPickList').innerHTML = tracks.map((tr, i) =>
+      `<button type="button" class="dog-pick-opt" data-pick="${i}"><b>${esc(tr.name || `Track ${tr.index + 1}`)}</b>`
+      + `<span>${esc(dogPickFacts(tr))}</span></button>`).join('');
+    $('dogPickList').onclick = (e) => {
+      const b = e.target.closest('[data-pick]');
+      if (b) dogPickDone?.(tracks[Number(b.dataset.pick)] ?? null);
+    };
+    $('dogPick').hidden = false;
+    $('dogPickTitle').focus({ preventScroll: true });
+  });
+}
+
+/** A GPX file picked for the dog's track: read, the dog's track picked when
+    there is more than one, checked against the run, and put on it. */
+async function takeDogTrackFile(sessionId, file) {
+  if (!file || !sessionId) return;
+  if (rec.on) return toast('Finish the recording first.');
+  if (file.size > GPX_MAX_BYTES) return toast('That file is too big to read on a phone. Export just the one walk or run, then try again.');
+  let tracks;
+  try {
+    tracks = gpxTracks(await file.text());
+  } catch (e) {
+    return toast(e?.plain ? e.message : 'Could not read that file.');
+  }
+  const picked = tracks.length === 1 ? tracks[0] : await pickDogTrack(tracks);
+  if (!picked) return;
+  await applyDogTrack(sessionId, picked, String(file.name || '').replace(/\.gpx$/i, ''));
+}
+
+/** Put a picked track on a run as the dog's, and grade the run again on it. */
+async function applyDogTrack(sessionId, picked, fileName = '') {
+  const s = db.sessions().find(x => x.id === sessionId);
+  if (!dogTrackable(s)) return toast('The dog’s track can only go on a run recorded on this phone.');
+  let check;
+  try {
+    check = dogTrackCheck(s.data, picked, { fmtM: (m) => fmtM(m) });
+  } catch (e) {
+    return toast(e?.plain ? e.message : 'Could not use that track.');
+  }
+  for (const q of check.ask) if (!confirm(q)) return;
+  const points = fitDogTrack(s, check.points, { lineToCome: noLineYet(s.data) });
+  if (!points) return toast('This run is too big to sync with the dog’s track on it as well, so it was not added.');
+  const graded = !!s.data.result && !noLineYet(s.data);
+  toast(graded ? 'Dog’s track imported. Grading the run on it…' : 'Dog’s track imported.');
+  const now = await regradeDogTrack(s.id, dogTrackPatch(points, picked.name || fileName, Date.now())).catch(() => null);
+  if (!now) return toast('Couldn’t grade the run on the dog’s track, so it was not added. Try again.');
+  /* The handheld's clock and the run's rarely agree to the second: what
+     fell outside the run is left out, and said. */
+  const cut = check.cut ? ' Only the part recorded during the run is used.' : '';
+  toast((graded ? 'Dog’s track imported. The run is graded on it.' : noLineYet(now.data)
+    ? 'Dog’s track imported. The run is graded on it once the laid trail is added.' : 'Dog’s track imported.') + cut);
+  dogTrackShown(now);
+}
+
+/** Take the dog's track off a run, and grade it again on the phone's. */
+async function removeDogTrack(sessionId) {
+  const s = db.sessions().find(x => x.id === sessionId);
+  if (!dogTrackable(s) || !s.data.dogTrack) return;
+  if (!confirm('Remove the dog’s track? The run is graded again on the phone’s track.')) return;
+  const now = await regradeDogTrack(s.id, { ...DOG_TRACK_GONE }).catch(() => null);
+  if (!now) return toast('Couldn’t remove the dog’s track. Try again.');
+  toast('Dog’s track removed');
+  dogTrackShown(now);
+}
+
+/* In the felt wind's queue: a track imported while a wind is being graded
+   in must land on that grade, not race it. */
+function regradeDogTrack(id, data) {
+  const job = feltQueue.then(() => regradeOnDogTrack(id, data));
+  feltQueue = job.catch(() => null);
+  return job;
+}
+
+/** A kept run with its dog's track put on or taken off, graded again and
+    saved with it in one go, as regradeInWind does: saved apart, a grade
+    that failed left a track on a run graded without it. */
+async function regradeOnDogTrack(id, data) {
+  const waiting = saveTrouble?.session?.id === id ? saveTrouble.session : null;
+  const s = waiting ?? db.sessions().find(x => x.id === id);
+  if (!dogTrackable(s)) return null;
+  /* A blind trail with no line, or a run never graded, has no grade to
+     redo: the track is kept, and the grade made on it when there is one. */
+  if (noLineYet(s.data) || !s.data.result) {
+    const now = keepPatch(s, { data });
+    if (run.session?.id === id) run.session = now;
+    return now;
+  }
+  const s2 = patchSession(s, { data });
+  const ind = (s.data.trackWaypoints || []).find(w => w.kind === 'Indication');
+  const old = s.data.result;
+  const firstAt = ind && Number.isFinite(old.toFirst) ? ind.t - old.toFirst : s.data.trackStarted;
+  const { runWeather, windFelt, ...result } = await computeResult(s2, s2.data.track, s2.data.trackWaypoints || [],
+    s2.data.trackStarted, { bank: teachesDrift(s2.data), rebank: true, firstAt });
+  const now = keepPatch(s, { summary: result.sentence, data: { ...data, windFelt, result, ...(runWeather ? { runWeather } : {}) } });
+  if (run.session?.id === id) run.session = now;
+  return now;
+}
+
+/** Whatever is showing the run drawn again with its track on or off, and
+    its level read again: coverage and the find are measured on it. */
+function dogTrackShown(now) {
+  if (pendingSession?.id === now.id) pendingSession = now;
+  if (currentScreen === 'scrResult' && (run.session ?? pendingSession)?.id === now.id) renderResult(now);
+  if (currentScreen === 'scrReplay' && replay.s?.id === now.id && !replay.mark && !clipUi.job) {
+    replay.s = now;
+    paintReplay();
+    paintMarkTools();
+  }
+  runLevelled(now);
+}
+
+/** The result card's box for the dog's track: what the run is graded on,
+    and the way to import or remove it. */
+function paintDogTrack(s) {
+  const can = dogTrackable(s);
+  const pts = dogTrackOf(s?.data);
+  const from = s?.data?.dogTrackFrom?.name ? ` (${s.data.dogTrackFrom.name})` : '';
+  const r = s?.data?.result;
+  /* A search whose indication the collar's track did not reach was measured
+     at the handler's mark, and says so. */
+  const missed = r?.kind === 'search' && Number.isFinite(r.toFirst) && !r.dogTrack
+    ? ' It does not reach the indication, so the catch is measured at the handler’s mark.' : '';
+  const said = !pts ? (r?.dogTrack === true
+    /* A run kept from a link: graded on a collar the link did not carry. */
+    ? 'Graded on the dog’s own GPS track, which this link does not carry; the line shown is the handler’s phone.' : '')
+    : noLineYet(s.data) ? `The dog’s GPS track${from} is kept with the run: ${fmtKm(pathLen(pts))}. The run is graded on it once the laid trail is added.`
+    : r?.dogTrack ? `Graded on the dog’s GPS track${from}: ${fmtKm(pathLen(pts))}.`
+    : `The dog’s GPS track${from}: ${fmtKm(pathLen(pts))}.${missed}`;
+  $('dogTrackBox').hidden = !can && !said;
+  $('dogTrackSaid').textContent = said;
+  $('dogTrackSaid').hidden = !said;
+  $('btnDogTrack').hidden = !can || !!pts;
+  $('dogTrackHint').hidden = !can || !!pts;
+  $('btnDogTrackOff').hidden = !can || !pts;
+}
+
+/** A session grown since its dog's track was imported (a laid line, a
+    contamination trail) thinned to still sync as one document: fitted at
+    import, the track left too little room for what came after, and the
+    whole run stopped syncing (sync.js tooBig). Returns the patch for the
+    track ({ dogTrack, dogTrackFrom }), DOG_TRACK_GONE when even a few
+    hundred points no longer fit, or null when nothing needs to change.
+    `grown` is the session as it will be saved. */
+function refitDogTrack(grown) {
+  const pts = dogTrackOf(grown?.data);
+  if (!pts) return null;
+  const fit = fitDogTrack(grown, pts);
+  if (fit === pts) return null;
+  if (!fit) return { ...DOG_TRACK_GONE };
+  const from = grown.data.dogTrackFrom || {};
+  return dogTrackPatch(fit, from.name, Number.isFinite(from.importedAt) ? from.importedAt : Date.now());
 }
 
 /* ── The wind on the ground ───────────────────────────────────────────
@@ -5944,12 +6171,22 @@ async function computeResult(s, track, wps, startedAt, { bank = true, rebank = f
   const st = stability(wx?.soil_temp, wx?.temp);
   const trusted = windTrusted(felt);
 
-  if (t.kind === 'hide') return { ...searchResult(s, track, wps, startedAt, wx, dogName, ageMin, firstAt), runWeather, windFelt: felt };
+  /* The dog's own track, when one was imported for this run. The run's
+     clock (when it began, when it ended) is still the phone's. */
+  const dogPts = dogTrackOf(s.data);
+  const onDog = dogPts ? { dogTrack: true } : {};
+
+  /* A search says it was graded on the dog's track only when the track
+     reached the indication (searchResult): otherwise the catch was measured
+     at the handler's mark, and the result must not claim the collar. */
+  if (t.kind === 'hide') return { ...searchResult(s, track, wps, startedAt, wx, dogName, ageMin, firstAt, dogPts), runWeather, windFelt: felt };
 
   const trail = s.data.trail;
   /* The phone's track, projected a line-length ahead: an ESTIMATE of where
-     the dog was, never a measurement. It is called the track throughout. */
-  const corrected = lineCorrect(track, dogRow?.lineM ?? 0);
+     the dog was, never a measurement. It is called the track throughout.
+     With the dog's own GPS track (dogtrack.js) there is nothing to estimate:
+     the collar was on the dog, so no line-length is added. */
+  const corrected = dogPts ?? lineCorrect(track, dogRow?.lineM ?? 0);
   /* Only where there is a line beside the dog: before the start or past the
      end a fix has no side (signedOffsets). */
   const offs = signedOffsets(trail, corrected, { withinEnds: true });
@@ -5957,9 +6194,16 @@ async function computeResult(s, track, wps, startedAt, { bank = true, rebank = f
   const medAbs = medianAbs(offs);
   const shares = sideShares(corrected, offs, { deadM: 3 });
   const accs = track.map(p => p.acc).filter(Number.isFinite).sort((a, b) => a - b);
-  const accMed = accs.length ? accs[accs.length >> 1] : null;
-  // A sideways difference smaller than the GPS's own uncertainty is not readable.
-  const noisy = Number.isFinite(accMed) && Number.isFinite(medAbs) && accMed > Math.max(5, medAbs);
+  /* A collar's GPX says nothing of its accuracy, so the one a collar has in
+     the open stands for it: a difference inside that is still not read. */
+  const accMed = dogPts ? DOG_GPS_ACC_M : accs.length ? accs[accs.length >> 1] : null;
+  /* A sideways difference smaller than the GPS's own uncertainty is not
+     readable. On the dog's own track that is a dog mostly inside the dead
+     band no fix is given a side in (DOG_NOISE_FLOOR_M): measured against a
+     fixed collar figure instead, every dog working close to the line was
+     "can't read which side", and banked nothing. */
+  const noisy = Number.isFinite(medAbs) && (dogPts ? medAbs < DOG_NOISE_FLOOR_M
+    : Number.isFinite(accMed) && accMed > Math.max(5, medAbs));
   const mainSide = !shares ? null : shares.left > shares.right * 1.25 ? 'left' : shares.right > shares.left * 1.25 ? 'right' : null;
 
   // The model's predicted side, point by point, then by majority.
@@ -6055,18 +6299,20 @@ async function computeResult(s, track, wps, startedAt, { bank = true, rebank = f
        dial that was not where it shipped, and is absent on every normal run.
        Without these a result cannot be reproduced, and a picture that cannot
        be reproduced is not a record of anything. */
-    mv: BUILD, ...(offBaseline ? { mp: moved } : {}),
+    mv: BUILD, ...(offBaseline ? { mp: moved } : {}), ...onDog,
     /* Not part of the result: the caller keeps them beside it. */
     runWeather, windFelt: felt,
   };
 }
 
-function searchResult(s, track, wps, startedAt, wx, dogName, ageMin, firstAt = rec.started) {
+/* `dogPts` is the dog's own GPS track, when the run has one: the catch and
+   the approach are then where the dog was, not the handler a line behind. */
+function searchResult(s, track, wps, startedAt, wx, dogName, ageMin, firstAt = rec.started, dogPts = null) {
   const hides = s.data.hides || [];
   const ind = wps.find(w => w.kind === 'Indication');
   const st = stability(wx?.soil_temp, wx?.temp);
 
-  let sentence, toFirst = null, catchM = null, approach = null;
+  let sentence, toFirst = null, catchM = null, approach = null, dogHere = null;
   if (!ind) {
     /* How long the track itself lasted, never the clock on the wall: a run
        kept after a crash is graded hours later, and the time the app lay
@@ -6078,14 +6324,17 @@ function searchResult(s, track, wps, startedAt, wx, dogName, ageMin, firstAt = r
       : `${dogName} searched — no indication marked.`;
   } else {
     toFirst = ind.t - firstAt;
+    dogHere = dogPts ? dogAt(dogPts, ind.t) : null;
+    const at = dogHere || ind;
     const nearest = hides.reduce((best, h) => {
-      const d = dist(ind, h);
+      const d = dist(at, h);
       return !best || d < best.d ? { h, d } : best;
     }, null);
     catchM = nearest ? Math.round(nearest.d) : null;
     // Approach direction over the last ~20 m into the indication.
-    const idx = track.findIndex(p => p.t >= ind.t);
-    const path = track.slice(0, idx < 0 ? track.length : idx + 1);
+    const way = dogHere ? dogPts : track;
+    const idx = way.findIndex(p => p.t >= ind.t);
+    const path = way.slice(0, idx < 0 ? way.length : idx + 1);
     let back = path.length - 1;
     while (back > 0 && dist(path[back], path[path.length - 1]) < 20) back--;
     /* Not in a wind the handler felt swirling or calm: into or with a wind
@@ -6094,14 +6343,15 @@ function searchResult(s, track, wps, startedAt, wx, dogName, ageMin, firstAt = r
       approach = approachToWind(bearing(path[back], path[path.length - 1]), wx.wind_direction);
     }
     sentence = `${dogName} indicated in ${fmtDur(toFirst)}`
-      + (catchM != null ? `, ${ind.approx ? 'roughly ' : ''}${fmtM(catchM)} from the hide` : '')
-      + (catchM != null && ind.approx ? ' (the GPS had dropped out)' : '')
+      + (catchM != null ? `, ${ind.approx && !dogHere ? 'roughly ' : ''}${fmtM(catchM)} from the hide` : '')
+      + (catchM != null && ind.approx && !dogHere ? ' (the GPS had dropped out)' : '')
       + (approach ? `, coming ${approach}.` : '.');
   }
   return {
     /* approachV marks a result whose approach is the right way round, so the
        store never swaps it back (healApproach). */
-    kind: 'search', sentence, toFirst, catchM, catchApprox: !!ind?.approx, approach, approachV: APPROACH_V, ageMin,
+    kind: 'search', sentence, toFirst, catchM, catchApprox: !!ind?.approx && !dogHere, approach, approachV: APPROACH_V, ageMin,
+    ...(dogHere ? { dogTrack: true } : {}),
     stability: st?.label ?? null, stabilityPlain: st?.plain ?? null,
     wind: wx ? { speed: wx.wind_speed, from: wx.wind_direction } : null,
   };
@@ -6182,6 +6432,7 @@ function renderResult(s) {
   /* The way to add the line, on a run of this phone's own only: one kept
      from someone else's link is theirs, as they sent it. */
   $('addLineBox').hidden = !(awaiting && ownRun(s) && s.data.track?.length > 1);
+  paintDogTrack(s);
   $('addLineHow').hidden = true;
   $('btnAddLine').setAttribute('aria-expanded', 'false');
 
@@ -6315,10 +6566,12 @@ function showOnMap(from = 'scrResult') {
     setSrc('hides', pointsOf(s.data.hides));
   }
   if (s.data.track) {
-    setDogTrack(s.data.track);
+    const dogPts = dogTrackOf(s.data);
+    setDogTrack(dogPts ?? s.data.track);
+    if (dogPts) setSrc('handler', lineOf(s.data.track));
     setSrc('wps', pointsOf(marksOf(s), 'kind'));
   }
-  fitTo(s.data.trail || s.data.hides || [], s.data.track || [], s.data.planTrail || []);
+  fitTo(s.data.trail || s.data.hides || [], s.data.track || [], dogTrackOf(s.data) || [], s.data.planTrail || []);
   const planShown = s.data.planTrail?.length > 1;
   $('showMapText').textContent = noLine
     ? (s.data.found === true ? 'The dog’s route, ending at the find. No laid trail added yet.' : 'The dog’s route. No laid trail added yet.')
@@ -6512,6 +6765,13 @@ let sharedModel = null, sharedSession = null, sharedFrom = null;
 function modelOf(s) {
   return trailModel(s, peopleFor(s));
 }
+/** A record as a file is made of it (GPX, PDF): the model, and the dog's own
+    GPS track beside it. Not in the model itself, which is also what a link
+    carries, and a link has no room for a second track. */
+function fileModelOf(s) {
+  const dogTrack = dogTrackOf(s?.data);
+  return dogTrack ? { ...modelOf(s), dogTrack, dogTrackFrom: s.data.dogTrackFrom ?? null } : modelOf(s);
+}
 /** Who a record belongs to: this phone's people, or a kept run's own names. */
 function peopleFor(s) {
   return peopleOf(s, { dogs: S.dogs, handlers: S.handlers, layers: S.layers, me: S.handler });
@@ -6603,14 +6863,18 @@ async function saveGpx(m) {
 const RPT_W = 600, RPT_H = 340;
 const INKC = [0.059, 0.122, 0.239];
 async function reportMap(m) {
-  const all = [m.trail, m.hides, m.track, ...m.contamination.map(c => c.points)].filter(Boolean).flat();
+  const all = [m.trail, m.hides, m.track, m.dogTrack, ...m.contamination.map(c => c.points)].filter(Boolean).flat();
   if (!all.length) return null;
   const view = miniView(all.length > 1 ? all : [all[0], all[0]], RPT_W, RPT_H);
   const at = (p) => { const [x, y] = view.at(p); return [x / RPT_W, y / RPT_H]; };
   const paths = [], dots = [];
   m.contamination.forEach(c => paths.push({ pts: c.points.map(at), stroke: [0.78, 0.72, 0.91], width: 1.8, dash: [3, 3] }));
   // The dog's track under the trail: where they overlap, the line that was laid must still show.
-  if (m.track) paths.push({ pts: m.track.map(at), stroke: [1, 1, 1], casing: INKC, width: 2.2 });
+  /* With the dog's own GPS track, that is the dog's line, and the handler's
+     walk goes thin and grey under it. */
+  if (m.track) paths.push(m.dogTrack ? { pts: m.track.map(at), stroke: [0.72, 0.76, 0.82], width: 1.2 }
+    : { pts: m.track.map(at), stroke: [1, 1, 1], casing: INKC, width: 2.2 });
+  if (m.dogTrack) paths.push({ pts: m.dogTrack.map(at), stroke: [1, 1, 1], casing: INKC, width: 2.2 });
   if (m.trail) paths.push({ pts: m.trail.map(at), stroke: [0.96, 0.82, 0.29], casing: INKC, width: 2.6,
     dash: unwalkedPlan(m) ? [4, 3] : null });
   (m.hides ?? []).forEach(h => { const [x, y] = at(h); dots.push({ x, y, fill: [0.79, 0.6, 0.18], r: 4.5 }); });
@@ -9671,7 +9935,7 @@ function wire() {
     openSessionList({ deleting: true });
   });
   $('saveLink').addEventListener('click', () => saveTrouble?.session && sendLink(modelOf(saveTrouble.session)));
-  $('saveGpx').addEventListener('click', () => saveTrouble?.session && saveGpx(modelOf(saveTrouble.session)));
+  $('saveGpx').addEventListener('click', () => saveTrouble?.session && saveGpx(fileModelOf(saveTrouble.session)));
   // A save that fails somewhere unguarded (a weather update, a preference) still gets said.
   const netSave = (e) => { const err = e.reason ?? e.error; if (err?.name === 'SaveError') { e.preventDefault?.(); saveTrouble = { session: null, retry: null, err }; showSaveTrouble(err); } };
   window.addEventListener('unhandledrejection', netSave);
@@ -9765,8 +10029,8 @@ function wire() {
   $('btnShareMore').addEventListener('click', () => pendingSession && openShareOut(pendingSession, 'scrShare'));
   $('btnShareOutBack').addEventListener('click', () => leaveForm(shareOutFrom));
   $('btnSendLink').addEventListener('click', () => shareOutSession && sendLink(modelOf(shareOutSession)));
-  $('btnSaveGpx').addEventListener('click', () => shareOutSession && saveGpx(modelOf(shareOutSession)));
-  $('btnSavePdf').addEventListener('click', () => shareOutSession && savePdf(modelOf(shareOutSession)));
+  $('btnSaveGpx').addEventListener('click', () => shareOutSession && saveGpx(fileModelOf(shareOutSession)));
+  $('btnSavePdf').addEventListener('click', () => shareOutSession && savePdf(fileModelOf(shareOutSession)));
   $('btnSharedMap').addEventListener('click', () => { if (sharedSession) { pendingSession = sharedSession; showOnMap('scrShared'); } });
   $('btnSharedGpx').addEventListener('click', () => sharedModel && saveGpx(sharedModel));
   $('btnSharedPdf').addEventListener('click', () => sharedModel && savePdf(sharedModel));
@@ -10044,6 +10308,31 @@ function wire() {
   $('repCancel').addEventListener('click', cancelMarking);
   $('repPlay').addEventListener('click', () => (replay.playing ? replayPause() : replayPlay()));
   $('repClip').addEventListener('click', openClip);
+  /* The dog's own GPS track: one file box for the result and the replay,
+     and the session it was opened for, so a file picked late cannot land
+     on whichever run is on screen by then. */
+  let dogFileFor = null;
+  const askDogFile = (s) => {
+    if (!dogTrackable(s)) return toast('The dog’s track can only go on a run recorded on this phone.');
+    dogFileFor = s.id;
+    $('dogTrackFile').click();
+  };
+  $('btnDogTrack').addEventListener('click', () => askDogFile(run.session ?? pendingSession));
+  $('repDogTrack').addEventListener('click', () => { if (replay.s && !replay.mark) askDogFile(sessionById(replay.s.id) ?? replay.s); });
+  $('btnDogTrackOff').addEventListener('click', () => {
+    const s = run.session ?? pendingSession;
+    if (s) removeDogTrack(s.id);
+  });
+  $('dogTrackFile').addEventListener('change', (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    const id = dogFileFor;
+    dogFileFor = null;
+    if (id) takeDogTrackFile(id, file);
+  });
+  $('dogPickCancel').addEventListener('click', () => dogPickDone?.(null));
+  $('dogPick').addEventListener('keydown', (e) => { if (e.key === 'Escape') dogPickDone?.(null); });
+  $('dogPick').addEventListener('click', (e) => { if (e.target === $('dogPick')) dogPickDone?.(null); });
   $('clipLen').addEventListener('click', (e) => {
     const b = e.target.closest('[data-clip]');
     if (!b) return;

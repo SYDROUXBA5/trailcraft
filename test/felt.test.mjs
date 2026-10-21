@@ -25,6 +25,7 @@ import { packDraft, unpackDraft } from '../public/draft.js';
 import { trailModel, encodeShared, decodeShared, sessionFromModel, keptSession, resultSentence, liveMeta, detailSections } from '../public/share.js';
 import { mergeOne, RUN_FIELDS } from '../public/sync-core.js';
 import { unwalkedPlan, ownRun, DEBRIEF, blankDebrief, debriefDone, noLineYet } from '../public/debrief.js';
+import { dogTrackOf, dogTrackUntil, dogAt, DOG_GPS_ACC_M, DOG_NOISE_FLOOR_M } from '../public/dogtrack.js';
 import { predictedOffsets } from '../public/sim.js';
 import { changed, applyPreset, resetParams } from '../public/params.js';
 import {
@@ -227,9 +228,14 @@ await t('a run graded again puts its drift row right, in place, and sets it asid
   db.addCalibration('bo', { t: 1, k: 1 });
   db.addCalibration('bo', { t: 2, k: 2 });
   db.addCalibration('bo', { t: 2, k: 6 }, { replace: true });
-  assert.deepEqual(db.calibration('bo'), [{ t: 1, k: 1 }, { t: 2, k: 6 }]);
+  /* Each row stamped when written (`at`), so the newest grade of a run wins wherever rows meet. */
+  const bare = (rows) => rows.map(({ at, ...r }) => r);
+  assert.deepEqual(bare(db.calibration('bo')), [{ t: 1, k: 1 }, { t: 2, k: 6 }]);
+  assert.ok(db.calibration('bo').every(r => Number.isFinite(r.at)));
+  const graded = db.calibration('bo')[1].at;
   db.setAsideDrift('bo', 2);
-  assert.deepEqual(db.calibration('bo')[1], { t: 2, k: 6, skip: true });
+  assert.deepEqual(bare(db.calibration('bo'))[1], { t: 2, k: 6, skip: true });
+  assert.ok(db.calibration('bo')[1].at >= graded, 'set aside later than it was banked');
   const before = seen.length;
   db.setAsideDrift('bo', 2);
   db.setAsideDrift('bo', 99);
@@ -320,6 +326,7 @@ function app() {
     currentScreen: 'scrResult', coach: { trail: null, field: [] },
     targetById, unwalkedPlan, ownRun, windAt, cleanWindFelt, windTrusted, feltOf, anchorFelt, stability, regime, FLAT, predictedOffsets, changed,
     lineCorrect, signedOffsets, meanSigned, medianAbs, sideShares, sideOfDrift, sideAgreement, approachToWind, bearing, dist,
+    dogTrackOf, dogAt, DOG_GPS_ACC_M, DOG_NOISE_FLOOR_M,   // graded on the dog's own GPS track when it has one (dogtrack.test)
     fmtDur, fmtM: (m) => fmtShort(m, false), APPROACH_V, resultSentence, teachesDrift, patchSession,
     unitsForText: () => ({ imperial: false, fahrenheit: false, coord: 'dd', when: String }),
     terrainFor: () => Promise.resolve(FLAT),
@@ -371,7 +378,7 @@ await t('every reader of a run’s wind reads the one the handler felt: plume, c
     followWeather: (w) => drawn.followed.push(w.wind_direction), scentField: (tr, w) => { drawn.field.push(w.wind_direction); return []; },
     plumePolygon: () => ({}), paintBandWalls() {}, EMPTY: {}, trailOf: (s) => s.data.trail, signedOffsets: () => [],
     targetById, fmtM: String, fmtDur, unwalkedPlan, ageUnknown: () => '', bandWallNote: () => '',
-    windWords, feltPanel, imp: () => false, noLineYet,
+    windWords, feltPanel, imp: () => false, noLineYet, dogTrackOf, dogTrackUntil, lineOf: () => ({}),
     $: () => ({ textContent: '', style: {}, classList: { toggle() {} }, setAttribute() {} }), document: { activeElement: null } };
   vm.createContext(rp);
   vm.runInContext([decl('function marksOf('), decl('function paintReplay(')].join('\n'), rp);

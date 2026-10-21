@@ -1004,7 +1004,8 @@ t('the HUD says when the GPS is keeping nothing, and a mark says when it is a gu
   assert.match(watch, /if \(e\?\.code === 'NOT_AUTHORIZED'\) rec\.blocked = true;/);
   assert.equal((watch.match(/rec\.droppedAt = 0; rec\.blocked = false;/g) || []).length, 2, 'both ways of recording start clean');
   assert.match(fnSrc('function addWaypoint(kind)'), /const stale = !!gpsTrouble\(\{ last, droppedAt: rec\.droppedAt \}\);[\s\S]{0,200}\.\.\.\(stale \? \{ approx: true \} : \{\}\)/);
-  assert.match(fnSrc('function searchResult('), /ind\.approx \? 'roughly ' : ''/, 'and the result does not claim a distance it never measured');
+  /* Unless the dog's own GPS track says where the dog was at that moment (dogtrack.test). */
+  assert.match(fnSrc('function searchResult('), /ind\.approx && !dogHere \? 'roughly ' : ''/, 'and the result does not claim a distance it never measured');
 });
 
 /* ── Hostile links, at the screen end ─────────────────────────────────
@@ -1295,7 +1296,7 @@ t('the run HUD and the replay caption give a drawn line no age either', () => {
     fmtM: String, fmtDur, unwalkedPlan, bandWallNote: () => '', document: { activeElement: null },
     $: (id) => (id === 'repCaption' ? cap : { textContent: '', value: '', setAttribute() {} }),
     feltPanel: () => null, windWords: () => null, imp: () => false,   // no wind felt on the ground
-    noLineYet,
+    noLineYet, dogTrackOf: () => null, dogTrackUntil: () => [], lineOf: () => ({}),   // no dog's GPS track (dogtrack.test)
   };
   vm.createContext(sb);
   vm.runInContext(js.slice(js.indexOf('\nconst ageUnknown = '), js.indexOf(';\n', js.indexOf('\nconst ageUnknown = ')) + 2), sb);

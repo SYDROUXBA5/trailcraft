@@ -24,6 +24,7 @@ import { targetById, routeCorners, runAgeMin, dogAge } from './store.js';
 import { unwalkedPlan, noLineYet, ownRun } from './debrief.js';
 import { solarPosition, forecastAt } from './field.js';
 import { applyFixes, readingFits, stretchMetres } from './ground.js';
+import { dogTrackOf, dogAt } from './dogtrack.js';
 
 const fin = Number.isFinite;
 const okPt = (p) => fin(p?.lat) && fin(p?.lon);
@@ -545,7 +546,7 @@ function signature(s) {
   const fixes = Array.isArray(d.surfFix) ? d.surfFix.map(f => `${f?.as}${f?.fromM}-${f?.toM}`).join(',') : '';
   const lines = Array.isArray(d.contamination) ? d.contamination.map(c => `${c?.order}${c?.points?.length}`).join(',') : '';
   return [s.id, s.handlerId, s.dogId, s.layerId, s.targetId, s.startedAt, s.deleted ? 1 : 0, d.trackStarted,
-    tr.length, lastT(tr), tk.length, lastT(tk), d.revealedAt, d.resultSeenAt, d.found, d.leftAgoMin, d.coach?.assisted,
+    tr.length, lastT(tr), tk.length, lastT(tk), Array.isArray(d.dogTrack) ? d.dogTrack.length : 0, lastT(Array.isArray(d.dogTrack) ? d.dogTrack : []), d.revealedAt, d.resultSeenAt, d.found, d.leftAgoMin, d.coach?.assisted,
     d.runWeather?.temp, d.runWeather?.series?.length, d.runWeather?.standIn ? 1 : 0, d.weather?.temp, d.weather?.series?.length,
     d.tzMin, d.imported?.from, d.lineAdded?.from,
     lines, w.length, marks, d.surfSig, fixes, d.result?.ageMin,
@@ -571,15 +572,21 @@ function readFacts(s) {
   const noLine = noLineYet(d) || (!hasLine && !d.plan);
   const unwalked = unwalkedPlan(d);
   const ran = track.length > 1 && fin(d.trackStarted);
+  /* The dog's own GPS track, when one was imported for the run (dogtrack.js):
+     where the dog went, rather than where the handler a line behind it went.
+     Whatever measures the dog against the trail reads it first. The run's
+     clock (when it began and ended) is still the phone's. */
+  const dogPts = ran ? dogTrackOf(d) : null;
+  const path = dogPts ?? track;
   const at = ran ? d.trackStarted : fin(s.startedAt) ? s.startedAt : null;
   let endAt = at;
   for (let i = track.length - 1; i >= 0; i--) if (fin(track[i].t)) { endAt = track[i].t; break; }
   const startPt = hasLine ? trail[0] : track[0] ?? null;
-  const endPt = hasLine ? trail[trail.length - 1] : track.length ? track[track.length - 1] : null;
+  const endPt = hasLine ? trail[trail.length - 1] : path.length ? path[path.length - 1] : null;
 
   /* Length. A Hot runaway nobody recorded has no line, so how far the dog
      got stands in for it; anywhere else there is nothing to measure. */
-  const lengthM = hasLine ? pathLen(trail) : ran ? reachLen(track) : null;
+  const lengthM = hasLine ? pathLen(trail) : ran ? reachLen(path) : null;
   const ageMin = hasLine ? runAgeMin(s) : fin(d.leftAgoMin) && d.leftAgoMin >= 0 ? d.leftAgoMin : null;
 
   /* Turns, and the ground under each. A corner is one of the trail's own
@@ -635,7 +642,9 @@ function readFacts(s) {
   let indicationM = null;
   if (endPt) for (const w of Array.isArray(d.trackWaypoints) ? d.trackWaypoints : []) {
     if (w?.kind !== 'Indication' || !okPt(w)) continue;
-    const m = dist(w, endPt);
+    /* The handler marks the indication where they stand, a line behind the
+       dog; with the dog's own track it is measured where the dog was. */
+    const m = dist((dogPts && dogAt(dogPts, w.t)) || w, endPt);
     if (indicationM === null || m < indicationM) indicationM = m;
   }
 
@@ -700,7 +709,8 @@ function readFacts(s) {
     night: sun === null ? null : sun <= 0, sunElevation: sun,
     tempC: tempAtRun(s),
     layKmh, onFoot: layKmh === null ? null : layKmh < RULES.footKmh,
-    coverage: hasLine && ran ? coverageOf(trail, track) : null,
+    coverage: hasLine && ran ? coverageOf(trail, path) : null,
+    onDogTrack: !!dogPts,
     timesOk,
     startPt: startPt ? Object.freeze({ lat: startPt.lat, lon: startPt.lon }) : null,
     levelTry: lt && fin(lt.v) && Number.isInteger(lt.level) ? Object.freeze({ v: lt.v, level: lt.level }) : null,

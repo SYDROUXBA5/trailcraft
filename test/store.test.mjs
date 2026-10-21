@@ -201,7 +201,9 @@ t('migration: the field phone keeps its team and its trails', () => {
 
 t('calibration: silent under five runs, then the median speaks', () => {
   const db = createStore(fakeBackend());
-  const row = (k) => ({ t: 1, predSide: 1, mean: 8, wind: 4, stability: 'Stable', k });
+  /* One row per run: a row's `t` is its run's start, and a run is read once. */
+  let run = 0;
+  const row = (k) => ({ t: ++run, predSide: 1, mean: 8, wind: 4, stability: 'Stable', k });
   for (const k of [2.1, 1.9, 2.4]) db.addCalibration('bo', row(k));
   assert.equal(db.dogDrift('bo'), null, 'three runs are not evidence');
   db.addCalibration('bo', row(2.0));
@@ -219,7 +221,8 @@ t('calibration: silent under five runs, then the median speaks', () => {
    20 as 6, a clamp bound passed off as a measurement. */
 t('calibration: the dog card gets the median as measured, never a clamp bound', () => {
   const db = createStore(fakeBackend());
-  const row = (k) => ({ t: 1, predSide: 1, mean: 2, wind: 6, stability: 'Stable', k });
+  let run = 0;   // one row per run: a row's `t` is its run's start
+  const row = (k) => ({ t: ++run, predSide: 1, mean: 2, wind: 6, stability: 'Stable', k });
   for (const k of [0.2, 0.18, 0.25, 0.21, 0.3]) db.addCalibration('bo', row(k));
   assert.equal(db.dogDrift('bo'), 0.21, 'a dog that barely drifts is not printed as 0.5');
   for (const k of [20, 18, 25, 21, 30]) db.addCalibration('rex', row(k));
@@ -256,7 +259,8 @@ t('teachesDrift agrees with "blind": a run the handler knew, or a drawn card, te
    two, and always erred high. */
 t('calibration: an even number of runs gives the middle of the two middle ones', () => {
   const db = createStore(fakeBackend());
-  const row = (k) => ({ t: 1, predSide: 1, mean: 2, wind: 6, stability: 'Stable', k });
+  let run = 0;   // one row per run: a row's `t` is its run's start
+  const row = (k) => ({ t: ++run, predSide: 1, mean: 2, wind: 6, stability: 'Stable', k });
   for (const k of [6, 1, 5, 2, 4, 3]) db.addCalibration('bo', row(k));
   assert.equal(db.dogDrift('bo'), 3.5);
   db.addCalibration('bo', row(7));

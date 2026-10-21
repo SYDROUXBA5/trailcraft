@@ -29,7 +29,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const pub = (f) => readFileSync(join(root, 'public', f), 'utf8');
 
 /* Dependency order: roots first, then their dependents, app last. */
-const MODULES = ['native', 'params', 'geo', 'colours', 'mvt', 'ground', 'debrief', 'marks', 'call', 'coach', 'field', 'walls', 'sim', 'card', 'sync-core', 'backup', 'firebase-config', 'sync', 'store', 'log', 'draft', 'share', 'clip', 'pdf',
+const MODULES = ['native', 'params', 'geo', 'colours', 'mvt', 'ground', 'debrief', 'marks', 'call', 'coach', 'field', 'walls', 'sim', 'card', 'sync-core', 'dogtrack', 'backup', 'firebase-config', 'sync', 'store', 'log', 'draft', 'share', 'clip', 'pdf',
   /* The team levels: the engine, its words, the pixel art, then the board that draws with all three.
      The art is a folder of modules behind the one door, pixel-team: each needs only the ones before it. */
   'levels', 'teams',

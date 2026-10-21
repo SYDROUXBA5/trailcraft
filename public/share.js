@@ -14,6 +14,7 @@ import { DEBRIEF, FLAGS, NOTE_TAGS, ownRun, toldField, toldOf, trailShown, ranBl
 import { CONFIDENCE, labelOf as callLabel } from './call.js';
 import { cleanSeen, seenLine } from './ground.js';
 import { rainRate, cleanWindFelt, feltOf, feltWeather, windWords, windTrusted, wxAt } from './field.js';
+import { timedLine } from './dogtrack.js';
 
 const MAGIC = 'TS1.';
 const fin = Number.isFinite;
@@ -281,6 +282,10 @@ const RESULT_FIELDS = {
   toFirst: within(0, 7 * 864e5), ageMin: within(0, 10 * 525600),
   agree: fraction, sideAgreement: fraction, approachV: within(0, 100),
   noisy: (v) => v === true, catchApprox: (v) => v === true,
+  /* Graded on the dog's own GPS track (dogtrack.js). A link leaves the track
+     itself out, so this is the only word it carries that the numbers came
+     from a collar, not from the phone line it draws (notes). */
+  dogTrack: (v) => v === true,
   shares: (v) => (v && typeof v === 'object' && [v.left, v.on, v.right].every(x => fraction(x) != null)
     ? { left: v.left, on: v.on, right: v.right } : null),
   wind: (v) => (v && typeof v === 'object' && within(0, 100)(v.speed) != null
@@ -575,7 +580,8 @@ function gpxTrack(name, desc, type, pts) {
 export function toGpx(m, u = {}) {
   const dogName = m.dog?.name || 'Dog';
   const said = m.result ? resultSentence(m.result, m.dog?.name, u) : null;
-  const all = [m.trail, m.hides, m.track, ...(m.contamination ?? []).map(c => c.points)].filter(Boolean).flat();
+  const dogGps = Array.isArray(m.dogTrack) && m.dogTrack.length > 1 ? m.dogTrack : null;
+  const all = [m.trail, m.hides, m.track, dogGps, ...(m.contamination ?? []).map(c => c.points)].filter(Boolean).flat();
   const lats = all.map(p => p.lat), lons = all.map(p => p.lon);
   /* Asked as the app asks it (unwalkedPlan), so a drawn card is a drawn line
      here too, not a laid trail. */
@@ -603,10 +609,23 @@ export function toGpx(m, u = {}) {
       drawn ? 'Plan' : 'Laid trail', m.trail));
   }
   (m.contamination ?? []).forEach((c, i) => trks.push(gpxTrack(`Contamination ${i + 1}`, null, 'Contamination', c.points)));
-  if (m.track?.length > 1) {
+  /* Beside the dog's own GPS track the phone's line is named for whose walk
+     it is: a mapping app shows the names and hides the descriptions, and two
+     lines that both read as the dog's put the handler's walk in its place. */
+  if (m.track?.length > 1 && dogGps) {
+    trks.push(gpxTrack('Handler’s walk (phone)', 'Recorded on the handler’s phone', 'Handler', m.track));
+  } else if (m.track?.length > 1) {
     trks.push(gpxTrack(`${dogName}’s run`,
       `Recorded on the handler’s phone${m.dog?.lineM ? `; the dog works about ${m.dog.lineM} m ahead on the line` : ''}`,
       'Dog run', m.track));
+  }
+  /* The dog's own GPS track from its collar, when one was imported for the
+     run (dogtrack.js): the run is graded on it, so it goes as a line of its
+     own, named so, beside the phone's. */
+  if (dogGps) {
+    const from = typeof m.dogTrackFrom?.name === 'string' && m.dogTrackFrom.name.trim() ? ` (${m.dogTrackFrom.name.trim()})` : '';
+    trks.push(gpxTrack(`${dogName}’s GPS track`, `From the dog’s own GPS collar${from}, imported after the run`,
+      'Dog GPS track', dogGps));
   }
 
   return [
@@ -641,26 +660,92 @@ export const GPX_MAX_POINTS = 5000;
 
 const plainError = (msg) => Object.assign(new Error(msg), { plain: true });
 
-/** A GPX file's line: { points: [{ lat, lon, t?, ele? }], timed, name }.
-    The first track with two points or more, its segments joined, or else the
-    first route. Timed only when every point has a believable time, in order:
-    a line where some are missing has no clock to trust. Throws a plain
-    message for anything else. `Parser` is the DOMParser to read it with. */
-export function parseGpx(text, Parser = globalThis.DOMParser) {
+/* What a GPX file may ask of the phone before a line of it is used. The
+   20 MB gate alone let a file of a million empty elements, or of elements
+   nested thousands deep, cost the parser and then every lookup over the
+   tree far more than any watch's file does: a whole day on a Garmin handheld
+   with two dogs is some fifty thousand points. So the text is counted first,
+   cheaply, and only then parsed, and the tree is walked by its own children,
+   never searched, so an element hidden deep inside a point costs nothing. */
+export const GPX_READ_POINTS = 200000;     // as many as sync-core.js ever unpacks
+const GPX_READ_ELEMENTS = 2000000;
+const GPX_READ_DEPTH = 40;                // a GPX point with its extensions is about eight deep
+const GPX_READ_LINES = 100;               // tracks and routes in one file
+const TOO_BIG_GPX = 'That file is too big to read on a phone. Export just the one walk or run, then try again.';
+
+/** The text's elements counted and their nesting measured, without parsing
+    it. Throws a plain message for a file past the limits. */
+/* One tag, read where it starts (sticky). The name must end at a space, a
+   slash or the bracket before anything else is read, so a long run of
+   letters with no bracket after it is not tried again at every length; and
+   nothing in a tag may be a '<', so each try stops at the next one. Both
+   keep the count linear in the file: a regular expression free to scan to
+   the end of the text from every '<' took hours on a few megabytes of
+   '<a<a<a'. Lazy, so the '/' of a self-closing '<trkpt .../>' is its own. */
+const GPX_TAG = /<(\/?)([A-Za-z_][\w.:-]*)(?=[\s/>])[^<>]*?(\/?)>/y;
+const NOT_GPX = 'That file is not a GPX file this app can read.';
+
+/** The text's elements counted and their nesting measured, without parsing
+    it. Throws a plain message for a file past the limits. A CDATA section
+    or a comment is stepped over whole: exporters put HTML in descriptions
+    (a '<br>' that never closes), and counted as tags it piled up as nesting
+    until a good file was refused. */
+function gpxPrecheck(text) {
+  let n = 0, depth = 0, deepest = 0, points = 0;
+  let i = text.indexOf('<');
+  while (i !== -1) {
+    const skip = text.startsWith('<![CDATA[', i) ? ']]>' : text.startsWith('<!--', i) ? '-->' : null;
+    if (skip) {
+      const end = text.indexOf(skip, i + 4);
+      if (end < 0) throw plainError(NOT_GPX);
+      i = text.indexOf('<', end + skip.length);
+      continue;
+    }
+    GPX_TAG.lastIndex = i;
+    const m = GPX_TAG.exec(text);
+    if (!m) { i = text.indexOf('<', i + 1); continue; }
+    i = text.indexOf('<', GPX_TAG.lastIndex);
+    if (m[1]) { depth = Math.max(0, depth - 1); continue; }
+    if (++n > GPX_READ_ELEMENTS) throw plainError(TOO_BIG_GPX);
+    const name = m[2].slice(m[2].indexOf(':') + 1);
+    if ((name === 'trkpt' || name === 'rtept') && ++points > GPX_READ_POINTS) throw plainError(TOO_BIG_GPX);
+    if (!m[3] && ++depth > deepest) {
+      deepest = depth;
+      if (deepest > GPX_READ_DEPTH) throw plainError(NOT_GPX);
+    }
+  }
+}
+
+/** A GPX file's tracks and routes as read, untrimmed: { trks, rtes }, each
+    a list of { name, points: [{ lat, lon, t?, ele? }] } in the file's order,
+    a track's segments joined. Points that are not a real place are dropped.
+    Throws a plain message for anything that is not a GPX file, or one too
+    big to read. `Parser` is the DOMParser to read it with. */
+export function readGpx(text, Parser = globalThis.DOMParser) {
   if (typeof text !== 'string' || !text.trim()) throw plainError('That file is empty.');
   if (typeof Parser !== 'function') throw plainError('This phone cannot read GPX files.');
+  if (text.length > GPX_MAX_BYTES) throw plainError(TOO_BIG_GPX);
+  gpxPrecheck(text);
   let doc = null;
   try { doc = new Parser().parseFromString(text, 'application/xml'); } catch { doc = null; }
   const root = doc?.documentElement;
   if (!root || doc.getElementsByTagName('parsererror').length || (root.localName ?? root.nodeName) !== 'gpx') {
     throw plainError('That is not a GPX file this app can read.');
   }
-  const kids = (el, name) => Array.from(el.getElementsByTagNameNS('*', name));
+  const nameOf = (el) => el.localName ?? String(el.nodeName || '').replace(/^.*:/, '');
+  /* An element's own children of one name: never its grandchildren. */
+  const kids = (el, name) => {
+    const out = [];
+    for (let c = el.firstChild; c; c = c.nextSibling) if (c.nodeType === 1 && nameOf(c) === name) out.push(c);
+    return out;
+  };
   const textOf = (el, name) => {
     const c = kids(el, name)[0];
-    return c ? String(c.textContent ?? '').trim() : '';
+    return c ? String(c.textContent ?? '').trim().slice(0, 200) : '';
   };
-  const read = (el) => {
+  let read = 0;
+  const point = (el) => {
+    if (++read > GPX_READ_POINTS) throw plainError(TOO_BIG_GPX);
     const lat = Number(el.getAttribute('lat')), lon = Number(el.getAttribute('lon'));
     if (!fin(lat) || !fin(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) return null;
     const time = textOf(el, 'time');
@@ -672,25 +757,62 @@ export function parseGpx(text, Parser = globalThis.DOMParser) {
     const ele = Number(textOf(el, 'ele') || NaN);
     return { lat, lon, ...(inEra(t) ? { t } : {}), ...(fin(ele) ? { ele } : {}) };
   };
-  const lineOf = (els) => els.map(read).filter(Boolean);
-  let pts = [], name = '';
+  const lineOf = (els) => els.map(point).filter(Boolean);
+  const trks = [], rtes = [];
   for (const trk of kids(root, 'trk')) {
-    const got = lineOf(kids(trk, 'trkpt'));
-    if (got.length > 1) { pts = got; name = textOf(trk, 'name'); break; }
+    if (trks.length + rtes.length >= GPX_READ_LINES) break;
+    trks.push({ name: textOf(trk, 'name'), points: kids(trk, 'trkseg').flatMap(seg => lineOf(kids(seg, 'trkpt'))) });
   }
-  if (pts.length < 2) {
-    for (const rte of kids(root, 'rte')) {
-      const got = lineOf(kids(rte, 'rtept'));
-      if (got.length > 1) { pts = got; name = textOf(rte, 'name'); break; }
-    }
+  for (const rte of kids(root, 'rte')) {
+    if (trks.length + rtes.length >= GPX_READ_LINES) break;
+    rtes.push({ name: textOf(rte, 'name'), points: lineOf(kids(rte, 'rtept')) });
   }
+  return { trks, rtes };
+}
+
+/** Whether every point of a line has a believable time, in order. A line
+    where some are missing has no clock to trust. */
+export const gpxTimed = (pts) => pts.length > 0 && pts.every((p, i) => fin(p.t) && (i === 0 || p.t >= pts[i - 1].t));
+
+/** A GPX file's line: { points: [{ lat, lon, t?, ele? }], timed, name }.
+    The first track with two points or more, its segments joined, or else the
+    first route. Timed only when every point has a believable time, in order:
+    a line where some are missing has no clock to trust. Throws a plain
+    message for anything else. `Parser` is the DOMParser to read it with. */
+export function parseGpx(text, Parser = globalThis.DOMParser) {
+  const { trks, rtes } = readGpx(text, Parser);
+  const line = trks.find(l => l.points.length > 1) ?? rtes.find(l => l.points.length > 1);
+  let pts = line ? line.points : [];
+  const name = line ? line.name : '';
   if (pts.length < 2) throw plainError('That file has no track in it. It needs at least two points.');
   if (pathLen(pts) > 200000) throw plainError('That track is far too long for a trail. Check it is the right file.');
-  const timed = pts.every((p, i) => fin(p.t) && (i === 0 || p.t >= pts[i - 1].t));
+  const timed = gpxTimed(pts);
   if (!timed) pts = pts.map(({ t, ...p }) => p);
   for (let tol = 1; pts.length > GPX_MAX_POINTS && tol <= 64; tol *= 2) pts = simplify(pts, tol);
   if (pts.length > GPX_MAX_POINTS) throw plainError('That track has too many points to use.');
   return { points: pts, timed, name: name.slice(0, 80) };
+}
+
+/** Every track in a GPX file that has two points or more, for the handler
+    to pick the dog's from: a Garmin handheld writes its own walk and each
+    dog's collar as tracks of their own, each named. Each is { index, name,
+    points, timed, startT, count, lengthM }, the points untrimmed (the dog's
+    track is cut to its run before it is thinned, dogtrack.js). Throws a
+    plain message when there is none. */
+export function gpxTracks(text, Parser = globalThis.DOMParser) {
+  const { trks } = readGpx(text, Parser);
+  const out = [];
+  trks.forEach((l, index) => {
+    if (l.points.length < 2) return;
+    /* Read as the dog's track will be (dogtrack.js timedLine): a fix or two
+       without a time does not make a collar's track "no times". */
+    let line = null;
+    try { line = timedLine(l.points); } catch { line = null; }
+    out.push({ index, name: l.name.slice(0, 80), points: l.points, timed: !!line,
+      startT: line ? line[0].t : null, count: l.points.length, lengthM: pathLen(l.points) });
+  });
+  if (!out.length) throw plainError('That file has no track in it. It needs at least two points.');
+  return out;
 }
 
 /** A blind trail's run said honestly while it has no line: how far, how
@@ -1011,6 +1133,14 @@ export function notes(m) {
   if (m.lineLater) n.push('A blind trail: no laid trail has been added yet, so the run is not graded.');
   else if (m.lineUntimed && m.result) n.push('Compared against a line with no times on it, so the trail’s age is not known.');
   else if (unwalkedPlan(m) && m.result) n.push('Compared against a line drawn on the map, not the trail as walked.');
+  if (Array.isArray(m.dogTrack) && m.dogTrack.length > 1) {
+    const from = typeof m.dogTrackFrom?.name === 'string' && m.dogTrackFrom.name.trim() ? ` (${m.dogTrackFrom.name.trim()})` : '';
+    n.push(m.result?.dogTrack
+      ? `Graded on the dog’s own GPS track${from}, imported after the run, rather than on the handler’s phone.`
+      : `The dog’s own GPS track${from} was imported after the run.`);
+  } else if (m.result?.dogTrack === true) {
+    n.push('Graded on the dog’s own GPS track, which this link does not carry; the line shown is the handler’s phone.');
+  }
   if (m.thinnedM > 0) n.push(`Lines thinned by up to ${m.thinnedM} m to fit in the link.`);
   n.push('The wind side and the scent band are estimates from a forecast, not measurements. They suggest an explanation; they do not judge the dog.');
   return n;

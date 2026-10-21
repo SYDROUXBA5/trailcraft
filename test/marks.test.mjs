@@ -22,6 +22,7 @@ import { noLineYet, ownRun } from '../public/debrief.js';
 import { patchSession } from '../public/store.js';
 import { fmtDur } from '../public/geo.js';
 import { clipOffered } from '../public/clip.js';
+import { dogTrackOf } from '../public/dogtrack.js';
 
 let pass = 0;
 const t = async (name, fn) => { await fn(); pass++; console.log(`  ok  ${name}`); };
@@ -211,6 +212,8 @@ function marking({ session, screen = 'scrReplay' } = {}) {
     placeMark, addMark, removeMark, callOwed, callMovedTo, removable, markingSave, fmtDur,
     /* Save video shares the Edit marks row, and is never offered while marking (clip.test). */
     clipOffered,
+    /* So does Import the dog's GPS track, on a run of this phone's own with no track yet (dogtrack.test). */
+    dogTrackOf, dogTrackable: (s) => !!s && !sb.rec.on && ownRun(s) && s.data?.track?.length > 1,
     keepPatch: (s, p) => sb.saveSession(s, p), foldIntoPending: () => null,
     esc: (s) => String(s ?? ''), toast: (m) => toasts.push(m), snap() {}, imp: () => false,
     sessionById: (id) => saved.get(id) ?? null,

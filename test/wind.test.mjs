@@ -22,6 +22,7 @@ import vm from 'node:vm';
 import { windAt, laidWind, feltPanel, feltWeather, feltOf, forecastAt, seriesCovers, windFeltFor, WIND_FELT_V } from '../public/field.js';
 import { cardinal, fmtSpeed, fmtTemp, forecastNote, fmtDur } from '../public/geo.js';
 import { unwalkedPlan, noLineYet } from '../public/debrief.js';
+import { dogTrackOf, dogTrackUntil } from '../public/dogtrack.js';
 import { trailModel, encodeShared, decodeShared, sessionFromModel } from '../public/share.js';
 
 let pass = 0;
@@ -216,6 +217,8 @@ await t('the replay’s clock moves the panel with the plume', () => {
     trailOf: () => [], signedOffsets: () => [], targetById: () => ({ kind: 'hide' }),
     fmtM: String, fmtDur, unwalkedPlan, ageUnknown: () => '', bandWallNote: () => '', $: () => fakeEl(), document: { activeElement: null },
     feltPanel, windWords: () => null, imp: () => false, noLineYet,
+    /* A run with no dog's GPS track draws the phone's as the dog's (dogtrack.test). */
+    dogTrackOf, dogTrackUntil, lineOf: () => ({}),
   };
   vm.createContext(sb);
   vm.runInContext([decl('function marksOf('), decl('function paintReplay(')].join('\n'), sb);

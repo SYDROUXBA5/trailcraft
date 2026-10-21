@@ -746,7 +746,11 @@ await t('wired: the replay is lent to the video and put back, and leaving the re
      dog's route as well, and the map can draw that empty moment into the video. */
   assert.match(host, /drawReplayGround\(replay\.s, \{ keep: show && was === hidden \}\);/);
   assert.match(bodyOf('drawReplayGround'), /^\nfunction drawReplayGround\(s, \{ keep = false \} = \{\}\) \{\n  if \(!keep\) clearMap\(\);\n/);
-  assert.match(host, /route: \(\) => track,\s*\n\s*dog: \{ colour: dp\.base, casing: dp\.casing \},/, 'the route and its colour, for the video to draw over the scent');
+  assert.match(host, /route: \(\) => route,\s*\n\s*route2: \(\) => \(dogPts \? track : null\),\s*\n\s*dog: \{ colour: dp\.base, casing: dp\.casing \},/, 'the route and its colour, for the video to draw over the scent');
+  /* With the dog's own GPS track, that is the route the video draws and measures, and the
+     handler's walk goes beside it, thinner (dogtrack.test). */
+  assert.match(host, /const dogPts = dogTrackOf\(s\.data\);\s*\n\s*const route = dogPts \?\? track;/);
+  assert.match(host, /clipLines\(\{ dog: name, track: route,/);
   assert.match(host, /const dp = trackPalette\(settings\.dogColor\);/);
   assert.match(host, /logo: GL === mapboxgl && \$\('map'\)\.querySelector\('\.mapboxgl-ctrl-logo'\)\s*\n\s*\? cssUrl\(getComputedStyle\(\$\('map'\)\.querySelector\('\.mapboxgl-ctrl-logo'\)\)\.backgroundImage\) : null,/,
     'Mapbox’s wordmark, from the live map’s own stylesheet, and only on a Mapbox map');
