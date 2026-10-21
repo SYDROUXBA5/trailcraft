@@ -133,6 +133,17 @@
     d="M12 2v3M12 19v3M2 12h3M19 12h3M12 7.5a4.5 4.5 0 100 9 4.5 4.5 0 000-9z"
     fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
 </button>
+<!-- Which track in a GPX file is the dog's: a Garmin handheld's file holds
+     its own walk and each dog's collar, each named. Over every screen,
+     because it is opened from the result and from the replay. -->
+<div class="dog-pick" id="dogPick" hidden role="dialog" aria-modal="true" aria-labelledby="dogPickTitle">
+  <div class="dog-pick-card">
+    <span class="label" id="dogPickTitle" tabindex="-1" style="margin-top:0">Which track is the dog’s?</span>
+    <p class="body small muted" id="dogPickSay">The file has more than one track. Pick the dog’s collar, not the handheld.</p>
+    <div class="dog-pick-list" id="dogPickList" role="group" aria-labelledby="dogPickTitle"></div>
+    <button class="btn ghost small" id="dogPickCancel">Cancel</button>
+  </div>
+</div>
 <!-- How to move a 3D map with two fingers: shown once, the first time the
      map appears, and again from Settings → Help. Pure CSS animation. -->
 <div class="map-tut" id="mapTut" hidden role="dialog" aria-modal="true" aria-labelledby="mapTutTitle">
@@ -554,6 +565,16 @@
     <span class="label">Recorded</span>
     <div class="grid2" id="resGrid"></div>
     <p class="body small muted" id="resCoach"></p>
+    <!-- The dog's own GPS track from its collar, after the run, on a run of
+         this phone's own. Any file, as for the laid trail above: iOS greys
+         out a .gpx it has no app for when asked for that type. -->
+    <div class="add-line dog-track" id="dogTrackBox" hidden>
+      <p class="body small" id="dogTrackSaid" hidden></p>
+      <button class="btn" id="btnDogTrack">Import the dog’s GPS track</button>
+      <p class="body small muted" id="dogTrackHint">From Garmin Explore: export the dog’s track as GPX, then choose it here.</p>
+      <button class="btn ghost small" id="btnDogTrackOff" hidden>Remove the dog’s track</button>
+    </div>
+    <input id="dogTrackFile" type="file" hidden>
     <div class="surf-box" id="resGround" hidden></div>
     <!-- What the handler said at the moment of commitment, before they looked.
          Sits above the debrief because that is the order it happened in. -->
@@ -893,6 +914,9 @@
     <div class="row-gap" id="repEditRow" hidden>
       <button class="btn ghost" id="repEdit">Edit marks</button>
       <button class="btn ghost" id="repClip">Save video</button>
+    </div>
+    <div class="row-gap" id="repDogRow" hidden>
+      <button class="btn ghost" id="repDogTrack">Import the dog’s GPS track</button>
     </div>
     <div class="row-gap" id="repRow">
       <button class="btn ghost" id="repDebrief">Write the debrief</button>

@@ -650,7 +650,11 @@ export function createStore(backend) {
       if (!dogId) return;
       const key = `cal:${dogId}`;
       const had = kv.get(key, []);
-      const rows = replace ? rebankRows(had, row?.t, row) : [...had, row];
+      /* Stamped, so the newest grade of a run wins wherever rows meet
+         (sync-core.js mergeCalibration). */
+      const at = Date.now();
+      const stamped = row && typeof row === 'object' ? { ...row, at } : row;
+      const rows = replace ? rebankRows(had, row?.t, stamped) : [...had, stamped];
       kv.set(key, rows.slice(-50));
       /* What a dog has taught the model is the one thing here that took
          months of real trails to earn, so it is announced like any row. */
@@ -664,7 +668,7 @@ export function createStore(backend) {
       const key = `cal:${dogId}`;
       const had = kv.get(key, []);
       if (!had.some(r => r?.t === t && r.skip !== true)) return;
-      const rows = rebankRows(had, t, null);
+      const rows = rebankRows(had, t, null, Date.now());
       kv.set(key, rows);
       notify('calibration', { id: dogId, rows, updatedAt: Date.now() });
     },
@@ -886,9 +890,12 @@ export function teachesDrift(data) {
     in the order they were run. With no row, because the run no longer
     banks, its rows are set aside (`skip`), as a deleted run's are, and a
     later grade that banks again puts a fresh row in their place. */
-export function rebankRows(rows, t, row = null) {
+export function rebankRows(rows, t, row = null, at = null) {
   const list = Array.isArray(rows) ? rows : [];
-  if (!row) return list.map(r => (r?.t === t && r.skip !== true ? { ...r, skip: true } : r));
+  /* `at` stamps a row set aside, so the setting aside outranks the row as
+     it was on a phone that has not heard yet (sync-core.js mergeCalibration). */
+  const aside = (r) => ({ ...r, skip: true, ...(Number.isFinite(at) ? { at } : {}) });
+  if (!row) return list.map(r => (r?.t === t && r.skip !== true ? aside(r) : r));
   const out = [];
   let put = false;
   for (const r of list) {
@@ -918,11 +925,16 @@ export function driftRows(rows, sessions) {
   for (const s of sessions || []) {
     if (Number.isFinite(s?.data?.trackStarted)) runAt.set(s.data.trackStarted, s);
   }
-  return (rows || []).filter(r => {
+  const live = (rows || []).filter(r => {
     if (r?.skip === true) return false;
     const s = runAt.get(r?.t);
     return !s || banksDrift(s);
   });
+  /* One row per run, the last: a cloud merged before rows were keyed by
+     their run may still hold a run graded again twice over. */
+  const last = new Map();
+  live.forEach((r, i) => { if (Number.isFinite(r?.t)) last.set(r.t, i); });
+  return live.filter((r, i) => !Number.isFinite(r?.t) || last.get(r.t) === i);
 }
 
 /** Everything worth showing about one dog's work. `sessions` is newest-first,

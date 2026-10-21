@@ -631,6 +631,30 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.75; cursor: p
 .add-line > div { display: flex; flex-direction: column; gap: 10px; }
 .add-line[hidden], .add-line > div[hidden] { display: none; }
 .add-line p { margin: 0; line-height: 1.45; }
+.dog-track { margin-top: 12px; }
+.dog-track .btn.small { align-self: flex-start; }
+
+/* Which track is the dog's: one big button per track, its name first, then
+   what tells two collars apart (how many points, when it began, how far). */
+.dog-pick { position: fixed; inset: 0; z-index: 65; display: grid; place-items: end center; padding: 12px 12px calc(var(--safe-b) + 12px); background: rgba(11, 22, 48, 0.55); }
+.dog-pick[hidden] { display: none; }
+.dog-pick-card {
+  width: 100%; max-width: 536px; max-height: 80vh; overflow-y: auto; box-sizing: border-box;
+  display: flex; flex-direction: column; gap: 10px;
+  background: var(--card); color: var(--ink); border: 1px solid var(--border); border-radius: var(--r);
+  padding: 14px 16px 16px; box-shadow: 0 18px 44px -10px rgba(15, 31, 61, 0.55);
+}
+.dog-pick-card p { margin: 0; line-height: 1.45; }
+.dog-pick-list { display: flex; flex-direction: column; gap: 8px; }
+.dog-pick-opt {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; min-height: 56px;
+  padding: 10px 14px; text-align: left; font: inherit; color: var(--ink); cursor: pointer;
+  background: var(--paper, transparent); border: 1px solid var(--border); border-radius: var(--r);
+}
+.dog-pick-opt b { font-size: calc(16 * var(--px)); overflow-wrap: anywhere; }
+.dog-pick-opt span { font-size: calc(13.5 * var(--px)); color: var(--muted); }
+.dog-pick-opt:focus-visible { outline: 3px solid var(--ember); outline-offset: 2px; }
+.dog-pick .btn.small { align-self: flex-end; }
 
 /* A GPS verdict is either reassurance or an instruction. Colour says which
    before the sentence is read. */

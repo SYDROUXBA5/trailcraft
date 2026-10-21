@@ -505,11 +505,20 @@ function drawWind(ctx, wind, topH) {
    every line flat on the ground and then draws its dots and footprints
    over the top whatever their order: once the laid trail and its scent are
    on, the route they are meant to be compared with is underneath them. */
-function drawRoute(ctx, pts, dog) {
+function drawRoute(ctx, pts, dog, { thin = false } = {}) {
   if (!(pts?.length > 1)) return;
   ctx.save();
   ctx.lineCap = 'round'; ctx.lineJoin = 'round';
   const line = () => { ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y); for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y); ctx.stroke(); };
+  /* The handler's own walk, beside a dog's own GPS track: thin and white, as
+     the map draws it (app.js handler-line), never in the dog's colour, so on
+     a phone-sized video it is not read as a second dog. */
+  if (thin) {
+    ctx.globalAlpha = 0.35; ctx.strokeStyle = '#0B1630'; ctx.lineWidth = 4; line();
+    ctx.globalAlpha = 0.6; ctx.strokeStyle = WHITE; ctx.lineWidth = 2; line();
+    ctx.restore();
+    return;
+  }
   ctx.globalAlpha = 0.6; ctx.strokeStyle = dog?.casing || '#0B1630'; ctx.lineWidth = 9; line();
   ctx.globalAlpha = 1; ctx.strokeStyle = dog?.colour || WHITE; ctx.lineWidth = 5; line();
   ctx.restore();
@@ -590,9 +599,10 @@ function drawCard(ctx, host, k) {
 /** One whole frame of the video onto `ctx`: the map as it was last copied
     (`mapBuf`), then everything said over it. `st` is clipAt's answer;
     `route` is the dog's route so far in frame pixels, given when the map's
-    own drawing of it is covered; `logo` is the map's wordmark, when it has
-    one. */
-export function drawFrame(ctx, { mapBuf, host, st, clock, marks, wind, route = null, logo = null }) {
+    own drawing of it is covered, and `route2` the handler's beside it when
+    the route is the dog's own GPS track; `logo` is the map's wordmark, when
+    it has one. */
+export function drawFrame(ctx, { mapBuf, host, st, clock, marks, wind, route = null, route2 = null, logo = null }) {
   const { W, H } = CLIP;
   const card = st.phase === 'card' || st.phase === 'done';
   /* Where the map has nothing (no signal, no tiles) the frame is the app's
@@ -600,6 +610,7 @@ export function drawFrame(ctx, { mapBuf, host, st, clock, marks, wind, route = n
   ctx.fillStyle = '#0B1630';
   ctx.fillRect(0, 0, W, H);
   if (mapBuf) ctx.drawImage(mapBuf, 0, 0);
+  drawRoute(ctx, route2, host.dog, { thin: true });
   drawRoute(ctx, route, host.dog);
   const topH = drawTop(ctx, host.lines, clock, st.f);
   const taken = [
@@ -676,6 +687,8 @@ async function wordmark(url) {
       credit            creditLine's
       logo              the map's wordmark as a data: address (cssUrl), or null
       route             the dog's route as { lat, lon, t }, in time order
+      route2            the handler's, when the route is the dog's own GPS
+                        track (optional), drawn thinner beside it
       dog               the route's { colour, casing }
       answer(show)      draw the laid trail and its scent, or take them off
       paint(at)         the replay as it stood at that moment of the run
@@ -730,6 +743,9 @@ export function recordClip({ map, canvas, seconds, host, onProgress = () => {}, 
   const track = (typeof host.route === 'function' ? host.route() || [] : [])
     .filter(p => Number.isFinite(p?.lat) && Number.isFinite(p?.lon) && Number.isFinite(p?.t));
   let trackXY = null, trackKey = '';
+  const track2 = (typeof host.route2 === 'function' ? host.route2() || [] : [])
+    .filter(p => Number.isFinite(p?.lat) && Number.isFinite(p?.lon) && Number.isFinite(p?.t));
+  let track2XY = null;
 
   /* The map's canvas is copied inside its own 'render' event. A WebGL
      canvas keeps its picture only until the browser has shown it; read at
@@ -857,12 +873,17 @@ export function recordClip({ map, canvas, seconds, host, onProgress = () => {}, 
     /* The route in code only while the answer is on the map over it. The
        camera does not move, so its place in the frame is worked out once
        (and again if the window is resized under it). */
-    let route = null;
+    let route = null, route2 = null;
     if (st.answer && host.reveal !== 'none' && track.length > 1) {
-      if (trackKey !== to.key) { trackXY = track.map(p => ({ ...to.place(p), t: p.t })); trackKey = to.key; }
+      if (trackKey !== to.key) {
+        trackXY = track.map(p => ({ ...to.place(p), t: p.t }));
+        track2XY = track2.length > 1 ? track2.map(p => ({ ...to.place(p), t: p.t })) : null;
+        trackKey = to.key;
+      }
       route = routeUntil(trackXY, at);
+      route2 = track2XY ? routeUntil(track2XY, at) : null;
     }
-    drawFrame(ctx, { mapBuf, host, st, clock: fmtDur(at - host.from), marks, wind: host.wind(at), route, logo });
+    drawFrame(ctx, { mapBuf, host, st, clock: fmtDur(at - host.from), marks, wind: host.wind(at), route, route2, logo });
     onProgress({ stage: 'record', t: Math.min(t, plan.total), total: plan.total });
     if (t >= plan.total + CLIP.DRAIN_S) wrap();
   }

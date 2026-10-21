@@ -65,9 +65,10 @@ const plainObject = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
    (marksAt): the next dog's run has neither been seen nor marked.
    And what a team's run was a try at (levelTry), the clock it ran by
    (tzMin) and how long a runaway's person had been gone (leftAgoMin): the
-   next team on the trail is on its own level, on its own day. */
+   next team on the trail is on its own level, on its own day. And the
+   dog's own GPS track (dogTrack, dogTrackFrom): it is that dog's run. */
 export const RUN_FIELDS = ['track', 'trackStarted', 'trackWaypoints', 'result', 'coach', 'debrief', 'seen', 'runWeather', 'windFelt', 'found',
-  'resultSeenAt', 'marksAt', 'levelTry', 'tzMin', 'leftAgoMin'];
+  'resultSeenAt', 'marksAt', 'levelTry', 'tzMin', 'leftAgoMin', 'dogTrack', 'dogTrackFrom'];
 const RUN_TOP = ['dogId', 'handlerId', 'summary'];
 const hasRun = (r) => (Array.isArray(r?.data?.track) && r.data.track.length > 0) || !!r?.data?.result;
 const empty = (v) => v == null || v === '' || (Array.isArray(v) && v.length === 0);
@@ -119,7 +120,11 @@ function withMissing(win, lose) {
   const marked = graded && Number.isFinite(winData.marksAt);
   const sameRun = plainObject(lose.data) && Number.isFinite(winData.trackStarted) && lose.data.trackStarted === winData.trackStarted;
   const ownSeen = graded && 'resultSeenAt' in winData && !sameRun;
-  if (plainObject(lose.data)) fill(data, lose.data, (k) => cloudless(k) || (graded && k === 'windFelt') || (filed && (k === 'folders' || k === 'foldersAt'))
+  /* And the dog's own GPS track (dogtrack.js), for the same reason as the
+     wind felt: the grade was made on it or without it, and taking it off
+     leaves null, a decision the older copy must not undo. */
+  const ownTrack = (k) => graded && (k === 'dogTrack' || k === 'dogTrackFrom');
+  if (plainObject(lose.data)) fill(data, lose.data, (k) => cloudless(k) || (graded && k === 'windFelt') || ownTrack(k) || (filed && (k === 'folders' || k === 'foldersAt'))
     || (marked && (k === 'trackWaypoints' || k === 'marksAt')) || (ownSeen && k === 'resultSeenAt'));
   /* Two copies of one run: the marks changed last are the marks, however
      new the rest of either copy is. A copy whose marks were never changed
@@ -468,19 +473,37 @@ export const DOC_LIMIT = 1_000_000;
     run, possibly on two phones in the same week. Newest-wins would throw away
     whichever phone's runs happened to be older, so it is a union instead —
     every graded run from either phone, once each, oldest first, capped at the
-    same fifty the store keeps. */
+    same fifty the store keeps.
+
+    A row's identity is its run (`t`, the run's trackStarted), not its
+    numbers: a run graded again (store.js rebankRows) changes its k, and a
+    union keyed by the numbers kept the old row beside the new one on every
+    phone, so the run counted twice in the dog's drift. Of two rows for one
+    run the newer stamp (`at`, set when the row was written) wins. */
 export function mergeCalibration(localRows = [], remoteRows = [], cap = 50) {
   const seen = new Map();
   /* Rows are a list; anything else in a document is no rows, not a failed pull. */
   const list = (x) => (Array.isArray(x) ? x : []);
   for (const r of [...list(remoteRows), ...list(localRows)]) {
     if (!r || !Number.isFinite(r.t)) continue;
-    const key = `${r.t}|${r.k}`;
-    /* A row set aside on either phone, when its run was deleted there, stays
-       set aside: the other phone has no run left to judge it by. */
-    seen.set(key, seen.get(key)?.skip === true && r.skip !== true ? { ...r, skip: true } : r);
+    const had = seen.get(r.t);
+    seen.set(r.t, had ? newerRow(had, r) : r);
   }
   return [...seen.values()].sort((a, b) => a.t - b.t).slice(-cap);
+}
+
+const stampOf = (r) => (Number.isFinite(r?.at) ? r.at : 0);
+/** Which of two rows for one run stands. The newer stamp; on a tie, a row
+    set aside on either phone, when its run was deleted there, stays set
+    aside: the other phone has no run left to judge it by. Rows written
+    before stamps existed tie at 0, and are then chosen by their content so
+    every phone picks the same one and the cloud is not sent it back and
+    forth. */
+function newerRow(a, b) {
+  const sa = stampOf(a), sb = stampOf(b);
+  if (sa !== sb) return sb > sa ? b : a;
+  if ((a.skip === true) !== (b.skip === true)) return a.skip === true ? a : b;
+  return JSON.stringify(b) > JSON.stringify(a) ? b : a;
 }
 
 /** Whether the cloud's rows are not the merged ones, by content. Counting
@@ -488,7 +511,7 @@ export function mergeCalibration(localRows = [], remoteRows = [], cap = 50) {
     and let the oldest go has fifty rows, the same as the cloud, and was
     never sent. */
 export function calibrationDiffers(rows = [], remoteRows = []) {
-  const key = (r) => `${r?.t}|${r?.k}|${r?.skip === true ? 1 : 0}`;
+  const key = (r) => `${r?.t}|${r?.k}|${r?.skip === true ? 1 : 0}|${stampOf(r)}`;
   const list = (x) => (Array.isArray(x) ? x : []);
   const mine = list(rows), cloud = list(remoteRows);
   const theirs = new Set(cloud.map(key));

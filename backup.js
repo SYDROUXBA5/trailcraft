@@ -15,6 +15,7 @@
    sync-core.js mergeOne), and nothing on the phone is deleted. */
 
 import { mergeOne, mergeCalibration, calibrationDiffers } from './sync-core.js';
+import { cleanDogTrack } from './dogtrack.js';
 
 export const BACKUP_VERSION = 3;
 const APP = 'trailcraft';
@@ -124,8 +125,8 @@ function line(pts) {
   if (pts.some(p => p.t != null && !inEra(p.t))) for (const p of pts) delete p.t;
   return pts;
 }
-const LINES = ['trail', 'track', 'hides', 'waypoints', 'trackWaypoints'];
-const OBJECTS = ['result', 'debrief', 'weather', 'coach', 'seen'];
+const LINES = ['trail', 'track', 'hides', 'waypoints', 'trackWaypoints', 'dogTrack'];
+const OBJECTS = ['result', 'debrief', 'weather', 'coach', 'seen', 'dogTrackFrom'];
 
 /** The fields every row shares: an id, a clock, and no bookkeeping. A clock
     in the future is brought back to now: newest wins, and a copy stamped a
@@ -174,6 +175,10 @@ const CLEAN = {
       for (const c of d.contamination) { if (!plainObject(c)) throw new Damaged(); line(c.points); }
     }
     for (const k of OBJECTS) if (d[k] != null && !plainObject(d[k])) throw new Damaged();
+    /* The dog's own track is only any use with its clock: one that lost its
+       times above, or was never in order, goes with its note rather than
+       standing as a track the grade cannot line up with the run. */
+    cleanDogTrack(d);
     return row;
   },
 };
@@ -189,6 +194,8 @@ function calRow(r) {
     stability: typeof r.stability === 'string' ? r.stability.slice(0, 40) : null,
     /* Set aside when its run was deleted (store.js, driftRows). */
     ...(r.skip === true ? { skip: true } : {}),
+    /* When it was written: the newest row for a run wins (mergeCalibration). */
+    ...(inEra(r.at) ? { at: r.at } : {}),
   };
 }
 
