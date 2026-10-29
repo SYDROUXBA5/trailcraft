@@ -266,6 +266,10 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.75; cursor: p
 .tut-title { margin: 0; font-family: var(--display); font-weight: 700; font-size: calc(40 * var(--px)); line-height: 1.1; letter-spacing: -1px; color: #fff; }
 .tut-body { margin: 0; font-size: calc(19 * var(--px)); line-height: 1.58; color: rgba(255, 255, 255, 0.78); }
 .tut-bottom { padding: 16px 24px calc(var(--safe-b) + 20px); max-width: 560px; margin: 0 auto; width: 100%; }
+.tut-bottom > .btn + .btn { margin-top: 10px; }
+.btn.ghost-on-dark { background: transparent; border: 1.5px solid rgba(255, 255, 255, 0.45); color: #fff; width: 100%; }
+.link-out { width: 100%; margin-top: 12px; min-height: 44px; padding: 8px 10px; border-radius: 10px; border: 1px solid rgba(255, 255, 255, 0.4);
+  background: rgba(0, 0, 0, 0.25); color: #fff; font: 400 calc(14 * var(--px))/1.3 var(--body); }
 
 /* ── Home ────────────────────────────────────────────────────────── */
 .home-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-start; gap: 12px; }
@@ -315,6 +319,36 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.75; cursor: p
 .wp-pill:active { transform: scale(0.94); background: var(--moss); color: #fff; }
 
 .contam-form { gap: 4px; }
+.contam-form input[type="text"] { min-height: 44px; }
+
+/* Contamination people on the share screen: a dot in their colour, who and
+   how, and their buttons. The dot carries a dark rim so it reads on paper
+   and in the dark theme alike. */
+.contam-list { display: flex; flex-direction: column; gap: 10px; }
+.contam-rows { display: flex; flex-direction: column; gap: 10px; }
+.contam-row { display: grid; grid-template-columns: 18px 1fr; gap: 4px 10px; align-items: start; }
+.contam-dot { width: 14px; height: 14px; margin-top: 3px; border-radius: 50%; background: var(--cc); box-shadow: 0 0 0 2px rgba(11, 22, 48, 0.55); }
+.cc-0 { --cc: #7A52E0; } .cc-1 { --cc: #86D0FF; } .cc-2 { --cc: #FF8F6B; } .cc-3 { --cc: #0B7F74; }
+.contam-say { display: flex; flex-direction: column; gap: 2px; min-width: 0; font: 400 calc(14 * var(--px))/1.35 var(--body); }
+.contam-say b { font-weight: 650; }
+.contam-say span { overflow-wrap: anywhere; }
+.contam-status { opacity: 0.7; font-size: calc(13 * var(--px)); }
+.contam-acts { grid-column: 2; display: flex; flex-wrap: wrap; gap: 6px; }
+.contam-acts .btn { width: auto; min-height: 44px; padding: 6px 12px; }
+.contam-qr { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.contam-qr-who { display: flex; align-items: center; gap: 8px; margin: 0; font: 400 calc(16 * var(--px))/1.3 var(--body); }
+.contam-qr-who .contam-dot { margin-top: 0; }
+.contam-qr-who span { opacity: 0.75; }
+/* Who each line is, over the map, left of centre and below the panels every
+   map screen keeps at its top; under the screens' own chrome (z 10). */
+.contam-key { position: fixed; z-index: 5; left: 10px; top: calc(var(--safe-t, 0px) + 215px); max-width: min(62vw, 260px);
+  display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border-radius: 12px; pointer-events: none;
+  background: rgba(11, 22, 48, 0.82); color: #fff; font: 400 calc(13 * var(--px))/1.3 var(--body); }
+.contam-key.off { display: none; }
+.contam-key-row { display: grid; grid-template-columns: 12px 1fr; gap: 6px; align-items: start; }
+.contam-key-row .contam-dot { width: 10px; height: 10px; margin-top: 3px; box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.85); }
+.contam-key-row b { font-weight: 650; }
+.qr-err { font: 600 calc(13 * var(--px)) var(--body); padding: 20px; }
 
 /* ── Share ───────────────────────────────────────────────────────── */
 /* The card's map: imagery underneath, the line drawn over it here. */

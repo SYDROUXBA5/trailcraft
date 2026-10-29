@@ -12,14 +12,16 @@ import {
 import { stepPoints, contamTimed, trailFrom, walkedOfTrail, gpsTrouble, forecastNote } from './geo.js';
 import { packDraft, unpackDraft, draftAlive, draftStats, DRAFT_MAX_AGE } from './draft.js';
 import { handlerStats, teachesDrift, runAgeMin } from './store.js';
-import { plumePalette, stepPalette, windPalette, trackPalette, COLOUR_PRESETS, isHex, mix } from './colours.js';
+import { plumePalette, stepPalette, windPalette, trackPalette, COLOUR_PRESETS, isHex, mix, hexToRgb } from './colours.js';
 import { FLAT, buildTerrain, stability, regime, flowAt, normOf, rainRate, RAIN_SUMS_PER_HOUR, windAt,
          laidWind, cleanWindFelt, windTrusted, forecastAt, feltMoment, nearestPoint, windFeltFor, forecastSaid,
          windWords, feltPanel, FELT_POINTS, feltPicked, feltSame, sameFelt, feltOf, anchorFelt, feltWeather,
          seriesCovers } from './field.js';
 import { predictedOffsets, ScentSim, driftFrom, stepByFlow } from './sim.js';
 import { PARAMS, DIALS, PV, setParam, resetParams, changed, isDefault, tally, dialById, PRESETS, applyPreset } from './params.js';
-import { encodeTrail, decodeTrail, cardUrl, cardFromText, walkedPlanFor, sameCard } from './card.js';
+import { encodeTrail, decodeTrail, cardUrl, cardFromText, walkedPlanFor, sameCard, encodeContam, isContamCard, TOO_TWISTY } from './card.js';
+import { CONTAM_COLOURS, colourIndex, contamColour, nextColour, contamStatus, contamWay, newContam, contamWalkFor,
+  attachWalk, withIds, contamWords, trailClock, reorderContam, contamKey } from './contam.js';
 import { decodeTile, tileOf, tileBox } from './mvt.js';
 import { wallIndex, bandInWalls } from './walls.js';
 import { GROUND_LAYERS, buildGround, surfaceAt, surfaceAlong, surfaceRows, withSurface,
@@ -64,7 +66,7 @@ import { searchWords, logRows, recentRuns, runAt, midnight, facets, filterRows, 
          cleanFolderName, putMany, toggleFolder, renameIn, dropFrom, mergeFolders, emptyHeld, folderPatch } from './log.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-10-21a';
+const BUILD = '2026-10-29a';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true,
@@ -414,10 +416,13 @@ function viewportFor(id) {
 function go(id, { back = false } = {}) {
   const from = currentScreen;
   stopScan();
+  /* The key to the contamination lines is for the map: a paper screen
+     covers it, and a screen reader must not read it out from under one. */
+  $('contamKey').classList.toggle('off', !MAP_SCREENS.includes(id));
   /* A scan for one run's walked card ends when its screen does, however it
      is left. Left set by the top arrow, it refused every later Trail Card
      and could file a walked card under the wrong plan. */
-  if (id !== 'scrScan') { scanWalkedFor = null; scanLineFor = null; }
+  if (id !== 'scrScan') { scanWalkedFor = null; scanLineFor = null; scanContamFor = null; }
   if (id === 'scrHome') navStack.length = 0;
   else if (!back && currentScreen && currentScreen !== id && !TRANSIENT.has(currentScreen)) {
     navStack.push(currentScreen);
@@ -444,7 +449,7 @@ function go(id, { back = false } = {}) {
     if (id !== 'scrBench') airPanel(id);
     mapChromeShow(true);
     stepsRun(true);
-    if (!db.kv.get('mapTutDone') && !mapTut.open) openMapTut();
+    if (!db.kv.get('mapTutDone') && !mapTut.open && !mapTut.held) openMapTut();
   } else {
     // Nothing on the map is worth animating while a paper screen covers it.
     airStop();
@@ -468,7 +473,10 @@ const MAP_TUT = [
   { g: 'tilt', title: 'Tilt the ground', body: 'Drag up or down with two fingers. The map is 3D \u2014 tilt it to see the slopes scent runs down.' },
   { g: 'turn', title: 'Turn the map', body: 'Twist with two fingers. The GPS button at the top right brings you back onto yourself.' },
 ];
-const mapTut = { i: 0, open: false, opener: null };
+/* `held`: not now. Someone who opened a contamination code to walk it, often
+   on a phone with nothing set up, came to walk a line, not to learn the map:
+   the lesson would sit over the route they are following. */
+const mapTut = { i: 0, open: false, opener: null, held: false };
 /* go() leaves focus alone while this card is open, so the card has to take
    it: its title, the way a screen's heading does, or a screen reader stands
    nowhere and never hears the card. Closed, focus goes back to the button
@@ -678,17 +686,18 @@ function addOverlays() {
                    0, '#C9761E', 0.45, '#F2B03C', 1, '#FFE7A8'],
                  'circle-opacity': ['+', 0.25, ['*', ['get', 's'], 0.7]],
                  'circle-blur': 0.18 } });
-  /* A contamination trail's own scent, in the violet of its line. Same air,
-     same rules; a different person, so it never shares the main trail's colour. */
+  /* Each contamination person's own scent, in the colour of their line
+     (contam.js): same air, same rules, a different person, so it never
+     shares the main trail's colour, nor another person's. */
   add({ id: 'contam-glow', type: 'circle', source: 'contamScent',
         paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 13, 2.2, 17, 5, 19, 9],
-                 'circle-color': '#9C7FE8',
+                 'circle-color': contamMatch(c => c.hex),
                  'circle-opacity': ['*', ['get', 's'], 0.20],
                  'circle-blur': 1 } });
   add({ id: 'contam-dots', type: 'circle', source: 'contamScent',
         paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 13, 0.7, 17, 1.5, 19, 2.6],
-                 'circle-color': ['interpolate', ['linear'], ['get', 's'],
-                   0, '#6E52C4', 0.45, '#A48BF0', 1, '#E6DDFF'],
+                 'circle-color': contamMatch(c => ['interpolate', ['linear'], ['get', 's'],
+                   0, c.dark, 0.45, c.hex, 1, c.light]),
                  'circle-opacity': ['+', 0.25, ['*', ['get', 's'], 0.7]],
                  'circle-blur': 0.18 } });
 
@@ -728,9 +737,19 @@ function addOverlays() {
         paint: { 'line-color': '#F1C77A', 'line-width': 7 } });
   add({ id: 'fix-ends', type: 'circle', source: 'fixEnds',
         paint: { 'circle-radius': 8, 'circle-color': '#F1C77A', 'circle-stroke-color': '#0B1630', 'circle-stroke-width': 3 } });
-  add({ id: 'contam-line', type: 'line', source: 'contam',
+  /* A drawn contamination line is dashed: a sketch of where someone was
+     asked to go. A walked one is solid, cased like the trail, because it
+     is where they really went. Colour per person, and the dash says which
+     is which without the colour. */
+  add({ id: 'contam-line', type: 'line', source: 'contam', filter: ['!=', ['get', 'w'], 1],
         layout: { 'line-cap': 'butt', 'line-join': 'round' },
-        paint: { 'line-color': '#C8B8E8', 'line-width': 3.5, 'line-opacity': 0.9, 'line-dasharray': [1, 1.4] } });
+        paint: { 'line-color': contamMatch(c => c.hex), 'line-width': 3.5, 'line-opacity': 0.9, 'line-dasharray': [1, 1.4] } });
+  add({ id: 'contam-walked-casing', type: 'line', source: 'contam', filter: ['==', ['get', 'w'], 1],
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: { 'line-color': '#0B1630', 'line-width': 6, 'line-opacity': 0.5 } });
+  add({ id: 'contam-walked', type: 'line', source: 'contam', filter: ['==', ['get', 'w'], 1],
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: { 'line-color': contamMatch(c => c.hex), 'line-width': 3.2, 'line-opacity': 0.95 } });
   /* The trail is footprints, not a line: the layer walked it, and the prints
      say so — and which way. One print every stride (see setTrail), thinned
      by zoom so they never pile up, left and right feet on their own sides,
@@ -1028,6 +1047,24 @@ const lineOf = (pts) => !pts || pts.length < 2 ? EMPTY : {
   features: [{ type: 'Feature', geometry: { type: 'LineString', coordinates: pts.map(p => [p.lon, p.lat]) } }],
 };
 
+/** A map style value per contamination colour, read from a feature's `ci`. */
+function contamMatch(pick) {
+  const out = ['match', ['get', 'ci']];
+  CONTAM_COLOURS.forEach((c, i) => out.push(i, pick(c)));
+  out.push(pick(CONTAM_COLOURS[0]));
+  return out;
+}
+
+/** Every contamination person's line, in their colour, drawn (dashed) or
+    walked (solid). An old entry, or one from a link, is coloured by its place. */
+const contamFeatures = (list) => ({
+  type: 'FeatureCollection',
+  features: (Array.isArray(list) ? list : []).map((c, i) => {
+    const f = lineOf(c?.points).features[0];
+    return f && { ...f, properties: { ci: colourIndex(c, i), w: contamStatus(c) === 'walked' ? 1 : 0 } };
+  }).filter(Boolean),
+});
+
 /* The laid trail, as footprints: one print every stride. A bright step walks
    the prints from the start to the end and round again, so the trail reads
    as walked, and which way. Prints stay where they are; only the light
@@ -1146,6 +1183,23 @@ const pointsOf = (pts, kindKey) => ({
 function setSrc(id, data) {
   srcData[id] = data;
   if (mapReady && map.getSource(id)) map.getSource(id).setData(data);
+  /* No contamination lines on the map, no key to them. */
+  if (id === 'contam' && !data?.features?.length) paintContamKey([]);
+}
+
+/** The contamination people's lines and clouds, with the key naming whose
+    each colour is. Given nothing (the answer not to be seen yet), neither. */
+function drawContam(list, trail) {
+  const l = Array.isArray(list) ? list : [];
+  setSrc('contam', l.length ? contamFeatures(l) : EMPTY);
+  paintContamKey(l.length ? contamKey(l, trail) : []);
+}
+function paintContamKey(rows) {
+  const el = $('contamKey');
+  if (!el) return;
+  el.hidden = !rows.length;
+  el.innerHTML = rows.map(r => `<div class="contam-key-row" role="listitem"><i class="contam-dot cc-${r.ci}" aria-hidden="true"></i>`
+    + `<span><b>${esc(r.who)}</b> · ${esc(r.colour)} · ${esc(r.words)}</span></div>`).join('');
 }
 /* The footprints' count goes with them. Left behind, the breathing timer
    kept repainting the map about eleven times a second for footprints that
@@ -2064,12 +2118,33 @@ function plumeSamples(trail) {
 /** The contamination trails' own cloud: their own parcels, so they can be
     drawn in their own colour. A line with no walked times has no scent age. */
 function contamSim(list) {
-  const lines = (list || []).filter(c => c?.points?.length > 1 && c.points.every(p => Number.isFinite(p.t)));
-  if (!lines.length) return null;
-  const c = new ScentSim({ pool: false });           // walked through: nobody stood at the end
-  c.seed(lines.flatMap(l => plumeSamples(l.points)));
-  return c;
+  /* One cloud per person, so each is drawn in that person's colour. A walked
+     line is seeded from its real clock: its scent is exactly as old as the
+     walk. A drawn one keeps the clock it was given from the main trail
+     (geo.js contamTimed), as it always has. */
+  const sims = (list || []).map((c, i) => ({ c, i }))
+    .filter(({ c }) => c?.points?.length > 1 && c.points.every(p => Number.isFinite(p.t)))
+    .map(({ c, i }) => {
+      const sim = new ScentSim({ pool: false });     // walked through: nobody stood at the end
+      sim.seed(plumeSamples(c.points));
+      return { ci: colourIndex(c, i), sim };
+    });
+  if (!sims.length) return null;
+  /* The same three things the frame asks of one cloud, asked of each, with
+     the parcel budget shared out so several people cost what one did. */
+  return {
+    sims,
+    set walls(W) { for (const x of sims) x.sim.walls = W; },
+    prune(now, wx, st, opts = {}) {
+      const max = Math.max(500, Math.floor((opts.max ?? 5000) / sims.length));
+      for (const x of sims) x.sim.prune(now, wx, st, { ...opts, max });
+    },
+    advance(...a) { for (const x of sims) x.sim.advance(...a); },
+  };
 }
+/** The clouds as one map source, each parcel carrying its person's colour. */
+const contamParcels = (multi) => ({ type: 'FeatureCollection', features: (multi?.sims || []).flatMap(x =>
+  parcelsGeo(x.sim).features.map(f => ({ ...f, properties: { ...f.properties, ci: x.ci } }))) });
 
 /** New ground, one fix at a time — append, never reseed, or it flickers. */
 function plumeAdd(pt) {
@@ -3216,6 +3291,10 @@ function drawReplayGround(s, { keep = false } = {}) {
     setTrail(trailOf(s));
     setSrc('start', pointsOf([s.data.trail[0]]));
     if (s.data.planTrail?.length > 1) setSrc('plan', lineOf(s.data.planTrail));
+    /* The contamination people's lines with their clouds below. The marking
+       and the video hand this a copy with none (answerHidden, withoutAnswer)
+       until the answer may be seen, exactly as they do the trail. */
+    drawContam(s.data.contamination, trailClock(s.data));
     /* On the replay's clock from the first frame, and pruned by the start of
        the run, because the slider can be dragged back there at any time. */
     const w0 = windAt(s, replay.at).wx;
@@ -3483,6 +3562,9 @@ function clipHost(s) {
     route: () => route,
     route2: () => (dogPts ? track : null),
     dog: { colour: dp.base, casing: dp.casing },
+    /* Who each contamination line is, drawn only once the answer is on the
+       frame (clip.js drawFrame), as the lines themselves are. */
+    key: contamKey(s.data.contamination, trailClock(s.data)),
     answer(show) {
       const was = replay.s;
       replay.s = show ? s : hidden;
@@ -3660,6 +3742,10 @@ async function deliverClip(made) {
 /** A run whose marks are placed afterwards: any trail, a blind trail too.
     A hide search keeps its marks on the run screen. */
 function markedAfter(s) { return !!s && targetById(s.targetId).kind === 'person'; }
+
+/** A run whose answer has not been seen yet: saved after the run as "not
+    seen" (null) for its marks to be placed blind. */
+const answerUnseen = (s) => markedAfter(s) && s?.data?.resultSeenAt === null;
 
 /** The session as the marking shows it before the answer is seen: as a
     blind trail with no line, whose replay draws the dog alone and the find,
@@ -4125,7 +4211,7 @@ function plumeFrame() {
   if (plume.contam) {
     plume.contam.prune(now, plume.wx, plume.st, { max: 5000, since: plume.since });
     plume.contam.advance(plume.T, plume.wx, plume.st, now);
-    setSrc('contamScent', parcelsGeo(plume.contam));
+    setSrc('contamScent', contamParcels(plume.contam));
   }
   paintFlow();
   plumeTerrain();
@@ -4319,7 +4405,14 @@ function unsavedWork() {
   try { return draftAlive(unpackDraft(db.draft.read())); } catch { return false; }
 }
 
-async function startWatch(hudId) {
+/* `resume` is a recording brought back after the app closed (a contamination
+   walk carried on): its points and start are kept, and the new fixes go on
+   after them, so nothing written before the restart is lost. */
+async function startWatch(hudId, resume = null) {
+  const fresh = () => {
+    rec.on = true; rec.pts = resume?.pts ? resume.pts.slice() : []; rec.dropped = 0; rec.droppedAt = 0; rec.blocked = false;
+    rec.started = resume?.startedAt ?? Date.now();
+  };
   headingStart({ gesture: true });   // still inside the tap that started this, which is when an iPhone browser allows the ask
   /* Inside the iOS app the shell records in the background: the phone can
      go in a pocket with the screen dark and every fix still arrives. The
@@ -4328,7 +4421,7 @@ async function startWatch(hudId) {
      calls do, when the app speaks through iOS (speaksInTheDark). */
   if (isNative()) {
     locateStop();
-    rec.on = true; rec.pts = []; rec.dropped = 0; rec.droppedAt = 0; rec.blocked = false; rec.started = Date.now();
+    fresh();
     try {
       rec.bg = await watchBackground(onFix,
         (e) => {
@@ -4356,7 +4449,7 @@ async function startWatch(hudId) {
     }
   } catch { /* Permissions API optional */ }
   locateStop();
-  rec.on = true; rec.pts = []; rec.dropped = 0; rec.droppedAt = 0; rec.blocked = false; rec.started = Date.now();
+  fresh();
   await holdScreen();
   rec.watch = navigator.geolocation.watchPosition(onFix,
     (e) => {
@@ -4591,12 +4684,16 @@ function renderShare(s) {
   paintGround('shareGround', s);
   const isHide = targetById(s.targetId).kind === 'hide';
   const isPlan = !!s.data.plan;
-  $('shareTitle').textContent = isHide ? 'Hide set' : isPlan ? 'Trail planned' : 'Trail laid';
+  $('shareTitle').textContent = isHide ? 'Hide set' : isPlan ? 'Trail planned' : s.data.contamOf ? 'Contamination walk' : 'Trail laid';
   $('shareNameLabel').textContent = isHide ? 'Name this search' : 'Name this trail';
   $('shareName').value = s.name || '';
   $('btnRunHere').textContent = isHide ? 'Search it on this phone' : 'Run it on this phone';
   $('btnShareDelete').textContent = isHide ? 'Delete this search' : 'Delete this trail';
-  $('btnContam').hidden = isHide;
+  /* Contamination people go on a trail, not on someone's walk of one. */
+  $('btnContam').hidden = isHide || !!s.data.walkOf;
+  $('contamQrBox').hidden = true;
+  $('contamQr').innerHTML = '';
+  paintContamList(s);
   /* A plan is a drawn sketch with no walked times behind it — modelling scent
      off it would dress a guess as a measurement. */
   /* A drawn plan has no walked times behind it, so no plume. Once the walked
@@ -4661,6 +4758,13 @@ const layerName = (s) => S.layers.find(l => l.id === s.layerId)?.name ?? 'the la
 
 async function renderShareQr(s) {
   const from = (S.layers.find(l => l.id === s.layerId)?.name) || S.handler?.name || '';
+  /* A contamination person's own record of their walk: the code is the
+     walked contamination card again, for a handler who has not scanned it. */
+  if (s.data.contamOf) {
+    await paintContamReturn(s.data.contamOf, s.data.trail, 'shareQr');
+    $('shareQrCaption').textContent = 'Point the handler’s camera at this. It adds your walk to their trail.';
+    return;
+  }
   try {
     const card = await encodeTrail({
       points: s.data.trail, waypoints: s.data.waypoints || [],
@@ -4687,8 +4791,20 @@ async function renderShareQr(s) {
   }
 }
 
-/* ── Contamination trails (drawn before the run) ──────────────────── */
-const contam = { pts: [], forSession: null, order: 'before' };
+/* ── Contamination people ─────────────────────────────────────────────
+   Other people's lines on a trail: a cross-track, a decoy. Each is its own
+   entry (contam.js) with its own colour and its own QR code. Guided: the
+   handler draws the route and their phone walks them along it. Free:
+   nothing is drawn and their phone records wherever they go. Either way the
+   real walk comes back by QR code and replaces the drawn line. */
+const contam = { pts: [], forSession: null, order: 'before', way: 'guided', ci: 0 };
+const WHO_ME = '__me', WHO_OTHER = '__other';
+
+/** The trail an entry belongs to: the plan it was drawn as, or the session. */
+const trailIdOf = (s) => s?.data?.planOf ?? s?.id;
+/* The handler's own colours from Settings, which a contamination person's
+   colour must not look like (contam.js nextColour). */
+const ownColours = () => [settings.dogColor, settings.plumeColor, settings.stepColor];
 
 function paintContamOrder() {
   for (const b of $('contamOrder').querySelectorAll('[data-order]')) {
@@ -4696,28 +4812,42 @@ function paintContamOrder() {
     b.classList.toggle('selected', on);
     b.setAttribute('aria-checked', String(on));
   }
+  for (const b of $('contamWay').querySelectorAll('[data-way]')) {
+    const on = b.dataset.way === contam.way;
+    b.classList.toggle('selected', on);
+    b.setAttribute('aria-checked', String(on));
+  }
+  const free = contam.way === 'free';
+  $('contamUndo').hidden = free;
+  map.getCanvas().style.cursor = free ? '' : 'crosshair';
+  paintContam();
 }
 
 function openContam(s) {
   contam.pts = [];
   contam.forSession = s.id;
+  contam.way = 'guided';
+  contam.ci = nextColour(s.data.contamination, ownColours());
   setTrail(s.data.trail);
-  setSrc('contam', lineOf([]));
+  setSrc('contam', EMPTY);
   setSrc('wps', EMPTY);
   fitTo(s.data.trail);
-  // Who walked it: any known person. When is before or after the main trail.
+  /* Who lays it: any known person, the handler, or someone typed in, who
+     may well be a stranger with the website open and no account. */
   $('contamWho').innerHTML =
     S.layers.map(l => `<option value="${esc(l.id)}">${esc(l.name)}</option>`).join('')
-    + `<option value="">${esc(S.handler?.name ?? 'Me')}</option>`;
+    + `<option value="${esc(WHO_ME)}">${esc(S.handler?.name ?? 'Me')}</option>`
+    + `<option value="${esc(WHO_OTHER)}">Someone else</option>`;
+  $('contamName').value = '';
+  $('contamName').hidden = true;
   contam.order = 'before';
-  paintContamOrder();
-  map.getCanvas().style.cursor = 'crosshair';
   map.on('click', onContamTap);
-  paintContam();
+  paintContamOrder();
   go('scrContam');
 }
 
 function onContamTap(e) {
+  if (contam.way === 'free') return;           // nothing to draw: their phone draws it
   const p = { lat: e.lngLat.lat, lon: e.lngLat.lng };
   const prev = contam.pts[contam.pts.length - 1];
   if (prev && dist(prev, p) > 5000) return toast('That corner is km away — zoom in');
@@ -4726,27 +4856,40 @@ function onContamTap(e) {
   paintContam();
 }
 function paintContam() {
-  setSrc('contam', lineOf(contam.pts));
-  setSrc('wps', pointsOf(contam.pts.map((p, i) => ({ ...p, kind: String(i + 1) })), 'kind'));
-  $('contamText').textContent = contam.pts.length < 2
-    ? 'Tap the corners of the extra trail' : `${contam.pts.length} corners`;
-  $('contamSave').disabled = contam.pts.length < 2;
+  const free = contam.way === 'free';
+  setSrc('contam', free ? EMPTY : contamFeatures([{ points: contam.pts, ci: contam.ci }]));
+  setSrc('wps', free ? EMPTY : pointsOf(contam.pts.map((p, i) => ({ ...p, kind: String(i + 1) })), 'kind'));
+  $('contamText').textContent = free ? 'Their phone records wherever they walk'
+    : contam.pts.length < 2 ? 'Tap the corners of their route' : `${contam.pts.length} corners · ${fmtKm(pathLen(contam.pts))}`;
+  $('contamSave').disabled = !free && contam.pts.length < 2;
 }
 function closeContam() {
   map.off('click', onContamTap);
   map.getCanvas().style.cursor = '';
   setSrc('wps', EMPTY);
 }
+
+/** The name the person goes by on this trail. Empty when "Someone else" is
+    chosen and no name typed yet. */
+function contamWhoName() {
+  const v = $('contamWho').value;
+  if (v === WHO_OTHER) return $('contamName').value.trim().slice(0, 40);
+  if (v === WHO_ME || !v) return S.handler?.name ?? 'Me';
+  return db.layers.byId(v)?.name ?? 'Someone';
+}
+
 function saveContam() {
   const s = db.sessions().find(x => x.id === contam.forSession);
   if (!s) return go('scrHome');
-  const whoId = $('contamWho').value || null;
-  const who = whoId ? (db.layers.byId(whoId)?.name ?? 'Someone') : (S.handler?.name ?? 'Me');
-  // Timed from the main trail (geo.js), which gives the drawn line the clock the engine runs on.
+  const who = contamWhoName();
+  if (!who) { toast('Type their name first'); $('contamName').focus(); return; }
   const order = contam.order === 'after' ? 'after' : 'before';
-  const points = contamTimed(s.data.trail, contam.pts, order);
-  const laidAt = points[0]?.t ?? Date.now();
-  const list = [...(s.data.contamination || []), { who, order, laidAt, points }];
+  const free = contam.way === 'free';
+  // Timed from the main trail (geo.js), which gives the drawn line the clock the engine runs on.
+  const points = free ? [] : contamTimed(s.data.trail, contam.pts, order);
+  const entry = newContam({ id: uid(), of: trailIdOf(s), who, order, way: contam.way, points,
+    ci: nextColour(s.data.contamination, ownColours()) });
+  const list = [...(s.data.contamination || []), entry];
   /* Thinned, never dropped, here: the run's grade was made on the dog's
      track and nothing is graded again when contamination is added. */
   const refit = refitDogTrack(patchSession(s, { data: { contamination: list } }));
@@ -4754,11 +4897,463 @@ function saveContam() {
   snap();
   closeContam();
   pendingSession = db.sessions().find(x => x.id === s.id);
-  toast(`Contamination trail saved: ${who}, laid ${order} the main trail`);
   go('scrShare');
   renderShare(pendingSession);
+  /* A free walk has nothing to look at but its code, so it is shown now,
+     headed with their name: a toast as well would sit over the code. */
+  if (free) showContamQr(s.id, list.length - 1);
+  else toast(`Contamination person added: ${who}`);
 }
 
+/** The share screen's list of contamination people: colour, name, how and
+    when they lay it, and what is still to come back. */
+function paintContamList(s) {
+  const list = Array.isArray(s?.data?.contamination) ? s.data.contamination : [];
+  const mine = !s?.data?.walkOf && targetById(s?.targetId).kind === 'person';
+  $('contamListCard').hidden = !mine || !list.length;
+  if (!mine) return;
+  $('contamRows').innerHTML = list.map((c, i) => {
+    const col = contamColour(c, i), st = contamStatus(c), way = contamWay(c);
+    const how = st === 'walked' ? `walked ${fmtKm(pathLen(c.points))}`
+      : way === 'free' ? 'walks where they like' : `route of ${fmtKm(pathLen(c.points || []))}`;
+    const when = st === 'walked' ? contamWords(c, trailClock(s.data))
+      : `${c.order === 'after' ? 'after' : 'before'} the trail`;
+    const status = st === 'walked' ? 'Walked' : st === 'waiting' ? 'Waiting for their walk' : 'Drawn';
+    const moved = c.orderChosen && c.orderChosen !== c.order ? ` (planned ${c.orderChosen})` : '';
+    /* Named in each button's label: with several people, a screen reader
+       otherwise hears the same "Show their QR code" over and over. */
+    const name = c.who || `contamination ${i + 1}`;
+    const acts = st === 'walked' ? ''
+      : `<button type="button" class="btn ghost small" data-contam-qr="${i}" aria-label="${esc(`Show ${name}’s QR code`)}">Show their QR code</button>`
+        + (st === 'waiting' ? `<button type="button" class="btn ghost small" data-contam-scan="${i}" aria-label="${esc(`Scan ${name}’s walk`)}">Scan their walk</button>` : '')
+        /* The handler laying it themselves (or anyone with this phone): a
+           phone cannot scan its own screen, so it walks it here instead. */
+        + `<button type="button" class="btn ghost small" data-contam-walk="${i}" aria-label="${esc(`Walk ${name}’s line on this phone`)}">Walk it on this phone</button>`;
+    return `<div class="contam-row">
+      <i class="contam-dot cc-${colourIndex(c, i)}" aria-hidden="true"></i>
+      <div class="contam-say"><b>${esc(c.who || `Contamination ${i + 1}`)}</b>
+        <span>${esc(col.name)} · ${esc(how)} · ${esc(when)}${esc(moved)}</span>
+        <span class="contam-status">${esc(status)}</span></div>
+      ${acts ? `<div class="contam-acts">${acts}</div>` : ''}</div>`;
+  }).join('');
+}
+
+/** One person's QR code on the share screen. The first time it is shown, an
+    old entry gets its id, and a drawn route becomes one waiting for its walk. */
+async function showContamQr(sid, i) {
+  let s = db.sessions().find(x => x.id === sid) ?? sessionById(sid);
+  if (!s) return;
+  const { list, changed } = withIds(s.data.contamination, trailIdOf(s), uid);
+  const was = list[i];
+  if (!was) return;
+  const next = contamStatus(was) === 'drawn' ? list.map((x, j) => (j === i ? { ...x, status: 'waiting' } : x)) : list;
+  if (changed || next !== list) {
+    db.updateSession(s.id, { data: { contamination: next } });
+    snap();
+    /* From the store: the screen's own copy is the one just made stale. */
+    s = db.sessions().find(x => x.id === sid) ?? s;
+    if (pendingSession?.id === s.id) pendingSession = s;
+  }
+  const c = next[i];
+  const free = contamWay(c) === 'free';
+  const col = contamColour(c, i);
+  /* The trail's own code is put away while a person's is up: with both on
+     the screen, their camera could take the main plan, and they would lay
+     the main trail without anyone knowing. */
+  $('shareQrCard').hidden = true;
+  $('contamQrBox').hidden = false;
+  $('contamQrWho').innerHTML = `<i class="contam-dot cc-${colourIndex(c, i)}" aria-hidden="true"></i>`
+    + `<b>${esc(c.who || 'Contamination')}</b> <span>${esc(col.name)} line</span>`;
+  $('contamQr').setAttribute('aria-label', `QR code for ${c.who ? `${c.who}’s` : 'their'} contamination walk`);
+  try {
+    const card = await encodeContam({ kind: free ? 4 : 3, planId: c.of, cid: c.id, from: S.handler?.name ?? '',
+      who: c.who, order: c.order, ci: colourIndex(c, i), points: c.points });
+    const qr = window.qrcode?.(0, 'M');
+    if (!qr) throw new Error('QR library missing — hard refresh once online');
+    qr.addData(cardUrl(card, SHARE_BASE), 'Byte');
+    qr.make();
+    $('contamQr').innerHTML = qr.createSvgTag({ cellSize: 4, margin: 0, scalable: true });
+    $('contamQrCaption').textContent = `For ${c.who || 'them'}: point their phone’s camera at this. It opens Trailcraft, nothing to install, and `
+      + (free ? 'records wherever they walk.' : 'guides them along the route.')
+      /* Their phone starts recording the moment they tap Start, so an
+         "after" person is shown the code when it is their turn. */
+      + (c.order === 'after' ? ' Show this when it’s their turn, once the trail is laid.' : '');
+  } catch (err) {
+    $('contamQr').innerHTML = '';
+    $('contamQrCaption').textContent = err.message;
+  }
+  paintContamList(s);
+  $('contamQrBox').scrollIntoView?.({ block: 'nearest' });
+}
+
+/** A person's code put away, and the trail's own back in its place. */
+function closeContamQr() {
+  $('contamQrBox').hidden = true;
+  $('contamQr').innerHTML = '';
+  $('shareQrCard').hidden = !pendingSession || targetById(pendingSession.targetId).kind === 'hide';
+}
+
+/** A contamination line walked on this phone: the handler laying it, say.
+    The same walk their phone would make, from the same card, and at the end
+    it goes straight onto the trail instead of into a code to scan. */
+function walkContamHere(sid, i) {
+  const s = db.sessions().find(x => x.id === sid);
+  if (!s) return;
+  const { list, changed } = withIds(s.data.contamination, trailIdOf(s), uid);
+  const c = list[i];
+  if (!c) return;
+  if (changed) { db.updateSession(s.id, { data: { contamination: list } }); snap(); }
+  const free = contamWay(c) === 'free';
+  if (!free && !(c.points?.length > 1)) return toast('That line has no route to walk');
+  startContamWalk({ kind: free ? 4 : 3, planId: c.of, cid: c.id, from: S.handler?.name ?? '', who: c.who,
+    order: c.order, ci: colourIndex(c, i), points: free ? [] : c.points.map(p => ({ lat: p.lat, lon: p.lon })), local: true });
+}
+
+/* ── Their walk, back on the handler's phone ── */
+
+/** This phone's sessions a contamination walk could belong to: never a
+    whole run kept from someone else's link, which is theirs. */
+function contamSessions() {
+  return db.sessions().filter(x => !x.deleted && (!x.data?.track || ownRun(x)))
+    .map(x => ({ id: x.id, planOf: x.data.planOf ?? null, deleted: !!x.deleted, contamination: x.data.contamination || [] }));
+}
+
+const CONTAM_WHY = {
+  other: 'That walk is for a trail that is not on this phone',
+  gone: 'That person is no longer on the trail on this phone',
+  dup: 'That walk is already on the trail',
+  bad: 'That is not a contamination walk',
+};
+
+/** A walked contamination card, to the person's entry on the trail it names
+    (contamWalkFor, contam.js). Never a new session. */
+async function takeContamWalk(card, { fromLink = false } = {}) {
+  const pick = contamWalkFor(card, contamSessions());
+  if (pick.why) { toast(CONTAM_WHY[pick.why] ?? CONTAM_WHY.bad); return false; }
+  const first = sessionById(pick.ids[0]);
+  const who = pick.entry?.who || card.who || 'them';
+  if (pick.ask === 'replace'
+      && !confirm(`${who} already has a walk on this trail. Replace it with this one, walked ${fmtWhen(card.started)}?`)) return false;
+  /* From a link, ids prove nothing: anyone who saw the code can make a card
+     with them. So the handler says yes to it, by name, first. */
+  if (fromLink && pick.ask !== 'replace'
+      && !confirm(`Add ${who}’s walk to the trail from ${fmtWhen(first?.startedAt)}?`)) return false;
+  return applyContamWalk(pick.ids, card);
+}
+
+/** The walk put on its entry on every copy of the trail, each saved, and
+    each run that was graded graded again (regradeDogTrack: banked once). */
+async function applyContamWalk(ids, card) {
+  let said = null, last = null;
+  const graded = [];
+  /* Each read from the store, not from a screen's copy, which can be older
+     than the list the walk is being put into. */
+  const fresh = (id) => db.sessions().find(x => x.id === id) ?? null;
+  for (const id of ids) {
+    const s = fresh(id);
+    if (!s) continue;
+    /* Measured against the trail's clock only once it is a real one: a plan
+       not walked yet is timed as if drawn at a walk's end, and a person who
+       really went before it would read as after (trailClock). The order
+       chosen then stands until the layer's walk comes in (applyWalked). */
+    const got = attachWalk(s.data.contamination, card.cid, card, trailClock(s.data));
+    if (!got) continue;
+    const refit = refitDogTrack(patchSession(s, { data: { contamination: got.list } }));
+    const saved = keepPatch(s, { data: { contamination: got.list, ...(refit?.dogTrack ? refit : {}) } });
+    said = said ?? got;
+    last = saved;
+    if (saved?.data?.result && dogTrackable(saved)) graded.push(saved.id);
+  }
+  if (!said) { toast('That walk could not be added'); return false; }
+  for (const id of graded) await regradeDogTrack(id, {}).catch(() => null);
+  const who = said.entry.who || 'someone';
+  /* What was chosen at the planning stage loses to the two clocks, and the
+     handler is told, because it changes what the run counts as. */
+  const turned = said.contradicts
+    ? ` Their walk was ${said.order} the main trail, not ${said.chosen} as planned, so it counts as ${said.order}.` : '';
+  const s = fresh(graded[0] ?? last.id) ?? last;
+  if (rec.on) { toast(`Contamination walk added: ${who}.${turned}`); return true; }
+  /* A run still waiting for its marks has not had its answer seen: the
+     result would show the trail and stamp it seen (noteAnswerSeen), and the
+     call would no longer be blind. Back to the marking, answer hidden. */
+  if (answerUnseen(s)) {
+    toast(`Contamination walk added: ${who}.${turned} Mark the run, then see the result.`);
+    run.session = s;
+    if (s.data.track?.length > 1) return openMarking(s, { hidden: true }), true;
+    go('scrHome');
+    return true;
+  }
+  toast(`Contamination walk added: ${who}.${turned}${graded.length ? ' Run graded again.' : ''}`);
+  if (s.data.result || noLineYet(s.data)) {
+    run.session = s;
+    renderResult(s);
+    go('scrResult');
+    for (const id of graded) runLevelled(fresh(id));
+  } else {
+    pendingSession = s;
+    go('scrShare');
+    renderShare(s);
+  }
+  return true;
+}
+
+/* ── Their phone: the contamination walk ── */
+
+/** Where to go when there is no handler on this phone: a stranger who only
+    opened the link has nothing set up, and is offered setting up then. */
+function homeOrBoot() {
+  if (S.handler) return go('scrHome');
+  return boot();
+}
+
+/* `resume` is the draft of the same walk, carried on after the app closed:
+   the unfinished recording it would otherwise wait for is this one. */
+function startContamWalk(card, { resume = null } = {}) {
+  if (rec.on) { toast('A recording is already going. Stop that one first.'); return false; }
+  if (!resume && recordingWaits()) return false;
+  const free = card.kind === 4;
+  walk.card = card;
+  walk.contam = true;
+  walk.offAt = resume?.offAt || 0;
+  walk.atStart = !!walk.offAt;
+  walk.done = false;
+  rec.kind = 'walk';
+  clearMap();
+  $('btnInPlace').textContent = 'Done';
+  if (!free) {
+    setSrc('routeAhead', lineOf(card.points));
+    setSrc('start', pointsOf([card.points[0]]));
+    setSrc('hides', pointsOf([card.points[card.points.length - 1]]));
+    fitTo(card.points);
+  } else locateMe({ zoom: 17 });
+  hudText = walkHud;
+  mapTut.held = true;
+  navSay('—', '', free ? 'Recording your walk' : 'Walk to the green start dot', '');
+  go('scrWalk');
+  if (!free) startFollowing(card.points, { courseUp: true });
+  startWatch('navSink', resume ? { pts: resume.pts, startedAt: resume.startedAt } : null)
+    .then(ok => { if (!ok) { stopFollowing(); homeOrBoot(); } });
+  toast(resume ? 'Carrying on with your walk' : free ? 'Walk where you like, then tap Done' : 'Walk the route, start to finish, then tap Done');
+  return true;
+}
+
+/** The banner on a contamination walk: no countdown, nobody waits for it. */
+function contamHud() {
+  const last = rec.pts[rec.pts.length - 1];
+  const trouble = gpsTrouble({ last, startedAt: rec.started, droppedAt: rec.droppedAt, blocked: rec.blocked });
+  if (!last) { navSay('—', '', trouble ? gpsTroubleText(trouble) : accWarning(), ''); return ''; }
+  const say = (m) => (m >= 1000 ? [(m / 1000).toFixed(1), 'km'] : [String(Math.round(m)), 'm']);
+  if (walk.card.kind === 4) {
+    const [n, u] = say(pathLen(rec.pts));
+    navSay(n, u, 'Recording your walk', trouble ? gpsTroubleText(trouble) : 'Tap Done when you have finished');
+    return '';
+  }
+  const pts = walk.card.points;
+  const dA = dist(last, pts[0]), dB = dist(last, pts[pts.length - 1]);
+  /* The same departure as a trail's walk (geo.js): the route starts when
+     they leave its start, and the walk there is not part of it. */
+  if (!walk.offAt) {
+    const st = departure(walk, { d: dA, t: last.t, ...walkedOfTrail(rec.pts, pts) });
+    walk.atStart = st.atStart;
+    if (st.offAt) {
+      walk.offAt = st.offAt;
+      keepDraft(true);
+      navigator.vibrate?.(60);
+      toast('Off you go — recording your walk');
+    }
+  }
+  const pr = progressAlong(pts, last);
+  const [n, u] = say(walk.offAt ? (pr ? pr.remaining : dB) : dA);
+  if (!walk.offAt) {
+    navSay(n, u, dA < 40 ? 'At the start — walk on' : 'To the start of the route', trouble ? gpsTroubleText(trouble) : '');
+    return '';
+  }
+  const off = pr ? pr.off : null;
+  navSay(n, u, off == null || off < 8 ? 'On the line' : `${fmtM(off)} off the line`,
+    trouble ? gpsTroubleText(trouble) : 'Tap Done at the end');
+  return '';
+}
+
+async function finishContamWalk() {
+  const last = rec.pts[rec.pts.length - 1];
+  if (walk.card.kind === 3) {
+    const B = walk.card.points[walk.card.points.length - 1];
+    if (last && dist(last, B) > 60 && !confirm(`You are ${fmtM(dist(last, B))} from the end of the route. Finish here anyway?`)) return;
+  }
+  if (rec.pts.length < 2 && !confirm('Your phone has no track of the walk yet. Finish anyway? The handler gets nothing back.')) return;
+  await stopWatch();
+  stopFollowing();
+  return keepContamWalk();
+}
+
+/** A finished contamination walk: kept on this phone (when it has someone to
+    keep it for) and shown as a QR code for the handler. A walk brought back
+    after a crash comes through here too. */
+async function keepContamWalk() {
+  rec.pts.forEach(pt => delete pt._seen);
+  walk.done = true;
+  const card = walk.card;
+  /* A guided walk starts where they left the route's start, as a trail's
+     walk does (geo.js trailFrom); a free one is everything recorded. */
+  const line = card.kind === 3 ? rec.pts.slice(trailFrom(rec.pts, card.points[0], walk.offAt)) : rec.pts.slice();
+  if (line.length < 2) {
+    /* No drawn stand-in: the whole point of the walk is its real clock. */
+    dropDraft();
+    walk.card = null;
+    walk.contam = false;
+    clearMap();
+    toast('No GPS track of the walk, so there is nothing to show the handler');
+    return homeOrBoot();
+  }
+  const trail = line.map(p => ({ lat: p.lat, lon: p.lon, t: p.t }));
+  const of = { planId: card.planId, cid: card.cid, who: card.who || '', order: card.order, ci: card.ci ?? null, from: card.from || '' };
+  /* Walked on the handler's own phone (walkContamHere): straight onto the
+     trail, as the scanned code would have put it, with no code to show. */
+  if (card.local) {
+    dropDraft();
+    walk.card = null;
+    walk.contam = false;
+    clearMap();
+    const back = { kind: 5, planId: card.planId, cid: card.cid, from: S.handler?.name ?? '', who: card.who || '',
+      order: card.order, ci: card.ci ?? null, points: trail, started: trail[0].t, ended: trail[trail.length - 1].t };
+    if (!(await takeContamWalk(back))) homeOrBoot();
+    return;
+  }
+  if (S.handler) {
+    const own = {
+      id: uid(), handlerId: S.handler.id, dogId: null, layerId: null,
+      targetId: 'person', startedAt: trail[0].t,
+      summary: `Contamination walk for ${card.from ? card.from + '’s' : 'a'} trail — ${fmtKm(pathLen(trail))}.`,
+      data: { trail, waypoints: [], weather: null, contamination: [], walkOf: true, contamOf: of },
+    };
+    if (guardSave(own, () => db.addSession(own))) dropDraft();
+    snap();
+  }
+  const back = await paintContamReturn(of, trail, 'waitQr');
+  /* With nobody set up here there is no session to keep it in, and a phone
+     browser reloads a tab left in the background: the code is kept on this
+     phone for a day (offerContamReturn), and only then is the walk's draft
+     let go. Not kept, the draft stays and is offered back instead. */
+  if (!S.handler && back.str && keepContamReturn(back, of.who)) dropDraft();
+  waitMode(true, back.link);
+  go('scrWait');
+}
+
+/* ── The code of a walk, kept on a phone with nobody set up ── */
+const RETURN_KEY = 'contamReturn';
+const RETURN_FOR_MS = 24 * 3600e3;
+let contamReturnStr = null;    // the walk on the waiting screen, as a card string, for its link
+
+function keepContamReturn({ str, link }, who) {
+  try { db.kv.set(RETURN_KEY, { str, link: !!link, who: String(who || '').slice(0, 40), at: Date.now() }); return true; }
+  catch { return false; }
+}
+function dropContamReturn() {
+  try { db.kv.set(RETURN_KEY, null); } catch { /* nothing kept to drop */ }
+}
+/** The kept code, when there is one less than a day old. */
+function keptContamReturn(now = Date.now()) {
+  let r = null;
+  try { r = db.kv.get(RETURN_KEY); } catch { return null; }
+  if (!r) return null;
+  const ok = typeof r.str === 'string' && r.str.startsWith('TC2.') && Number.isFinite(r.at) && now - r.at >= 0 && now - r.at < RETURN_FOR_MS;
+  if (!ok) { dropContamReturn(); return null; }
+  return r;
+}
+/** At launch, on a phone with nobody set up: a walk's code that was never
+    handed over is shown again before anything else. */
+function offerContamReturn() {
+  const r = keptContamReturn();
+  if (!r) return false;
+  walk.card = null;
+  walk.contam = true;
+  showContamReturn(r.str, r.link, 'waitQr');
+  waitMode(true, r.link);
+  $('waitSub').textContent = 'Your walk from earlier. Show this QR code to the handler.';
+  go('scrWait');
+  return true;
+}
+
+/** Their walk as the card the handler scans: kind 5, the real line and clock.
+    A walk too long and winding for one QR code goes as a link instead, which
+    may carry more of it (card.js encodeContam), rather than nothing going
+    back. Returns the card string, and whether it is a link only. */
+async function paintContamReturn(of, trail, el) {
+  const c = { kind: 5, planId: of.planId, cid: of.cid, from: of.who || S.handler?.name || '',
+    who: of.who, order: of.order, ci: of.ci, points: trail };
+  let str = null, link = false;
+  try {
+    try { str = await encodeContam(c); }
+    catch (e) {
+      if (e?.message !== TOO_TWISTY) throw e;
+      str = await encodeContam(c, {}, { forLink: true });
+      link = true;
+    }
+  } catch (err) {
+    contamReturnStr = null;
+    $(el).innerHTML = `<p class="qr-err">${esc(err.message)}</p>`;
+    return { str: null, link: false };
+  }
+  showContamReturn(str, link, el);
+  return { str, link };
+}
+
+/** A walk's card on the waiting screen: its QR code, or, for one too long
+    for a code, word that it goes as a link. */
+function showContamReturn(str, link, el) {
+  contamReturnStr = str;
+  $('waitLinkOut').hidden = true;
+  if (link) {
+    $(el).innerHTML = '<p class="qr-err">This walk is too long for one QR code. Send it to the handler as a link instead.</p>';
+    return;
+  }
+  try {
+    const qr = window.qrcode?.(0, 'M');
+    if (!qr) throw new Error('QR library missing — hard refresh once online');
+    qr.addData(cardUrl(str, SHARE_BASE), 'Byte');
+    qr.make();
+    $(el).innerHTML = qr.createSvgTag({ cellSize: 4, margin: 0, scalable: true });
+  } catch (err) {
+    $(el).innerHTML = `<p class="qr-err">${esc(err.message)}</p>`;
+  }
+}
+
+/** The walk as a link: the share sheet, else the clipboard, else a box to
+    copy it from. Sending is the person's own tap in the sheet. */
+async function sendContamLink() {
+  if (!contamReturnStr) return;
+  const url = cardUrl(contamReturnStr, SHARE_BASE);
+  if (navigator.share) {
+    try { await navigator.share({ title: 'Trailcraft contamination walk', url }); return; }
+    catch (e) { if (e?.name === 'AbortError') return; }
+  }
+  try { await navigator.clipboard.writeText(url); toast('Link copied — send it to the handler'); }
+  catch {
+    const box = $('waitLinkOut');
+    box.value = url; box.hidden = false; box.focus(); box.select();
+    toast('Copy the link from the box');
+  }
+}
+
+/** The end screen says what this walk is: a trail's layer waits for the
+    dog; a contamination person only shows their code and is done. */
+function waitMode(contamDone, link = false) {
+  $('waitClock').hidden = contamDone;
+  $('waitKicker').textContent = contamDone ? 'Walk done' : 'Stay put';
+  $('waitNote').hidden = contamDone;
+  $('waitQr').setAttribute('aria-label', contamDone ? 'Contamination walk QR code' : 'Walked trail card');
+  /* A link is the way back when the handler is not beside them, or when the
+     walk is too long for one code. */
+  $('waitLink').hidden = !contamDone || !contamReturnStr;
+  $('waitLink').textContent = link ? 'Send your walk as a link' : 'Send it as a link instead';
+  $('waitLinkOut').hidden = true;
+  $('waitDone').textContent = contamDone ? 'The handler has it' : 'Done';
+  if (contamDone) {
+    clearInterval(walk.tick); walk.tick = 0;
+    $('waitSub').textContent = link ? 'Send this walk to the handler as a link. It carries the walk you really did.'
+      : 'Show this QR code to the handler. It carries the walk you really did.';
+  }
+}
 
 /* ── The relay: draw → guide → countdown on both → walked card back ─
    The handler draws the trail with a finger, A to B. The layer scans the
@@ -4954,7 +5549,9 @@ function paintCountdown() {
 function stopCountdownUi() { clearInterval(CD.tick); CD.tick = 0; CD.buzzed = false; }
 
 /* ── The layer’s guided walk ── */
-const walk = { card: null, atStart: false, offAt: 0, done: false, tick: 0 };
+/* `contam`: a contamination person's walk (startContamWalk), not a trail's:
+   no countdown, and what comes back is a walked contamination card. */
+const walk = { card: null, atStart: false, offAt: 0, done: false, tick: 0, contam: false };
 
 function startWalk(card) {
   /* One phone records one thing. A plan opened from the camera mid-run would
@@ -4962,11 +5559,13 @@ function startWalk(card) {
   if (rec.on) return toast('A recording is already going. Stop that one first.');
   if (recordingWaits()) return;
   walk.card = card;
+  walk.contam = false;
   walk.atStart = false;
   walk.offAt = 0;
   walk.done = false;
   rec.kind = 'walk';
   clearMap();
+  $('btnInPlace').textContent = 'I’m in place';
   /* The route layers own this line now — drawing it as a plain trail as well
      put two lines in the same place saying different things. */
   setSrc('routeAhead', lineOf(card.points));
@@ -4982,6 +5581,7 @@ function startWalk(card) {
 }
 
 function walkHud() {
+  if (walk.contam) return contamHud();
   const A = walk.card.points[0], B = walk.card.points[walk.card.points.length - 1];
   const last = rec.pts[rec.pts.length - 1];
   const trouble = gpsTrouble({ last, startedAt: rec.started, droppedAt: rec.droppedAt, blocked: rec.blocked });
@@ -5037,7 +5637,8 @@ function navSay(num, unit, instr, sub) {
 }
 
 async function finishWalk() {
-  if (!walk.card) { stopFollowing(); return go('scrHome'); }
+  if (!walk.card) { stopFollowing(); return homeOrBoot(); }
+  if (walk.contam) return finishContamWalk();
   const B = walk.card.points[walk.card.points.length - 1];
   const last = rec.pts[rec.pts.length - 1];
   if (last && dist(last, B) > 60 &&
@@ -5086,6 +5687,7 @@ async function keepWalk() {
   } catch (err) {
     $('waitQr').innerHTML = `<p style="font:600 13px sans-serif;padding:20px">${esc(err.message)}</p>`;
   }
+  waitMode(false);
   clearInterval(walk.tick);
   walk.tick = setInterval(paintWait, 500);
   paintWait();
@@ -5104,6 +5706,7 @@ function paintWait() {
 /* ── The walked card, back on the handler’s phone ── */
 let scanWalkedFor = null;    // session id waiting for its walked card
 let scanLineFor = null;      // a blind trail's session id waiting for its laid line
+let scanContamFor = null;    // a trail's session id whose contamination walk is being scanned
 
 /** This phone's plans still waiting for their walk, as walkedPlanFor wants
     them. Only this phone's own runs: one kept from someone else's link is
@@ -5140,6 +5743,10 @@ function askWhichPlan(ids) {
   return null;
 }
 
+/** What the trail's real clock changed about contamination walks already in. */
+const turnedWords = (turned) => (turned || []).map(c =>
+  ` ${c.who || 'A contamination walk'} was ${c.order} the main trail, not ${c.orderChosen} as planned, so it counts as ${c.order}.`).join('');
+
 async function applyWalked(sessionId, card) {
   const s = db.sessions().find(x => x.id === sessionId);
   if (!s) return false;
@@ -5151,10 +5758,15 @@ async function applyWalked(sessionId, card) {
     startedAt: card.started,
     data: { planTrail: plan, trail: card.points, walked: true, walkedFrom: card.from, walkedDrawn: !!card.drawn },
   };
+  /* The contamination walks already in were held to the order chosen while
+     the plan's clock was made up (applyContamWalk): now the trail has a real
+     one, each is measured against it, in the same save. */
+  const re = reorderContam(s.data.contamination, trailClock(patchSession(s, walkedPatch).data));
+  if (re.changed) walkedPatch.data.contamination = re.list;
   const savedWalk = guardSave(patchSession(s, walkedPatch), () => saveSession(s, walkedPatch));
   snap();
   let s2 = savedWalk ?? patchSession(s, walkedPatch);
-  toast(`The real walked line from ${card.from || 'the layer'} — re-grading`);
+  toast(`The real walked line from ${card.from || 'the layer'} — re-grading.${turnedWords(re.turned)}`);
   if (s2.data.track) {
     /* Graded for the dog that ran it (s2.dogId), not whichever dog is picked
        on Home today, and banked to that dog. */
@@ -5166,7 +5778,7 @@ async function applyWalked(sessionId, card) {
     snap();
     s2 = db.sessions().find(x => x.id === s.id);
   }
-  if (gradedElsewhere('Walked trail added and the run graded. Open it from the log.')) return true;
+  if (gradedElsewhere(`Walked trail added and the run graded. Open it from the log.${turnedWords(re.turned)}`)) return true;
   run.session = s2;
   renderResult(s2);
   go('scrResult');
@@ -5205,6 +5817,10 @@ async function applyLine(sessionId, line) {
   for (const q of check.ask) if (!confirm(q)) return false;
 
   const patch = linePatch(s, line, Date.now());
+  /* Contamination walks added before the line, measured against it now,
+     when it has a real clock (trailClock: an untimed line has none). */
+  const re = reorderContam(s.data.contamination, trailClock(patchSession(s, patch).data));
+  if (re.changed) patch.data.contamination = re.list;
   /* The line makes the session bigger: a dog's track kept on a blind trail
      is thinned to leave it room, or, when there is none, left off and the
      run graded on the phone, rather than a run that never syncs again. */
@@ -5215,6 +5831,7 @@ async function applyLine(sessionId, line) {
      common: what it recorded after the dog set off is left out, and said. */
   const cutWords = check.cut > 0 ? ' Only the part recorded before the dog set off is used.' : '';
   toast((line.via === 'gpx' ? 'Laid trail added from the file. Grading the run…' : `Laid trail added from ${line.from || 'the layer'}’s card. Grading the run…`) + cutWords
+    + turnedWords(re.turned)
     + (dogTrackDropped ? ' The dog’s track no longer fits beside it, so the run is graded on the phone’s track.' : ''));
   /* Graded on the lined copy in memory first, and the line saved with its
      grade in one go. Saved apart, a grade that failed or was cut short left
@@ -5245,7 +5862,7 @@ async function applyLine(sessionId, line) {
     const p0 = patch.data.trail[0];
     fetchWeather(p0.lat, p0.lon, patch.startedAt).then(wx => keepWeather(s.id, wx)).catch(() => { /* offline: joins later */ });
   }
-  if (gradedElsewhere()) return true;
+  if (gradedElsewhere(`Laid trail added and the run graded. Open it from the log.${turnedWords(re.turned)}`)) return true;
   const s2 = db.sessions().find(x => x.id === s.id) ?? saved ?? patchSession(now, whole);
   run.session = s2;
   renderResult(s2);
@@ -5919,10 +6536,7 @@ function toggleReveal() {
       plumeStart(trailOf(s), windAt(s, run.startedAt).wx, undefined, s.data.contamination);
       weatherPanelFor(s, run.startedAt);
     } else plumeStop();
-    setSrc('contam', run.revealed
-      ? { type: 'FeatureCollection',
-          features: (s.data.contamination || []).map(c => lineOf(c.points).features[0]).filter(Boolean) }
-      : EMPTY);
+    drawContam(run.revealed ? s.data.contamination : null, trailClock(s.data));
   } else {
     setSrc('hides', run.revealed ? pointsOf(s.data.hides) : EMPTY);
   }
@@ -6441,6 +7055,9 @@ function renderResult(s) {
      real one — nor to teach the dog's calibration anything. */
   const provisional = !!s.data.plan && !s.data.walked;
   $('btnScanWalked').hidden = !provisional;
+  /* A contamination person whose walk has not come back yet: their code can
+     be scanned from here too, as the run's own walked card is. */
+  $('btnScanContam').hidden = !ownRun(s) || !(s.data.contamination || []).some(c => contamStatus(c) === 'waiting');
   $('btnReplay').hidden = !(s.data.track?.length > 1);
   $('btnLayAgain').hidden = !canLayAgain(s);
   /* A trail laid on an earlier one's route says whose, so two dogs' runs on
@@ -6545,10 +7162,7 @@ function showOnMap(from = 'scrResult') {
     setTrail(s.data.trail);
     setSrc('start', pointsOf([s.data.trail[0]]));
     if (s.data.planTrail?.length > 1) setSrc('plan', lineOf(s.data.planTrail));
-    if (s.data.contamination?.length) {
-      setSrc('contam', { type: 'FeatureCollection',
-        features: s.data.contamination.map(c => lineOf(c.points).features[0]).filter(Boolean) });
-    }
+    if (s.data.contamination?.length) drawContam(s.data.contamination, trailClock(s.data));
     if (wx) {
       /* The general model for every dog. A per-dog drift figure is still
          collected (dog card: "observed track patterns") but no longer fed
@@ -6868,7 +7482,12 @@ async function reportMap(m) {
   const view = miniView(all.length > 1 ? all : [all[0], all[0]], RPT_W, RPT_H);
   const at = (p) => { const [x, y] = view.at(p); return [x / RPT_W, y / RPT_H]; };
   const paths = [], dots = [];
-  m.contamination.forEach(c => paths.push({ pts: c.points.map(at), stroke: [0.78, 0.72, 0.91], width: 1.8, dash: [3, 3] }));
+  /* Each person in their own colour, as the legend names it: solid where
+     they really walked, dashed where the line is only drawn. */
+  m.contamination.forEach((c, i) => {
+    const rgb = hexToRgb(contamColour(c, i).hex).map(v => v / 255);
+    paths.push({ pts: c.points.map(at), stroke: rgb, width: 1.8, dash: contamStatus(c) === 'walked' ? null : [3, 3] });
+  });
   // The dog's track under the trail: where they overlap, the line that was laid must still show.
   /* With the dog's own GPS track, that is the dog's line, and the handler's
      walk goes thin and grey under it. */
@@ -7098,8 +7717,7 @@ async function openLive(id) {
     else {
       setTrail(m.trail);
       if (m.trail) setSrc('start', pointsOf([m.trail[0]]));
-      if (m.contamination.length) setSrc('contam', { type: 'FeatureCollection',
-        features: m.contamination.map(c => lineOf(c.points).features[0]).filter(Boolean) });
+      if (m.contamination.length) drawContam(m.contamination, trailClock(m));
     }
     setDogTrack(m.track);
     setSrc('wps', pointsOf(m.wps, 'kind'));
@@ -8068,11 +8686,12 @@ let scanCameFrom = 'scrPick';
 
 /* What the scan is for is set by every opening, so no scan inherits the
    last one's purpose. */
-async function openScan(from = 'scrPick', { walkedFor = null, lineFor = null } = {}) {
+async function openScan(from = 'scrPick', { walkedFor = null, lineFor = null, contamFor = null } = {}) {
   scanCameFrom = from;
   go('scrScan');
   scanWalkedFor = walkedFor;
   scanLineFor = lineFor;
+  scanContamFor = contamFor;
   const gen = ++scan.gen;
   $('scanState').textContent = 'Point the camera at a Trail Card.';
   if (!window.jsQR) {
@@ -8160,6 +8779,10 @@ async function handleCard(data, { fromLink = false } = {}) {
       $('scanState').textContent = 'That is a plan, not the laid trail. Still scanning…';
       return false;
     }
+    if (isContamCard(card)) {
+      $('scanState').textContent = 'That is a contamination code, not the laid trail. Still scanning…';
+      return false;
+    }
     const id = scanLineFor;
     scanLineFor = null;
     stopScan();
@@ -8176,6 +8799,30 @@ async function handleCard(data, { fromLink = false } = {}) {
      button on the result card, or from the phone's camera with no context at
      all. Find the plan it belongs to rather than quietly filing it as a new
      trail — a walk with nothing to compare it against is not a session. */
+  /* Contamination codes (card.js kinds 3–5). A walk coming back goes to its
+     person's line on its trail, or nowhere: never a session of its own. A
+     code to walk is shown first, what it is and what Start will do, from
+     the camera as from a link, because Start records where they go. */
+  if (isContamCard(card)) {
+    if (card.kind === 5) {
+      scanContamFor = null;
+      scanWalkedFor = null;
+      stopScan();
+      return takeContamWalk(card, { fromLink });
+    }
+    if (scanWalkedFor || scanContamFor) {
+      $('scanState').textContent = 'That is a code to walk, not a walk coming back. Still scanning…';
+      return false;
+    }
+    stopScan();
+    if (fromLink) return startContamWalk(card);
+    offerCardLink(cardFromText(data), card, { scanned: true });
+    return true;
+  }
+  if (scanContamFor) {
+    $('scanState').textContent = 'That is not a contamination walk. Still scanning…';
+    return false;
+  }
   if (card.kind === 2) {
     const asked = scanWalkedFor;
     scanWalkedFor = null;
@@ -9758,6 +10405,31 @@ function wire() {
     if (pendingSession) renderShare(pendingSession);
   });
   $('contamSave').addEventListener('click', saveContam);
+  $('contamWay').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-way]');
+    if (!b) return;
+    contam.way = b.dataset.way === 'free' ? 'free' : 'guided';
+    paintContamOrder();
+  });
+  $('contamWho').addEventListener('change', () => {
+    const other = $('contamWho').value === WHO_OTHER;
+    $('contamName').hidden = !other;
+    if (other) $('contamName').focus();
+  });
+  /* Each person's buttons on the share screen, by their place in the list. */
+  $('contamRows').addEventListener('click', (e) => {
+    const s = pendingSession;
+    if (!s) return;
+    const qr = e.target.closest('[data-contam-qr]');
+    if (qr) return showContamQr(s.id, Number(qr.dataset.contamQr));
+    const here = e.target.closest('[data-contam-walk]');
+    if (here) return walkContamHere(s.id, Number(here.dataset.contamWalk));
+    if (e.target.closest('[data-contam-scan]')) openScan('scrShare', { contamFor: s.id });
+  });
+  $('contamQrHide').addEventListener('click', closeContamQr);
+  $('btnScanContam').addEventListener('click', () => {
+    if (run.session) openScan('scrResult', { contamFor: run.session.id });
+  });
 
   // Draw a plan — reached from Start on the lay screen.
   /* Custom opens a field in the card, not a system prompt. window.prompt is
@@ -9837,18 +10509,29 @@ function wire() {
   // The layer's walk
   $('btnInPlace').addEventListener('click', finishWalk);
   $('walkCancel').addEventListener('click', async () => {
-    if (rec.pts.length > 1 && !confirm('Cancel this walk? The handler gets no walked card.')) return;
+    if (rec.pts.length > 1 && !confirm(walk.contam ? 'Cancel this walk? The handler gets nothing back.'
+      : 'Cancel this walk? The handler gets no walked card.')) return;
     await stopWatch();
     dropDraft();            // thrown away on purpose: never offered back
     stopFollowing();
     walk.card = null;
+    walk.contam = false;
     clearMap();
-    go('scrHome');
+    homeOrBoot();
   });
+  $('waitLink').addEventListener('click', sendContamLink);
   $('waitDone').addEventListener('click', () => {
+    /* With nobody set up on this phone, the code is kept for a day only so
+       that a reloaded page does not lose it: once the handler has it, it goes. */
+    if (walk.contam && !S.handler) {
+      if (!confirm('Has the handler got your walk? Once you say yes, it is gone from this phone.')) return;
+      dropContamReturn();
+    }
+    contamReturnStr = null;
     clearInterval(walk.tick); walk.tick = 0;
+    walk.contam = false;
     clearMap();
-    go('scrHome');
+    homeOrBoot();
   });
 
   // Pick / scan
@@ -10444,6 +11127,7 @@ function wire() {
   });
   $('btnGoogle').addEventListener('click', () => signInWithGoogle());
   $('btnRecoverKeep').addEventListener('click', recoverKeep);
+  $('btnRecoverFinish').addEventListener('click', recoverFinish);
   $('btnCardInGo').addEventListener('click', cardLinkGo);
   $('btnCardInNo').addEventListener('click', cardLinkNo);
   $('btnRecoverDrop').addEventListener('click', recoverDrop);
@@ -10665,16 +11349,25 @@ async function importFromLink() {
   let card;
   try { card = await decodeTrail(text); }
   catch (err) { toast(err.message); return false; }
-  /* Still on Home: they may have moved on while the card was being read. */
-  if (currentScreen !== 'scrHome') return false;
+  /* Still on Home: they may have moved on while the card was being read.
+     A contamination code to walk is the exception: it is often opened on a
+     stranger's phone with nothing set up, and is offered straight away. */
+  const stranger = !S.handler && isContamCard(card) && card.kind !== 5;
+  if (currentScreen !== 'scrHome' && !stranger) return false;
   offerCardLink(text, card);
   return true;
 }
 
+/** Whether the page was opened from a contamination code to walk: then it
+    is shown before any setting up, since walking one needs none. */
+const contamLinkFirst = () => !S.handler && String(location.hash || '').startsWith('#c=TC2.');
+
 let cardLinkText = null;   // the card on the screen below, until it is taken or turned down
 
-function offerCardLink(text, card) {
+function offerCardLink(text, card, { scanned = false } = {}) {
   cardLinkText = text;
+  $('cardInLabel').textContent = isContamCard(card) ? 'Contamination code' : scanned ? 'Trail Card' : 'Trail Card from a link';
+  if (isContamCard(card)) return offerContamLink(card);
   const who = card.from || 'someone';
   const len = fmtKm(pathLen(card.points));
   const had = card.kind === 0 && db.sessions().find(x => sameCard(x, card));
@@ -10690,7 +11383,9 @@ function offerCardLink(text, card) {
   const dog = named && S.dogs.find(d => d.id === named.dogId)?.name;
   $('cardInNote').textContent = had
     ? (had.data.track ? 'This trail is already on this phone.' : 'This trail is already on this phone, not run yet.')
-    : card.kind === 1 ? 'Walking it starts a guided walk along the line, using this phone’s location.'
+    /* Said outright: a contamination person whose camera took this code
+       instead of their own would otherwise lay the main trail unawares. */
+    : card.kind === 1 ? 'You are laying the main trail. Walking it starts a guided walk along the line, using this phone’s location.'
       : card.kind === 2 ? walkedNote(pick, named, dog)
         : 'Running it adds it to your sessions and starts the run, using this phone’s location.';
   $('btnCardInGo').textContent = had ? (had.data.track ? 'Open it' : 'Run it')
@@ -10708,16 +11403,58 @@ function walkedNote(pick, named, dog) {
   return 'Using it replaces the line of a plan on this phone with this walk, and re-grades any run on that plan. You will be asked which plan.';
 }
 
+/** What a contamination code does here, before anything is recorded or
+    attached: walk one (kinds 3 and 4), or add a walk to a trail (5). */
+function offerContamLink(card) {
+  const by = card.from || 'the handler';
+  const len = fmtKm(pathLen(card.points));
+  if (card.kind === 5) {
+    const pick = contamWalkFor(card, contamSessions());
+    const named = pick.ids?.length ? sessionById(pick.ids[0]) : null;
+    $('cardInHead').textContent = `A contamination walk from ${card.from || card.who || 'someone'}`;
+    /* A walk thinned by more than a few metres to fit is said: its crossings
+       are measured to 15 m. */
+    $('cardInWhat').textContent = `${len}, walked ${fmtWhen(card.started)} (${when(card.started)})`
+      + `${card.tol > 8 ? `, simplified to about ${card.tol} m` : ''}.`;
+    $('cardInNote').textContent = pick.why === 'other' ? 'This walk is for a trail that is not on this phone, so there is nothing to use it for.'
+      : pick.why === 'gone' ? 'That person is no longer on the trail on this phone, so there is nothing to use it for.'
+        : pick.why === 'dup' ? 'This walk is already on the trail.'
+          : pick.why ? 'This is not a walk this phone can use.'
+            : `Using it puts ${pick.entry?.who ? `${pick.entry.who}’s` : 'the'} real walk on your trail from ${fmtWhen(named?.startedAt)}`
+              + `${pick.ask === 'replace' ? ', replacing the walk already there' : ''}, and grades any run on it again. You will be asked to confirm.`;
+    $('btnCardInGo').textContent = 'Use this walk';
+    $('btnCardInGo').hidden = !!pick.why;
+  } else {
+    const free = card.kind === 4;
+    $('cardInHead').textContent = `Lay a contamination trail for ${by === 'the handler' ? 'the handler’s' : `${by}’s`} trail`;
+    $('cardInWhat').textContent = (free ? 'Walk where you like' : `Guided route of ${len}`)
+      + `, ${card.order === 'after' ? 'after' : 'before'} the main trail${card.who ? `, for ${card.who}` : ''}.`;
+    $('cardInNote').textContent = (free
+      ? 'Your phone records where you walk, using its location. Tap Done when you have finished.'
+      : 'Your phone guides you along the route and records where you really walk, using its location. Tap Done at the end.')
+      + ' Then it shows a QR code for the handler. Nothing to install, no account.'
+      /* Recording starts on Start: an "after" walk begun now would be before
+         the trail, and the cross-track the handler planned would be lost. */
+      + (card.order === 'after' ? ' Wait until the handler tells you the trail is laid, then tap Start.' : '');
+    $('btnCardInGo').textContent = 'Start the walk';
+    $('btnCardInGo').hidden = false;
+  }
+  go('scrCardIn');
+}
+
 function cardLinkGo() {
   const text = cardLinkText;
   cardLinkText = null;
-  if (!text) return leaveForm('scrHome');
-  go('scrHome');
+  if (!text) return homeOrBoot();
+  /* Someone with nothing set up goes straight to the walk: Home needs a
+     handler, and the walk does not. */
+  if (S.handler) go('scrHome');
   handleCard(text, { fromLink: true });
 }
 
 function cardLinkNo() {
   cardLinkText = null;
+  if (!S.handler) return boot();
   leaveForm('scrHome');
 }
 
@@ -10725,6 +11462,13 @@ function cardLinkNo() {
 /* ── Offering an unfinished recording back ──────────────────────────── */
 let recovering = null;
 let recoveryLater = false;   // "not now" to a recovered walk: ask again at the next launch, not straight away
+
+/** Whether a draft is a contamination walk's (its plan a kind 3 or 4 card). */
+const contamDraft = (d) => d?.kind === 'walk' && (d.plan?.kind === 3 || d.plan?.kind === 4);
+/** An unfinished contamination walk on this phone, still young enough. */
+function contamDraftHere() {
+  try { const d = unpackDraft(db.draft.read()); return draftAlive(d) && contamDraft(d); } catch { return false; }
+}
 
 function offerRecovery() {
   const d = (() => { try { return unpackDraft(db.draft.read()); } catch { return null; } })();
@@ -10736,15 +11480,60 @@ function offerRecovery() {
   const st = draftStats(d);
   $('recoverWhat').textContent = d.kind === 'hide'
     ? `${st.hides} hide${st.hides === 1 ? '' : 's'} set, not saved.`
-    : `${fmtKm(st.metres)} ${d.kind === 'run' ? 'run' : d.kind === 'walk' ? 'walk of a plan' : 'trail'}, ${fmtDur(st.lastedMs)}, not saved.`;
+    : `${fmtKm(st.metres)} ${d.kind === 'run' ? 'run' : d.kind === 'walk' ? (d.plan?.kind >= 3 ? 'contamination walk' : 'walk of a plan') : 'trail'}, ${fmtDur(st.lastedMs)}, not saved.`;
   $('recoverWhen').textContent = `Recorded ${fmtWhen(st.startedAt)}.`;
+  /* A contamination walk can be carried on from where it stopped, or
+     finished there and its code shown. */
+  const cw = contamDraft(d);
+  $('btnRecoverKeep').textContent = cw ? 'Carry on with the walk' : 'Keep it';
+  $('btnRecoverFinish').hidden = !cw;
   go('scrRecover');
   return true;
+}
+
+/** A contamination walk brought back after the app closed: carried on, the
+    old points kept and the new going on after them, or finished there. */
+function contamDraftBack(d, { carryOn }) {
+  recovering = null;
+  rec.kind = 'walk';
+  rec.pts = d.pts;
+  rec.wps = d.wps;
+  rec.hides = d.hides;
+  rec.started = d.startedAt;
+  rec.on = false;
+  walk.card = d.plan;
+  walk.offAt = d.offAt || 0;
+  walk.atStart = !!walk.offAt;
+  walk.contam = true;
+  if (!carryOn) return recoverContamWalk();
+  if (!startContamWalk(d.plan, { resume: d })) boot();
+}
+
+function recoverFinish() {
+  const d = recovering;
+  if (!d || !contamDraft(d)) return boot();
+  return contamDraftBack(d, { carryOn: false });
+}
+
+/** A contamination walk brought back after a crash, finished as its Done
+    button would: its code shown for the handler. A free one has no end to
+    have stopped short of; a guided one asks, as the button does. */
+function recoverContamWalk() {
+  const end = walk.card.kind === 3 ? walk.card.points[walk.card.points.length - 1] : null;
+  const lastPt = rec.pts[rec.pts.length - 1];
+  const short = end && lastPt ? dist(lastPt, end) : 0;
+  if (short > 60 && !confirm(`The recording stopped ${fmtM(short)} before the end of the route. Send what was walked anyway?`)) {
+    recoveryLater = true;
+    toast('Kept on this phone. It is offered again next time you open Trailcraft');
+    return boot();
+  }
+  return keepContamWalk();
 }
 
 async function recoverKeep() {
   const d = recovering;
   if (!d) return boot();
+  if (contamDraft(d)) return contamDraftBack(d, { carryOn: true });
   if (!S.handler) { toast('Set yourself up first, then this comes back'); return boot(); }
   /* Back to exactly where the recording stopped, using the same paths a
      finished one takes — nothing here is a second way of saving a walk. */
@@ -10798,6 +11587,8 @@ async function recoverKeep() {
     walk.card = d.plan;
     walk.offAt = d.offAt || 0;
     walk.atStart = !!walk.offAt;
+    /* A contamination walk never gets here: contamDraftBack, above. */
+    walk.contam = false;
     /* The question the Finish button asks, asked here too: a walk the phone
        lost part-way is not a finished one, and the handler's run will be
        graded against whatever is sent. Saying no loses nothing — the draft
@@ -10859,7 +11650,18 @@ function boot() {
   if (openFromHash()) return;   // a trail someone sent: that first, the app's own business after
   /* Only once there is a handler to own it: recovery goes through the same
      save paths, and those need to know whose walk this is. */
-  if (S.handler && !recoveryLater && offerRecovery()) return;
+  /* A contamination walk needs nobody set up, so its recording is offered
+     back on a phone with nobody set up too, and so is its code, kept for
+     the handler (offerContamReturn), before any setting up. */
+  if ((S.handler || contamDraftHere()) && !recoveryLater && offerRecovery()) return;
+  if (contamLinkFirst()) {
+    /* A code that cannot be read is said (importFromLink) and then the app
+       starts as it would have. A new code opened is what they came for, so
+       it comes before an earlier walk's kept code, which waits its turn. */
+    importFromLink().then(ok => { if (!ok) boot(); });
+    return;
+  }
+  if (!S.handler && offerContamReturn()) return;
   /* A brand-new phone is offered sign-in before anything else, because if
      there is an account, everything the handler set up on their last phone
      comes back and onboarding is not needed at all. Offered once: "use

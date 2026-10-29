@@ -144,12 +144,166 @@ export async function encodeTrail(session, info = {}) {
   return MAGIC + b64url(packed);
 }
 
+/* ── Contamination cards ──────────────────────────────────────────────
+   Three more kinds, for the people who lay contamination across a trail:
+     3 = a guided route for their phone to walk them along (no clock: it is
+         a drawn line, and they make the clock by walking it);
+     4 = a free walk: no line at all, only which trail and which person;
+     5 = their walk coming back: the real line with its real clock.
+
+   They go out under `TC2.`, not TC1. An app that only speaks TC1 reads any
+   unknown kind as a plain laid trail, and would have offered to RUN a
+   contamination route as if it were the trail. Under TC2 the same app says
+   "this card is from a newer Trailcraft", which is the truth. Every TC1 card
+   still decodes exactly as before.
+
+   Each names its trail (i) and its person (c) by id, both required and both
+   held to the same allow-list as a plan id: a walk that comes back goes to
+   that person's line on that trail, or to nothing. */
+const MAGIC2 = 'TC2.';
+const CONTAM_KINDS = new Set([3, 4, 5]);
+const DAMAGED = 'Trail Card is damaged — try scanning again';
+const T_MIN = Date.UTC(2000, 0, 1), T_MAX = Date.UTC(2100, 0, 1);
+const IDS = /^[\w-]{1,32}$/;
+/* A contamination walk is someone walking across a field, not a day's
+   march: one that lasts longer than this was not made by this app. */
+const MAX_WALK_MS = 12 * 3600e3;
+
+/** A contamination entry as a card: `kind` 3 (route), 4 (free) or 5 (walked).
+    `info` is filled as encodeTrail fills it.
+
+    Whatever this makes, decodeTrail takes: the decoder's bounds are applied
+    here first, so a person is never handed a code the handler's phone can
+    only call damaged. `forLink` is for a walk too long and winding for one
+    QR code: as a link it may carry twice the points (the decoder's own
+    limit), and only then is it thinned past 16 m. */
+export async function encodeContam(c, info = {}, { forLink = false } = {}) {
+  needStreams();
+  const kind = c?.kind;
+  if (!CONTAM_KINDS.has(kind)) throw new Error('Not a contamination card');
+  if (!IDS.test(String(c.planId || '')) || !IDS.test(String(c.cid || ''))) throw new Error('That contamination line has no id yet');
+  let all = kind === 4 ? [] : (c.points || []);
+  if (kind !== 4 && all.length < 2) throw new Error('Nothing to share — the line has no points');
+  if (!all.every(p => Number.isFinite(p?.lat) && Number.isFinite(p?.lon) && Math.abs(p.lat) <= 90 && Math.abs(p.lon) <= 180)) {
+    throw new Error('That line has a point off the map');
+  }
+  if (kind === 5) {
+    if (!all.every(p => Number.isFinite(p.t))) throw new Error('That walk has no clock');
+    if (all.some((p, i) => i && p.t < all[i - 1].t)) throw new Error('That walk’s clock is out of order');
+    if (all[0].t < T_MIN || all[all.length - 1].t > T_MAX) throw new Error('That walk’s clock is wrong');
+    /* Someone who forgot to tap Done leaves the phone recording on a table:
+       the walk is at the start, so the first 12 hours are kept (a second
+       short of it, for the clock rounded to whole seconds) and the rest,
+       which no contamination walk lasts, is left off. */
+    const end = all[0].t + MAX_WALK_MS - 1000;
+    if (all[all.length - 1].t > end) all = all.filter(p => p.t <= end);
+    if (all.length < 2) throw new Error('That walk has no track to send');
+  }
+  /* A little under the decoder's 200 km, for the rounding of each point. */
+  if (kind !== 4 && pathLen(all) > 199000) throw new Error('That walk is too long to send back');
+  /* A walk's crossings are measured to 15 m (contam.js), so it is thinned by
+     no more than 16 m for a QR code; a link may go further, and says so. */
+  const cap = forLink ? 2 * MAX_PTS : MAX_PTS;
+  const maxTol = kind === 5 && !forLink ? 16 : 64;
+  let pts = all, tol = 2, tolUsed = 0;
+  while (pts.length > cap && tol <= maxTol) {
+    pts = simplify(all, tol);
+    tolUsed = tol;
+    tol *= 2;
+  }
+  if (pts.length > cap) throw new Error(TOO_TWISTY);
+  info.tol = tolUsed;
+  const payload = {
+    v: 2, k: kind,
+    i: String(c.planId), c: String(c.cid),
+    f: String(c.from || '').slice(0, 40),
+    n: String(c.who || '').slice(0, 40),
+    o: c.order === 'after' ? 'a' : 'b',
+    ...(Number.isInteger(c.ci) && c.ci >= 0 && c.ci < 8 ? { x: c.ci } : {}),
+    ...(kind === 4 ? {} : {
+      a: tolUsed,
+      p: kind === 5
+        ? [deltas(pts.map(p => q(p.lat))), deltas(pts.map(p => q(p.lon))), deltas(pts.map(p => Math.round(p.t / 1000)))]
+        : [deltas(pts.map(p => q(p.lat))), deltas(pts.map(p => q(p.lon)))],
+    }),
+  };
+  const bytes = new TextEncoder().encode(JSON.stringify(payload));
+  const packed = await through(bytes, new CompressionStream('deflate-raw'));
+  const out = MAGIC2 + b64url(packed);
+  if (out.length > MAX_CARD) throw new Error(TOO_TWISTY);
+  return out;
+}
+
+/** What encodeContam says when a walk will not go in one QR code: the
+    caller then offers it as a link (forLink). */
+export const TOO_TWISTY = 'That walk is too long and twisty for one card';
+
+/** A TC2 card's payload, held to the same bounds as a Trail Card's. */
+function contamFromPayload(payload) {
+  const bad = () => { throw new Error(DAMAGED); };
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload) || payload.v !== 2 || !CONTAM_KINDS.has(payload.k)) bad();
+  const kind = payload.k;
+  if (typeof payload.i !== 'string' || !IDS.test(payload.i) || typeof payload.c !== 'string' || !IDS.test(payload.c)) bad();
+  if (payload.o !== 'a' && payload.o !== 'b') bad();
+  let points = [];
+  if (kind === 4) {
+    /* A free walk carries no line; one that does was not made by this app. */
+    if (payload.p !== undefined) bad();
+  } else {
+    const cols = kind === 5 ? 3 : 2;
+    if (!Array.isArray(payload.p) || payload.p.length !== cols
+        || !payload.p.every(a => Array.isArray(a) && a.length <= 2 * MAX_PTS && a.every(v => Number.isInteger(v)))) bad();
+    const [la, lo, ts] = payload.p.map(absolutes);
+    if (la.length < 2 || lo.length !== la.length || (ts && ts.length !== la.length)) bad();
+    points = la.map((v, i) => ({ lat: v / 1e5, lon: lo[i] / 1e5, ...(ts ? { t: ts[i] * 1000 } : {}) }));
+    for (let i = 0; i < points.length; i++) {
+      const p = points[i];
+      if (!Number.isFinite(p.lat) || !Number.isFinite(p.lon) || Math.abs(p.lat) > 90 || Math.abs(p.lon) > 180) bad();
+      if (ts) {
+        if (!Number.isFinite(p.t) || p.t < T_MIN || p.t > T_MAX) bad();
+        if (i && p.t < points[i - 1].t) bad();
+      }
+    }
+    if (pathLen(points) > 200000) bad();
+    if (ts && points[points.length - 1].t - points[0].t > MAX_WALK_MS) bad();
+  }
+  const tol = typeof payload.a === 'number' && payload.a >= 2 && payload.a <= 64 ? payload.a : 0;
+  return {
+    kind,
+    planId: payload.i, cid: payload.c,
+    from: typeof payload.f === 'string' ? payload.f.slice(0, 40) : '',
+    who: typeof payload.n === 'string' ? payload.n.slice(0, 40) : '',
+    order: payload.o === 'a' ? 'after' : 'before',
+    ci: Number.isInteger(payload.x) && payload.x >= 0 && payload.x < 8 ? payload.x : null,
+    drawn: kind === 3, approx: tol > 0, tol,
+    points, waypoints: [],
+    started: kind === 5 ? points[0].t : null,
+    ended: kind === 5 ? points[points.length - 1].t : null,
+    ageMin: null,
+  };
+}
+
+/** Whether a decoded card is one of the contamination kinds. */
+export const isContamCard = (card) => CONTAM_KINDS.has(card?.kind);
+
 /** A Trail Card string back into a trail. Throws plain-language errors — the
     message is shown to whoever scanned the code. */
 export async function decodeTrail(str) {
   needStreams();
   const s = String(str || '').trim();
   if (!s.startsWith('TC')) throw new Error('Not a Trail Card');
+  if (s.startsWith(MAGIC2)) {
+    if (s.length > MAX_CARD) throw new Error(DAMAGED);
+    let payload;
+    try {
+      const bytes = await inflate(unb64url(s.slice(MAGIC2.length)), MAX_CARD_JSON);
+      if (!bytes) throw new Error('too big');
+      payload = JSON.parse(new TextDecoder().decode(bytes));
+    } catch {
+      throw new Error(DAMAGED);
+    }
+    return contamFromPayload(payload);
+  }
   if (!s.startsWith(MAGIC)) throw new Error('This card is from a newer Trailcraft than this app');
   if (s.length > MAX_CARD) throw new Error('Trail Card is damaged — try scanning again');
 

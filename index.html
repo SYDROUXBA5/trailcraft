@@ -39,6 +39,9 @@
 <!-- The map lives underneath everything. Paper screens cover it entirely;
      the field screens (lay, run, confirm) are transparent chrome over it. -->
 <div id="map"></div>
+<!-- Who each contamination line is, over the map wherever their lines are
+     drawn (app.js drawContam). Under every screen: the paper ones cover it. -->
+<div id="contamKey" class="contam-key" role="list" aria-label="Contamination lines" hidden></div>
 
 <div id="toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
 <!-- A level passed, played over the result that earned it. It never has to
@@ -389,14 +392,18 @@
 <!-- ── Layer waiting at the end, dog inbound ───────────────────────── -->
 <section id="scrWait" class="screen tutorial" hidden>
   <div class="tut-card center-card">
-    <span class="tut-k">Stay put</span>
+    <span class="tut-k" id="waitKicker">Stay put</span>
     <h1 class="tut-title huge" id="waitClock">--:--</h1>
     <p class="tut-body center" id="waitSub">The dog starts when this hits zero.</p>
     <div class="qr-plate wait-qr" id="waitQr" role="img" aria-label="Walked trail card"></div>
-    <p class="tut-body center small-note">Show this card to the handler after the find —
+    <p class="tut-body center small-note" id="waitNote">Show this card to the handler after the find —
       it carries the trail you actually walked.</p>
+    <input type="text" class="link-out" id="waitLinkOut" readonly hidden aria-label="Link to your walk">
   </div>
-  <div class="tut-bottom"><button class="btn moss-on-dark" id="waitDone">Done</button></div>
+  <div class="tut-bottom">
+    <button class="btn ghost-on-dark" id="waitLink" hidden>Send it as a link instead</button>
+    <button class="btn moss-on-dark" id="waitDone">Done</button>
+  </div>
 </section>
 
 <!-- ── Confirm the line ────────────────────────────────────────────── -->
@@ -430,7 +437,17 @@
       <p class="body small center muted" id="shareQrCaption">Scan this with the other phone</p>
     </div>
     <button class="btn card-btn" id="btnSharePlume">Watch the scent on the map</button>
-    <button class="btn card-btn" id="btnContam" hidden>Add a contamination trail</button>
+    <div class="card contam-list" id="contamListCard" hidden>
+      <span class="field-label">Contamination people</span>
+      <div class="contam-rows" id="contamRows"></div>
+      <div class="contam-qr" id="contamQrBox" hidden>
+        <p class="contam-qr-who" id="contamQrWho"></p>
+        <div id="contamQr" class="qr-plate" role="img" aria-label="Contamination QR code"></div>
+        <p class="body small center muted" id="contamQrCaption"></p>
+        <button type="button" class="btn ghost small" id="contamQrHide">Done</button>
+      </div>
+    </div>
+    <button class="btn card-btn" id="btnContam" hidden>Add a contamination person</button>
     <button class="btn card-btn" id="btnShareMore">Send as a link or a file</button>
     <div class="page-bottom">
       <button class="btn ember" id="btnOff" hidden>She&rsquo;s off, start the countdown</button>
@@ -446,8 +463,14 @@
   <div class="hud-pill"><span id="contamText">Tap the corners of the extra trail</span></div>
   <div class="glass-bottom">
     <div class="contam-form card">
-      <label class="field-label" for="contamWho">Who walked it</label>
+      <label class="field-label" for="contamWho">Who lays it</label>
       <select id="contamWho"></select>
+      <input id="contamName" type="text" maxlength="40" autocomplete="off" autocapitalize="words" enterkeyhint="done" placeholder="Their name" aria-label="Their name" hidden>
+      <span class="field-label" id="contamWayLabel">How they walk</span>
+      <div class="order-row" id="contamWay" role="radiogroup" aria-labelledby="contamWayLabel">
+        <button type="button" class="chip" role="radio" data-way="guided" aria-checked="true">Draw their route</button>
+        <button type="button" class="chip" role="radio" data-way="free" aria-checked="false">Where they like</button>
+      </div>
       <span class="field-label" id="contamOrderLabel">Laid</span>
       <div class="order-row" id="contamOrder" role="radiogroup" aria-labelledby="contamOrderLabel">
         <button type="button" class="chip" role="radio" data-order="before" aria-checked="true">Before the main trail</button>
@@ -457,7 +480,7 @@
     <div class="row-gap">
       <button class="btn ghost" id="contamUndo">Undo</button>
       <button class="btn ghost" id="contamCancel">Cancel</button>
-      <button class="btn moss" id="contamSave" disabled>Save trail</button>
+      <button class="btn moss" id="contamSave" disabled>Add this person</button>
     </div>
   </div>
 </section>
@@ -607,6 +630,7 @@
     </div>
     <div class="page-bottom">
       <button class="btn ember" id="btnScanWalked" hidden>Scan the walked trail card</button>
+      <button class="btn ghost" id="btnScanContam" hidden>Scan a contamination walk</button>
       <button class="btn moss" id="btnShowMap">Show on map</button>
       <button class="btn moss" id="btnReplay" hidden>Replay this run</button>
       <button class="btn" id="btnLayAgain" hidden>Lay this route again</button>
@@ -1106,6 +1130,7 @@
     <p class="body small muted">The app closed before this was saved. Keeping it takes you to where you left off.</p>
     <div class="page-bottom">
       <button class="btn moss" id="btnRecoverKeep">Keep it</button>
+      <button class="btn ghost" id="btnRecoverFinish" hidden>Finish and show the code</button>
       <button class="btn ghost" id="btnRecoverDrop">Throw it away</button>
     </div>
   </div>
@@ -1114,7 +1139,7 @@
 <!-- ── A Trail Card that came in a link: shown before anything is done ── -->
 <section id="scrCardIn" class="screen paper" hidden>
   <div class="page">
-    <span class="label">Trail Card from a link</span>
+    <span class="label" id="cardInLabel">Trail Card from a link</span>
     <h1 class="display" id="cardInHead"></h1>
     <div class="card">
       <p class="body" id="cardInWhat"></p>

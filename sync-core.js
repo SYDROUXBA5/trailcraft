@@ -160,8 +160,52 @@ function withMissing(win, lose) {
     data.foldersAt = lose.data.foldersAt;
     added++;
   }
+  /* The contamination people, person by person. Their list is changed
+     after the trail is laid now (a code shown, a walk added), so a phone
+     that had not heard of a walk added on the other, and then showed
+     someone's code, was the newer copy and its whole list won: the walk was
+     gone from every phone. Each person is kept by their id: the newer copy's
+     order and entries, then any person only the older copy has, and for a
+     person on both, the copy that holds their walk (the later walk if both
+     do). Entries with no id (from before people had one) stay as the newer
+     copy has them. */
+  if (plainObject(lose.data) && Array.isArray(data.contamination) && Array.isArray(lose.data.contamination)) {
+    const merged = mergeContam(data.contamination, lose.data.contamination);
+    if (merged) { data.contamination = merged; added++; }
+  }
   if (plainObject(win.data) || plainObject(lose.data)) out.data = data;
   return added ? out : null;
+}
+
+const contamId = (c) => (plainObject(c) && typeof c.id === 'string' && c.id ? c.id : null);
+const walkedEntry = (c) => plainObject(c) && c.walked === true && Array.isArray(c.points) && c.points.length > 1;
+
+/** Two copies of a trail's contamination list as one (withMissing), or null
+    when the newer copy's list already is that. Exported for the tests. */
+export function mergeContam(win, lose) {
+  const theirs = new Map();
+  for (const c of lose) { const id = contamId(c); if (id && !theirs.has(id)) theirs.set(id, c); }
+  const seen = new Set();
+  let changed = false;
+  const out = win.map(c => {
+    const id = contamId(c);
+    if (!id) return c;
+    seen.add(id);
+    const o = theirs.get(id);
+    if (!o) return c;
+    const later = (x) => (Number.isFinite(x.walkedAt) ? x.walkedAt : 0);
+    const take = walkedEntry(o) && (!walkedEntry(c) || later(o) > later(c));
+    if (take) changed = true;
+    return take ? o : c;
+  });
+  for (const c of lose) {
+    const id = contamId(c);
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    out.push(c);
+    changed = true;
+  }
+  return changed ? out : null;
 }
 
 /** One record, two copies: `keep` is what both should hold, and `up` says
