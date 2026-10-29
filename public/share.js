@@ -15,6 +15,7 @@ import { CONFIDENCE, labelOf as callLabel } from './call.js';
 import { cleanSeen, seenLine } from './ground.js';
 import { rainRate, cleanWindFelt, feltOf, feltWeather, windWords, windTrusted, wxAt } from './field.js';
 import { timedLine } from './dogtrack.js';
+import { contamColour, contamWords, colourIndex } from './contam.js';
 
 const MAGIC = 'TS1.';
 const fin = Number.isFinite;
@@ -79,7 +80,14 @@ export function trailModel(s, { dog = null, handler = null, layer = null, k = nu
     found: d.found === true,
     trail: d.trail?.length ? d.trail : null,
     hides: d.hides?.length ? d.hides : null,
-    contamination: (d.contamination ?? []).filter(c => c?.points?.length > 1).map(c => ({ points: c.points })),
+    /* Each person's line with what the report says about it: whose, in
+       which colour, and whether it was really walked. Only the points ever
+       leave the phone (packModel, liveMeta): the rest is for this phone's
+       own report and replay. */
+    contamination: (d.contamination ?? []).map((c, i) => ({ c, i })).filter(({ c }) => c?.points?.length > 1)
+      .map(({ c, i }) => ({ points: c.points, ci: colourIndex(c, i),
+        ...(typeof c.who === 'string' ? { who: c.who } : {}), ...(c.order ? { order: c.order } : {}),
+        ...(c.walked === true ? { walked: true } : {}), ...(c.way ? { way: c.way } : {}), ...(c.status ? { status: c.status } : {}) })),
     track: d.track?.length > 1 ? d.track : null,
     wps: d.track?.length > 1 ? (d.trackWaypoints ?? []) : [],
     wx: d.weather ?? null,
@@ -982,7 +990,18 @@ export function detailSections(m, u = {}) {
     rows.push(['Start', fmtCoord(a.lat, a.lon, coord)]);
     rows.push(['End', fmtCoord(b.lat, b.lon, coord)]);
     if (m.contamination?.length) {
-      rows.push(['Contamination', `${m.contamination.length} crossing trail${m.contamination.length === 1 ? '' : 's'}`]);
+      /* Named lines (this phone's own report): who, in which colour, and
+         when they really crossed. Lines that came in a link carry no names,
+         and are counted as they always were. */
+      if (m.contamination.some(c => typeof c.who === 'string')) {
+        /* A drawn plan's clock is made up (contam.js trailClock): no walk is
+           measured against it until the real line is in. */
+        const clock = drawn || m.lineLater ? null : tr;
+        m.contamination.forEach((c, i) => rows.push([`${contamColour(c, i).name} line`,
+          `${c.who || `Contamination ${i + 1}`}, ${contamWords(c, clock)}`]));
+      } else {
+        rows.push(['Contamination', `${m.contamination.length} crossing trail${m.contamination.length === 1 ? '' : 's'}`]);
+      }
     }
     out.push({ title: m.lineUntimed ? 'Trail, with no times' : drawn ? 'Drawn plan' : 'Trail', rows });
   } else if (m.hides) {
@@ -1162,7 +1181,9 @@ export function liveMeta(m, startedAt = Date.now()) {
     laidAt: m.laidAt, startedAt,
     plan: m.plan, walked: m.walked,
     trail: m.trail, hides: m.hides,
-    contamination: m.contamination ?? [],
+    /* Lines only, as they always went: the live document's rules allow a
+       list, and nothing about the people on it needs to be in the cloud. */
+    contamination: (m.contamination ?? []).map(c => ({ points: c.points })),
     wx: packWx(m.wx) ?? null,
     k: m.k,
   };

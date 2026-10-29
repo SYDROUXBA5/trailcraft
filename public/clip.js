@@ -500,6 +500,35 @@ function drawWind(ctx, wind, topH) {
   return { x: cx - r, y: cy - r, w: 2 * r + 12 + w, h: 2 * r };
 }
 
+/* Who each contamination line is, under the wind on the left: a dot in the
+   line's colour, the name and what the line is (contam.js contamKey). Only
+   ever drawn once the answer is on the frame, as the lines are. Returns the
+   room it took, so no mark is named over it. */
+function drawKey(ctx, rows, top) {
+  if (!(rows?.length)) return null;
+  const x = 36, rowH = 34, padX = 14, shown = rows.slice(0, 4);
+  ctx.save();
+  ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+  const said = shown.map(r => {
+    const text = fitted(ctx, `${r.who} · ${r.words}`, CLIP.W * 0.6, 600, 20, 15);
+    return { text, font: ctx.font, width: ctx.measureText(text).width };
+  });
+  const w = Math.max(...said.map(x => x.width)) + padX * 2 + 24, h = shown.length * rowH + 12;
+  ctx.fillStyle = navy(0.86);
+  pill(ctx, x, top, w, h, 16); ctx.fill();
+  shown.forEach((r, i) => {
+    const cy = top + 6 + rowH * i + rowH / 2;
+    ctx.fillStyle = r.hex;
+    ctx.beginPath(); ctx.arc(x + padX + 7, cy, 7, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = WHITE; ctx.lineWidth = 2; ctx.stroke();
+    ctx.font = said[i].font;
+    ctx.fillStyle = WHITE;
+    ctx.fillText(said[i].text, x + padX + 24, cy + 1);
+  });
+  ctx.restore();
+  return { x, y: top, w, h };
+}
+
 /* The dog's route, drawn again in code over the copied map. The map draws
    it too, but the ground is in relief there, and on relief the map lays
    every line flat on the ground and then draws its dots and footprints
@@ -613,8 +642,11 @@ export function drawFrame(ctx, { mapBuf, host, st, clock, marks, wind, route = n
   drawRoute(ctx, route2, host.dog, { thin: true });
   drawRoute(ctx, route, host.dog);
   const topH = drawTop(ctx, host.lines, clock, st.f);
+  const windBox = card ? null : drawWind(ctx, wind, topH);
+  const showKey = !card && st.answer && host.reveal !== 'none';
   const taken = [
-    card ? null : drawWind(ctx, wind, topH),
+    windBox,
+    showKey ? drawKey(ctx, host.key, (windBox ? windBox.y + windBox.h : topH) + 16) : null,
     st.phase === 'reveal' ? drawReveal(ctx, host.revealWords, st.k, topH) : null,
   ];
   drawMarks(ctx, marks, topH, taken);

@@ -1043,7 +1043,7 @@ await t('Reveal draws the air panel again in the words of the wind felt on the g
   const s = trailRun({ track: undefined, trackStarted: undefined, windFelt: felt('calm') });
   const sb = { noLineYet,
     run: { session: s, revealed: false, revealedAt: 0, startedAt: RUN }, targetById, trailOf: (x) => x.data.trail, windAt,
-    setTrail() {}, plumeStart() {}, plumeStop() {}, setSrc() {}, lineOf: () => ({ features: [] }), pointsOf: () => ({}), EMPTY: {},
+    setTrail() {}, plumeStart() {}, plumeStop() {}, setSrc() {}, lineOf: () => ({ features: [] }), contamFeatures: () => ({ features: [] }), drawContam() {}, trailClock: () => null, pointsOf: () => ({}), EMPTY: {},
     weatherPanelFor: (x, at) => panels.push([x, at]), $: () => ({ textContent: '' }), Date, paintReveal() {},
   };
   vm.createContext(sb);
@@ -1067,7 +1067,7 @@ const revealSandbox = (session) => {
     run: { session, revealed: false, revealedAt: 0, startedAt: RUN }, targetById, trailOf: (x) => x.data.trail, windAt,
     setTrail: (x) => drawn.trail.push(!!x), plumeStart: () => { drawn.plume++; }, plumeStop() {},
     setSrc: (k, v) => { if (k === 'hides') drawn.hides.push(v !== sb.EMPTY); },
-    lineOf: () => ({ features: [] }), pointsOf: () => ({}), EMPTY: {}, weatherPanelFor() {},
+    lineOf: () => ({ features: [] }), contamFeatures: () => ({ features: [] }), drawContam() {}, trailClock: () => null, pointsOf: () => ({}), EMPTY: {}, weatherPanelFor() {},
     $: (id) => btns[id], Date, btns, drawn,
   };
   vm.createContext(sb);
@@ -1162,7 +1162,7 @@ await t('a wind picked with the trail revealed blows from where it was picked, o
   const rv = { noLineYet,
     run: { session: live, revealed: false, revealedAt: 0, startedAt: START }, targetById, trailOf: (x) => x.data.trail, windAt,
     setTrail() {}, plumeStart: (tr, w) => plumes.push(w.wind_direction), plumeStop() {}, setSrc() {},
-    lineOf: () => ({ features: [] }), pointsOf: () => ({}), EMPTY: {},
+    lineOf: () => ({ features: [] }), contamFeatures: () => ({ features: [] }), drawContam() {}, trailClock: () => null, pointsOf: () => ({}), EMPTY: {},
     weatherPanelFor: (x, at) => panels.push(windAt(x, at).wx.wind_direction), $: () => ({ textContent: '' }), Date, paintReveal() {},
   };
   vm.createContext(rv);

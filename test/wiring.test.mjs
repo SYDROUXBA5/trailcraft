@@ -278,9 +278,13 @@ t('an unfinished recording is written down, and nothing reloads over it', () => 
     const body = js.slice(js.indexOf(where), js.indexOf(where) + 1200);
     assert.ok(body.includes(what), `${where} clears the draft`);
   }
-  assert.match(js, /if \(S\.handler && !recoveryLater && offerRecovery\(\)\) return;/,
+  /* A contamination walk needs nobody set up, so its draft is offered back
+     on a phone with nobody set up too (contamDraftHere); any other recording
+     waits for a handler to save it for. */
+  assert.match(js, /if \(\(S\.handler \|\| contamDraftHere\(\)\) && !recoveryLater && offerRecovery\(\)\) return;/,
     'boot offers it back, once there is a handler to save it for, unless she said not now');
-  assert.ok(htmlIds.has('scrRecover') && htmlIds.has('btnRecoverKeep') && htmlIds.has('btnRecoverDrop'));
+  assert.match(js, /function contamDraftHere\(\) \{[\s\S]{0,160}draftAlive\(d\) && contamDraft\(d\)/);
+  assert.ok(htmlIds.has('scrRecover') && htmlIds.has('btnRecoverKeep') && htmlIds.has('btnRecoverDrop') && htmlIds.has('btnRecoverFinish'));
 });
 
 /** One top-level function of app.js as source, to be run against stand-ins. */
@@ -857,12 +861,90 @@ t('a walked card names its plan, and one that does not is asked about', () => {
   assert.match(fnSrc('async function handleCard(data, { fromLink = false } = {})'), /return takeWalked\(card, asked, \{ fromLink \}\);/);
 });
 
+t('a contamination walk added to a run still being marked never shows its answer', () => {
+  /* The result shows the trail and stamps the answer seen (noteAnswerSeen):
+     a run saved "not seen yet" goes back to its blind marking instead. */
+  const apply = fnSrc('async function applyContamWalk(ids, card)');
+  const guard = apply.indexOf('if (answerUnseen(s)) {');
+  assert.ok(guard > 0 && guard < apply.indexOf('renderResult('), 'asked before the result is ever drawn');
+  assert.match(apply.slice(guard, guard + 500), /openMarking\(s, \{ hidden: true \}\)/);
+  assert.match(js, /const answerUnseen = \(s\) => markedAfter\(s\) && s\?\.data\?\.resultSeenAt === null;/);
+  /* And it is measured against the trail's real clock only (contam.js trailClock). */
+  assert.match(apply, /attachWalk\(s\.data\.contamination, card\.cid, card, trailClock\(s\.data\)\)/);
+  assert.match(fnSrc('async function applyWalked(sessionId, card)'), /reorderContam\(s\.data\.contamination, trailClock\(patchSession\(s, walkedPatch\)\.data\)\)/);
+  assert.match(fnSrc('async function applyLine(sessionId, line)'), /reorderContam\(s\.data\.contamination, trailClock\(patchSession\(s, patch\)\.data\)\)/);
+});
+
+t('a person’s code is shown alone, named, and the trail’s own code comes back after', () => {
+  const show = fnSrc('async function showContamQr(sid, i)');
+  assert.ok(show.indexOf("$('shareQrCard').hidden = true;") > 0
+    && show.indexOf("$('shareQrCard').hidden = true;") < show.indexOf('qr.make()'), 'the main plan’s code is put away first');
+  assert.match(show, /\$\('contamQrWho'\)\.innerHTML = `<i class="contam-dot cc-\$\{colourIndex\(c, i\)\}"/);
+  assert.match(show, /esc\(c\.who \|\| 'Contamination'\)/, 'the name is escaped');
+  assert.match(show, /setAttribute\('aria-label', `QR code for /);
+  assert.match(show, /c\.order === 'after' \? ' Show this when it’s their turn/);
+  assert.match(fnSrc('function closeContamQr()'), /\$\('shareQrCard'\)\.hidden = !pendingSession \|\| targetById\(pendingSession\.targetId\)\.kind === 'hide';/);
+  assert.match(js, /\$\('contamQrHide'\)\.addEventListener\('click', closeContamQr\);/);
+  /* Each button says whose it is, and a stranger opening the main plan is told what it is. */
+  const list = fnSrc('function paintContamList(s)');
+  for (const say of ['Show ${name}’s QR code', 'Scan ${name}’s walk', 'Walk ${name}’s line on this phone']) {
+    assert.ok(list.includes(`aria-label="\${esc(\`${say}\`)}"`), say);
+  }
+  assert.match(fnSrc('function offerCardLink(text, card, { scanned = false } = {})'), /'You are laying the main trail\. /);
+  assert.match(fnSrc('function offerContamLink(card)'), /card\.order === 'after' \? ' Wait until the handler tells you the trail is laid, then tap Start\.'/);
+  assert.match(readFileSync(new URL('../public/app.css', import.meta.url), 'utf8'), /\.contam-acts \.btn \{[^}]*min-height: 44px/);
+});
+
+t('a walk on a phone with nobody set up outlives the tab, and one on the handler’s phone goes straight on', () => {
+  const keep = fnSrc('async function keepContamWalk()');
+  /* Kept for the handler before its draft goes, and never the other way round. */
+  assert.match(keep, /if \(!S\.handler && back\.str && keepContamReturn\(back, of\.who\)\) dropDraft\(\);/);
+  assert.ok(!/\} else dropDraft\(\);/.test(keep), 'no longer dropped without being kept');
+  /* Walked on the handler's own phone: onto the trail, never a code to scan. */
+  const local = keep.slice(keep.indexOf('if (card.local) {'), keep.indexOf('if (S.handler) {'));
+  assert.match(local, /takeContamWalk\(back\)/);
+  assert.ok(!/paintContamReturn|scrWait/.test(local));
+  assert.match(fnSrc('function walkContamHere(sid, i)'), /startContamWalk\(\{ kind: free \? 4 : 3,[\s\S]*local: true \}\);/);
+  /* At launch, before any setting up: the walk's draft, a new code opened, then an earlier walk's kept code. */
+  const boot = fnSrc('function boot()');
+  const order = ['(S.handler || contamDraftHere())', 'contamLinkFirst()', 'offerContamReturn()', 'openSignIn(', 'openHandlerForm('].map(x => boot.indexOf(x));
+  assert.ok(order.every((x, i) => x > 0 && (i === 0 || x > order[i - 1])), `boot order ${order}`);
+  assert.match(fnSrc('function keptContamReturn(now = Date.now())'), /now - r\.at < RETURN_FOR_MS/);
+  assert.match(js, /const RETURN_FOR_MS = 24 \* 3600e3;/);
+  /* Gone once the handler has it. */
+  assert.match(js, /if \(!confirm\('Has the handler got your walk\? Once you say yes, it is gone from this phone\.'\)\) return;\s*\n\s*dropContamReturn\(\);/);
+  /* A walk too long for one code goes back as a link. */
+  assert.match(fnSrc('async function paintContamReturn(of, trail, el)'), /if \(e\?\.message !== TOO_TWISTY\) throw e;\s*\n\s*str = await encodeContam\(c, \{\}, \{ forLink: true \}\);/);
+  assert.ok(htmlIds.has('waitLink') && htmlIds.has('waitLinkOut') && htmlIds.has('contamQrWho') && htmlIds.has('contamKey'));
+});
+
+t('the map’s key to the contamination lines comes and goes with the lines', () => {
+  assert.match(fnSrc('function setSrc(id, data)'), /if \(id === 'contam' && !data\?\.features\?\.length\) paintContamKey\(\[\]\);/);
+  assert.match(js, /drawContam\(run\.revealed \? s\.data\.contamination : null, trailClock\(s\.data\)\);/, 'not before the reveal on the run');
+  assert.ok(!/setSrc\('contam', contamFeatures\(s\.data\.contamination\)\)/.test(js), 'every drawing of a trail’s lines goes through drawContam');
+  assert.match(fnSrc('function paintContamKey(rows)'), /<b>\$\{esc\(r\.who\)\}<\/b> · \$\{esc\(r\.colour\)\} · \$\{esc\(r\.words\)\}/);
+  assert.match(fnSrc('function clipHost(s)'), /key: contamKey\(s\.data\.contamination, trailClock\(s\.data\)\),/);
+});
+
 t('a Trail Card in a link is shown first, and nothing is saved or started until it is taken', () => {
   const link = fnSrc('async function importFromLink()');
   assert.ok(!/handleCard\(|addSession|startRun|startWalk|takeWalked/.test(link), 'the link itself acts on nothing');
   assert.match(link, /offerCardLink\(text, card\);/);
-  const offer = fnSrc('function offerCardLink(text, card)');
+  const offer = fnSrc('function offerCardLink(text, card, { scanned = false } = {})');
   assert.ok(!/handleCard\(|addSession|startRun|startWalk|takeWalked|innerHTML/.test(offer), 'showing it changes nothing, and writes no markup');
+  /* A contamination code (card.js kinds 3–5) is shown the same way: what it
+     is and what Go will do, from contamWalkFor as takeContamWalk asks it,
+     and nothing recorded, attached or written as markup until Go. */
+  const contamOffer = fnSrc('function offerContamLink(card)');
+  assert.ok(!/handleCard\(|addSession|updateSession|keepPatch|startContamWalk|takeContamWalk|applyContamWalk|innerHTML/.test(contamOffer),
+    'showing a contamination code changes nothing');
+  assert.match(contamOffer, /contamWalkFor\(card, contamSessions\(\)\)/);
+  assert.match(offer, /if \(isContamCard\(card\)\) return offerContamLink\(card\);/);
+  const hcc = fnSrc('async function handleCard(data, { fromLink = false } = {})');
+  assert.match(hcc, /if \(fromLink\) return startContamWalk\(card\);\s*\n\s*offerCardLink\(cardFromText\(data\), card, \{ scanned: true \}\);/,
+    'a code to walk scanned with the camera is shown first too');
+  assert.ok(!/addSession/.test(fnSrc('async function takeContamWalk(card, { fromLink = false } = {})'))
+    && !/addSession/.test(fnSrc('async function applyContamWalk(ids, card)')), 'a contamination walk never becomes a session of its own');
   assert.match(offer, /go\('scrCardIn'\)/);
   /* The note says what Go will really do: it asks walkedPlanFor the same
      question takeWalked will, and promises a question only when one comes. */
@@ -957,7 +1039,7 @@ t('a web recording keeps the screen awake after the page has been hidden', () =>
     'a lock the browser let go of is known to be gone');
   assert.match(js, /document\.addEventListener\('visibilitychange', \(\) => \{\s*\n\s*if \(document\.visibilityState !== 'visible'\) return;\s*\n\s*holdScreen\(\);/,
     'and asked for again when the page comes back');
-  const watch = fnSrc('async function startWatch(hudId)');
+  const watch = fnSrc('async function startWatch(hudId, resume = null)');
   assert.match(watch, /await holdScreen\(\);/);
   assert.ok(!/wakeLock/.test(watch), 'one place asks for the lock');
 });
@@ -969,7 +1051,7 @@ t('a web recording keeps the screen awake after the page has been hidden', () =>
    through iOS (speaksInTheDark), and then that is what it says. The hold
    itself is run in screens.test.mjs. */
 t('in the iPhone app a coached run says what plays with the screen dark', () => {
-  const watch = fnSrc('async function startWatch(hudId)');
+  const watch = fnSrc('async function startWatch(hudId, resume = null)');
   assert.match(watch, /message: coach\.on && rec\.kind === 'run'\s*\? \(speaksInTheDark\(\) \? 'Recording\. The coach still speaks with the phone locked' : 'Recording\. Coach calls need the screen on'\)\s*: 'Recording — the phone can go in your pocket'/,
     'a coached run does not promise the pocket unless its voice carries on there, and a lay or walk is never a coached run');
   assert.match(js, /\nconst speaksInTheDark = \(\) => voiceCache\.native && !!settings\.coachVoice;\n/, 'only the app’s own voice, and only with the voice on');
@@ -999,10 +1081,13 @@ t('the HUD says when the GPS is keeping nothing, and a mark says when it is a gu
   assert.match(fnSrc('function gpsHudText()'), /if \(trouble\) return gpsTroubleText\(trouble\);/, 'and the lay HUD');
   assert.match(fnSrc('function walkHud()'), /trouble \? gpsTroubleText\(trouble\) : clock/, 'and the walk');
   assert.match(fnSrc('function onFix(pos)'), /if \(verdict === 'drop'\) \{ rec\.dropped\+\+; rec\.lastAcc = acc; rec\.droppedAt = pt\.t; return; \}/);
-  const watch = fnSrc('async function startWatch(hudId)');
+  const watch = fnSrc('async function startWatch(hudId, resume = null)');
   assert.match(watch, /if \(e\.code === 1\) rec\.blocked = true;/, 'a refusal stays on the HUD, not just in a toast');
   assert.match(watch, /if \(e\?\.code === 'NOT_AUTHORIZED'\) rec\.blocked = true;/);
-  assert.equal((watch.match(/rec\.droppedAt = 0; rec\.blocked = false;/g) || []).length, 2, 'both ways of recording start clean');
+  /* Both ways of recording start through one reset (fresh), which keeps a
+     carried-on walk's points and nothing else of the last recording. */
+  assert.equal((watch.match(/rec\.droppedAt = 0; rec\.blocked = false;/g) || []).length, 1, 'one reset');
+  assert.equal((watch.match(/\n\s*fresh\(\);/g) || []).length, 2, 'both ways of recording start clean');
   assert.match(fnSrc('function addWaypoint(kind)'), /const stale = !!gpsTrouble\(\{ last, droppedAt: rec\.droppedAt \}\);[\s\S]{0,200}\.\.\.\(stale \? \{ approx: true \} : \{\}\)/);
   /* Unless the dog's own GPS track says where the dog was at that moment (dogtrack.test). */
   assert.match(fnSrc('function searchResult('), /ind\.approx && !dogHere \? 'roughly ' : ''/, 'and the result does not claim a distance it never measured');

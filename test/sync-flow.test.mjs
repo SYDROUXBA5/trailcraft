@@ -115,6 +115,32 @@ await t('a phone that has not pulled for hours cannot send its old copy over a r
    The stale rename used to keep all three empty over the run: the run's dog,
    its summary and the saved weather went, and it dropped out of the dog's
    history on both phones. */
+/* Contamination people are changed after the trail is laid: a code shown
+   (drawn becomes waiting), a walk added. Merged as one list, the newer copy
+   won whole, and a tablet that had not heard of Jo's walk, showing Sam's
+   code, threw Jo's walk away on every phone. */
+await t('a walk added on one phone survives a stale phone showing another person’s code', async () => {
+  const sam = { id: 'cSam', of: 's1', who: 'Sam', order: 'after', way: 'guided', status: 'drawn', ci: 0, laidAt: 1000, points: walk(4) };
+  const jo = { id: 'cJo', of: 's1', who: 'Jo', order: 'before', way: 'free', status: 'waiting', ci: 1, laidAt: 1000, points: [] };
+  const joWalked = { ...jo, status: 'walked', walked: true, walkedAt: 9000,
+    points: walk(6).map((p, i) => ({ ...p, lon: -2.601, t: 2000 + i * 1000 })) };
+  const A = await phone({ setup: st => { st.kv.set('ownerUid', 'alice'); st.addSession(trail('s1', { data: { trail: walk(5), contamination: [sam, jo] } })); } });
+  const B = await phone();
+  assert.equal(local(B, 's1').data.contamination.length, 2, 'the tablet has both people from its launch');
+
+  A.store.updateSession('s1', { data: { contamination: [sam, joWalked] } });
+  await done(A);
+  /* The tablet never pulled, and shows Sam's code. */
+  B.store.updateSession('s1', { data: { contamination: [{ ...sam, status: 'waiting' }, jo] } });
+  await done(B);
+
+  const says = (list) => Object.fromEntries(list.map(c => [c.id, [c.status, !!c.walked, c.points.length]]));
+  const want = { cSam: ['waiting', false, 4], cJo: ['walked', true, 6] };
+  assert.deepEqual(says(local(B, 's1').data.contamination), want, 'the tablet has Jo’s walk and Sam waiting');
+  await comeBack(A);
+  assert.deepEqual(says(local(A, 's1').data.contamination), want, 'and so does the phone, when it comes back');
+});
+
 await t('a stale rename over a run keeps the run’s dog, what it said, and the weather', async () => {
   const laid = { id: 's1', handlerId: 'h1', dogId: null, startedAt: 1000, summary: 'Trail laid, not run yet.',
     data: { trail: walk(5), weather: null, contamination: [] } };

@@ -25,6 +25,7 @@ import { unwalkedPlan, noLineYet, ownRun } from './debrief.js';
 import { solarPosition, forecastAt } from './field.js';
 import { applyFixes, readingFits, stretchMetres } from './ground.js';
 import { dogTrackOf, dogAt } from './dogtrack.js';
+import { contamWalked, crossings, orderFromTimes } from './contam.js';
 
 const fin = Number.isFinite;
 const okPt = (p) => fin(p?.lat) && fin(p?.lon);
@@ -544,7 +545,7 @@ function signature(s) {
   const tk = Array.isArray(d.track) ? d.track : [], tr = Array.isArray(d.trail) ? d.trail : [];
   const lastT = (a) => (a.length ? a[a.length - 1]?.t : null);
   const fixes = Array.isArray(d.surfFix) ? d.surfFix.map(f => `${f?.as}${f?.fromM}-${f?.toM}`).join(',') : '';
-  const lines = Array.isArray(d.contamination) ? d.contamination.map(c => `${c?.order}${c?.points?.length}`).join(',') : '';
+  const lines = Array.isArray(d.contamination) ? d.contamination.map(c => `${c?.order}${c?.points?.length}${c?.walked ? `w${c.points?.[0]?.t}` : ''}`).join(',') : '';
   return [s.id, s.handlerId, s.dogId, s.layerId, s.targetId, s.startedAt, s.deleted ? 1 : 0, d.trackStarted,
     tr.length, lastT(tr), tk.length, lastT(tk), Array.isArray(d.dogTrack) ? d.dogTrack.length : 0, lastT(Array.isArray(d.dogTrack) ? d.dogTrack : []), d.revealedAt, d.resultSeenAt, d.found, d.leftAgoMin, d.coach?.assisted,
     d.runWeather?.temp, d.runWeather?.series?.length, d.runWeather?.standIn ? 1 : 0, d.weather?.temp, d.weather?.series?.length,
@@ -616,20 +617,57 @@ function readFacts(s) {
   const thin = hasLine && lines.length ? simplify(trail, 2) : null;
   const off = (p) => progressAlong(thin, p)?.off ?? Infinity;
   let crossTracks = 0, alongM = 0, split = false;
+  /* Once a contamination person's real walk has come back (contam.js), the
+     cross-track levels count real walks only, and only where they really
+     met the trail after it was laid: a walk that never came within reach
+     of the line, or went by before the trail was there, crossed nothing.
+     Drawn lines on a run with no walk back count exactly as they always
+     have, so no run that counted before stops counting until a walk says
+     otherwise, and a drawn line can never make a real walk count for more. */
+  const real = lines.some(contamWalked);
+  let timedFine = null;        // the trail every 5 m with its clock, made once and only if a walk needs it
+  /* A plan not walked yet has a made-up clock (store.js planSession: timed
+     as if walked and finished when it was drawn), so a real walk is not
+     measured against it: the order chosen stands, and a walk counts where it
+     came within reach of the line, whenever that was. */
+  const madeUpClock = unwalked;
   for (const c of lines) {
     const pts = c.points.filter(okPt);
-    if (c.order === 'after') {
+    const walked = contamWalked(c);
+    const order = walked && !madeUpClock ? (orderFromTimes(trail, pts)?.order ?? c.order) : c.order;
+    if (order === 'after') {
+      if (real && !walked) continue;
+      let after = null;
+      if (walked) {
+        after = crossings(trail, pts, RULES.alongNearM).filter(x => madeUpClock || x.dtMs > 0);
+        if (!after.length) continue;
+      }
       crossTracks++;
       if (!thin) continue;
       const fine = densify(pts, 5);
-      let run = 0, was = off(fine[0]) <= RULES.alongNearM;
+      /* Along the trail, and for a real walk only while it was later than
+         the trail at that spot: walking along a line before it exists is
+         not walking along it. */
+      const ok = (p) => off(p) <= RULES.alongNearM && (!walked || madeUpClock || !Number.isFinite(p.t) || laterThanTrail(p));
+      let run = 0, was = ok(fine[0]);
       for (let i = 1; i < fine.length; i++) {
-        const is = off(fine[i]) <= RULES.alongNearM;
+        const is = ok(fine[i]);
         if (is && was) run += dist(fine[i - 1], fine[i]);
         was = is;
       }
       alongM = Math.max(alongM, run);
     } else if (thin && off(pts[0]) <= RULES.splitM) split = true;
+  }
+  /** Whether a timed point of a walk went by after the trail did, there. */
+  function laterThanTrail(p) {
+    timedFine = timedFine ?? densify(trail.filter(q => fin(q.t)), 5);
+    let best = Infinity, t = null;
+    for (const q of timedFine) {
+      if (!fin(q.t)) continue;
+      const m = dist(p, q);
+      if (m < best) { best = m; t = q.t; }
+    }
+    return t === null || p.t > t;
   }
 
   /* How it ended. The debrief is the handler's word and has the last say;

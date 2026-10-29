@@ -336,10 +336,11 @@ await t('every screen that drew the laid trail steps round a blind trail with no
   assert.match(apply, /\} catch \(e\) \{[\s\S]{0,260}return false;/, 'a failed grade adds nothing');
   assert.match(apply, /if \(!\(s\.data\.track\?\.length > 1\)\) \{ toast\(/, 'a blind trail with no run takes no line');
   /* Never takes over a recording begun while it graded. */
-  assert.match(apply, /if \(gradedElsewhere\(\)\) return true;\s*\n[\s\S]{0,120}run\.session = s2;/);
+  /* (Its words say any contamination walk the line's clock moved: turnedWords.) */
+  assert.match(apply, /if \(gradedElsewhere\(`Laid trail added and the run graded\. Open it from the log\.\$\{turnedWords\(re\.turned\)\}`\)\) return true;\s*\n[\s\S]{0,120}run\.session = s2;/);
   assert.match(bodyOf('gradedElsewhere'), /if \(!rec\.on && \(currentScreen === 'scrResult' \|\| currentScreen === 'scrScan'\)\) return false;/);
   const walk = js.slice(js.indexOf('\nasync function applyWalked('), js.indexOf('\n}\n', js.indexOf('\nasync function applyWalked(')));
-  assert.match(walk, /if \(gradedElsewhere\([^)]*\)\) return true;\s*\n\s*run\.session = s2;/, 'a walked card does not either');
+  assert.match(walk, /if \(gradedElsewhere\([^\n]*\)\) return true;\s*\n\s*run\.session = s2;/, 'a walked card does not either');
   assert.match(bodyOf('renderResult'), /\$\('addLineBox'\)\.hidden = !\(awaiting && ownRun\(s\) && s\.data\.track\?\.length > 1\);/);
   assert.match(bodyOf('renderResult'), /const r = \(awaiting \? \{\} : [^;]*\) \?\? \{\};/, 'a run with no result still draws');
   /* A blind run opened from the replay is the one its card acts on. */

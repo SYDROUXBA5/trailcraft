@@ -38,7 +38,10 @@ export function packDraft({
   /* A walk is finished against the plan it followed: the plan's end, its
      countdown, whose it was and which plan it answers. Without the plan there
      is no walked card to send back, so there is nothing worth writing. */
-  if (kind === 'walk' && !(plan?.points?.length >= 2)) return null;
+  /* A contamination walk (plan.kind 3 or 4, contam.js) is finished against
+     the entry it answers, and a free one (4) has no line to follow at all. */
+  const contam = kind === 'walk' && (plan?.kind === 3 || plan?.kind === 4);
+  if (kind === 'walk' && !(plan?.points?.length >= 2) && !(plan?.kind === 4 && str(plan.planId) && str(plan.cid))) return null;
   /* The wind the handler felt on the ground during a run is kept with the
      run only when Stop saves it, so until then this is its one copy: a run
      recovered without it would be graded in the forecast they corrected. */
@@ -63,9 +66,13 @@ export function packDraft({
     hides: hides?.length ? packPoints(hides, { compact: true }) : null,
     ...(kind === 'walk' ? {
       plan: {
-        pts: packPoints(plan.points, { compact: true }),
+        pts: plan.points?.length ? packPoints(plan.points, { compact: true }) : null,
         from: str(plan.from), planId: str(plan.planId),
         ageMin: fin(plan.ageMin) ? plan.ageMin : null,
+        ...(contam ? { kind: plan.kind, cid: str(plan.cid), who: str(plan.who), order: plan.order === 'after' ? 'after' : 'before',
+          /* Its colour, and whether it is being walked on the handler's own
+             phone, where it goes straight onto the trail (app.js walkContamHere). */
+          ci: Number.isInteger(plan.ci) && plan.ci >= 0 && plan.ci < 8 ? plan.ci : null, ...(plan.local === true ? { local: true } : {}) } : {}),
       },
       /* When she left the start: the countdown on both phones runs from it. */
       offAt: fin(offAt) && offAt > 0 ? offAt : null,
@@ -85,9 +92,13 @@ export function unpackDraft(o) {
   let plan = null;
   if (o.kind === 'walk') {
     const points = o.plan?.pts ? unpackPoints(o.plan.pts) ?? [] : [];
-    if (points.length < 2) return null;
+    const ck = o.plan?.kind === 3 || o.plan?.kind === 4 ? o.plan.kind : null;
+    if (points.length < 2 && !(ck === 4 && str(o.plan.planId) && str(o.plan.cid))) return null;
     plan = { points, from: str(o.plan.from) ?? '', planId: str(o.plan.planId),
-      ageMin: fin(o.plan.ageMin) ? o.plan.ageMin : null };
+      ageMin: fin(o.plan.ageMin) ? o.plan.ageMin : null,
+      ...(ck ? { kind: ck, cid: str(o.plan.cid), who: str(o.plan.who) ?? '', order: o.plan.order === 'after' ? 'after' : 'before',
+        ci: Number.isInteger(o.plan.ci) && o.plan.ci >= 0 && o.plan.ci < 8 ? o.plan.ci : null,
+        ...(o.plan.local === true ? { local: true } : {}) } : {}) };
   }
   return {
     kind: o.kind, at: o.at, startedAt: fin(o.startedAt) ? o.startedAt : o.at,

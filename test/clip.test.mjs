@@ -346,6 +346,19 @@ await t('a frame says the dog, the stats, the level, the clock, the marks reache
   assert.ok(!ctx.said.includes('The laid trail') && !ctx.said.includes('Blind run'), 'nothing of the end before the end');
 });
 
+await t('the contamination key is in the frame only once the answer is, never before', () => {
+  const key = [{ hex: '#86D0FF', who: 'Sam', words: 'crossed 28 min after the trail' }, { hex: '#FF8F6B', who: 'Jo', words: 'waiting for their walk' }];
+  const plan = clipPlan(15, { reveal: true });
+  const says = (host, at, p = plan) => { const ctx = fakeCtx(); drawFrame(ctx, { mapBuf: null, host, st: clipAt(p, at), clock: '1:00', marks: [], wind: host.wind() }); return ctx.said; };
+  assert.ok(!says(hostOf({ key }), 5).some(x => /Sam/.test(x)), 'a blind run’s answer, and its key, wait for the end');
+  assert.ok(says(hostOf({ key }), 11.5).includes('Sam · crossed 28 min after the trail'), 'shown with the trail');
+  assert.ok(says(hostOf({ key }), 11.5).includes('Jo · waiting for their walk'));
+  assert.ok(says(hostOf({ key, reveal: 'start' }), 5, clipPlan(15, { reveal: false })).includes('Sam · crossed 28 min after the trail'), 'a run with its answer open from the start');
+  assert.ok(!says(hostOf({ key, reveal: 'none' }), 11.5).some(x => /Sam/.test(x)), 'no answer, no key');
+  assert.ok(!says(hostOf({ key }), 14).some(x => /Sam/.test(x)), 'not over the closing card');
+  assert.ok(says(hostOf(), 11.5).length > 0, 'a host with no key draws as before');
+});
+
 await t('with the answer on the map the route is drawn again over it, and Mapbox’s wordmark sits beside its credit', () => {
   const host = hostOf({ dog: { colour: '#FF8800', casing: '#0B1630' } });
   const plan = clipPlan(15, { reveal: true });

@@ -126,6 +126,33 @@ function line(pts) {
   return pts;
 }
 const LINES = ['trail', 'track', 'hides', 'waypoints', 'trackWaypoints', 'dogTrack'];
+
+/* A contamination person (contam.js). Old entries are only who, when and a
+   line; newer ones add an id, the trail they belong to, how they were laid
+   and a colour, each held to what the app writes. A walk is only a walk
+   with its clock: one whose clock went above is a drawn line again, never a
+   walk with a made-up age. */
+const CONTAM_ID = /^[\w-]{1,32}$/;
+function contamEntry(c) {
+  if (!plainObject(c)) throw new Damaged();
+  line(c.points);
+  if (c.points != null && c.points.length > 5000) throw new Damaged();
+  if (!(c.id == null || (typeof c.id === 'string' && CONTAM_ID.test(c.id)))) throw new Damaged();
+  if (!(c.of == null || (typeof c.of === 'string' && CONTAM_ID.test(c.of)))) throw new Damaged();
+  if (!text(c.who, 400) || !text(c.walkedBy, 400)) throw new Damaged();
+  for (const [k, ok] of [['order', ['before', 'after']], ['orderChosen', ['before', 'after']],
+    ['way', ['guided', 'free']], ['status', ['drawn', 'waiting', 'walked']]]) {
+    if (!(c[k] == null || ok.includes(c[k]))) throw new Damaged();
+  }
+  if (!(c.ci == null || (Number.isInteger(c.ci) && c.ci >= 0 && c.ci < 8))) throw new Damaged();
+  if (!(c.laidAt == null || fin(c.laidAt)) || !(c.walkedAt == null || fin(c.walkedAt))) throw new Damaged();
+  if (!(c.walked == null || typeof c.walked === 'boolean')) throw new Damaged();
+  if (c.walked && !(c.points?.length > 1 && c.points.every(p => fin(p.t)))) {
+    c.walked = false;
+    c.status = 'drawn';
+  }
+  return c;
+}
 const OBJECTS = ['result', 'debrief', 'weather', 'coach', 'seen', 'dogTrackFrom'];
 
 /** The fields every row shares: an id, a clock, and no bookkeeping. A clock
@@ -172,7 +199,7 @@ const CLEAN = {
     for (const k of LINES) line(d[k]);
     if (d.contamination != null) {
       if (!Array.isArray(d.contamination)) throw new Damaged();
-      for (const c of d.contamination) { if (!plainObject(c)) throw new Damaged(); line(c.points); }
+      for (const c of d.contamination) contamEntry(c);
     }
     for (const k of OBJECTS) if (d[k] != null && !plainObject(d[k])) throw new Damaged();
     /* The dog's own track is only any use with its clock: one that lost its
