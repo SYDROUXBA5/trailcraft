@@ -2473,3 +2473,153 @@ html[data-motion="on"] .lu-title:not([hidden]) { animation: lu-plate 300ms steps
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .inc-replay .inc-kicker { color: var(--muted); } }
 /* On a phone the pins' short names carry the map; the tags would bury it. */
 @media (max-width: 599px) { .inc-mark-tag { display: none; } }
+
+/* ── The squad screens' sheets (sheet.js), in place of confirm() ───────
+   The app's own colours and big type; the dangerous answer in red. */
+.app-sheet { position: fixed; inset: 0; z-index: 70; display: grid; place-items: end center;
+  padding: 12px 12px calc(var(--safe-b) + 12px); background: rgba(11, 22, 48, 0.55); }
+.app-sheet[hidden] { display: none; }
+.app-sheet-card { width: min(520px, 100%); max-height: calc(100vh - 40px); overflow-y: auto;
+  display: flex; flex-direction: column; gap: 12px; padding: 18px 18px 16px; border-radius: 20px;
+  background: var(--card); color: var(--ink); border: 1px solid var(--border); box-shadow: 0 16px 40px rgba(11, 22, 48, 0.35); }
+@media (min-width: 700px) { .app-sheet { place-items: center; } }
+.app-sheet-title { margin: 0; font: 700 calc(19 * var(--px)) var(--display); overflow-wrap: anywhere; }
+.app-sheet-title:focus { outline: none; }
+.app-sheet-body, .app-sheet-note { margin: 0; font-size: calc(15 * var(--px)); line-height: 1.45; overflow-wrap: anywhere; }
+.app-sheet-note { font-size: calc(13 * var(--px)); color: var(--muted); }
+.app-sheet-hint { font-size: calc(13 * var(--px)); font-weight: 400; color: var(--muted); }
+.app-sheet-btns { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+.app-sheet-btns .btn { min-height: 48px; }
+.app-sheet-list { margin: 0; display: flex; flex-direction: column; gap: 4px; }
+.app-sheet-list dt { font: 700 calc(14 * var(--px)) var(--body); margin-top: 6px; }
+.app-sheet-list dd { margin: 0; font-size: calc(14.5 * var(--px)); line-height: 1.45; color: var(--muted); }
+.app-sheet-fields { display: flex; flex-direction: column; gap: 10px; }
+.app-sheet-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.app-sheet-grid .app-sheet-field:first-child { grid-column: 1 / -1; }
+.app-sheet-field { display: flex; flex-direction: column; gap: 4px; min-width: 0;
+  font: 700 calc(12 * var(--px)) var(--body); color: var(--muted); }
+.app-sheet-field input, .app-sheet-field select { font: inherit; font-size: max(16px, calc(16 * var(--px))); font-weight: 400; color: var(--ink);
+  padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border); background: var(--card); min-width: 0; }
+
+/* ── The command map during an incident: following, the phone strip ──── */
+/* Under the status pill, centred on the map the panel leaves. */
+.cmd-follow { position: fixed; z-index: 8; top: calc(var(--top-row, 14px) + 56px); left: 50%; translate: -50% 0;
+  white-space: nowrap; box-shadow: 0 8px 22px rgba(11, 22, 48, 0.35); }
+.cmd-follow[hidden] { display: none; }
+@media (min-width: 900px) { .cmd-follow { left: calc(50% - 187px); } }
+/* On a phone the weather panel reaches across most of the top: under it
+   (--wx-gap is its measured height plus a gap, set by app.js wxGap). */
+@media (max-width: 899px) { .cmd-follow { top: calc(var(--top-row, 14px) + max(56px, var(--wx-gap, 0px) + 8px)); } }
+.cmd-kept { align-self: flex-start; }
+.inc-quiet { margin: 0; font-size: calc(14 * var(--px)); font-weight: 600; color: #8A5A00; white-space: pre-line; }
+.inc-quiet:empty { display: none; }
+:root[data-theme="dark"] .inc-quiet { color: #F3D891; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .inc-quiet { color: #F3D891; } }
+.inc-strip { display: none; }
+/* On a phone, folded, the incident is one slim line that opens on a tap:
+   "K9-1 Rex · heading E · Re-found 1 min ago · 10 min". */
+@media (max-width: 899px) {
+  .cmd-panel.folded.inc-on { gap: 6px; padding-top: 8px; }
+  .cmd-panel.folded.inc-on .cmd-head { display: none; }
+  .cmd-panel.folded.inc-on .inc-live > :not(.inc-strip) { display: none; }
+  .cmd-panel.folded.inc-on .inc-live { padding: 0; border: 0; box-shadow: none; background: transparent; }
+  .cmd-panel.folded.inc-on .inc-strip {
+    display: flex; align-items: center; gap: 8px; width: 100%; min-height: 48px; padding: 10px 12px;
+    border-radius: 14px; border: 1px solid #E3A5A0; box-shadow: inset 4px 0 0 #D93025; background: var(--card);
+    color: var(--ink); font: 700 calc(15 * var(--px)) var(--body); text-align: left; cursor: pointer;
+    font-variant-numeric: tabular-nums; overflow-wrap: anywhere;
+  }
+  /* Amber, as the perimeter line goes: the walking ring has passed it. */
+  .cmd-panel.folded.inc-on .inc-strip.warn { border-color: #F2A900; box-shadow: inset 4px 0 0 #F2A900; }
+  .cmd-panel.folded.inc-on .cmd-kept { display: none; }
+}
+
+/* ── Wall mode: the command map on a TV or a projector ──────────────────
+   Read from across a room: a big clock and the latest lines bottom left
+   (the weather keeps the top left), the units in big type down the side,
+   short pins whose details show on a tap or close in. */
+.cmd-wall-btn { white-space: nowrap; }
+@media (max-width: 899px) { .cmd-wall-btn { display: none; } }
+.cmd-wall-box { position: fixed; z-index: 6; left: 14px; bottom: 14px; width: min(460px, 34vw);
+  display: flex; flex-direction: column; gap: 8px; padding: 16px 20px; border-radius: 20px;
+  background: rgba(11, 22, 48, 0.84); color: #fff; box-shadow: 0 12px 34px rgba(0, 0, 0, 0.4); }
+.cmd-wall-box[hidden] { display: none; }
+.cmd-wall-top { display: flex; align-items: center; gap: 12px; }
+.cmd-wall-clock { flex: 1; font: 800 clamp(calc(40 * var(--px)), 4.6vw, calc(76 * var(--px)))/1 var(--display); font-variant-numeric: tabular-nums; letter-spacing: 0.01em; }
+.cmd-wall-box .btn.ghost { color: #fff; border-color: rgba(255, 255, 255, 0.45); background: transparent; }
+.cmd-wall-box .btn[aria-pressed="true"] { background: rgba(255, 255, 255, 0.18); }
+.cmd-wall-inc { margin: 0; font: 700 clamp(calc(18 * var(--px)), 1.6vw, calc(26 * var(--px))) var(--body); overflow-wrap: anywhere; }
+.cmd-wall-log { list-style: none; margin: 0; padding: 0; font: 600 clamp(calc(16 * var(--px)), 1.35vw, calc(22 * var(--px)))/1.35 var(--body);
+  font-variant-numeric: tabular-nums; }
+.cmd-wall-log li { padding: 5px 0; border-top: 1px solid rgba(255, 255, 255, 0.16); overflow-wrap: anywhere; }
+.cmd-wall .cmd-panel { width: 440px; }
+.cmd-wall .hud-pill { right: 474px; }
+.cmd-wall .cmd-follow { left: calc(50% - 227px); }
+.cmd-wall .cmd-title { font-size: calc(26 * var(--px)); }
+.cmd-wall .cmd-row { min-height: 60px; }
+.cmd-wall .cmd-who { font-size: calc(22 * var(--px)); }
+.cmd-wall .cmd-who i { font-size: calc(16 * var(--px)); }
+.cmd-wall .cmd-age { font-size: calc(17 * var(--px)); }
+.cmd-wall .sq-dot { width: 16px; height: 16px; }
+.cmd-wall .inc-name { font-size: calc(22 * var(--px)); }
+.cmd-wall .inc-team, .cmd-wall .inc-facts, .cmd-wall .inc-quiet { font-size: calc(18 * var(--px)); }
+.cmd-wall .cmd-duty, .cmd-wall .cmd-kept, .cmd-wall #cmdFit { display: none; }
+/* Wall mode is a screen to watch, not to work on: the drawing tools stay on
+   the laptop's own view, and the units get the room. */
+.cmd-wall .inc-tools, .cmd-wall .inc-label { display: none; }
+/* The card keeps to its name, the clock, the warning and the team: the
+   wall box already shows the log, and the units need the height. */
+.cmd-wall .inc-live .inc-log, .cmd-wall .inc-live .inc-brief, .cmd-wall .inc-live .inc-reach,
+.cmd-wall .inc-live .inc-facts, .cmd-wall .inc-live .inc-onscent { display: none; }
+.cmd-wall .cmd-incident { max-height: 36vh; overflow: hidden; }
+.cmd-wall .cmd-list { flex: 1; min-height: 40vh; }
+/* The toast goes to the foot of the map, beside the panel: never over the
+   demo label, which stays on every frame, nor over the clock box. */
+body.wall-on .toast { top: auto; bottom: 24px; left: auto; right: 474px;
+  max-width: max(240px, min(420px, calc(100vw - 474px - 34vw - 40px))); }
+/* The units and pins are markers on the map itself, outside the screen's
+   section, so Wall mode marks the map too (squad-ui.js, incident-ui.js). */
+#map.map-wall .sq-tag { font-size: calc(16 * var(--px)); padding: 4px 10px; }
+#map.map-wall .inc-pin { font-size: calc(15 * var(--px)); padding: 6px 10px; }
+#map.map-wall .inc-mark-tag { display: none; }
+#map.map-wall.map-zoomed .inc-mark-tag { display: block; font-size: calc(14 * var(--px)); }
+
+/* ── Last seen, the reach rings and the live log (incident card) ───────
+   The clock from last seen is the biggest thing on the card: it is what
+   tells Command whether the perimeter is keeping up. */
+.inc-seen { margin: 0; display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.inc-seen-clock { font: 800 calc(34 * var(--px))/1 var(--display); font-variant-numeric: tabular-nums; letter-spacing: 0.01em; }
+.inc-seen-sub { font-size: calc(13 * var(--px)); color: var(--muted); }
+.inc-warn { margin: 0; padding: 6px 10px; border-radius: 10px; background: #FFF1C7; color: #6B4700; border: 1px solid #F2A900;
+  font: 700 calc(14 * var(--px)) var(--body); }
+.inc-onscent { margin: 0; font: 700 calc(14 * var(--px)) var(--body); }
+.inc-brief, .inc-reach { margin: 0; font-size: calc(13.5 * var(--px)); color: var(--muted); overflow-wrap: anywhere; }
+.inc-reach { font-style: italic; }
+.inc-warn:empty, .inc-onscent:empty, .inc-brief:empty, .inc-reach:empty { display: none; }
+:root[data-theme="dark"] .inc-warn { background: #3D2E00; color: #FFE08A; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .inc-warn { background: #3D2E00; color: #FFE08A; } }
+.inc-log { list-style: none; margin: 0; padding: 0; max-height: 15em; overflow-y: auto; border-radius: 10px; border: 1px solid var(--border); }
+.inc-log li + li { border-top: 1px solid var(--border); }
+.inc-log-line { display: block; width: 100%; min-height: 40px; padding: 8px 10px; border: 0; background: transparent; color: var(--ink);
+  font: 500 calc(14 * var(--px))/1.35 var(--body); text-align: left; cursor: pointer; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.inc-log-line time { font-weight: 700; }
+.inc-log-line:hover { background: var(--well, rgba(15, 31, 61, 0.05)); }
+.inc-log-line:focus-visible { outline: 2px solid var(--ember); outline-offset: -2px; }
+.inc-log-off .inc-log-text { text-decoration: line-through; opacity: 0.7; }
+.inc-log-why { font-style: italic; font-size: 0.9em; color: var(--muted); }
+/* A replay lists what is still to come, dimmed, and marks where it is. */
+.inc-log-ahead .inc-log-line { opacity: 0.5; }
+.inc-log-now .inc-log-line { box-shadow: inset 4px 0 0 var(--ember); font-weight: 700; }
+/* The ring's own tag on the map: a rough guide, never a place. */
+.inc-reach-tag { padding: 2px 8px; border-radius: 8px; background: rgba(79, 91, 213, 0.92); color: #fff; white-space: nowrap;
+  font: 700 calc(11 * var(--px)) var(--body); pointer-events: none; z-index: 2; }
+/* Wall mode: the clock from last seen under the incident's name, amber when
+   the perimeter is inside range; a withdrawn line crossed out. */
+/* The time since last seen is the number that matters most here: it gets
+   the size just under the clock's. */
+.cmd-wall-seen { margin: 0; font: 800 clamp(calc(22 * var(--px)), 2.2vw, calc(36 * var(--px)))/1.2 var(--body); font-variant-numeric: tabular-nums; }
+.cmd-wall-seen:empty { display: none; }
+.cmd-wall-seen.warn { color: #FFD15C; }
+.cmd-wall-log .inc-log-why { color: rgba(255, 255, 255, 0.7); }
+.cmd-wall .inc-seen-clock { font-size: calc(44 * var(--px)); }
+.cmd-wall .inc-warn, .cmd-wall .inc-onscent { font-size: calc(18 * var(--px)); }

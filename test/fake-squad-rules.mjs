@@ -123,18 +123,28 @@ export function allow(op, path, c) {
     const iid = p[3];
     const incidentPath = `squads/${sid}/incidents/${iid}`;
     if (p.length === 4) {
+      const seenOk = (x) => val(x, 'lastSeenAt', null) == null
+        || (isNum(x.lastSeenAt) && x.lastSeenAt <= x.startedAt && x.lastSeenAt >= x.startedAt - 172800000);
+      const briefOk = (b) => b == null
+        || (typeof b === 'object' && !Array.isArray(b) && hasOnly(b, ['dir', 'desc', 'article'])
+            && optText(val(b, 'dir', null), 40) && optText(val(b, 'desc', null), 160)
+            && (val(b, 'article', null) == null || typeof b.article === 'boolean'));
       const incidentOk = (x) => hasOnly(x, ['name', 'lkp', 'k9Uid', 'startedBy', 'startedAt', 'endedAt', 'status',
-        'expiresAt', 'deleteAt', 'summary'])
+        'expiresAt', 'deleteAt', 'summary', 'lastSeenAt', 'pace', 'brief'])
         && text(x.name, 80) && x.name.length > 0
         && x.lkp && typeof x.lkp === 'object' && place(x.lkp.lat, x.lkp.lon)
         && optText(val(x, 'k9Uid', null), 128)
         && isStr(x.startedBy) && isNum(x.startedAt) && optNum(val(x, 'endedAt', null))
         && ['active', 'ended'].includes(x.status)
         && (val(x, 'summary', null) == null || typeof x.summary === 'object')
+        && seenOk(x)
+        && (val(x, 'pace', null) == null || ['walk', 'run', 'vehicle'].includes(x.pace))
+        && briefOk(val(x, 'brief', null))
         && expires(x, 192, c.now);
       if (op === 'get' || op === 'list') return isMember;
       if (op === 'create') return isCommand && incidentOk(d) && d.startedBy === c.uid && d.status === 'active';
-      if (op === 'update') return isCommand && incidentOk(d) && r.status === 'active' && d.startedBy === r.startedBy;
+      if (op === 'update') return isCommand && incidentOk(d) && r.status === 'active' && d.startedBy === r.startedBy
+        && d.startedAt === r.startedAt;
       if (op === 'delete') return signedIn && creator === c.uid;
       return false;
     }
@@ -152,11 +162,18 @@ export function allow(op, path, c) {
         return isMember && markOk(d) && k9Ok(d) && new RegExp(`^${c.uid}_[0-9]{1,3}$`).test(p[5])
           && recent(d.at, c.now) && get(incidentPath)?.status === 'active';
       }
-      if (op === 'update') return isMember && r.by === c.uid && markOk(d) && d.kind === r.kind && get(incidentPath)?.status === 'active';
-      if (op === 'delete') {
-        return (signedIn && creator === c.uid)
-          || (isMember && (r?.by === c.uid || isCommand) && get(incidentPath)?.status === 'active');
+      const withdrawOk = () => affected(d, r).every(k => ['withdrawnBy', 'withdrawnAt'].includes(k))
+        && val(r, 'withdrawnBy', null) == null
+        && d.withdrawnBy === c.uid
+        && recent(d.withdrawnAt, c.now);
+      if (op === 'update') {
+        return (isMember && r.by === c.uid && val(r, 'withdrawnBy', null) == null
+                && markOk(d) && d.kind === r.kind && get(incidentPath)?.status === 'active')
+          || (isMember && (r.by === c.uid || isCommand) && withdrawOk() && get(incidentPath)?.status === 'active');
       }
+      // Never while the incident runs; deleting the squad ends it first.
+      if (op === 'delete') return signedIn && creator === c.uid
+        && (!get(incidentPath) || get(incidentPath).status === 'ended');
       return false;
     }
     if (p[4] === 'tracks' && p.length === 6) {

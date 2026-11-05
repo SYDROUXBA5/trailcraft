@@ -38,7 +38,7 @@ const MODULES = ['native', 'params', 'geo', 'colours', 'mvt', 'ground', 'debrief
   'pixel-team', 'board',
   /* The squad demo: the rules of it, the cloud, then the screens; the
      incident layer rides on top of the squad's screens. */
-  'squad', 'squad-cloud', 'incident', 'incident-cloud', 'squad-ui', 'incident-ui'];
+  'squad', 'squad-cloud', 'incident', 'incident-cloud', 'sheet', 'squad-ui', 'incident-ui'];
 
 /** Inline-script safety: a literal "</script>" inside JS would end the tag.
     The escape is invisible at runtime (identical string value). */

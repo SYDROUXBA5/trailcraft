@@ -276,15 +276,31 @@ service cloud.firestore {
 
       // An incident: Command starts and ends it; every member reads it.
       match /incidents/{incidentId} {
+        // Last seen: no later than the incident opened, no more than two
+        // days before. How they left: walking, running or a vehicle. The
+        // handler's brief: a way, a description, a scent article or not.
+        function seenOk(d) {
+          return d.get('lastSeenAt', null) == null
+              || (num(d.lastSeenAt) && d.lastSeenAt <= d.startedAt && d.lastSeenAt >= d.startedAt - 172800000);
+        }
+        function briefOk(b) {
+          return b == null
+              || (b is map && b.keys().hasOnly(['dir', 'desc', 'article'])
+                  && optText(b.get('dir', null), 40) && optText(b.get('desc', null), 160)
+                  && (b.get('article', null) == null || b.article is bool));
+        }
         function incidentOk(d) {
           return d.keys().hasOnly(['name', 'lkp', 'k9Uid', 'startedBy', 'startedAt', 'endedAt', 'status',
-                                   'expiresAt', 'deleteAt', 'summary'])
+                                   'expiresAt', 'deleteAt', 'summary', 'lastSeenAt', 'pace', 'brief'])
               && text(d.name, 80) && d.name.size() > 0
               && d.lkp is map && place(d.lkp.lat, d.lkp.lon)
               && optText(d.get('k9Uid', null), 128)
               && d.startedBy is string && num(d.startedAt) && optNum(d.get('endedAt', null))
               && d.status in ['active', 'ended']
               && (d.get('summary', null) == null || d.summary is map)
+              && seenOk(d)
+              && (d.get('pace', null) == null || d.pace in ['walk', 'run', 'vehicle'])
+              && briefOk(d.get('brief', null))
               && expires(d, 192);
         }
         function incidentPath() { return /databases/$(database)/documents/squads/$(squadId)/incidents/$(incidentId); }
@@ -295,7 +311,10 @@ service cloud.firestore {
         // Ended is final: what the debrief replays is what happened.
         allow update: if isCommand() && incidentOk(request.resource.data)
                       && resource.data.status == 'active'
-                      && request.resource.data.startedBy == resource.data.startedBy;
+                      && request.resource.data.startedBy == resource.data.startedBy
+                      // The opening time is what the clock, the rings and the
+                      // last-seen limit hang on: it never moves.
+                      && request.resource.data.startedAt == resource.data.startedAt;
         // Only the creator, deleting the whole squad: Command ends an
         // incident, and an ended one is the debrief's record.
         allow delete: if signedIn() && creator() == request.auth.uid;
@@ -304,7 +323,8 @@ service cloud.firestore {
         // (indication, lost it, re-found) come from that team only; a
         // sighting, a roadblock, a rally point or a perimeter line from any
         // member. A mark is its maker's to move or take back; Command may
-        // take back any.
+        // take back any. Taking back is not deleting: the mark is marked
+        // withdrawn, by whom and when, once, and stays in the log crossed out.
         match /marks/{markId} {
           function markOk(d) {
             return d.keys().hasOnly(['kind', 'by', 'at', 'lat', 'lon', 'pts', 'label', 'expiresAt', 'deleteAt'])
@@ -326,14 +346,26 @@ service cloud.firestore {
                         && markId.matches(request.auth.uid + '_[0-9]{1,3}')
                         && recent(request.resource.data.at)
                         && get(incidentPath()).data.status == 'active';
-          allow update: if isMember() && resource.data.by == request.auth.uid
-                        && markOk(request.resource.data) && request.resource.data.kind == resource.data.kind
-                        && get(incidentPath()).data.status == 'active';
-          // Taken back only while the incident runs; after the end, only
-          // with the whole squad, by its creator.
-          allow delete: if (signedIn() && creator() == request.auth.uid)
-                        || (isMember() && (resource.data.by == request.auth.uid || isCommand())
+          // Withdrawn: only those two fields are added, in the withdrawer's
+          // own name, at about now, to a mark not already withdrawn.
+          function withdrawOk() {
+            return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['withdrawnBy', 'withdrawnAt'])
+                && resource.data.get('withdrawnBy', null) == null
+                && request.resource.data.withdrawnBy == request.auth.uid
+                && recent(request.resource.data.withdrawnAt);
+          }
+          allow update: if (isMember() && resource.data.by == request.auth.uid
+                            && resource.data.get('withdrawnBy', null) == null
+                            && markOk(request.resource.data) && request.resource.data.kind == resource.data.kind
+                            && get(incidentPath()).data.status == 'active')
+                        || (isMember() && (resource.data.by == request.auth.uid || isCommand()) && withdrawOk()
                             && get(incidentPath()).data.status == 'active');
+          // Only by the squad's creator, and never while the incident runs:
+          // the live record holds against Command too. Deleting the squad
+          // ends a running incident first (squad-cloud.js deleteSquad); a
+          // mark left behind its incident goes too, and expires anyway.
+          allow delete: if signedIn() && creator() == request.auth.uid
+                        && (!exists(incidentPath()) || get(incidentPath()).data.status == 'ended');
         }
 
         // Everyone's movements during the incident, a minute to a document

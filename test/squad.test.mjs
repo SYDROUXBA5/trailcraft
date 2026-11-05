@@ -10,16 +10,22 @@ import { allow } from './fake-squad-rules.mjs';
 import { ROLES, canSetRole, canRemove, canLeave, cleanCallSign, cleanSquadName, newJoinCode, codeFromText,
          showCode, squadLink, CODE_ALPHABET, shouldSend, SEND, writesPerHour, headingOf, freshness, ageWords,
          roster, onDutyCount, fitPoints, cleanMember, cleanPosition, positionDoc, createSim, compass,
-         POSITION_TTL, PATHS, DEMO_LABEL, FRESH_MS } from '../public/squad.js';
+         POSITION_TTL, INCIDENT_TTL, PATHS, DEMO_LABEL, FRESH_MS, SIM_SQUAD, simUnits, cleanDemoNames,
+         keptLines } from '../public/squad.js';
 import { createSquad, findSquad, joinSquad, myMember, watchSquad, putPosition, clearPosition, setRole,
          removeMember, leaveSquad, newCode, deleteSquad, getSquad, TOMBSTONE_MS } from '../public/squad-cloud.js';
 import { html, esc } from '../public/squad-ui.js';
 import { MARKS, DRAW_TOOLS, RUN_MARKS, incidentDoc, cleanIncident, activeOf, pastOf, markDoc, cleanMark, mayMark, mayUnmark,
          trackBuffer, minuteOf, cleanTrack, joinTracks, trailInfo, aheadLine, elapsedWords, clockWords, countWords,
-         summarise, buildReplay, placeAt, replayAt, scentPath, createSimIncident, mayShareRun } from '../public/incident.js';
-import { startIncident, endIncident, watchIncidents, watchIncident, putMark, removeMark, putTrack,
-         loadIncident } from '../public/incident-cloud.js';
-import { project } from '../public/geo.js';
+         summarise, buildReplay, placeAt, replayAt, scentPath, createSimIncident, mayShareRun, metresWords, callWords,
+         stripWords, quietLines, followPoints, allInView, SGT, standing, standingOf, PACES, cleanPaces, cleanBrief,
+         cleanLastSeen, seenAt, lastSeenFrom, hhmm, reachM, reachRings, nearM, passedLines, warnWords, reachWords,
+         isClosed, insideLine,
+         onScentWords, briefWords, logLines, ring, REACH_CAP_M } from '../public/incident.js';
+import { wallIndex, wallAt, blockStep, outside as outsideWall } from '../public/walls.js';
+import { startIncident, endIncident, watchIncidents, watchIncident, putMark, withdrawMark, putTrack,
+         loadIncident, updateSeen } from '../public/incident-cloud.js';
+import { project, pathLen } from '../public/geo.js';
 import { dist } from '../public/geo.js';
 
 let pass = 0;
@@ -369,13 +375,14 @@ t('the pretend incident plays out on one device: trail, calls, perimeter, roadbl
   for (const k of ['perimeter', 'rally', 'roadblock', 'sighting']) assert.ok(order.includes(k), `a ${k}`);
   const marks = [...si.marks.values()];
   assert.equal(marks.find(m => m.kind === 'perimeter').by, 'sim-7', 'the sergeant sets the perimeter');
-  assert.equal(marks.filter(m => m.kind === 'roadblock').length, 2, 'both cars at their roadblocks');
+  assert.equal(standingOf(si.marks).filter(m => m.kind === 'roadblock').length, 2, 'both cars at their roadblocks');
   assert.ok(marks.every(m => m.kind === 'perimeter' ? m.pts.length > 3 : Number.isFinite(m.lat)));
   assert.ok(si.trail.length > 50 && dist(si.trail[0], lkp) < 10, 'the trail starts at the last known point');
-  // The person at the screen draws too, and can take it back.
+  // The person at the screen draws too, and can take it back: withdrawn, not gone.
   const id = si.addMark({ kind: 'roadblock', by: 'you', at: t, lat: center.lat, lon: center.lon });
-  si.removeMark(id);
-  assert.ok(!si.marks.has(id));
+  si.removeMark(id, 'you', t + 500);
+  assert.deepEqual([si.marks.get(id).withdrawnBy, si.marks.get(id).withdrawnAt], ['you', t + 500]);
+  assert.ok(!standingOf(si.marks).some(m => m.id === id), 'off the map');
   si.end(t + 1000);
   assert.equal(si.inc.status, 'ended');
   assert.ok(si.inc.summary.k9M > 500 && si.inc.summary.marks >= 7);
@@ -387,7 +394,8 @@ t('the pretend incident plays out on one device: trail, calls, perimeter, roadbl
   const k9Line = rp.units.find(u => u.uid === 'sim-1');
   assert.ok(k9Line.pts.length > si.trail.length - 1, 'the team’s fine trail is in the replay');
   const endScene = replayAt(rp, rp.end);
-  assert.equal(endScene.marks.length, si.marks.size);
+  assert.equal(endScene.marks.length, standingOf(si.marks).length, 'the map at the end: what still stood');
+  assert.equal(endScene.said.length, si.marks.size, 'the log at the end: everything said, withdrawn too');
   // Same seed, same incident: a test sees the same thing every time.
   const sim2 = createSim({ center, now: t0, seed: 11 });
   const si2 = createSimIncident({ sim: sim2, lkp, k9Uid: 'sim-1', now: t0, seed: 5 });
@@ -407,6 +415,498 @@ t('a pretend incident far from the K9 team starts it a short walk away, not minu
   while (si.phase === 'responding' && t < t0 + 5 * 60e3) { t += 1000; sim.step(t); si.step(t); }
   assert.notEqual(si.phase, 'responding', 'trailing within a minute or two of pretend time');
   assert.ok(t - t0 < 2 * 60e3);
+});
+
+/* ── Move A: a believable demo, readable from across the room ───────── */
+/* A town of blocks for the pretend squad to walk round: 40 m buildings on
+   a 70 m grid, so the streets between them are 30 m wide. */
+const TOWN = { lat: 51.2094, lon: -2.6476 };
+function townWalls() {
+  const kx = 111320 * Math.cos(TOWN.lat * Math.PI / 180);
+  const ll = (x, y) => [TOWN.lon + x / kx, TOWN.lat + y / 111320];
+  const list = [];
+  for (let gx = -6; gx <= 6; gx++) {
+    for (let gy = -6; gy <= 6; gy++) {
+      const x = gx * 70 + 15, y = gy * 70 + 15;   // the street crossings sit on the centre
+      list.push({ rings: [[ll(x, y), ll(x + 40, y), ll(x + 40, y + 40), ll(x, y + 40), ll(x, y)]], h: 10 });
+    }
+  }
+  return wallIndex(list, TOWN);
+}
+
+t('distances follow Settings: metres, or yards and miles', () => {
+  assert.equal(metresWords(320), '320 m');
+  assert.equal(metresWords(1500), '1.5 km');
+  assert.equal(metresWords(320, true), '350 yd');
+  assert.equal(metresWords(1609.344, true), '1.0 mi');
+  const ui = read('public/incident-ui.js');
+  assert.match(ui, /const distWords = \(m\) => metresWords\(m, imperial\(\)\)/);
+  assert.doesNotMatch(ui.replace('metresWords(m, imperial())', ''), /metresWords\(/, 'every distance on the incident screens goes through the setting');
+  assert.match(read('public/app.js'), /imperial: imp,/, 'the one switch Settings already has, not a second one');
+});
+
+t('the command screen’s words: the call said aloud, the phone strip, and a unit not heard from', () => {
+  assert.equal(callWords('lost', 'K9-1'), 'K9-1, lost it');
+  assert.equal(callWords('refound', 'K9-1'), 'K9-1, re-found');
+  assert.equal(callWords('indication', 'Dog <b>'), 'Dog <b>, indication', 'spoken, never put in the page');
+  assert.equal(callWords('roadblock', 'Foot 3'), '', 'only the K9 team’s calls are said');
+  const now = 1_700_000_600_000;
+  const info = { heading: 90, compass: 'E', lengthM: 400, elapsedMs: 10 * 60e3 };
+  const call = { kind: 'refound', at: now - 60e3 };
+  assert.equal(stripWords({ k9: { callSign: 'K9-1', dog: 'Rex' }, info, call, now }), 'K9-1 Rex · heading E · Re-found 1 min ago · 10 min');
+  assert.equal(stripWords({ k9: null, info: { heading: null, lengthM: 0, elapsedMs: 30e3 }, call: null, now }), 'No K9 team · on the way · 30 s');
+  // The folded strip carries the card's clock and the amber warning, with its rough guide.
+  assert.equal(stripWords({ k9: { callSign: 'K9-1', dog: 'Rex' }, info, call: null, now, seenMs: 13 * 60e3, warn: warnWords('walk') }),
+    'K9-1 Rex · heading E · Inside walking range (rough guide) · 13 min since seen');
+  assert.equal(stripWords({ k9: { callSign: 'K9-1', dog: 'Rex' }, info, call: null, now, seenMs: null }), 'K9-1 Rex · heading E · 10 min',
+    'no last-seen time: since the opening, as the card');
+  const rows = [
+    { callSign: 'Foot 5', fresh: 'stale', pos: { at: now - 150e3 } },
+    { callSign: '2A12', fresh: 'live', pos: { at: now - 5e3 } },
+    { callSign: 'Off', fresh: 'off', pos: null },
+  ];
+  assert.deepEqual(quietLines(rows, now), ['Foot 5: no update from the app for 2 min, check by radio']);
+  assert.deepEqual(quietLines(undefined, now), []);
+  // The live card says it, and the strip, by textContent (paintLive), never by HTML.
+  const ui = read('public/incident-ui.js');
+  assert.match(ui, /text\('strip', stripWords\(/);
+  assert.match(ui, /seenMs: finite\(v\.inc\.lastSeenAt\) \? v\.now - v\.inc\.lastSeenAt : null/);
+  assert.match(ui, /querySelector\('\.inc-strip'\)\?\.classList\.toggle\('warn', !!rn\.warn\)/, 'on the strip itself, which the CSS colours');
+  assert.match(ui, /text\('quiet', quietLines\(st\.rows, v\.now\)/);
+});
+
+t('following the K9 team: the team, the point and the perimeter stay in view until a hand moves the map', () => {
+  const inc = { lkp: { lat: 51.2, lon: -2.6 } };
+  const marks = [{ kind: 'perimeter', pts: [{ lat: 51.201, lon: -2.6 }, { lat: 51.2, lon: -2.601 }] },
+                 { kind: 'roadblock', lat: 51.3, lon: -2.7 }];
+  const pts = followPoints({ inc, marks, k9: { lat: 51.2005, lon: -2.6005, at: 1 } });
+  assert.equal(pts.length, 4, 'the point, the team and the perimeter line; a roadblock far off is not chased');
+  assert.deepEqual(followPoints({ inc: null, marks, k9: null }), []);
+  const pad = { top: 90, bottom: 40, left: 40, right: 380 };
+  const size = { w: 1600, h: 900 };
+  assert.equal(allInView([{ x: 100, y: 100 }, { x: 1200, y: 800 }], size, pad), true);
+  assert.equal(allInView([{ x: 1300, y: 400 }], size, pad), false, 'under the panel is out of view');
+  assert.equal(allInView([{ x: 500, y: 50 }], size, pad), false, 'under the pills is out of view');
+  const ui = read('public/incident-ui.js');
+  const follow = ui.slice(ui.indexOf('function onHand('), ui.indexOf('/* ── Hearing the K9 team'));
+  assert.match(follow, /if \(e && !e\.originalEvent\) return;/, 'the map easing itself does not count as a hand');
+  assert.match(follow, /\['dragstart', 'zoomstart', 'rotatestart', 'pitchstart'\]/);
+  assert.match(follow, /if \(I\.follow\.paused \|\| I\.tool \|\| I\.form/, 'never moves the map while someone draws');
+  assert.match(follow, /fitOnMap\(\[\.\.\.pts, \.\.\.room\], 17\)/, 'it builds on fitOnMap');
+  assert.match(ui, /onLook\(pauseFollow\)/, 'a tap on a unit in the list, or Fit everyone, pauses it too');
+  assert.match(ui, /\$\('cmdFollow'\)\.addEventListener\('click', resumeFollow\)/);
+  const sq = read('public/squad-ui.js');
+  for (const fn of ['function focusUnit(', 'function fitAll(']) {
+    const body = sq.slice(sq.indexOf(fn), sq.indexOf('\n}', sq.indexOf(fn)));
+    assert.match(body, /looked\('/, `${fn} tells the incident layer`);
+  }
+});
+
+t('the six confirm() boxes are the app’s own sheets, which put nothing in the page as HTML', () => {
+  for (const f of ['public/squad-ui.js', 'public/incident-ui.js']) {
+    assert.doesNotMatch(read(f), /\bconfirm\(/, `${f} asks with a sheet`);
+  }
+  const sq = read('public/squad-ui.js'), inc = read('public/incident-ui.js');
+  assert.equal((sq.match(/await ask\(\{/g) || []).length, 4, 'remove a member, new code, leave, delete');
+  assert.equal((inc.match(/await ask\(\{/g) || []).length, 2, 'End incident, remove a mark');
+  for (const [src, n] of [[sq, 3], [inc, 2]]) assert.ok((src.match(/danger: true/g) || []).length >= n, 'the dangerous answer is red');
+  const sheet = read('public/sheet.js');
+  assert.doesNotMatch(sheet, /innerHTML|insertAdjacentHTML|outerHTML|document\.write/, 'textContent only');
+  assert.match(sheet, /e\.key === 'Escape'/, 'Escape cancels');
+  assert.match(sheet, /data-sheet-safe|dataset\.sheetSafe/, 'the safe answer takes the focus');
+  const page = read('public/index.html');
+  assert.match(page, /<div class="app-sheet" id="appSheet" hidden role="dialog" aria-modal="true" aria-labelledby="appSheetTitle"><\/div>/);
+  // Cached for offline use and folded into the one-file build, before the screens that use it.
+  assert.ok(read('public/sw.js').includes("'sheet.js'"));
+  const build = read('scripts/build-single.mjs');
+  assert.ok(build.indexOf("'sheet'") > 0 && build.indexOf("'sheet'") < build.indexOf("'squad-ui'"));
+  // A sheet left up while the incident ended does not act on it afterwards.
+  assert.match(inc, /The sheet was up a while: the incident may have ended under it\.[\s\S]*?if \(!now\.inc \|\| now\.inc\.id !== v\.inc\.id/);
+});
+
+t('his department: the name and call signs he types replace the pretend ones, tidied, on this device only', () => {
+  assert.deepEqual(cleanDemoNames(null), { squad: SIM_SQUAD, callSigns: simUnits().map(u => u.callSign) });
+  const n = cleanDemoNames({ squad: '  Wells\u0000 Police ', callSigns: ['K9 Alpha', '', 'x'.repeat(60)] });
+  assert.equal(n.squad, 'Wells Police');
+  assert.equal(n.callSigns[0], 'K9 Alpha');
+  assert.equal(n.callSigns[1], 'K9-2', 'blank keeps the usual one');
+  assert.equal(n.callSigns[2].length, 24, 'bounded like any call sign');
+  const sim = createSim({ center: TOWN, now: 1_700_000_000_000, seed: 2, callSigns: n.callSigns });
+  assert.equal(sim.members().get('sim-1').callSign, 'K9 Alpha');
+  assert.equal(sim.members().get('sim-1').dog, 'Rex', 'the dogs stay');
+  const ui = read('public/squad-ui.js');
+  assert.match(ui, /\$\('sqSim'\)\.addEventListener\('click', openDemo\)/, 'the form comes before the pretend squad starts');
+  assert.match(ui, /ctx\.kv\.set\('squadDemoNames', names\)/, 'remembered on the device, never in the cloud');
+  assert.doesNotMatch(ui.slice(ui.indexOf('async function openDemo('), ui.indexOf('/* ── Wall mode')), /handle\(|putPosition|createSquad/);
+  assert.match(ui, /name: S\.simName, members: S\.sim\.members\(\)/);
+});
+
+t('pretend walkers keep out of buildings, and so does the pretend person’s line', () => {
+  const W = townWalls();
+  const t0 = 1_700_000_000_000;
+  const sim = createSim({ center: TOWN, now: t0, seed: 4, walls: W });
+  for (const u of sim.units) if (u.mode === 'foot') { const p = outsideWall(W, u); u.lat = p.lat; u.lon = p.lon; }
+  const feet = sim.units.filter(u => u.mode === 'foot');
+  let moved = 0;
+  const was = new Map(feet.map(u => [u.uid, { lat: u.lat, lon: u.lon }]));
+  for (let s = 1; s <= 900; s++) {
+    sim.step(t0 + s * 1000);
+    for (const u of feet) {
+      assert.equal(wallAt(W, u), -1, `${u.callSign} stepped into a building at ${s} s`);
+      const v = dist(was.get(u.uid), u);
+      assert.ok(v <= 1.8 || v < 26, `${u.callSign} moved ${v.toFixed(1)} m in a second`);
+      moved += v;
+      was.set(u.uid, { lat: u.lat, lon: u.lon });
+    }
+  }
+  assert.ok(moved > 1500, 'and they still get about');
+  // The person's line: no step of it goes through a wall, and the same seed gives the same line.
+  const lkp = { lat: TOWN.lat, lon: TOWN.lon };
+  const path = scentPath({ lkp, seed: 9, walls: W });
+  for (let i = 1; i < path.pts.length; i++) {
+    assert.equal(blockStep(W, path.pts[i - 1], path.pts[i]), path.pts[i], `step ${i} of the line crosses a wall`);
+  }
+  assert.ok(path.lostAt > 0 && path.refoundAt > path.lostAt);
+  assert.deepEqual(scentPath({ lkp, seed: 9 }), scentPath({ lkp, seed: 9, walls: null }), 'without walls, the line it always was');
+  // Buildings that arrive after the squad starts move nobody into a wall.
+  const late = createSim({ center: TOWN, now: t0, seed: 6 });
+  late.setWalls(W);
+  for (const u of late.units) if (u.mode === 'foot') assert.equal(wallAt(W, u), -1);
+});
+
+t('the pretend sergeant contains wide early, then tightens ahead of the team, and never reads the hidden line', () => {
+  const W = townWalls();
+  const t0 = 1_800_000_000_000;
+  const sim = createSim({ center: TOWN, now: t0, seed: 11, walls: W });
+  const si = createSimIncident({ sim, lkp: { lat: TOWN.lat, lon: TOWN.lon }, now: t0, seed: 5 });
+  let t = t0, wide = null, inner = null, wideGoneBeforeInner = false, refoundAt = 0;
+  while (t < t0 + 40 * 60e3 && si.phase !== 'found') {
+    t += 2000; sim.step(t); si.step(t);
+    const ms = standingOf(si.marks);
+    const w = ms.find(m => m.label === 'Wide perimeter');
+    const i = ms.find(m => m.label === 'Inner perimeter');
+    if (w && !wide) wide = { at: t, mark: w };
+    if (i && !inner) { inner = { at: t, mark: i }; wideGoneBeforeInner = !w; }
+    const re = ms.find(m => m.kind === 'refound');
+    if (re && !refoundAt) refoundAt = re.at;
+    const k9 = sim.unit('sim-1');
+    assert.equal(wallAt(W, k9), -1, 'the dog keeps out of buildings');
+  }
+  assert.equal(si.phase, 'found', 'the team still reaches the person among the buildings');
+  assert.ok(wide && wide.at - t0 <= SGT.wideAfterMs + 4000, 'a wide perimeter goes up at once');
+  // A ring's radius, from the middle of its points (the last repeats the first, to close it).
+  const r = (m) => { const q = m.pts.slice(0, -1); return Math.round(dist(q[0], { lat: q.reduce((a, p) => a + p.lat, 0) / q.length, lon: q.reduce((a, p) => a + p.lon, 0) / q.length })); };
+  assert.ok(Math.abs(r(wide.mark) - SGT.wideM) < 15, 'round the last known point');
+  assert.ok(inner && inner.at > refoundAt && refoundAt > 0, 'tightened only after the handler called the re-find');
+  assert.ok(r(inner.mark) < r(wide.mark), 'tighter');
+  assert.ok(wideGoneBeforeInner, 'the wide line is withdrawn as the inner one goes up');
+  assert.equal(standingOf(si.marks).filter(m => m.kind === 'roadblock').length, 2, 'the cars’ roadblocks are on the inner line now');
+  const gone = [...si.marks.values()].filter(m => m.withdrawnAt);
+  assert.ok(gone.some(m => m.label === 'Wide perimeter') && gone.every(m => m.withdrawnBy === 'sim-7'),
+    'the wide line is withdrawn by the sergeant, kept for the log');
+  for (const m of si.marks.values()) if (m.kind === 'rally') assert.equal(wallAt(W, m), -1, 'a rally point in the open');
+  // What the sergeant reads: never the hidden line, nor where the person is.
+  const src = read('public/incident.js');
+  const sgt = src.slice(src.indexOf('function sergeant('), src.indexOf('const si = {', src.indexOf('function sergeant(')))
+    .replace(/\/\*[\s\S]*?\*\//g, '');   // the code, not its comments
+  assert.ok(sgt.length > 500);
+  assert.doesNotMatch(sgt, /\bscent\b|\bperson\b|hiddenRoute|pathAt/, 'the sergeant knows what a real one would');
+  assert.match(sgt, /trailInfo\(si\.trail, inc, t\)/, 'he goes by the team’s own track');
+  // Nothing on any screen reads the hidden line (only the end-of-scenario line will).
+  for (const f of ['squad-ui.js', 'incident-ui.js', 'squad.js']) assert.doesNotMatch(read(`public/${f}`), /hiddenRoute|\.scent\b/, f);
+  assert.doesNotMatch(read('public/app.js'), /hiddenRoute/);
+  assert.equal(si.scent, undefined, 'the line is not on the incident the screens draw from');
+});
+
+t('hear it: the command screen says the K9 team’s new calls in the coach voice, and can be switched off', () => {
+  const app = read('public/app.js');
+  const init = app.slice(app.indexOf('initIncidents({'), app.indexOf('});', app.indexOf('initIncidents({')));
+  assert.match(init, /speak: \(text\) => coachSpeak\(text\)/, 'the coach’s own voice, wired through initIncidents');
+  const ui = read('public/incident-ui.js');
+  const say = ui.slice(ui.indexOf('function speakCalls('), ui.indexOf('function setVoice('));
+  assert.match(say, /I\.said = \{ for: live\.id, ids: new Set\(v\.marks/, 'calls made before the screen opened are not said');
+  assert.match(say, /mk\.by !== meUid\(\)/, 'a handler does not hear their own');
+  assert.match(say, /if \(!I\.voice \|\| !ctx\.speak\) return;/);
+  assert.match(say, /callWords\(mk\.kind, who\(mk\.by, st\.members\)\)/);
+  assert.match(ui, /data-inc-act="voice" aria-pressed=/, 'a switch on the incident card');
+  assert.match(ui, /ctx\.kv\.set\('squadVoice', I\.voice\)/, 'remembered on the device');
+});
+
+t('Wall mode: a big clock, the latest lines, big units, short pins, a night look that keeps the lines bright', () => {
+  const page = read('public/index.html');
+  for (const id of ['cmdWall', 'cmdWallClock', 'cmdWallInc', 'cmdWallLog', 'cmdNight', 'cmdWallBtn', 'cmdFollow', 'cmdKept', 'sqKept', 'sqKept2']) {
+    assert.ok(page.includes(`id="${id}"`), `#${id}`);
+  }
+  const cmd = page.slice(page.indexOf('<section id="scrCommand"'), page.indexOf('</section>', page.indexOf('<section id="scrCommand"')));
+  assert.match(cmd, /id="cmdWall"/, 'inside the command screen');
+  const css = read('public/app.css');
+  assert.match(css, /#map\.map-wall \.inc-mark-tag \{ display: none; \}/, 'short pins on the wall');
+  assert.match(css, /#map\.map-wall\.map-zoomed \.inc-mark-tag \{ display: block;/, 'details close in');
+  assert.match(css, /@media \(max-width: 899px\) \{ \.cmd-wall-btn \{ display: none; \} \}/, 'a wall is a big screen');
+  const sq = read('public/squad-ui.js');
+  assert.match(sq, /setConfigProperty\?\.\('basemap', 'lightPreset', on \? 'night' : 'day'\)/, 'the Standard map’s night light');
+  assert.match(sq, /const under = \['inc-reach-fill', 'inc-lines'\]\.find\(id => m\.getLayer\(id\)\);/, 'the veil goes under the incident’s layers');
+  assert.match(read('public/incident-ui.js'), /`\$\{l\.type\}-emissive-strength`\]: 1/, 'which glow at night');
+  assert.match(sq, /function closeCommand\(\)[\s\S]*?setWall\(false\);/, 'leaving the map leaves Wall mode');
+  // The live log (move B) takes over the slot; until then the marks fill it, five at most, by html``.
+  const inc = read('public/incident-ui.js');
+  assert.match(inc, /put\(\$\('cmdWallLog'\), html`/);
+  assert.match(inc, /\.slice\(-5\)/);
+});
+
+t('the phone strip folds the incident to one line, and opens on a tap', () => {
+  const inc = read('public/incident-ui.js');
+  assert.match(inc, /<button type="button" class="inc-strip" data-inc-act="unfold"/);
+  assert.match(inc, /if \(act === 'unfold'\) return foldPanel\(false\);/);
+  assert.match(inc, /\$\('cmdPanel'\)\?\.classList\.toggle\('inc-on', !!live\)/);
+  const css = read('public/app.css');
+  assert.match(css, /\.cmd-panel\.folded\.inc-on \.inc-live > :not\(\.inc-strip\) \{ display: none; \}/);
+  assert.match(css, /\.inc-strip \{ display: none; \}/, 'only on a phone, folded');
+});
+
+t('what’s kept, and for how long, is worked out from the app’s own numbers', () => {
+  const lines = keptLines();
+  const all = lines.map(l => `${l.head} ${l.text}`).join(' ');
+  assert.ok(all.includes(`${POSITION_TTL / 3600e3} hours`), 'positions');
+  assert.ok(all.includes(`${INCIDENT_TTL / 86400e3} days`), 'incidents');
+  assert.ok(all.includes('deleted at once'), 'off duty, a position goes at once');
+  assert.ok(all.includes('each member\'s name, call sign'), 'names are kept with the squad, and it says so');
+  assert.ok(all.includes('the brief (direction and description)') && all.includes('every squad member can see them'),
+    'the brief is personal data: kept a week, seen by all, and it says so');
+  assert.doesNotMatch(all, /secure|evidence|sealed|CJIS|proof|guarantee/i, 'honest words only');
+  assert.match(read('public/squad-ui.js'), /info\(\{ title: 'What’s kept, and for how long', items: keptLines\(\) \}\)/);
+});
+
+t('last seen, how they left and the brief: bounded on the way out, cleaned on the way in', () => {
+  const now = 1_800_000_000_000;
+  const d = incidentDoc({ name: 'X', lkp: { lat: 51.2, lon: -2.6 }, k9Uid: 'k9', uid: 'chief', now,
+    lastSeenAt: now - 9 * 60e3, pace: 'run', brief: { dir: '  north,\n to the  park ', desc: 'x'.repeat(400), article: true, evil: 1 } });
+  assert.equal(d.lastSeenAt, now - 9 * 60e3);
+  assert.equal(d.pace, 'run');
+  assert.deepEqual(d.brief, { dir: 'north, to the park', desc: 'x'.repeat(160), article: true }, 'tidied, bounded, nothing extra');
+  // Never later than the opening, never more than two days before it; nonsense is nothing.
+  assert.equal(cleanLastSeen(now + 60e3, now), now);
+  assert.equal(cleanLastSeen(now - 9 * 864e5, now), now - 48 * 3600e3);
+  assert.equal(cleanLastSeen('soon', now), null);
+  const plain = incidentDoc({ name: 'X', lkp: { lat: 51.2, lon: -2.6 }, uid: 'chief', now, pace: 'teleport', brief: { dir: ' ' } });
+  assert.deepEqual([plain.lastSeenAt, plain.pace, plain.brief], [null, null, null]);
+  assert.equal(seenAt(cleanIncident(plain, 'i')), now, 'not said: the clock starts when the incident opened');
+  const c = cleanIncident({ ...d, brief: { dir: '<b>N</b>', article: 'yes' } }, 'i');
+  assert.deepEqual(c.brief, { dir: '<b>N</b>', desc: '', article: null }, 'kept as text (html`` escapes it), a non-answer is not known');
+  assert.equal(cleanBrief({ article: false }).article, false, 'no scent article is an answer');
+  // A time typed in the form is the last time it was that o'clock.
+  const at = new Date(2027, 2, 3, 14, 20).getTime();
+  assert.equal(lastSeenFrom('14:05', at), new Date(2027, 2, 3, 14, 5).getTime());
+  // A few minutes ahead is a slip (a fast phone), refused, never yesterday's 24-hour ring; well ahead is yesterday.
+  assert.ok(Number.isNaN(lastSeenFrom('14:22', at)), '2 min ahead: refused');
+  assert.ok(Number.isNaN(lastSeenFrom('23:50', at)), '9 h 30 min ahead: still refused');
+  assert.equal(lastSeenFrom('14:21', at), new Date(2027, 2, 3, 14, 21).getTime(), 'within a minute: a clock a little out');
+  const early = new Date(2027, 2, 3, 9, 0).getTime();
+  assert.equal(lastSeenFrom('22:30', early), new Date(2027, 2, 2, 22, 30).getTime(), '13 h 30 min ahead: yesterday');
+  const ui0 = read('public/incident-ui.js');
+  assert.equal((ui0.match(/Number\.isNaN\((lastSeenAt|t)\)\) return (err|ctx\.toast)\('That time is after now'\)/g) || []).length, 2,
+    'the start form and the last-seen sheet both say so');
+  for (const bad of ['', '25:00', '14:5', 'noon', null]) assert.equal(lastSeenFrom(bad, at), null, String(bad));
+  assert.equal(hhmm(new Date(2027, 2, 3, 9, 4).getTime()), '09:04');
+  // Paces: this device's, each held to a sensible span.
+  assert.deepEqual(cleanPaces(null), { walk: 5, run: 10, vehicle: 40 });
+  assert.deepEqual(cleanPaces({ walk: 0.2, run: 'x', vehicle: 999 }), { walk: 1, run: 10, vehicle: 130 });
+  assert.equal(briefWords(d.brief, 'run'), `Running · Heading north, to the park · ${'x'.repeat(160)} · Scent article: yes`);
+});
+
+t('the ring grows from the last known point at the pace, and the perimeter goes amber once it is passed', () => {
+  const t0 = 1_800_000_000_000;
+  const lkp = { lat: 51.2094, lon: -2.6476 };
+  const inc = { lkp, startedAt: t0, endedAt: null, lastSeenAt: t0 - 3 * 60e3, pace: 'walk' };
+  const r = reachRings({ inc, now: t0 + 3 * 60e3, paces: null });
+  assert.equal(r.sinceMs, 6 * 60e3, 'from last seen, not from the opening');
+  assert.equal(Math.round(r.main.m), 500, '6 min at 5 km/h');
+  assert.equal(Math.round(r.wide.m), 1000, 'the dashed ring: if they ran');
+  assert.equal(reachRings({ inc: { ...inc, pace: 'run' }, now: t0, paces: null }).wide, null, 'running: no wider ring');
+  assert.equal(reachRings({ inc: { ...inc, pace: 'vehicle' }, now: t0 + 864e5, paces: null }).main.m, REACH_CAP_M, 'capped');
+  assert.equal(Math.round(reachRings({ inc, now: t0 + 3 * 60e3, paces: { walk: 4 } }).main.m), 400, 'the device’s own pace');
+  // Ended, or in a replay: the ring is as it was at that moment, never past the end.
+  const ended = { ...inc, endedAt: t0 + 60e3 };
+  assert.equal(reachRings({ inc: ended, now: t0 + 3600e3, paces: null }).sinceMs, 4 * 60e3);
+  assert.equal(reachRings({ inc: ended, now: t0, paces: null }).sinceMs, 3 * 60e3);
+  // A wide ring of 450 m round the point: inside walking range once the ring passes 450 m.
+  const wide = { id: 'w', kind: 'perimeter', at: t0, pts: ring(lkp, 450, 12) };
+  const road = { id: 'rb', kind: 'roadblock', at: t0, lat: lkp.lat, lon: lkp.lon };
+  assert.ok(Math.abs(nearM(lkp, wide.pts) - 450 * Math.cos(Math.PI / 12)) < 3, 'how near the line comes: the middle of a side');
+  const at = (min) => reachRings({ inc, now: t0 - 3 * 60e3 + min * 60e3, paces: null });
+  assert.deepEqual(passedLines({ inc, marks: [wide, road], reach: at(5) }), [], '417 m: still inside it');
+  assert.deepEqual(passedLines({ inc, marks: [wide, road], reach: at(6) }), ['w'], '500 m: past it');
+  assert.equal(warnWords('walk'), 'Perimeter now inside walking range');
+  assert.equal(warnWords('vehicle'), 'Perimeter now inside driving range');
+  assert.match(reachWords(at(6)), /^Rough guide, not where the person is: walking 5 km\/h, about 500 m; running 10 km\/h, about 1\.0 km \(dashed\)$/);
+  assert.match(reachWords(at(6), true), /walking 3 mph, about .*yd; running 6 mph/, 'miles when Settings say so');
+  // The dog at the last known point, after last seen: a position, not a claim about the scent.
+  assert.equal(onScentWords({ inc, trail: [], now: t0 + 60e3 }), 'Dog not at the last known point yet · 4 min since last seen');
+  const walkIn = [{ ...project(lkp, 90, 300), t: t0 + 60e3 }, { ...project(lkp, 90, 120), t: t0 + 3 * 60e3 }];
+  assert.equal(onScentWords({ inc, trail: walkIn, now: t0 + 4 * 60e3 }), 'Dog not at the last known point yet · 7 min since last seen', 'the walk in is not the point');
+  assert.equal(onScentWords({ inc, trail: [...walkIn, { ...project(lkp, 90, 20), t: t0 + 6 * 60e3 }], now: t0 + 9e5 }),
+    'Dog at the last known point about 9 min after last seen', 'from when the team reached the last known point');
+  const noSeen = { ...inc, lastSeenAt: null };
+  assert.equal(onScentWords({ inc: noSeen, trail: [], now: t0 + 60e3 }), 'Dog not at the last known point yet · 1 min since the incident opened',
+    'no last-seen time given: counted from the opening, and it says so');
+  assert.doesNotMatch(read('public/incident.js'), /on scent \$\{|started trailing/, 'never worded as what the dog did');
+  // A closed ring that does not go round the point (an inner ring ahead of the dog) is never "passed".
+  const ahead = { id: 'in', kind: 'perimeter', at: t0, pts: ring(project(lkp, 90, 700), 250, 12) };
+  assert.ok(isClosed(ahead.pts) && !insideLine(lkp, ahead.pts) && insideLine(lkp, wide.pts));
+  assert.deepEqual(passedLines({ inc, marks: [wide, ahead], reach: at(12) }), ['w'], 'only the ring round the point');
+  // An open line (a cordon across a road) is judged by how near it comes.
+  const cordon = { id: 'c', kind: 'perimeter', at: t0, pts: [project(lkp, 0, 300), project(lkp, 60, 320), project(lkp, 120, 300)] };
+  assert.ok(!isClosed(cordon.pts));
+  assert.deepEqual(passedLines({ inc, marks: [cordon], reach: at(4) }), ['c'], '333 m: past a cordon about 280 m off');
+  // Honest words only.
+  const words = [reachWords(at(6)), warnWords('walk'), onScentWords({ inc, trail: [], now: t0 })].join(' ');
+  assert.doesNotMatch(words, /predict|proof|secure|evidence|sealed/i);
+});
+
+t('in the pretend demo the wide ring goes amber as a moment in the story, and the sergeant\'s inner ring is never amber', () => {
+  const center = { lat: 51.2094, lon: -2.6476 };
+  const t0 = 1_800_000_000_000;
+  let inners = 0;
+  for (const seed of [1, 2, 3, 4, 5, 6]) {
+    const sim = createSim({ center, now: t0, seed: seed + 20 });
+    /* As the "Pretend incident" button does: seen walking off a minute before. */
+    const si = createSimIncident({ sim, lkp: project(sim.unit('sim-1'), 30, 120), now: t0, seed, lastSeenAt: t0 - 60e3, pace: 'walk' });
+    let t = t0, firstAmber = null;
+    const flagged = new Set();
+    while (t < t0 + 30 * 60e3 && si.phase !== 'found') {
+      t += 4000; sim.step(t); si.step(t);
+      const marks = standingOf(si.marks);
+      const passed = passedLines({ inc: si.inc, marks, reach: reachRings({ inc: si.inc, now: t, paces: null }) });
+      if (passed.length && firstAmber == null) firstAmber = t - t0;
+      for (const id of passed) flagged.add(id);
+    }
+    const inner = [...si.marks.values()].filter(m => m.label === 'Inner perimeter');
+    inners += inner.length;
+    /* Ahead of the dog, clear of the point: never amber. (A long trail can
+       make him tighten round it anyway; then the warning is the honest one.) */
+    for (const m of inner) if (!insideLine(si.inc.lkp, m.pts)) assert.ok(!flagged.has(m.id), `seed ${seed}: the inner ring ahead of the dog is never amber`);
+    for (const m of inner) if (insideLine(si.inc.lkp, m.pts)) assert.ok(pathLen(si.trail.filter(p => p.t <= m.at)) >= SGT.anywayM - 50, `seed ${seed}: round the point only on a long trail`);
+    if (firstAmber != null) assert.ok(firstAmber >= 200e3, `seed ${seed}: amber at ${firstAmber / 1e3} s, not from the start`);
+  }
+  assert.ok(inners > 0, 'some runs reach the tightening');
+  assert.match(read('public/incident-ui.js'), /seenAt: viewNow\(\) - 60e3, pace: 'walk'/);
+});
+
+t('the live log says what happened in plain words, keeps a withdrawn mark crossed out, and stops at a replay’s moment', () => {
+  const t0 = new Date(2027, 2, 3, 14, 0).getTime();
+  const min = (n) => t0 + n * 60e3;
+  const inc = { lkp: { lat: 51.2, lon: -2.6 }, startedAt: t0, endedAt: min(30), startedBy: 'sgt', k9Uid: 'k9',
+                lastSeenAt: min(-4), pace: 'walk', status: 'ended' };
+  const marks = [
+    { id: 'a', kind: 'lost', by: 'k9', at: min(9), lat: 51.201, lon: -2.6 },
+    { id: 'b', kind: 'sighting', by: 'f5', at: min(10), lat: 51.202, lon: -2.6, label: 'Person seen on foot' },
+    { id: 'c', kind: 'roadblock', by: 'car3', at: min(11), lat: 51.203, lon: -2.6, withdrawnBy: 'sgt', withdrawnAt: min(12) },
+    { id: 'd', kind: 'perimeter', by: 'sgt', at: min(5), pts: [{ lat: 51.21, lon: -2.6 }, { lat: 51.21, lon: -2.61 }], label: 'Wide perimeter' },
+  ];
+  const names = { sgt: 'Sgt 1', k9: 'K9-1', f5: 'Foot 5', car3: 'Car 3' };
+  const trail = [{ lat: 51.199, lon: -2.6, t: min(2) }, { lat: 51.2, lon: -2.6, t: min(4) }, { lat: 51.201, lon: -2.6, t: min(5) }];
+  const log = logLines({ inc, marks: new Map(marks.map(m => [m.id, m])), trail, who: (u) => names[u], team: 'K9-1 Rex' });
+  assert.deepEqual(log.map(l => `${l.time} ${l.text}`), [
+    '13:56 Last seen, walking',
+    '14:00 Incident opened by Sgt 1',
+    '14:04 K9-1 Rex at the last known point',
+    '14:05 Sgt 1 perimeter line: Wide perimeter',
+    '14:09 K9-1 lost it',
+    '14:10 Foot 5 sighting: Person seen on foot',
+    '14:11 Car 3 roadblock',
+    '14:30 Incident ended',
+  ]);
+  assert.equal(log.find(l => l.key === 'm:c').withdrawn, 'withdrawn by Sgt 1, 14:12', 'kept, crossed out, who and when');
+  assert.deepEqual(log.find(l => l.key === 'm:d').at, { lat: 51.21, lon: -2.6 }, 'a line is found by its first point');
+  assert.equal(log.find(l => l.key === 'm:d').pts.length, 2, 'and shown whole');
+  // At a replay's moment: only what had happened, the roadblock not yet withdrawn.
+  const at = logLines({ inc, marks, trail, who: (u) => names[u], now: min(11.5) });
+  assert.equal(at[at.length - 1].text, 'Car 3 roadblock');
+  assert.equal(at[at.length - 1].withdrawn, null);
+  assert.ok(!at.some(l => l.key === 'end'));
+  // standing(): what the map draws at a moment.
+  assert.ok(standing(marks[2], min(11.5)) && !standing(marks[2], min(12)) && !standing(marks[0], min(8)));
+  assert.equal(mayUnmark(marks[2], 'sgt', true), false, 'withdrawn once, never again');
+  // Withdrawn fields from another phone are cleaned: both halves or neither.
+  const p = markDoc({ kind: 'roadblock', uid: 'ofc', at: 5, lat: 51.1, lon: -2.1 });
+  assert.equal(cleanMark({ ...p, withdrawnBy: 'chief', withdrawnAt: 9 }, 'm').withdrawnBy, 'chief');
+  assert.equal(cleanMark({ ...p, withdrawnBy: 'chief' }, 'm').withdrawnBy, undefined);
+  assert.equal(cleanMark({ ...p, withdrawnBy: 7, withdrawnAt: 9 }, 'm').withdrawnAt, undefined);
+  assert.equal(summarise({ inc, trail, marks, units: 4, now: min(30) }).marks, 3, 'the end counts what still stood');
+});
+
+t('the pretend incident carries last seen and the brief, and the sergeant’s withdrawn line shows in its log', () => {
+  const center = { lat: 51.2094, lon: -2.6476 };
+  const t0 = 1_800_000_000_000;
+  const sim = createSim({ center, now: t0, seed: 11 });
+  const si = createSimIncident({ sim, lkp: project(sim.unit('sim-1'), 30, 120), now: t0, seed: 5,
+    lastSeenAt: t0 - 3 * 60e3, pace: 'walk', brief: { dir: 'east', desc: 'grey hoodie', article: true } });
+  assert.equal(seenAt(si.inc), t0 - 3 * 60e3);
+  assert.deepEqual(si.inc.brief, { dir: 'east', desc: 'grey hoodie', article: true });
+  let t = t0;
+  while (t < t0 + 40 * 60e3 && si.phase !== 'found') { t += 4000; sim.step(t); si.step(t); }
+  const names = new Map([...sim.members().values()].map(m => [m.uid, m.callSign]));
+  const log = logLines({ inc: si.inc, marks: si.marks, trail: si.trail, who: (u) => names.get(u) || 'You' });
+  const wide = log.find(l => /Wide perimeter/.test(l.text));
+  assert.match(wide.withdrawn, new RegExp(`^withdrawn by ${names.get('sim-7')}, \\d\\d:\\d\\d$`));
+  assert.ok(log.some(l => / at the last known point$/.test(l.text)) && log.some(l => / lost it$/.test(l.text)));
+  // The sergeant's inner ring, drawn ahead of the dog, is never flagged the moment he draws it.
+  const inner = [...si.marks.values()].find(m => m.label === 'Inner perimeter');
+  if (inner) {
+    const r = reachRings({ inc: si.inc, now: inner.at, paces: null });
+    assert.ok(!passedLines({ inc: si.inc, marks: [inner], reach: r }).includes(inner.id), 'the inner ring is not amber when drawn');
+  }
+  si.setSeen({ lastSeenAt: t0 + 3600e3, pace: 'teleport', brief: null });
+  assert.deepEqual([si.inc.lastSeenAt, si.inc.pace, si.inc.brief], [t0, null, null], 'Command corrects it, cleaned the same way');
+  // The rings read the last known point and the clock: nothing of the hidden line.
+  const src = read('public/incident.js');
+  const reach = src.slice(src.indexOf('export const PACES'), src.indexOf('/* ── The live log'))
+    .replace(/\/\*[\s\S]*?\*\//g, '').replace(/`[^`]*`|'[^'\n]*'/g, '""');   // the code, not its comments or words
+  assert.ok(reach.length > 1500);
+  assert.doesNotMatch(reach, /hiddenRoute|scent\.|\bperson\b/);
+});
+
+t('the incident card: the big clock, the rings, the amber line, the brief, paces and a log that jumps the map', () => {
+  const ui = read('public/incident-ui.js');
+  for (const k of ['seenClock', 'seenSub', 'warn', 'onScent', 'brief', 'reach']) assert.match(ui, new RegExp(`data-inc-text="${k}"`), k);
+  for (const k of ['seen', 'pace', 'dir', 'desc', 'art']) assert.match(ui, new RegExp(`data-inc-${k}=?`), `the form takes ${k}`);
+  assert.match(ui, /maxlength="\$\{DIR_MAX\}"/);
+  assert.match(ui, /maxlength="\$\{DESC_MAX\}"/);
+  // Layers: the rings under the perimeter, which goes amber when passed.
+  const layers = ui.slice(ui.indexOf('const LAYERS = ['), ui.indexOf('const SOURCES'));
+  assert.ok(layers.indexOf("'inc-reach-fill'") < layers.indexOf("'inc-lines'"), 'the rings under the lines');
+  assert.match(layers, /'line-dasharray': \[2, 2\]/, 'the running ring dashed');
+  assert.match(layers, /\['case', \['boolean', \['get', 'warn'\], false\], WARN_C, '#D93025'\]/);
+  assert.match(ui, /`\$\{PACES\[reach\.pace\]\.label\} range · rough guide`/, 'the ring says it is a rough guide on the map too');
+  // The log: a tap moves the map, and in a replay the slider, to that moment.
+  const tap = ui.slice(ui.indexOf('function onLogLine('), ui.indexOf('/* ── Last seen, the brief and the paces'));
+  assert.match(tap, /playReplay\(false\);[\s\S]*r\.t = Math\.max\(r\.rp\.start, Math\.min\(r\.rp\.end, l\.t\)\)/);
+  assert.match(tap, /pauseFollow\(\)/, 'live: following stops, so the map stays where it was sent');
+  assert.match(tap, /if \(l\.pts\?\.length\) fitOnMap\(l\.pts, 17\);\n  else if \(l\.at\) fitOnMap\(\[l\.at\]\);/, 'a line shown whole, a point close in');
+  assert.match(ui, /put\(el, html`\$\{lines\.map\(\(l, i\) => html`<li class="\$\{cls\(l, i\)\}">/, 'by html``');
+  assert.match(ui, /const cls = \(l, i\) => \[l\.withdrawn \? 'inc-log-off' : '', l\.ahead \? 'inc-log-ahead' : ''/, 'crossed out; in a replay, what is to come dimmed');
+  // A replay's log holds the whole incident, so a tap can jump forward too.
+  const lo = ui.slice(ui.indexOf('function logOf('), ui.indexOf('function paintLog('));
+  assert.match(lo, /now: Infinity \}\)\n    \.filter\(l => l\.t > v\.now\)\.map\(l => \(\{ \.\.\.l, withdrawn: null, ahead: true \}\)\)/);
+  assert.match(read('public/app.css'), /\.inc-log-ahead \.inc-log-line \{ opacity: 0\.5; \}/);
+  assert.match(read('public/app.css'), /\.inc-log-off \.inc-log-text \{[^}]*text-decoration: line-through/);
+  // Wall mode's slot is the live log now.
+  const wall = ui.slice(ui.indexOf('function paintWall('), ui.indexOf('/* ── The panel'));
+  assert.match(wall, /logOf\(v, st\.members\)\.filter\(l => !l\.ahead\)\.slice\(-5\)\.reverse\(\)/, 'newest first, as on the card');
+  assert.match(wall, /: `Opened \$\{elapsedWords\(upTo - v\.inc\.startedAt\)\} ago · last seen not given`/, 'no last-seen clock nobody gave');
+  assert.match(wall, /\$\{rn\.warn \? ` · \$\{rn\.warn\} · rough guide` : ''\}/, 'the wall\'s warning is a rough guide too');
+  assert.match(wall, /\$\('cmdWallSeen'\)/);
+  // Withdrawn, not removed: the map and the counts read what stands.
+  assert.match(ui, /marks: standingOf\(I\.marks\), said: \[\.\.\.I\.marks\.values\(\)\]/);
+  assert.match(ui, /await withdrawMark\(h, I\.sid, v\.inc\.id, mark\.id\)/);
+  assert.doesNotMatch(ui, /removeMark\(h|deleteDoc/);
+  // Paces on this device; last seen and the brief by Command, in the cloud.
+  assert.match(ui, /ctx\.kv\.set\('squadPaces', I\.paces\)/);
+  assert.match(ui, /It never moves or shrinks a perimeter: Command decides\./);
+  assert.match(ui, /\$\{cmd \? html`<button type="button" class="btn ghost small" data-inc-act="seen">/);
+  assert.match(ui, /The sheet was up a while: the incident may have ended under it\. \*\/\n  const now = shown\(\);\n  if \(!now\.inc \|\| now\.inc\.id !== inc\.id/);
+  const sheet = read('public/sheet.js');
+  assert.match(sheet, /el\('option', '', c\.text\)/, 'a choice in the sheet goes in by textContent');
 });
 
 t('a handler’s run reaches the incident only on duty, and only after Start trailing', () => {
@@ -663,10 +1163,12 @@ t('an incident in the cloud: every member hears of it, sees the trail and the ma
   await refused(putMark(ofc, sq.id, inc.id, { kind: 'lost', lat: 51.21, lon: -2.64 }), 'an officer calling lost it');
   const pid = await putMark(ofc, sq.id, inc.id, { kind: 'perimeter', pts: [{ lat: 51.21, lon: -2.65 }, { lat: 51.211, lon: -2.64 }, { lat: 51.208, lon: -2.64 }] });
   const rb = await putMark(ofc, sq.id, inc.id, { kind: 'roadblock', lat: 51.21, lon: -2.64, label: '<b>A39</b>' });
-  await refused(removeMark(k9, sq.id, inc.id, rb), 'taking back someone else’s mark');
-  await removeMark(chief, sq.id, inc.id, rb);
+  await refused(withdrawMark(k9, sq.id, inc.id, rb), 'taking back someone else’s mark');
+  await refused(fake.deleteDoc(fake.doc(ofc.fs, ...PATHS.mark(sq.id, inc.id, rb))), 'its maker deleting a mark outright');
+  await withdrawMark(chief, sq.id, inc.id, rb);
   await settle();
-  assert.deepEqual([...live.marks.values()].map(m => m.kind).sort(), ['indication', 'perimeter']);
+  assert.deepEqual(standingOf(live.marks).map(m => m.kind).sort(), ['indication', 'perimeter']);
+  assert.equal(live.marks.get(rb).withdrawnBy, 'chief', 'withdrawn, and kept for the log');
   assert.equal(live.marks.get(pid).pts.length, 3);
 
   // Ended: final. No reopening, no more marks; the last minute of a track still lands.
@@ -723,13 +1225,77 @@ t('an ended incident is final, and phones cannot fake the time or flood the squa
   await fake.setDoc(fake.doc(k9.fs, ...PATHS.track(sq.id, 'i2', 'k9', 0)), track('k9', 0));
   clock += 130e3;
   await refused(fake.setDoc(fake.doc(k9.fs, ...PATHS.track(sq.id, 'i2', 'k9', 0)), track('k9', 0)), 'rewriting a track after the end');
-  await refused(removeMark(ofc, sq.id, 'i2', mid), 'taking a mark back after the end');
+  await refused(withdrawMark(ofc, sq.id, 'i2', mid), 'taking a mark back after the end');
   await setRole(chief, sq.id, 'k9', 'command');
-  await refused(removeMark(k9, sq.id, 'i2', mid), 'a promoted Command deleting a mark after the end');
+  await refused(withdrawMark(k9, sq.id, 'i2', mid), 'a promoted Command withdrawing a mark after the end');
+  await refused(fake.deleteDoc(fake.doc(k9.fs, ...PATHS.mark(sq.id, 'i2', mid))), 'a promoted Command deleting a mark after the end');
   await refused(fake.deleteDoc(fake.doc(k9.fs, ...PATHS.incident(sq.id, 'i2'))), 'a promoted Command deleting an ended incident');
   await refused(fake.deleteDoc(fake.doc(k9.fs, ...PATHS.track(sq.id, 'i2', 'k9', 0))), 'a promoted Command deleting a track');
   await setRole(chief, sq.id, 'k9', 'k9');
   await clearPosition(ofc, sq.id);
+});
+
+t('last seen, pace and the brief in the cloud: Command sets and corrects them, bounded, and the end keeps them', async () => {
+  const lkp = { lat: 51.2094, lon: -2.6476 };
+  const inc = await startIncident(chief, sq.id, { name: 'Seen test', lkp, k9Uid: 'k9', lastSeenAt: Date.now() - 6 * 60e3,
+    pace: 'run', brief: { dir: 'north', desc: 'red coat', article: false } });
+  const path = `squads/${sq.id}/incidents/${inc.id}`;
+  const held = fake.cloudDoc(path);
+  assert.equal(held.pace, 'run');
+  assert.deepEqual(held.brief, { dir: 'north', desc: 'red coat', article: false });
+  const write = (h, x) => fake.setDoc(fake.doc(h.fs, ...PATHS.incident(sq.id, inc.id)), { ...fake.cloudDoc(path), ...x });
+  await refused(write(chief, { lastSeenAt: held.startedAt + 60e3 }), 'last seen after the incident opened');
+  await refused(write(chief, { lastSeenAt: held.startedAt - 3 * 864e5 }), 'last seen three days before');
+  await refused(write(chief, { pace: 'teleport' }), 'a pace that is not one');
+  await refused(write(chief, { brief: { dir: 'n', evil: '<script>' } }), 'a brief with more in it');
+  await refused(write(chief, { brief: { desc: 'x'.repeat(161) } }), 'a description past 160');
+  await refused(write(chief, { brief: { article: 'maybe' } }), 'a scent article that is not yes or no');
+  await refused(write(chief, { startedAt: held.startedAt - 3600e3, lastSeenAt: held.startedAt - 3600e3 - 60e3 }),
+    'the opening time moved, last seen with it');
+  await refused(write(chief, { startedAt: held.startedAt + 60e3 }), 'the opening time moved on');
+  await refused(updateSeen(ofc, sq.id, inc, { lastSeenAt: null, pace: 'walk', brief: null }), 'an officer correcting last seen');
+  const t = Date.now() - 2 * 60e3;
+  await updateSeen(chief, sq.id, inc, { lastSeenAt: t, pace: 'walk', brief: { dir: 'east' } });
+  assert.deepEqual([fake.cloudDoc(path).lastSeenAt, fake.cloudDoc(path).pace, fake.cloudDoc(path).brief], [t, 'walk', { dir: 'east', desc: '', article: null }]);
+  assert.equal(fake.cloudDoc(path).startedAt, held.startedAt, 'nothing else moves');
+  const now = cleanIncident(fake.cloudDoc(path), inc.id);
+  await endIncident(chief, sq.id, now, summarise({ inc: now, trail: [], marks: [], units: 1, now: Date.now() }));
+  const ended = fake.cloudDoc(path);
+  assert.deepEqual([ended.status, ended.lastSeenAt, ended.pace, ended.brief.dir], ['ended', t, 'walk', 'east'], 'ending wipes nothing said');
+  await refused(updateSeen(chief, sq.id, now, { lastSeenAt: null, pace: 'run', brief: null }), 'correcting an ended incident');
+});
+
+t('a mark taken back in the cloud is withdrawn, once, in the withdrawer’s name, and never deleted', async () => {
+  const inc = await startIncident(chief, sq.id, { name: 'Withdraw test', lkp: { lat: 51.2094, lon: -2.6476 }, k9Uid: 'k9' });
+  const mid = await putMark(ofc, sq.id, inc.id, { kind: 'roadblock', lat: 51.21, lon: -2.64 });
+  const ref = fake.doc(ofc.fs, ...PATHS.mark(sq.id, inc.id, mid));
+  const path = `squads/${sq.id}/incidents/${inc.id}/marks/${mid}`;
+  await refused(fake.setDoc(ref, { withdrawnBy: 'chief', withdrawnAt: Date.now() }, { merge: true }), 'withdrawn in someone else’s name');
+  await refused(fake.setDoc(ref, { withdrawnBy: 'ofc', withdrawnAt: Date.now() + 3600e3 }, { merge: true }), 'withdrawn an hour ahead');
+  await refused(fake.setDoc(ref, { withdrawnBy: 'ofc', withdrawnAt: Date.now(), lat: 51.3 }, { merge: true }), 'moved as it is withdrawn');
+  await refused(withdrawMark(stranger, sq.id, inc.id, mid), 'a stranger withdrawing it');
+  const born = { ...markDoc({ kind: 'sighting', uid: 'ofc', at: Date.now(), lat: 51.21, lon: -2.64 }), withdrawnBy: 'ofc', withdrawnAt: Date.now() };
+  await refused(fake.setDoc(fake.doc(ofc.fs, ...PATHS.mark(sq.id, inc.id, 'ofc_900')),
+    { ...born, deleteAt: fake.Timestamp.fromMillis(born.expiresAt) }), 'a mark made already withdrawn');
+  await withdrawMark(ofc, sq.id, inc.id, mid);
+  const held = fake.cloudDoc(path);
+  assert.equal(held.withdrawnBy, 'ofc');
+  assert.equal(held.kind, 'roadblock', 'the rest of it kept');
+  await refused(withdrawMark(chief, sq.id, inc.id, mid), 'withdrawing it twice');
+  const { withdrawnBy, withdrawnAt, ...back } = held;
+  await refused(fake.setDoc(ref, back), 'its maker bringing it back');
+  await refused(fake.deleteDoc(ref), 'its maker deleting it');
+  await refused(fake.deleteDoc(fake.doc(chief.fs, ...PATHS.mark(sq.id, inc.id, mid))), 'the creator deleting a mark while the incident runs');
+  // Read back by every member: off the map, in the log.
+  const { marks } = await loadIncident(k9, sq.id, inc.id);
+  assert.equal(marks.get(mid).withdrawnBy, 'ofc');
+  assert.equal(standingOf(marks).length, 0);
+  // Command withdraws anyone's.
+  const mid2 = await putMark(ofc, sq.id, inc.id, { kind: 'sighting', lat: 51.21, lon: -2.64 });
+  await refused(withdrawMark(k9, sq.id, inc.id, mid2), 'a handler withdrawing an officer’s mark');
+  await withdrawMark(chief, sq.id, inc.id, mid2);
+  assert.equal(fake.cloudDoc(`squads/${sq.id}/incidents/${inc.id}/marks/${mid2}`).withdrawnBy, 'chief');
+  await endIncident(chief, sq.id, inc, summarise({ inc, trail: [], marks, units: 1, now: Date.now() }));
 });
 
 t('the incident screens write HTML only through html``, and use only elements the page has', () => {
@@ -757,6 +1323,9 @@ t('the creator deletes the squad: everything in it goes, and a tombstone keeps i
   // A member the creator's phone has not heard of still goes: the cloud is asked.
   const late = phone('late');
   await joinSquad(late, { id: sq.id, code: sq.code, role: 'officer', callSign: 'Late' });
+  // A running incident with a mark on it: deleting the squad ends it first, then takes it all.
+  const live = await startIncident(chief, sq.id, { name: 'Still running', lkp: { lat: 51.2094, lon: -2.6476 }, k9Uid: 'k9' });
+  await putMark(ofc, sq.id, live.id, { kind: 'sighting', lat: 51.21, lon: -2.64 });
   await deleteSquad(chief, sq);
   const left = [...fake.cloud.docs.keys()].filter(p => p.startsWith(`squads/${sq.id}/`) || p.startsWith('joinCodes/'));
   assert.deepEqual(left, [], 'members, positions, incidents, marks, tracks and the code all gone');
@@ -797,6 +1366,8 @@ t('firestore.rules says what the fake’s copy of it relies on', () => {
   at("request.resource.data.n <= (request.time.toMillis() - get(incidentPath()).data.startedAt) / 60000 + 1");
   assert.equal((rules.match(/allow delete: if signedIn\(\) && creator\(\) == request\.auth\.uid;/g) || []).length, 2,
     'an incident and a track are deleted only by the creator, with the squad');
+  at("allow delete: if signedIn() && creator() == request.auth.uid\n                        && (!exists(incidentPath()) || get(incidentPath()).data.status == 'ended');");
+  at("&& request.resource.data.startedAt == resource.data.startedAt;");
   at("request.resource.data.code == get(squadPath()).data.code");
   at("getAfter(squadPath()).data.createdBy == request.auth.uid");
   at("&& expires(d, 12);");
@@ -806,10 +1377,57 @@ t('firestore.rules says what the fake’s copy of it relies on', () => {
   at("&& request.resource.data.status == 'active';");
   at("trackOk(request.resource.data) && exists(incidentPath())");
   at("'indication', 'lost', 'refound', 'article', 'sighting', 'roadblock', 'rally', 'perimeter'");
+  // Move B: last seen, how they left and the brief on the incident; a mark withdrawn, not deleted.
+  at("'expiresAt', 'deleteAt', 'summary', 'lastSeenAt', 'pace', 'brief'])");
+  at("(num(d.lastSeenAt) && d.lastSeenAt <= d.startedAt && d.lastSeenAt >= d.startedAt - 172800000)");
+  at("(d.get('pace', null) == null || d.pace in ['walk', 'run', 'vehicle'])");
+  at("b.keys().hasOnly(['dir', 'desc', 'article'])");
+  at("optText(b.get('dir', null), 40) && optText(b.get('desc', null), 160)");
+  at("request.resource.data.diff(resource.data).affectedKeys().hasOnly(['withdrawnBy', 'withdrawnAt'])");
+  at("&& resource.data.get('withdrawnBy', null) == null\n                && request.resource.data.withdrawnBy == request.auth.uid\n                && recent(request.resource.data.withdrawnAt);");
+  at("|| (isMember() && (resource.data.by == request.auth.uid || isCommand()) && withdrawOk()");
+  assert.doesNotMatch(rules.slice(at('match /marks/{markId}'), at('match /tracks/{trackId}')), /'withdrawnBy'[^\n]*\]\)\n\s*&& d\.kind/,
+    'markOk itself never takes the withdrawn fields: a new mark cannot be born withdrawn');
   assert.ok(rules.lastIndexOf('match /{document=**} { allow read, write: if false; }') > at('match /squads/{squadId}'),
     'everything else is still refused, after the squads');
   // The copy refuses what the rules refuse, for the paths it does not know.
   assert.equal(allow('get', 'elsewhere/x', { uid: 'a', before: new Map(), after: new Map() }), false);
+});
+
+t('review fixes: nothing said that Command did not say, the wall reads from across the room, pins and tags stay readable', () => {
+  const ui = read('public/incident-ui.js'), css = read('public/app.css');
+  // "Last seen & brief" fills in only what was said, and refuses a time after the opening.
+  const ed = ui.slice(ui.indexOf('async function editSeen('), ui.indexOf('async function editPaces('));
+  assert.match(ed, /value: finite\(inc\.lastSeenAt\) \? hhmm\(inc\.lastSeenAt\) : ''/);
+  assert.match(ed, /value: inc\.pace \|\| '',\n\s+choices: \[\{ value: '', text: 'Not known' \}, \.\.\.PACE_KEYS/);
+  assert.match(ed, /pace: got\.pace \|\| null/);
+  assert.match(ed, /if \(t != null && t > inc\.startedAt\) return ctx\.toast\('Last seen can’t be after the incident opened'\)/);
+  assert.doesNotMatch(ed, /seenAt\(inc\)|\|\| 'walk'/);
+  // The start form does not say "walking" unless Command does.
+  assert.match(ui, /seen: '', pace: null, dir: '', desc: '', article: null \};/);
+  assert.match(ui, /\['', 'Not known'\]\]\.map\(\(\[k, t\]\) => html`<button type="button" class="chip" data-inc-pace="\$\{k\}"/);
+  // The description is personal data every member reads: said where it is typed.
+  assert.equal((ui.match(/DESC_HINT/g) || []).length, 3, 'defined, on the form, in the sheet');
+  assert.match(ui, /const DESC_HINT = 'Every squad member sees this\. Keep it short\.';/);
+  assert.match(read('public/sheet.js'), /if \(f\.hint\) lab\.append\(el\('span', 'app-sheet-hint', f\.hint\)\);/, 'by textContent');
+  // Wall mode: the card keeps to its head, the units get the height, the toast clears the demo label.
+  assert.match(css, /\.cmd-wall \.inc-live \.inc-log, \.cmd-wall \.inc-live \.inc-brief, \.cmd-wall \.inc-live \.inc-reach,/);
+  assert.match(css, /\.cmd-wall \.cmd-list \{ flex: 1; min-height: 40vh; \}/);
+  assert.match(css, /body\.wall-on \.toast \{ top: auto; bottom: 24px; left: auto; right: 474px;/);
+  assert.match(read('public/squad-ui.js'), /document\.body\.classList\.toggle\('wall-on', S\.wall\);/);
+  // Pins: sized as drawn, the latest call on top.
+  const pins = ui.slice(ui.indexOf('function paintPins('), ui.indexOf('/* A tap on a pin.'));
+  assert.match(pins, /w = Math\.max\(w, pe\.offsetWidth \+ 4\);/);
+  assert.match(pins, /p\.marker\.setOffset\(\[k \* w, 0\]\)/);
+  assert.match(pins, /const z = String\(1 \+ n\);/);
+  // The ring's tag goes on an edge it can be read whole on, or not at all.
+  const tag = ui.slice(ui.indexOf('const TAG_SPOTS'), ui.indexOf('function pinEl('));
+  for (const k of ["i: 54, anchor: 'left'", "i: 18, anchor: 'right'", "i: 36, anchor: 'bottom'", "i: 0, anchor: 'top'"]) assert.ok(tag.includes(k), k);
+  assert.match(tag, /tag\.el\.hidden = !spot;/);
+  // Phone: Follow K9 sits under the weather panel.
+  assert.match(css, /@media \(max-width: 899px\) \{ \.cmd-follow \{ top: calc\(var\(--top-row, 14px\) \+ max\(56px, var\(--wx-gap, 0px\) \+ 8px\)\); \} \}/);
+  // The strip goes amber with the line.
+  assert.match(css, /\.cmd-panel\.folded\.inc-on \.inc-strip\.warn \{/);
 });
 
 t('nothing is published: the rules reach Firebase only by npm run rules:publish', () => {

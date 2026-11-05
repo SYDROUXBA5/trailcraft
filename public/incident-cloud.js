@@ -26,9 +26,9 @@ const newId = () => {
 
 /** Command starts an incident. Returns it, cleaned, as every member will
     see it. */
-export async function startIncident(h, sid, { name, lkp, k9Uid, now = Date.now() }) {
+export async function startIncident(h, sid, { name, lkp, k9Uid, lastSeenAt = null, pace = null, brief = null, now = Date.now() }) {
   const id = newId();
-  const d = incidentDoc({ name, lkp, k9Uid, uid: h.uid, now });
+  const d = incidentDoc({ name, lkp, k9Uid, uid: h.uid, now, lastSeenAt, pace, brief });
   await h.f.setDoc(ref(h, PATHS.incident(sid, id)), { ...d, ...ttl(h, d.expiresAt) });
   return cleanIncident(d, id);
 }
@@ -36,9 +36,23 @@ export async function startIncident(h, sid, { name, lkp, k9Uid, now = Date.now()
 /** Command ends it, with the few numbers the list of past incidents shows.
     An ended incident is final: the rules refuse any change after. */
 export async function endIncident(h, sid, inc, summary, now = Date.now()) {
-  const d = incidentDoc({ name: inc.name, lkp: inc.lkp, k9Uid: inc.k9Uid, uid: inc.startedBy, now: inc.startedAt });
   await h.f.setDoc(ref(h, PATHS.incident(sid, inc.id)),
-    { ...d, ...ttl(h, d.expiresAt), status: 'ended', endedAt: now, summary });
+    { ...again(h, inc), status: 'ended', endedAt: now, summary });
+}
+
+/* The incident written out again whole, as it stands, for Command's next
+   change to it: what was said about last seen and the brief rides along, so
+   ending it or correcting one thing never wipes the rest. */
+function again(h, inc, patch = {}) {
+  const d = incidentDoc({ name: inc.name, lkp: inc.lkp, k9Uid: inc.k9Uid, uid: inc.startedBy, now: inc.startedAt,
+    lastSeenAt: inc.lastSeenAt, pace: inc.pace, brief: inc.brief, ...patch });
+  return { ...d, ...ttl(h, d.expiresAt) };
+}
+
+/** Command corrects when the person was last seen, how they left, or the
+    handler's brief, while the incident runs. */
+export function updateSeen(h, sid, inc, { lastSeenAt, pace, brief }) {
+  return h.f.setDoc(ref(h, PATHS.incident(sid, inc.id)), again(h, inc, { lastSeenAt, pace, brief }));
 }
 
 /** Every incident of the squad, active and ended (ended ones are kept a
@@ -117,7 +131,12 @@ export async function putMark(h, sid, iid, m, now = Date.now()) {
   return id;
 }
 
-export const removeMark = (h, sid, iid, mid) => h.f.deleteDoc(ref(h, PATHS.mark(sid, iid, mid)));
+/** Takes a mark back. It is not deleted: it is marked withdrawn, by whom and
+    when, so the log keeps it crossed out and the debrief shows what was
+    called and then taken back. The rules let these two fields be added once,
+    by the mark's maker or Command, and change nothing else. */
+export const withdrawMark = (h, sid, iid, mid, now = Date.now()) =>
+  h.f.setDoc(ref(h, PATHS.mark(sid, iid, mid)), { withdrawnBy: h.uid, withdrawnAt: now }, { merge: true });
 
 /** One minute of this member's movements. Rewritten whole each time it
     grows: a minute holds at most a few dozen fixes. */

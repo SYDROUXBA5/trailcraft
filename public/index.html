@@ -45,6 +45,8 @@
 
 <div id="toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
 <!-- A squad incident, on whatever screen is up (incident-ui.js). Filled with textContent only. -->
+<!-- The squad screens' own sheets, in place of the browser's confirm() boxes (sheet.js fills it). -->
+<div class="app-sheet" id="appSheet" hidden role="dialog" aria-modal="true" aria-labelledby="appSheetTitle"></div>
 <div id="incBanner" class="inc-banner" role="alert" hidden>
   <span class="inc-banner-text"><b id="incBannerName">Incident</b><i id="incBannerSub"></i></span>
   <span class="inc-banner-btns">
@@ -860,6 +862,7 @@
         <button type="button" class="btn ghost" id="sqSimReplay" hidden>Replay the pretend incident</button>
       </div>
       <p class="body small muted">The pretend officers move about on this device only. Nothing is sent and no account is needed.</p>
+      <button type="button" class="btn ghost small" id="sqKept">What’s kept, and for how long</button>
     </div>
 
     <div id="sqIn" hidden>
@@ -899,6 +902,7 @@
         <button type="button" class="btn ghost" id="sqSimReplay2" hidden>Replay the pretend incident</button>
         <button type="button" class="btn danger" id="sqLeave" hidden>Leave the squad</button>
         <button type="button" class="btn danger" id="sqDelete" hidden>Delete the squad</button>
+        <button type="button" class="btn ghost small" id="sqKept2">What’s kept, and for how long</button>
       </div>
     </div>
   </div>
@@ -965,12 +969,25 @@
 
 <section id="scrCommand" class="screen glass cmd" hidden>
   <div class="hud-pill"><span class="rec-dot" aria-hidden="true"></span><span id="cmdHud">Squad</span></div>
+  <!-- Wall mode, for a TV or a projector: a big clock and the latest from the incident (squad-ui.js, incident-ui.js). -->
+  <div class="cmd-wall-box" id="cmdWall" hidden>
+    <div class="cmd-wall-top">
+      <b class="cmd-wall-clock" id="cmdWallClock">00:00:00</b>
+      <button type="button" class="btn ghost small" id="cmdNight" aria-pressed="false">Night look</button>
+    </div>
+    <p class="cmd-wall-inc" id="cmdWallInc"></p>
+    <p class="cmd-wall-seen" id="cmdWallSeen"></p>
+    <ol class="cmd-wall-log" id="cmdWallLog" aria-label="Latest from the incident"></ol>
+  </div>
+  <!-- Shown when following the K9 team has been paused by a hand on the map (incident-ui.js). -->
+  <button type="button" class="btn moss cmd-follow" id="cmdFollow" hidden>Follow K9</button>
   <aside class="cmd-panel" id="cmdPanel" aria-label="Squad members">
     <p class="sq-demo" role="note" data-demo-label>Demo — not for real operations</p>
     <p class="cmd-sim" id="cmdSim" hidden>Pretend officers · this device only <button type="button" class="btn ghost small" id="cmdSimSpeed">Speed ×1</button> <button type="button" class="btn ghost small" id="cmdSimStop">Stop</button></p>
     <div class="cmd-head">
       <h2 class="cmd-title" id="cmdTitle">Squad</h2>
       <span class="cmd-count" id="cmdCount"></span>
+      <button type="button" class="btn ghost small cmd-wall-btn" id="cmdWallBtn" aria-pressed="false">Wall</button>
       <button type="button" class="btn ghost small cmd-fold" id="cmdFold" aria-expanded="true" aria-controls="cmdList">Hide list</button>
     </div>
     <!-- An incident: starting one, the one in force, its replay (incident-ui.js). Above the list, so a phone shows it first. -->
@@ -984,6 +1001,7 @@
       <button type="button" class="btn moss grow" id="cmdFit">Fit everyone</button>
       <button type="button" class="btn ghost grow" id="cmdClose">Close</button>
     </div>
+    <button type="button" class="btn ghost small cmd-kept" id="cmdKept">What’s kept, and for how long</button>
   </aside>
 </section>
 

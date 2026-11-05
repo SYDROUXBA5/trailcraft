@@ -10,6 +10,7 @@
    say so (DEMO_LABEL), and firestore.rules keeps squad data to its members. */
 
 import { dist, bearing, project } from './geo.js';
+import { blockStep, outside } from './walls.js';
 
 export const DEMO_LABEL = 'Demo — not for real operations';
 
@@ -117,6 +118,22 @@ export const PATHS = {
    a little more than each, for a phone whose clock is off. */
 export const POSITION_TTL = 6 * 3600e3;
 export const INCIDENT_TTL = 7 * 24 * 3600e3;
+/* ── What's kept, and for how long ──────────────────────────────────────
+   Worked out from the numbers above, so the sheet can never say one thing
+   while the app does another. */
+const hoursWords = (ms) => `${Math.round(ms / 3600e3)} hours`;
+const daysWords = (ms) => `${Math.round(ms / 86400e3)} days`;
+/** The plain lines of the "What's kept, and for how long" sheet. */
+export function keptLines() {
+  return [
+    { head: 'Your position', text: `Shared with your squad only while On duty is on. Switch it off and it is deleted at once. If a phone dies on duty, its last position is set to be deleted ${hoursWords(POSITION_TTL)} after it was sent, and the map stops drawing it after ${Math.round(STALE_HIDE_MS / 60e3)} min.` },
+    { head: 'Incidents', text: `The trail, the points on the map and everyone's movements are kept ${daysWords(INCIDENT_TTL)} for the debrief, then set to be deleted. When the person was last seen, how they left, and the brief (direction and description) are kept with the incident ${daysWords(INCIDENT_TTL)}, and every squad member can see them. Save anything you need to keep before then.` },
+    { head: 'The squad', text: 'Its name, and each member\'s name, call sign, role and dog, stay until you leave or Command deletes the squad.' },
+    { head: 'Pretend officers', text: 'Everything in the demo stays on this device. Nothing is sent and no account is needed. Your department name and call signs for it are kept on this device only.' },
+    { head: 'Clean-up', text: 'The cloud\'s clean-up can run up to a day after the time above. This is a demo, not a records system.' },
+  ];
+}
+
 export const MARK_KINDS = ['indication', 'lost', 'refound', 'article', 'sighting', 'roadblock', 'rally', 'perimeter'];
 /* The K9 team's own calls about the scent; the rest anyone may drop. */
 export const K9_MARKS = ['indication', 'lost', 'refound'];
@@ -332,6 +349,17 @@ const SIM_UNITS = [
   { callSign: 'Foot 5', name: 'Walsh', role: 'officer', mode: 'foot' },
   { callSign: 'Sgt 1', name: 'Patel', role: 'command', mode: 'car' },
 ];
+/** The pretend squad's call signs and dogs, for the form before it starts. */
+export const simUnits = () => SIM_UNITS.map(u => ({ callSign: u.callSign, role: u.role, mode: u.mode, dog: u.dog || null }));
+/** What the chief typed into that form, tidied: his department's name and
+    his own call signs, each falling back to the pretend one when blank.
+    Kept on this device only (it is never a squad in the cloud). */
+export function cleanDemoNames(raw) {
+  const squad = cleanSquadName(raw?.squad) || SIM_SQUAD;
+  const callSigns = SIM_UNITS.map((u, i) => cleanCallSign(raw?.callSigns?.[i]) || u.callSign);
+  return { squad, callSigns };
+}
+
 const MODES = {
   foot: { speed: [1.1, 1.7], turn: 70, leg: [60, 260], pause: [8, 40], pauseP: 0.35, radius: 450 },
   car: { speed: [6, 12], turn: 30, leg: [250, 700], pause: [10, 60], pauseP: 0.25, radius: 1100 },
@@ -340,14 +368,14 @@ const SIM_REPORT_MS = 5e3;      // how often a pretend phone reports
 const SIM_WOBBLE_M = 3;
 
 /** A pretend squad around `center`, starting at `now`. */
-export function createSim({ center, now = Date.now(), seed = 7, count = SIM_UNITS.length } = {}) {
+export function createSim({ center, now = Date.now(), seed = 7, count = SIM_UNITS.length, callSigns = null, walls = null } = {}) {
   const r = rng(seed);
   const span = (lo, hi) => lo + r() * (hi - lo);
   const units = SIM_UNITS.slice(0, Math.max(1, Math.min(count, SIM_UNITS.length))).map((u, i) => {
     const mode = MODES[u.mode];
     const start = project(center, r() * 360, span(80, mode.radius * 0.7));
     return {
-      ...u, uid: `sim-${i + 1}`, joinedAt: now,
+      ...u, callSign: cleanCallSign(callSigns?.[i]) || u.callSign, uid: `sim-${i + 1}`, joinedAt: now,
       lat: start.lat, lon: start.lon, hdg: r() * 360, spd: 0,
       target: null, pauseUntil: now + span(0, 6) * 1000, goal: null,
       /* The third unit drops out for a few minutes: long enough to go grey. */
@@ -355,16 +383,42 @@ export function createSim({ center, now = Date.now(), seed = 7, count = SIM_UNIT
       report: null, nextReport: now,
     };
   });
-  const sim = { center, units, at: now, r, span };
+  const sim = { center, units, at: now, r, span, walls };
 
   function pickTarget(u) {
     const mode = MODES[u.mode];
     /* A leg away from where it is, kept inside its patrol ring: pulled back
-       towards the centre once it strays to the edge. */
+       towards the centre once it strays to the edge. On foot among
+       buildings, a leg with a clear walk to its end, or a short one. */
     const off = dist(center, u);
-    let brg = (u.hdg + span(-100, 100) + 360) % 360;
-    if (off > mode.radius * 0.8) brg = bearing(u, center) + span(-50, 50);
-    u.target = project(u, brg, span(...mode.leg));
+    for (let tries = 0; tries < 6; tries++) {
+      let brg = (u.hdg + span(-100, 100) + 360) % 360;
+      if (off > mode.radius * 0.8) brg = bearing(u, center) + span(-50, 50);
+      u.target = project(u, brg, span(...mode.leg) * (tries < 3 ? 1 : 0.3));
+      u.best = null;
+      if (!onFoot(u) || clear(u, u.target)) return;
+    }
+  }
+
+  /* Walkers keep out of buildings (walls.js). Cars are left on the map as
+     they were: they stay on longer, faster legs, and a car crossing a
+     corner of a block reads as a road the map did not draw. */
+  const onFoot = (u) => !!sim.walls && u.mode === 'foot';
+  const clear = (a, b) => blockStep(sim.walls, a, b) === b;
+  /** A point to walk to first when a building stands between a walker and
+      where they are going: the open one that leaves the least to walk. */
+  function detour(u, goal, wide = false) {
+    const brg = bearing(u, goal);
+    let best = null;
+    for (const turn of [35, -35, 70, -70, 105, -105, 140, -140, ...(wide ? [170, -170] : [])]) {
+      for (const d of wide ? [40, 80, 130] : [20, 40, 70]) {
+        const c = project(u, brg + turn, d);
+        if (!clear(u, c)) continue;
+        const score = dist(c, goal) + d * 0.3;
+        if (!best || score < best.score) best = { score, lat: c.lat, lon: c.lon };
+      }
+    }
+    return best ? { lat: best.lat, lon: best.lon } : null;
   }
 
   function move(u, dtS, t) {
@@ -372,9 +426,32 @@ export function createSim({ center, now = Date.now(), seed = 7, count = SIM_UNIT
     if (t < u.pauseUntil) { u.spd = 0; return; }
     /* On a path (a K9 team on a trail), the next point of it is the goal. */
     if (u.path) u.goal = u.path[u.pathAt] ?? u.goal;
-    const goal = u.goal || u.target;
+    let goal = u.goal || u.target;
     if (!goal) { pickTarget(u); return; }
+    /* A team on a trail walks the trail's own line, which already keeps
+       out of buildings; anyone else on foot goes round them. */
+    if (onFoot(u) && !u.path) {
+      if (u.via && (dist(u, u.via) < 6 || t >= u.viaUntil)) u.via = null;
+      /* Not getting any closer for a while: boxed in behind a terrace. */
+      const d = dist(u, goal);
+      if (u.best == null || d < u.best - 2) { u.best = d; u.bestAt = t; }
+      const stuck = t - u.bestAt > 12e3;
+      if (stuck) {
+        u.best = d; u.bestAt = t; u.via = null;
+        if (!u.goal) { u.target = null; return; }               // patrolling: another leg
+        /* Close to where it was sent, a gap the map does not draw (an
+           alley, a gate through a yard) is the likely way: through it. */
+        if (d < 25) { const p = outside(sim.walls, goal); u.lat = p.lat; u.lon = p.lon; return; }
+      }
+      if (!u.via && !clear(u, goal)) {
+        u.via = detour(u, goal, stuck);
+        u.viaUntil = t + 20e3;
+        if (!u.via && !u.goal) { u.target = null; return; }   // boxed in: another leg
+      }
+      if (u.via) goal = u.via;
+    }
     const left = dist(u, goal);
+    if (u.via && goal === u.via && left < 6) { u.via = null; return; }
     if (left < 6) {
       /* The next point at once, in the same step: a pause at each one would
          make a trail look like stop-start. */
@@ -392,7 +469,8 @@ export function createSim({ center, now = Date.now(), seed = 7, count = SIM_UNIT
     if (!u.cruise) u.cruise = span(...mode.speed);
     /* Slow for a sharp turn, as anyone does. */
     u.spd = u.cruise * (Math.abs(diff) > 60 ? 0.4 : 1);
-    const p = project(u, u.hdg, Math.min(left, u.spd * dtS));
+    let p = project(u, u.hdg, Math.min(left, u.spd * dtS));
+    if (onFoot(u)) p = blockStep(sim.walls, u, p);
     u.lat = p.lat; u.lon = p.lon;
   }
 
@@ -422,7 +500,20 @@ export function createSim({ center, now = Date.now(), seed = 7, count = SIM_UNIT
   /** Send a unit to a point, where it waits (a perimeter post, a trail). */
   sim.goTo = (uid, point) => {
     const u = units.find(x => x.uid === uid);
-    if (u) { u.goal = point ? { lat: point.lat, lon: point.lon } : null; u.path = null; u.pauseUntil = 0; }
+    if (u) { u.goal = point ? { lat: point.lat, lon: point.lon } : null; u.path = null; u.via = null; u.best = null; u.pauseUntil = 0; }
+  };
+  /** The buildings, once the map has them (they arrive after the squad
+      starts). A walker already inside one, where the map put no building
+      before, is moved to the nearest open ground. */
+  sim.setWalls = (W) => {
+    sim.walls = W || null;
+    if (!sim.walls) return;
+    for (const u of units) {
+      if (u.mode !== 'foot') continue;
+      const p = outside(sim.walls, u);
+      if (p !== u) { u.lat = p.lat; u.lon = p.lon; }
+      u.via = null;
+    }
   };
   /** Put a unit somewhere at once, no walk: a pretend K9 team already near
       the last known point, so the demo does not wait while it walks there. */
