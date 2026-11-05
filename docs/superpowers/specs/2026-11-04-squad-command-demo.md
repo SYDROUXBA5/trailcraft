@@ -27,7 +27,7 @@ A chief of police wants this: officers grouped in a squad, command seeing everyo
 
 ## Requirements
 
-- **Members only.** Squad data is readable and writable only by the squad's members (Firestore rules), with roles enforced in the rules. A join code is needed to join. Positions and incidents expire by TTL. The rules are written in the repository and published only with Rémi's OK.
+- **Members only.** Squad data is readable and writable only by the squad's members (Firestore rules), with roles enforced in the rules. A join code is needed to join. Positions and incidents expire by TTL. The rules are written in the repository and published only with Rémi's OK. Switching on the TTL policies (positions, incidents, marks, tracks, squads, on `deleteAt`) is a blocking step before publishing: see README, "Before the squad rules go live".
 - **Cost.** It must stay within Firebase's free daily limits for a demo of a few people over an hour or two: throttle position writes and write only on meaningful movement or every 10–15 s.
 - **Unchanged.** Everything that exists keeps working: solo use, runs, live share, team levels and the audit fixes. The CSP stays intact.
 

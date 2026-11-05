@@ -31,7 +31,9 @@ import { GROUND_LAYERS, buildGround, surfaceAt, surfaceAlong, surfaceRows, withS
 import { sync, onSync, initSync, signInWithGoogle, signInWithApple, signOut, deleteAccount, useThisAccount, forgetSkipped,
          adoptRecords, wipeAndSignOut, resync,
          signUpWithEmail, signInWithEmail, resetPassword, resendConfirmation, checkConfirmed,
-         startLive, pushLive, endLive, watchLive, resumeLive, dropLive } from './sync.js';
+         startLive, pushLive, endLive, watchLive, resumeLive, dropLive, squadHandle } from './sync.js';
+import { initSquad, paintSquad, openJoin, closeCommand, squadSignOut, squadForget, squadCodeIn, squadCentre } from './squad-ui.js';
+import { initIncidents, incidentScreen, incidentAirPoint } from './incident-ui.js';
 import { trailModel, encodeShared, decodeShared, sharedUrl, toGpx, fileBase,
          detailSections, headline, notes, liveMeta, liveModel, cleanResult,
          resultSentence, sessionFromModel, keptSession, peopleOf, parseGpx, gpxTracks, blindSummary, GPX_MAX_BYTES } from './share.js';
@@ -66,7 +68,7 @@ import { searchWords, logRows, recentRuns, runAt, midnight, facets, filterRows, 
          cleanFolderName, putMany, toggleFolder, renameIn, dropFrom, mergeFolders, emptyHeld, folderPatch } from './log.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-10-29a';
+const BUILD = '2026-11-04a';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true,
@@ -249,10 +251,10 @@ const SCREENS = ['scrOnboardHandler', 'scrOnboardDog', 'scrTutorial', 'scrHome',
   'scrConfirm', 'scrShare', 'scrContam', 'scrPick', 'scrScan', 'scrRun', 'scrResult',
   'scrShowMap', 'scrSessions', 'scrSettings', 'scrDraw', 'scrCountdown', 'scrWalk', 'scrWait', 'scrDog',
   'scrSignIn', 'scrShareOut', 'scrShared', 'scrLive', 'scrBench', 'scrReplay', 'scrDebrief', 'scrFix',
-  'scrDelete', 'scrRecover', 'scrTeam', 'scrTeamNew', 'scrCardIn'];
+  'scrDelete', 'scrRecover', 'scrTeam', 'scrTeamNew', 'scrCardIn', 'scrSquad', 'scrSquadNew', 'scrSquadJoin', 'scrCommand'];
 
 /* The screens that are transparent chrome over the live map. */
-const MAP_SCREENS = ['scrLay', 'scrConfirm', 'scrContam', 'scrRun', 'scrShowMap', 'scrDraw', 'scrWalk', 'scrLive', 'scrBench', 'scrReplay', 'scrFix'];
+const MAP_SCREENS = ['scrLay', 'scrConfirm', 'scrContam', 'scrRun', 'scrShowMap', 'scrDraw', 'scrWalk', 'scrLive', 'scrBench', 'scrReplay', 'scrFix', 'scrCommand'];
 
 /* ── Going back ───────────────────────────────────────────────────────
    Every page except home carries the same arrow, top-left, and it always
@@ -267,9 +269,10 @@ const MAP_SCREENS = ['scrLay', 'scrConfirm', 'scrContam', 'scrRun', 'scrShowMap'
    (leaveForm), never forward: forward put the closed screen on the stack,
    and the arrow on the next page led straight back into it. */
 const TRANSIENT = new Set(['scrLay', 'scrConfirm', 'scrContam', 'scrRun', 'scrWalk', 'scrDraw', 'scrScan',
-  'scrLive', 'scrShowMap', 'scrOnboardHandler', 'scrOnboardDog', 'scrTutorial', 'scrSignIn', 'scrReplay']);
+  'scrLive', 'scrShowMap', 'scrOnboardHandler', 'scrOnboardDog', 'scrTutorial', 'scrSignIn', 'scrReplay', 'scrCommand']);
 const BACKABLE = ['scrShare', 'scrPick', 'scrScan', 'scrResult', 'scrSessions', 'scrSettings', 'scrDog',
-  'scrShareOut', 'scrShared', 'scrCountdown', 'scrWait', 'scrOnboardHandler', 'scrOnboardDog', 'scrHandler', 'scrTeamNew'];
+  'scrShareOut', 'scrShared', 'scrCountdown', 'scrWait', 'scrOnboardHandler', 'scrOnboardDog', 'scrHandler', 'scrTeamNew',
+  'scrSquad', 'scrSquadNew', 'scrSquadJoin'];
 let currentScreen = null;
 const navStack = [];
 
@@ -286,6 +289,8 @@ const LEAVE = {
   scrCountdown: () => stopCountdownUi(),
   scrLay: () => { map.off('click', onHideTap); map.getCanvas().style.cursor = ''; },
   scrTeamNew: () => closeTeamForm(),
+  /* The squad map's markers, its clock, and the pretend officers if they ran. */
+  scrCommand: () => closeCommand(),
 };
 
 /** The screen something is being recorded on right now, or null. A hide
@@ -296,7 +301,9 @@ function liveScreen() {
 }
 
 function goBackNow() {
-  const special = { scrShared: closeShared, scrLive: closeLive }[currentScreen];
+  /* A join screen opened from a squad link has nothing behind it: the app
+     starts as it would have. */
+  const special = { scrShared: closeShared, scrLive: closeLive, scrSquadJoin: navStack.length ? null : boot }[currentScreen];
   if (special) return special();
   LEAVE[currentScreen]?.();
   let prev = navStack.pop();
@@ -356,6 +363,14 @@ function airSessionFor(id) {
     case 'scrReplay': return replay.s;
     case 'scrFix': return fixer.s;
     case 'scrLive': return pendingSession;
+    /* The squad's ground: the incident's last known point, else the middle
+       of the squad. Never this device's own position, which a laptop
+       running the command view may not have, and asking for it would put a
+       location prompt up mid-demo. */
+    case 'scrCommand': {
+      const p = incidentAirPoint() ?? squadCentre();
+      return p ? { data: { trail: [p] } } : null;
+    }
     // The forecast this lay fetched at its first fix, which its plume is drawn in.
     case 'scrConfirm': return rec.kind === 'lay' && rec.wx ? { data: { weather: rec.wx } } : null;
     default: return null;
@@ -381,6 +396,7 @@ function airMomentFor(id, s) {
 /** The wind panel for a screen: its trail's air at its moment, or the air here. */
 function airPanel(id) {
   const s = airSessionFor(id);
+  if (id === 'scrCommand' && !s) return hideWeather();
   weatherPanelFor(s, airMomentFor(id, s));
 }
 
@@ -430,6 +446,7 @@ function go(id, { back = false } = {}) {
     try { history.pushState({ tc: id }, ''); } catch { /* file:// and the like */ }
   }
   currentScreen = id;
+  incidentScreen();   // the incident banner shows on every screen but the squad map
   for (const s of SCREENS) $(s).hidden = s !== id;
   viewportFor(id);
   if (id === 'scrHome') renderHome();
@@ -440,6 +457,7 @@ function go(id, { back = false } = {}) {
      screen, and again on the way back from the form that edits its team. */
   if (id === 'scrTeam') paintTeam();
   if (id === 'scrSessions') renderSessions();
+  if (id === 'scrSquad') paintSquad();
   // The map only needs to be right when something transparent sits over it.
   if (MAP_SCREENS.includes(id)) {
     map?.resize();
@@ -449,7 +467,11 @@ function go(id, { back = false } = {}) {
     if (id !== 'scrBench') airPanel(id);
     mapChromeShow(true);
     stepsRun(true);
-    if (!db.kv.get('mapTutDone') && !mapTut.open && !mapTut.held) openMapTut();
+    /* Not over the squad map: it opens by itself on every member's phone
+       when an incident starts, and on a chief's big screen mid-demo, where
+       four cards about finger gestures would blur the one thing that
+       matters. Settings → Help still has it. */
+    if (!db.kv.get('mapTutDone') && !mapTut.open && !mapTut.held && id !== 'scrCommand') openMapTut();
   } else {
     // Nothing on the map is worth animating while a paper screen covers it.
     airStop();
@@ -2245,6 +2267,9 @@ function showWeather(wx, felt = null) {
   if (!p) return;
   // A late answer must not surface over a paper screen.
   if (!MAP_SCREENS.includes(currentScreen)) { p.hidden = true; $('wxRose').hidden = true; wxGap(); return; }
+  /* On the squad map a dash and "No forecast" read as broken on a chief's
+     screen; the corner stays empty until there is a reading. */
+  if (currentScreen === 'scrCommand' && (!wx || wx.wind_speed == null)) { p.hidden = true; $('wxRose').hidden = true; wxGap(); return; }
   p.hidden = false;
   $('wxRose').hidden = false;
   if (!wxWatch && 'ResizeObserver' in window) { wxWatch = new ResizeObserver(wxGap); wxWatch.observe(p); }
@@ -7628,6 +7653,15 @@ function openFromHash() {
     openLive(h.slice(6).replace(/[^A-Za-z0-9_-]/g, ''));
     return true;
   }
+  /* A squad's invitation: the join screen, with the code in it. Nothing is
+     joined until they have seen which squad it is and said yes. */
+  if (h.startsWith('#squad=')) {
+    clear();
+    const code = squadCodeIn(h);
+    if (!code) { toast('That squad link is not complete'); return false; }
+    openJoin(code);
+    return true;
+  }
   return false;
 }
 
@@ -10071,7 +10105,9 @@ async function submitDelete() {
   btn.disabled = true;
   btn.textContent = 'Deleting…';
   try {
-    const r = await deleteAccount({ password });
+    /* Out of the squad once the password is proved, before the account goes:
+       off duty, and the member record (or the squad, for its creator) with it. */
+    const r = await deleteAccount({ password, beforeDelete: squadForget });
     if (!r.ok) return err(r.error);
     $('delPassword').value = '';
     renderSettings();
@@ -11220,6 +11256,7 @@ function wire() {
     }
     if (b.dataset.account === 'signout') {
       if (!confirm('Sign out? Your trails stay on this phone; they just stop backing up.')) return;
+      await squadSignOut();   // off duty first: once signed out the position can no longer be taken down
       await signOut();
       toast('Signed out — everything is still on this phone');
     }
@@ -11275,6 +11312,8 @@ function wire() {
       ? ` This also signs you out. Your account backup is kept: signing in again brings it back. To delete the backup too, use Delete my account first.${behind}`
       : '';
     if (!confirm(`Wipe everything? ${S.sessions.length} sessions, ${S.dogs.length} dogs and all profiles. Save a backup file first if you want them back later.${backup}`)) return;
+    /* Off duty first: once signed out the position can no longer be taken down. */
+    if (signedIn) await squadSignOut();
     if (signedIn) {
       const ok = await wipeAndSignOut().catch(() => false);
       if (!ok) return toast('That did not work. Nothing was changed.');
@@ -11729,6 +11768,31 @@ function start() {
   buildMap();
   wire();
   initSync(db);            // does nothing until a Firebase config exists; before boot so a live link can wait on it
+  const squadCtx = {
+    $, toast, go, goBack,
+    /* A screen opened from a link has nothing behind it to go back to. */
+    leave: () => (navStack.length ? goBack() : boot()),
+    getMap: () => ({ map, GL, ready: mapReady }),
+    user: () => sync.user, configured: () => sync.configured, onSync,
+    handle: squadHandle, openSignIn: () => openSignIn(),
+    kv: db.kv, dogs: () => S.dogs,
+    shareBase: () => SHARE_BASE,
+    here: () => (lastFix && Date.now() - lastFix.t < 30 * 60e3 ? { lat: lastFix.lat, lon: lastFix.lon } : null),
+    demoPlace: () => ({ lat: 51.2094, lon: -2.6476 }),   // Wells, where the demo trail is
+    isNative, watchBackground,
+  };
+  initSquad(squadCtx);
+  /* An incident rides on the squad: it needs to know what screen is up (a
+     run must not be swept away by the incident map), the run being
+     recorded (the trailing team's run streams into the incident), and how
+     to start one. */
+  initIncidents({
+    ...squadCtx,
+    screen: () => currentScreen,
+    busy: () => rec.on,
+    runState: () => ({ on: rec.on, kind: rec.kind, pts: rec.pts, wps: rec.wps, startedAt: run.startedAt }),
+    startTrail: () => startBlind(),
+  });
   /* Back in the app, or back in signal: take what another phone changed since,
      before anything here is edited over it (sync.js resync). */
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') resync(); });

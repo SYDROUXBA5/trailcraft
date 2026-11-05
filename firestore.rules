@@ -129,6 +129,240 @@ service cloud.firestore {
       }
     }
 
+    // ── Squads (a demo for a chief of police) ──────────────────────────
+    // Squad data is for the squad's members only: nobody else can read a
+    // member list, a position or an incident, and nobody can list squads.
+    // Being a member is having a record under members/ with your own
+    // account's id; a record is made only with the squad's join code, or by
+    // the squad's creator, who is Command. Command promotes and removes.
+    // Anyone can make an account, so what each document may hold is checked
+    // too: only the fields the app writes (squad.js, squad-cloud.js), each
+    // of its kind and bounded.
+
+    // A join code leads to its squad. Read one at a time, by the code, never
+    // listed: holding the code is what lets someone ask to join.
+    match /joinCodes/{code} {
+      function codeOk(d) {
+        return d.keys().hasOnly(['squadId', 'name', 'by', 'createdAt'])
+            && d.squadId is string && d.squadId.size() <= 40
+            && d.name is string && d.name.size() <= 60
+            && d.by is string && d.by.size() <= 24
+            && d.createdAt is number;
+      }
+      allow get: if request.auth != null;
+      allow list: if false;
+      // Made with its squad (or a new code), by that squad's Command, and
+      // only the code the squad now holds.
+      allow create: if request.auth != null && codeOk(request.resource.data)
+                    && code.size() == 8
+                    && getAfter(/databases/$(database)/documents/squads/$(request.resource.data.squadId)).data.code == code
+                    && getAfter(/databases/$(database)/documents/squads/$(request.resource.data.squadId)/members/$(request.auth.uid)).data.role == 'command';
+      allow update: if false;
+      allow delete: if request.auth != null
+                    && (get(/databases/$(database)/documents/squads/$(resource.data.squadId)/members/$(request.auth.uid)).data.role == 'command'
+                        || get(/databases/$(database)/documents/squads/$(resource.data.squadId)).data.createdBy == request.auth.uid);
+    }
+
+    match /squads/{squadId} {
+      function signedIn() { return request.auth != null; }
+      function squadPath() { return /databases/$(database)/documents/squads/$(squadId); }
+      function mePath() { return /databases/$(database)/documents/squads/$(squadId)/members/$(request.auth.uid); }
+      // A deleted squad leaves a tombstone ({ gone: true }) rather than
+      // nothing: with nothing there, a former member who knew the id could
+      // make the squad again, become its Command and read what is left of
+      // its incidents. A record left behind by a deletion grants nothing.
+      function squadLive() { return exists(squadPath()) && get(squadPath()).data.get('gone', false) != true; }
+      function isMember() { return signedIn() && exists(mePath()) && squadLive(); }
+      function isCommand() { return isMember() && get(mePath()).data.role == 'command'; }
+      function creator() { return get(squadPath()).data.createdBy; }
+      function text(v, n) { return v is string && v.size() <= n; }
+      function optText(v, n) { return v == null || text(v, n); }
+      function num(v) { return v is number; }
+      function optNum(v) { return v == null || v is number; }
+      function role(v) { return v in ['command', 'k9', 'officer']; }
+      // A TTL a little longer than the app's, for a phone whose clock is off.
+      function expires(d, hours) {
+        return d.expiresAt is number && d.expiresAt <= request.time.toMillis() + hours * 3600000
+            && d.deleteAt is timestamp && d.deleteAt <= request.time + duration.value(hours, 'h');
+      }
+      // A time a phone claims for itself: a little ahead of the server for a
+      // clock that runs fast, never far in the future (a dot that never goes
+      // grey), never long past.
+      function recent(at) {
+        return at is number && at <= request.time.toMillis() + 300000 && at >= request.time.toMillis() - 600000;
+      }
+      function place(lat, lon) {
+        return lat is number && lon is number && lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180;
+      }
+
+      function squadOk(d) {
+        return d.keys().hasOnly(['name', 'code', 'createdBy', 'createdAt', 'v', 'demo'])
+            && text(d.name, 60) && d.name.size() > 0
+            && text(d.code, 8) && d.code.size() == 8
+            && d.createdBy is string && num(d.createdAt) && num(d.v) && d.demo is bool;
+      }
+      allow get: if isMember();
+      allow list: if false;
+      // Made by its creator, who is Command in the same batch.
+      allow create: if signedIn() && squadOk(request.resource.data)
+                    && request.resource.data.createdBy == request.auth.uid
+                    && getAfter(mePath()).data.role == 'command';
+      // Command may rename it or give it a new code; whose it is never changes.
+      // Deleting is the creator turning it into a tombstone, kept longer
+      // than anything in it can live (incidents: eight days), so that by
+      // the time the clean-up takes the tombstone there is nothing left to
+      // read. A tombstone never comes back.
+      function tombOk(d) {
+        return d.keys().hasOnly(['gone', 'createdBy', 'expiresAt', 'deleteAt']) && d.gone == true
+            && d.createdBy == resource.data.createdBy && expires(d, 240)
+            && d.expiresAt >= request.time.toMillis() + 192 * 3600000;
+      }
+      allow update: if (isCommand() && squadOk(request.resource.data)
+                        && request.resource.data.createdBy == resource.data.createdBy
+                        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'code']))
+                    || (signedIn() && resource.data.createdBy == request.auth.uid
+                        && resource.data.get('gone', false) != true && tombOk(request.resource.data));
+      allow delete: if false;
+
+      match /members/{uid} {
+        function memberOk(d) {
+          return d.keys().hasOnly(['uid', 'role', 'callSign', 'name', 'dog', 'joinedAt', 'code'])
+              && d.uid == uid && role(d.role)
+              && text(d.callSign, 24) && d.callSign.size() > 0
+              && text(d.get('name', ''), 60) && optText(d.get('dog', null), 40)
+              && num(d.joinedAt) && optText(d.get('code', null), 8);
+        }
+        allow read: if isMember();
+        // Joining: your own record, as a K9 handler or an officer, with the
+        // code the squad holds now. The creator's own record is Command.
+        allow create: if signedIn() && uid == request.auth.uid && memberOk(request.resource.data)
+                      && ((request.resource.data.role in ['k9', 'officer']
+                           && request.resource.data.code == get(squadPath()).data.code)
+                          || (request.resource.data.role == 'command'
+                              && getAfter(squadPath()).data.createdBy == request.auth.uid));
+        // Your own record: your call sign, your dog, K9 or officer; never
+        // into or out of Command by yourself. Command changes only someone
+        // else's role, and never the creator's.
+        allow update: if isMember() && memberOk(request.resource.data)
+                      && ((uid == request.auth.uid
+                           && (request.resource.data.role == resource.data.role
+                               || (resource.data.role != 'command' && request.resource.data.role in ['k9', 'officer']))
+                           && request.resource.data.get('code', null) in [resource.data.get('code', null), get(squadPath()).data.code])
+                          || (isCommand() && uid != request.auth.uid && uid != creator()
+                              && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['role'])));
+        // Leaving (not the creator, who deletes the squad instead); Command
+        // removing someone (never the creator); the creator's own record
+        // going with the squad, in the batch that deletes it.
+        allow delete: if signedIn()
+                      && ((uid == request.auth.uid && uid != creator())
+                          || (isCommand() && uid != creator())
+                          || (creator() == request.auth.uid && getAfter(squadPath()).data.get('gone', false) == true));
+      }
+
+      // Where an on-duty member is. Written only by that member, read by the
+      // squad; deleted when they go off duty, and by the TTL policy if the
+      // phone dies on duty.
+      match /positions/{uid} {
+        function positionOk(d) {
+          return d.keys().hasOnly(['uid', 'lat', 'lon', 'acc', 'hdg', 'spd', 'at', 'expiresAt', 'deleteAt'])
+              && d.uid == uid && place(d.lat, d.lon) && recent(d.at)
+              && optNum(d.get('acc', null)) && optNum(d.get('hdg', null)) && optNum(d.get('spd', null))
+              && expires(d, 12);
+        }
+        allow read: if isMember();
+        allow create, update: if isMember() && uid == request.auth.uid && positionOk(request.resource.data);
+        allow delete: if signedIn() && (uid == request.auth.uid || isCommand() || creator() == request.auth.uid);
+      }
+
+      // An incident: Command starts and ends it; every member reads it.
+      match /incidents/{incidentId} {
+        function incidentOk(d) {
+          return d.keys().hasOnly(['name', 'lkp', 'k9Uid', 'startedBy', 'startedAt', 'endedAt', 'status',
+                                   'expiresAt', 'deleteAt', 'summary'])
+              && text(d.name, 80) && d.name.size() > 0
+              && d.lkp is map && place(d.lkp.lat, d.lkp.lon)
+              && optText(d.get('k9Uid', null), 128)
+              && d.startedBy is string && num(d.startedAt) && optNum(d.get('endedAt', null))
+              && d.status in ['active', 'ended']
+              && (d.get('summary', null) == null || d.summary is map)
+              && expires(d, 192);
+        }
+        function incidentPath() { return /databases/$(database)/documents/squads/$(squadId)/incidents/$(incidentId); }
+        allow read: if isMember();
+        allow create: if isCommand() && incidentOk(request.resource.data)
+                      && request.resource.data.startedBy == request.auth.uid
+                      && request.resource.data.status == 'active';
+        // Ended is final: what the debrief replays is what happened.
+        allow update: if isCommand() && incidentOk(request.resource.data)
+                      && resource.data.status == 'active'
+                      && request.resource.data.startedBy == resource.data.startedBy;
+        // Only the creator, deleting the whole squad: Command ends an
+        // incident, and an ended one is the debrief's record.
+        allow delete: if signedIn() && creator() == request.auth.uid;
+
+        // A mark on the incident map. The K9 team's calls on the scent
+        // (indication, lost it, re-found) come from that team only; a
+        // sighting, a roadblock, a rally point or a perimeter line from any
+        // member. A mark is its maker's to move or take back; Command may
+        // take back any.
+        match /marks/{markId} {
+          function markOk(d) {
+            return d.keys().hasOnly(['kind', 'by', 'at', 'lat', 'lon', 'pts', 'label', 'expiresAt', 'deleteAt'])
+                && d.kind in ['indication', 'lost', 'refound', 'article', 'sighting', 'roadblock', 'rally', 'perimeter']
+                && d.by == request.auth.uid && num(d.at)
+                && (d.get('lat', null) == null || place(d.lat, d.lon))
+                && (d.get('pts', null) == null || (d.pts is list && d.pts.size() <= 200))
+                && optText(d.get('label', null), 60)
+                && expires(d, 192);
+          }
+          function k9Ok(d) {
+            return !(d.kind in ['indication', 'lost', 'refound'])
+                || get(incidentPath()).data.k9Uid == request.auth.uid;
+          }
+          allow read: if isMember();
+          // Ids are {uid}_{0-999}: a thousand marks a member at most, so
+          // one phone with the code cannot run the squad's free reads dry.
+          allow create: if isMember() && markOk(request.resource.data) && k9Ok(request.resource.data)
+                        && markId.matches(request.auth.uid + '_[0-9]{1,3}')
+                        && recent(request.resource.data.at)
+                        && get(incidentPath()).data.status == 'active';
+          allow update: if isMember() && resource.data.by == request.auth.uid
+                        && markOk(request.resource.data) && request.resource.data.kind == resource.data.kind
+                        && get(incidentPath()).data.status == 'active';
+          // Taken back only while the incident runs; after the end, only
+          // with the whole squad, by its creator.
+          allow delete: if (signedIn() && creator() == request.auth.uid)
+                        || (isMember() && (resource.data.by == request.auth.uid || isCommand())
+                            && get(incidentPath()).data.status == 'active');
+        }
+
+        // Everyone's movements during the incident, a minute to a document
+        // ({uid}_{minute}), for the replay at the debrief. Each member
+        // writes only their own, only for an incident that is running (the
+        // last minute may still arrive up to two minutes after it ends), and
+        // no minute later than the incident has lasted. The call sign
+        // and role ride along so a member who has since left still has a
+        // name in the replay.
+        match /tracks/{trackId} {
+          function column(v) { return v is list && v.size() <= 600; }
+          function trackOk(d) {
+            return d.keys().hasOnly(['uid', 'n', 'lat', 'lon', 't', 'cs', 'role', 'expiresAt', 'deleteAt'])
+                && d.uid == request.auth.uid && d.n is int && d.n >= 0 && d.n <= 2880
+                && trackId == request.auth.uid + '_' + string(d.n)
+                && column(d.lat) && column(d.lon) && column(d.t)
+                && optText(d.get('cs', null), 24) && (d.get('role', null) == null || role(d.role))
+                && expires(d, 192);
+          }
+          allow read: if isMember();
+          allow create, update: if isMember() && trackOk(request.resource.data) && exists(incidentPath())
+                                && (get(incidentPath()).data.status == 'active'
+                                    || request.time.toMillis() < get(incidentPath()).data.endedAt + 120000)
+                                && request.resource.data.n <= (request.time.toMillis() - get(incidentPath()).data.startedAt) / 60000 + 1;
+          allow delete: if signedIn() && creator() == request.auth.uid;
+        }
+      }
+    }
+
     match /{document=**} { allow read, write: if false; }
   }
 }

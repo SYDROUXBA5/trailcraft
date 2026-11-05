@@ -35,7 +35,10 @@ const MODULES = ['native', 'params', 'geo', 'colours', 'mvt', 'ground', 'debrief
   'levels', 'teams',
   'pixel/core', 'pixel/ramps', 'pixel/lands', 'pixel/paint', 'pixel/terrain', 'pixel/dog', 'pixel/human', 'pixel/props', 'pixel/rope', 'pixel/states', 'pixel/moments', 'pixel/stones', 'pixel/layout',
   'pixel/scenery', 'pixel/tracks', 'pixel/landmarks', 'pixel/scene', 'pixel/ground', 'pixel/board-art', 'pixel/close', 'pixel/fx', 'pixel/ambient', 'pixel/team', 'pixel/player',
-  'pixel-team', 'board'];
+  'pixel-team', 'board',
+  /* The squad demo: the rules of it, the cloud, then the screens; the
+     incident layer rides on top of the squad's screens. */
+  'squad', 'squad-cloud', 'incident', 'incident-cloud', 'squad-ui', 'incident-ui'];
 
 /** Inline-script safety: a literal "</script>" inside JS would end the tag.
     The escape is invisible at runtime (identical string value). */

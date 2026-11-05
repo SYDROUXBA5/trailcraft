@@ -10,6 +10,8 @@
    exactly as firestore.rules says: a save naming the copy it was made from
    (baseAt) is refused when the cloud holds a different one. */
 
+import { allow as squadAllow, governed } from './fake-squad-rules.mjs';
+
 const SERVER = Symbol('serverTimestamp');
 const DELETE = Symbol('delete');
 
@@ -152,7 +154,10 @@ function matching(q, from) {
   const found = [];
   for (const [path, d] of from) {
     if (!path.startsWith(`${q.path}/`) || path.slice(q.path.length + 1).includes('/')) continue;
-    if ((q.wheres || []).some(w => !(w.op === '>' && d[w.field] != null && d[w.field] > w.value.toMillis()))) continue;
+    /* Two kinds of where: the backup's "changed since" (> on the time it
+       was synced) and the squad's "this member's" (== on a field). */
+    if ((q.wheres || []).some(w => !(w.op === '==' ? d.data?.[w.field] === w.value
+      : (w.op === '>' && d[w.field] != null && d[w.field] > w.value.toMillis())))) continue;
     found.push([path, d]);
   }
   return found;
@@ -170,6 +175,7 @@ export async function getDocs(q) {
   if (p) { p.reached(); await p.gate; }
   alive(q.fs);
   if (cloud.fail) { const code = cloud.fail; cloud.fail = null; throw err(code); }
+  if (governed(`${q.path}/x`) && !readable('list', `${q.path}/x`, q.fs)) throw err('permission-denied');
   const docs = matching(q, cloud.docs).map(([path, d]) => { seen(q.fs, path, d); return snapOf(path, d, q.fs); });
   cloud.read += docs.length;
   return { docs, metadata: { fromCache: false } };
@@ -178,6 +184,7 @@ export async function getDocs(q) {
 export async function getDoc(ref) {
   alive(ref.fs);
   await reachable(ref.fs);
+  if (governed(ref.path) && !readable('get', ref.path, ref.fs)) throw err('permission-denied');
   seen(ref.fs, ref.path, cloud.docs.get(ref.path));
   return snapOf(ref.path, cloud.docs.get(ref.path), ref.fs);
 }
@@ -191,10 +198,42 @@ function allowed(path, data) {
   return data.baseAt === (held.data.updatedAt ?? null);
 }
 
+/* Who a phone is signed in as, for the squad rules. */
+const uidOf = (fs) => phones.find(p => p.fs === fs)?.auth?.currentUser?.uid ?? null;
+const dataMap = (m) => new Map([...m].map(([k, v]) => [k, v.data]));
+function readable(op, path, fs) {
+  const before = dataMap(cloud.docs);
+  return squadAllow(op, path, { uid: uidOf(fs), data: null, resource: before.get(path) ?? null,
+                                before, after: before, now: Date.now() });
+}
+/* firestore.rules for squads (fake-squad-rules.mjs): every write in a batch
+   is asked against the cloud as it was before the batch (get) and as it
+   would be after it (getAfter), as Firestore does. */
+function squadWritesAllowed(fs, writes) {
+  if (!writes.some(([path]) => governed(path))) return true;
+  const before = dataMap(cloud.docs);
+  const after = new Map(before);
+  const merged = writes.map(([path, data, merge]) => {
+    if (data === DELETE) { after.delete(path); return null; }
+    const { syncedAt, ...rest } = data;
+    const next = merge && after.has(path) ? { ...after.get(path), ...clone(rest) } : clone(rest);
+    after.set(path, next);
+    return next;
+  });
+  const uid = uidOf(fs), now = Date.now();
+  return writes.every(([path, data], i) => {
+    if (!governed(path)) return true;
+    const resource = before.get(path) ?? null;
+    const op = data === DELETE ? 'delete' : resource ? 'update' : 'create';
+    return squadAllow(op, path, { uid, data: data === DELETE ? null : merged[i], resource, before, after, now });
+  });
+}
+
 /* A save the server took is in the saving phone's own copy too, with the
    time the server stamped on it. */
 function apply(fs, writes) {
   for (const [path, data] of writes) if (!allowed(path, data)) throw err('permission-denied');
+  if (!squadWritesAllowed(fs, writes)) throw err('permission-denied');
   const at = ++cloud.clock;
   for (const [path, data, merge] of writes) {
     if (data === DELETE) { cloud.docs.delete(path); seen(fs, path, null); continue; }
@@ -206,6 +245,7 @@ function apply(fs, writes) {
     });
     seen(fs, path, cloud.docs.get(path));
   }
+  if (writes.some(([path]) => governed(path))) queueMicrotask(notify);
 }
 
 export async function setDoc(ref, data, opts = {}) {
@@ -222,7 +262,7 @@ export async function deleteDoc(ref) {
 export function writeBatch(fs) {
   const writes = [];
   return {
-    set(ref, data) { writes.push([ref.path, data, false]); },
+    set(ref, data, opts = {}) { writes.push([ref.path, data, !!opts.merge]); },
     delete(ref) { writes.push([ref.path, DELETE]); },
     async commit() {
       alive(fs); await reachable(fs); alive(fs);
@@ -231,4 +271,51 @@ export function writeBatch(fs) {
     },
   };
 }
-export const onSnapshot = () => () => {};
+/* Listening. Only squad documents are listened to for real (the backup's
+   tests never needed it, and keep the silent listener they were written
+   against). A listener hears its document or collection as it is now, then
+   again after every change, and is cut off, with permission-denied, the
+   moment the rules stop letting its phone read it, as Firestore does. */
+const listeners = new Set();
+export function onSnapshot(target, next, error) {
+  if (!governed(`${target.path}/x`) && !governed(target.path)) return () => {};
+  const isDoc = target.path.split('/').length % 2 === 0;
+  const l = { target, isDoc, next, error, seen: new Map(), dead: false };
+  listeners.add(l);
+  queueMicrotask(() => deliver(l));
+  return () => { l.dead = true; listeners.delete(l); };
+}
+function deliver(l) {
+  if (l.dead) return;
+  const { fs, path } = l.target;
+  if (!fs.online || fs.terminated) return;
+  const ok = l.isDoc ? readable('get', path, fs) : readable('list', `${path}/x`, fs);
+  if (!ok) { l.dead = true; listeners.delete(l); l.error?.(err('permission-denied')); return; }
+  if (l.isDoc) {
+    const d = cloud.docs.get(path);
+    const sig = d ? JSON.stringify(d.data) : null;
+    if (l.seen.has(path) && l.seen.get(path) === sig) return;
+    l.seen.set(path, sig);
+    l.next(snapOf(path, d, fs));
+    return;
+  }
+  const now = new Map(matching({ path, wheres: l.target.wheres }, cloud.docs).map(([p, d]) => [p, d]));
+  const changes = [];
+  for (const [p, d] of now) {
+    const sig = JSON.stringify(d.data);
+    if (!l.seen.has(p)) changes.push({ type: 'added', doc: snapOf(p, d, fs) });
+    else if (l.seen.get(p) !== sig) changes.push({ type: 'modified', doc: snapOf(p, d, fs) });
+  }
+  for (const p of l.seen.keys()) if (!now.has(p)) changes.push({ type: 'removed', doc: snapOf(p, null, fs) });
+  if (!changes.length && l.started) return;
+  l.started = true;
+  l.seen = new Map([...now].map(([p, d]) => [p, JSON.stringify(d.data)]));
+  const docs = [...now].map(([p, d]) => snapOf(p, d, fs));
+  l.next({ docs, size: docs.length, empty: !docs.length, docChanges: () => changes, forEach: (fn) => docs.forEach(fn) });
+}
+function notify() { for (const l of [...listeners]) deliver(l); }
+/** Every listener on every phone, heard again: for a test that changed the
+    cloud behind the fake's back (seed) or put a phone back in signal. */
+export const resend = notify;
+/** How many listeners are still open, so a test can see a screen let go. */
+export const listening = () => [...listeners].filter(l => !l.dead).length;

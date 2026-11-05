@@ -44,6 +44,15 @@
 <div id="contamKey" class="contam-key" role="list" aria-label="Contamination lines" hidden></div>
 
 <div id="toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
+<!-- A squad incident, on whatever screen is up (incident-ui.js). Filled with textContent only. -->
+<div id="incBanner" class="inc-banner" role="alert" hidden>
+  <span class="inc-banner-text"><b id="incBannerName">Incident</b><i id="incBannerSub"></i></span>
+  <span class="inc-banner-btns">
+    <button type="button" class="btn small" id="incBannerTrail" hidden>Start trailing</button>
+    <button type="button" class="btn small moss" id="incBannerOpen">Open map</button>
+    <button type="button" class="btn ghost small" id="incBannerHide" aria-label="Hide this banner">Hide</button>
+  </span>
+</div>
 <!-- A level passed, played over the result that earned it. It never has to
      be answered: a tap skips it, and a plain level-up leaves by itself. A
      boss's title card stays until it is closed, and so does the still card
@@ -305,6 +314,7 @@
     <button class="btn big moss" id="btnLay"><b id="btnLayLabel">Lay a trail</b><i id="btnLaySub"></i></button>
     <button class="btn big ember" id="btnRun"><b id="btnRunLabel">Run a trail</b><i id="btnRunSub"></i></button>
     <button class="btn big ghost" id="btnScanHome" hidden><b>Scan a trail card</b><i>Take a trail, or a plan to walk, from another phone</i></button>
+    <button class="btn big ghost" id="btnSquadHome"><b>Squad</b><i>Demo: your team on one map</i></button>
 
     <span class="label">Recent</span>
     <div id="recentList" class="recent"></div>
@@ -829,6 +839,152 @@
       <button class="btn ghost grow" id="btnLiveClose">Close</button>
     </div>
   </div>
+</section>
+
+<!-- ── Squad: a chief, officers and K9 teams on one map (squad-ui.js) ── -->
+<section id="scrSquad" class="screen paper" hidden>
+  <div class="page sq-page">
+    <span class="label">Squad</span>
+    <p class="sq-demo" role="note" data-demo-label>Demo — not for real operations</p>
+
+    <div id="sqNone">
+      <h1 class="display">Your team on one map</h1>
+      <p class="body muted">Command sees every officer and K9 team who is on duty, live. Members share their position only while their On duty switch is on.</p>
+      <p class="body small muted" id="sqLoading" hidden>Finding your squad…</p>
+      <p class="body small muted" id="sqNoCloud" hidden>Squads need the cloud, which is off in this copy of the app. You can still try the demo with pretend officers.</p>
+      <div class="sq-actions">
+        <button type="button" class="btn moss" id="sqSignInBtn" hidden>Sign in to make or join a squad</button>
+        <button type="button" class="btn moss" id="sqCreate" hidden>Make a squad</button>
+        <button type="button" class="btn ghost" id="sqJoin" hidden>Join with a code</button>
+        <button type="button" class="btn ghost" id="sqSim"><b>Try it with pretend officers</b></button>
+        <button type="button" class="btn ghost" id="sqSimReplay" hidden>Replay the pretend incident</button>
+      </div>
+      <p class="body small muted">The pretend officers move about on this device only. Nothing is sent and no account is needed.</p>
+    </div>
+
+    <div id="sqIn" hidden>
+      <h1 class="display" id="sqName"></h1>
+      <p class="body small muted" id="sqMe"></p>
+      <label class="switch-row sq-duty" for="sqDuty">
+        <span>On duty<i id="sqDutyNote">Nothing is shared while this is off</i></span>
+        <input id="sqDuty" type="checkbox">
+      </label>
+      <button type="button" class="btn big moss" id="sqOpenMap"><b>Squad map</b><i>Everyone on duty, live</i></button>
+
+      <div class="sq-invite" id="sqInvite" hidden>
+        <span class="label">Bring your team in</span>
+        <p class="body small muted">They open Trailcraft, tap Squad, then Join with a code. Or point their camera at the QR code.</p>
+        <div class="sq-code-row">
+          <div class="sq-qr" id="sqQr" aria-label="QR code to join the squad" role="img"></div>
+          <div>
+            <span class="field-label">Join code</span>
+            <b class="sq-code" id="sqCode"></b>
+            <button type="button" class="btn ghost small" id="sqCopy">Copy the link</button>
+            <button type="button" class="btn ghost small" id="sqNewCode">Make a new code</button>
+          </div>
+        </div>
+      </div>
+
+      <span class="label" id="sqCount">Members</span>
+      <ul class="sq-roster" id="sqRoster" aria-labelledby="sqCount"></ul>
+
+      <!-- Ended incidents, kept a week for the debrief (incident-ui.js). -->
+      <div id="sqPast" hidden>
+        <span class="label" id="sqPastLabel">Past incidents</span>
+        <ul class="sq-roster" id="sqPastList" aria-labelledby="sqPastLabel"></ul>
+      </div>
+
+      <div class="page-bottom">
+        <button type="button" class="btn ghost" id="sqSim2">Try it with pretend officers</button>
+        <button type="button" class="btn ghost" id="sqSimReplay2" hidden>Replay the pretend incident</button>
+        <button type="button" class="btn danger" id="sqLeave" hidden>Leave the squad</button>
+        <button type="button" class="btn danger" id="sqDelete" hidden>Delete the squad</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="scrSquadNew" class="screen paper" hidden>
+  <div class="page">
+    <span class="label">New squad</span>
+    <p class="sq-demo" role="note" data-demo-label>Demo — not for real operations</p>
+    <h1 class="display">Make a squad</h1>
+    <p class="body small muted">You will be Command: you see everyone on duty, and you can make others Command or remove them.</p>
+    <label class="field-label" for="sqnName">Squad name</label>
+    <input id="sqnName" type="text" maxlength="60" placeholder="Wells K9 and patrol" autocomplete="off" autocapitalize="words">
+    <label class="field-label" for="sqnCall">Your call sign</label>
+    <input id="sqnCall" type="text" maxlength="24" placeholder="Chief" autocomplete="off" autocapitalize="characters">
+    <p class="body small sq-err" id="sqnErr" role="alert"></p>
+    <div class="page-bottom">
+      <button type="button" class="btn moss" id="sqnSave">Make the squad</button>
+      <button type="button" class="btn ghost" id="sqnCancel">Cancel</button>
+    </div>
+  </div>
+</section>
+
+<section id="scrSquadJoin" class="screen paper" hidden>
+  <div class="page">
+    <span class="label">Join a squad</span>
+    <p class="sq-demo" role="note" data-demo-label>Demo — not for real operations</p>
+    <p class="body small muted" id="sqjNoCloud" hidden>Squads need the cloud, which is off in this copy of the app.</p>
+    <div id="sqjNeedSignIn" hidden>
+      <p class="body">Sign in first, then come back to join.</p>
+      <button type="button" class="btn moss" id="sqjSignIn">Sign in</button>
+    </div>
+    <div id="sqjFind">
+      <h1 class="display">Enter the code</h1>
+      <label class="field-label" for="sqjCode">Join code</label>
+      <input id="sqjCode" class="sq-code-input" type="text" maxlength="40" placeholder="K7MP-4XQ2" autocomplete="off" autocapitalize="characters" spellcheck="false">
+      <button type="button" class="btn moss" id="sqjFindBtn">Find the squad</button>
+    </div>
+    <!-- What the code leads to, shown before anything is joined. -->
+    <div id="sqjFound" hidden>
+      <h1 class="display">Join <span id="sqjName"></span>?</h1>
+      <p class="body small muted" id="sqjBy"></p>
+      <p class="body small">Its members will see your name and call sign. Command will see where you are, but only while your On duty switch is on.</p>
+      <span class="label" id="sqjRoleLabel">You are</span>
+      <div class="chip-row" id="sqjRoles" role="group" aria-labelledby="sqjRoleLabel">
+        <button type="button" class="chip" data-role="k9" aria-pressed="false">K9 handler</button>
+        <button type="button" class="chip" data-role="officer" aria-pressed="true">Officer</button>
+      </div>
+      <div id="sqjDogWrap" hidden>
+        <label class="field-label" for="sqjDog">Your dog</label>
+        <div class="chip-row" id="sqjDogs"></div>
+        <input id="sqjDog" type="text" maxlength="40" placeholder="Dog’s name" autocomplete="off">
+      </div>
+      <label class="field-label" for="sqjCall">Your call sign</label>
+      <input id="sqjCall" type="text" maxlength="24" placeholder="K9-1 or 2A12" autocomplete="off" autocapitalize="characters">
+      <div class="page-bottom">
+        <button type="button" class="btn moss" id="sqjJoin">Join the squad</button>
+      </div>
+    </div>
+    <p class="body small sq-err" id="sqjErr" role="alert"></p>
+    <button type="button" class="btn ghost" id="sqjCancel">Cancel</button>
+  </div>
+</section>
+
+<section id="scrCommand" class="screen glass cmd" hidden>
+  <div class="hud-pill"><span class="rec-dot" aria-hidden="true"></span><span id="cmdHud">Squad</span></div>
+  <aside class="cmd-panel" id="cmdPanel" aria-label="Squad members">
+    <p class="sq-demo" role="note" data-demo-label>Demo — not for real operations</p>
+    <p class="cmd-sim" id="cmdSim" hidden>Pretend officers · this device only <button type="button" class="btn ghost small" id="cmdSimSpeed">Speed ×1</button> <button type="button" class="btn ghost small" id="cmdSimStop">Stop</button></p>
+    <div class="cmd-head">
+      <h2 class="cmd-title" id="cmdTitle">Squad</h2>
+      <span class="cmd-count" id="cmdCount"></span>
+      <button type="button" class="btn ghost small cmd-fold" id="cmdFold" aria-expanded="true" aria-controls="cmdList">Hide list</button>
+    </div>
+    <!-- An incident: starting one, the one in force, its replay (incident-ui.js). Above the list, so a phone shows it first. -->
+    <div class="cmd-incident" id="cmdIncident" hidden></div>
+    <label class="switch-row cmd-duty" for="cmdDuty" id="cmdDutyRow">
+      <span>On duty<i id="cmdDutyNote">Nothing is shared while this is off</i></span>
+      <input id="cmdDuty" type="checkbox">
+    </label>
+    <ul class="cmd-list" id="cmdList"></ul>
+    <div class="row-gap">
+      <button type="button" class="btn moss grow" id="cmdFit">Fit everyone</button>
+      <button type="button" class="btn ghost grow" id="cmdClose">Close</button>
+    </div>
+  </aside>
 </section>
 
 <section id="scrSessions" class="screen paper" hidden>

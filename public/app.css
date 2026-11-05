@@ -2294,3 +2294,182 @@ html[data-motion="on"] .lu-title:not([hidden]) { animation: lu-plate 300ms steps
    only. In light mode the cards are already white on a near-white page, and
    a white rim would erase the edge they have. */
 :root[data-theme="dark"] .recent .card { border: 1.5px solid rgba(255, 255, 255, 0.85); }
+
+/* ── Squad (squad-ui.js) ───────────────────────────────────────────────
+   The roster and the command map. A unit is green while it is heard from,
+   amber after half a minute's quiet, grey after two minutes: the one thing a
+   chief must not mistake is an old position for where someone is now. */
+.sq-demo {
+  margin: 4px 0 12px; padding: 6px 12px; border-radius: 10px; width: fit-content;
+  background: #FCEFD2; color: #6B4B00; border: 1px solid #E8C877;
+  font: 700 calc(13 * var(--px)) var(--body); letter-spacing: 0.02em;
+}
+.sq-actions { display: flex; flex-direction: column; gap: 10px; margin: 18px 0 10px; }
+.sq-duty { margin: 14px 0; }
+.sq-err { color: #B3372B; min-height: 1em; }
+.sq-invite { margin: 18px 0; padding: 16px; border: 1px solid var(--border); border-radius: var(--r); background: var(--card); }
+.sq-code-row { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+.sq-code-row > div:last-child { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.sq-qr { width: 132px; height: 132px; padding: 8px; background: #fff; border-radius: 12px; flex: none; }
+.sq-qr svg { width: 100%; height: 100%; display: block; }
+.sq-code { font: 700 calc(26 * var(--px)) ui-monospace, "SF Mono", Menlo, monospace; letter-spacing: 0.08em; }
+.sq-code-input { font-family: ui-monospace, "SF Mono", Menlo, monospace; letter-spacing: 0.08em; text-transform: uppercase; }
+#sqjFindBtn { margin-top: 12px; width: 100%; }
+#sqjRoles .chip[aria-pressed="true"] { background: var(--moss); border-color: var(--moss); color: #fff; }
+.sq-roster { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.sq-row {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 12px 14px; border: 1px solid var(--border); border-radius: 14px; background: var(--card);
+}
+.sq-who { flex: 1; min-width: 160px; font-size: calc(15 * var(--px)); overflow-wrap: anywhere; }
+.sq-who i, .cmd-who i { display: block; font-style: normal; font-size: calc(13 * var(--px)); color: var(--muted); }
+.sq-tools { display: flex; gap: 6px; flex-wrap: wrap; }
+.sq-remove { color: #B3372B; }
+.sq-dot { width: 12px; height: 12px; border-radius: 50%; flex: none; background: #9AA3B2; }
+.sq-live .sq-dot { background: #2E9E5B; }
+.sq-quiet .sq-dot { background: #D99A1E; }
+.sq-stale .sq-dot, .sq-off .sq-dot { background: #9AA3B2; }
+
+/* The command map: a panel down the right on a computer or big screen, a
+   sheet at the bottom on a phone or tablet that folds away to show the map. */
+.cmd-panel {
+  position: fixed; z-index: 7; display: flex; flex-direction: column; gap: 8px;
+  background: var(--card); color: var(--ink); border: 1px solid var(--border);
+  box-shadow: 0 10px 30px rgba(15, 31, 61, 0.22);
+  left: 0; right: 0; bottom: 0; max-height: 46vh; overflow: hidden;
+  border-radius: 20px 20px 0 0; padding: 12px 16px calc(var(--safe-b) + 12px);
+}
+.cmd-panel .sq-demo { margin: 0; }
+/* Folded, the pretend squad's speed switch stays: it is what a demo reaches for mid-incident. */
+.cmd-panel.folded .cmd-list, .cmd-panel.folded .cmd-duty { display: none; }
+.cmd-head { display: flex; align-items: center; gap: 10px; }
+.cmd-title { margin: 0; font: 700 calc(18 * var(--px)) var(--display); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cmd-count { font-size: calc(13 * var(--px)); color: var(--muted); }
+.cmd-duty { margin: 0; }
+.cmd-sim { margin: 0; display: flex; align-items: center; gap: 10px; font: 600 calc(13 * var(--px)) var(--body); color: var(--muted); }
+.cmd-sim .btn, #cmdHud { white-space: nowrap; }
+.cmd-list { list-style: none; margin: 0; padding: 0; overflow-y: auto; flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 4px; }
+.cmd-row {
+  width: 100%; display: flex; align-items: center; gap: 10px; text-align: left; cursor: pointer;
+  padding: 9px 10px; min-height: 48px; border-radius: 12px; border: 1px solid transparent;
+  background: transparent; color: inherit; font: inherit;
+}
+.cmd-row:hover:not([disabled]) { border-color: var(--border); }
+.cmd-row[disabled] { cursor: default; opacity: 0.6; }
+.cmd-who { flex: 1; min-width: 0; font-size: calc(15 * var(--px)); overflow-wrap: anywhere; }
+.cmd-age { font-size: calc(12 * var(--px)); color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; }
+.cmd-stale .cmd-age, .sq-stale .cmd-age { color: #8A93A3; }
+@media (min-width: 900px) {
+  .cmd-panel {
+    left: auto; top: calc(var(--safe-t) + 14px); right: 14px; bottom: 14px; width: 340px; max-height: none;
+    border-radius: 20px; padding: 16px;
+  }
+  .cmd-fold { display: none; }
+  /* The status pill centres on what the panel leaves of the map. */
+  .cmd .hud-pill { right: 374px; }
+}
+
+/* A unit on the map: an arrow the way it is heading (a dot when it is
+   standing still) and its call sign. */
+/* Placed by Mapbox's own marker class; absolute here too, so that a unit can
+   never fall into the page's flow and sit below the one before it. */
+.sq-unit { position: absolute; top: 0; left: 0; width: 30px; height: 30px; cursor: pointer; }
+.sq-arrow {
+  position: absolute; inset: 0; border-radius: 50%;
+  background: var(--sq-c, #2D6FD6); border: 3px solid #fff; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
+  transition: transform 600ms var(--ease-out);
+}
+.sq-arrow::after {
+  content: ""; position: absolute; left: 50%; top: -12px; transform: translateX(-50%);
+  border: 7px solid transparent; border-bottom: 11px solid var(--sq-c, #2D6FD6); border-top: 0;
+  filter: drop-shadow(0 -1px 0 #fff);
+}
+.sq-arrow.still::after { display: none; }
+.sq-tag {
+  position: absolute; left: 50%; top: 34px; transform: translateX(-50%); white-space: nowrap;
+  padding: 3px 8px; border-radius: 8px; background: rgba(11, 22, 48, 0.86); color: #fff;
+  font: 700 calc(12 * var(--px)) var(--body); letter-spacing: 0.02em;
+}
+.sq-unit.sq-role-k9 { --sq-c: #D9822B; }
+.sq-unit.sq-role-command { --sq-c: #7A3FC4; }
+.sq-unit.sq-quiet .sq-arrow { opacity: 0.85; }
+.sq-unit.sq-stale { --sq-c: #8A93A3; }
+.sq-unit.sq-stale .sq-tag { background: rgba(90, 98, 112, 0.9); }
+.sq-unit.sq-me .sq-arrow { border-color: #FFE7A8; }
+@media (prefers-reduced-motion: reduce) { .sq-arrow { transition: none; } }
+:root[data-theme="dark"] .sq-demo { background: #3A2E10; color: #F3D891; border-color: #6B5520; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .sq-demo { background: #3A2E10; color: #F3D891; border-color: #6B5520; }
+}
+
+/* ── Incidents (incident-ui.js) ────────────────────────────────────────
+   Red is kept for the incident itself (the banner, the perimeter, End); the
+   trailing team's line is the K9 orange it wears on the roster, so a chief
+   reads "that is the dog" without a legend. */
+.inc-banner {
+  position: fixed; z-index: 55; left: 50%; transform: translateX(-50%);
+  top: calc(var(--safe-t) + 10px); width: min(560px, calc(100vw - 32px));
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 10px 12px 10px 16px; border-radius: 16px;
+  background: #7F1D1D; color: #fff; box-shadow: 0 10px 30px rgba(60, 10, 10, 0.4);
+}
+.inc-banner-text { flex: 1; min-width: 180px; overflow-wrap: anywhere; }
+.inc-banner-text b { display: block; font: 700 calc(16 * var(--px)) var(--display); }
+.inc-banner-text i { display: block; font-style: normal; font-size: calc(13 * var(--px)); opacity: 0.9; }
+.inc-banner-btns { display: flex; gap: 6px; flex-wrap: wrap; }
+.inc-banner .btn.ghost { color: #fff; border-color: rgba(255, 255, 255, 0.5); background: transparent; }
+.inc-banner .btn:not(.ghost):not(.moss) { background: #fff; color: #7F1D1D; border-color: #fff; }
+
+.cmd-incident { flex: none; overflow-y: auto; max-height: 34vh; }
+.cmd-panel.folded .cmd-incident { max-height: 22vh; }
+@media (min-width: 900px) { .cmd-incident { max-height: 55vh; } }
+.inc-card { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border-radius: 14px;
+  border: 1px solid var(--border); background: var(--paper, transparent); }
+.inc-live { border-color: #E3A5A0; box-shadow: inset 4px 0 0 #D93025; }
+.inc-kicker { margin: 0; display: flex; align-items: center; gap: 6px; font: 700 calc(12 * var(--px)) var(--body);
+  letter-spacing: 0.06em; text-transform: uppercase; color: #B3261E; }
+.inc-replay .inc-kicker { color: var(--muted); }
+.inc-dot { width: 9px; height: 9px; border-radius: 50%; background: #D93025; animation: inc-pulse 1.4s ease-in-out infinite; }
+@keyframes inc-pulse { 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .inc-dot { animation: none; } }
+.inc-name { margin: 0; font: 700 calc(17 * var(--px)) var(--display); overflow-wrap: anywhere; }
+.inc-team, .inc-facts, .inc-hint, .inc-last, .inc-clock { margin: 0; font-size: calc(14 * var(--px)); overflow-wrap: anywhere; }
+.inc-facts, .inc-hint, .inc-clock { color: var(--muted); font-variant-numeric: tabular-nums; }
+.inc-label { margin: 4px 0 0; font: 700 calc(12 * var(--px)) var(--body); color: var(--muted); }
+.inc-tools, .inc-chips { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.inc-chips .chip[aria-pressed="true"] { background: var(--moss); border-color: var(--moss); color: #fff; }
+.inc-field { display: flex; flex-direction: column; gap: 4px; font: 700 calc(12 * var(--px)) var(--body); color: var(--muted); }
+.inc-field input { font: inherit; font-size: max(16px, calc(16 * var(--px))); font-weight: 400; color: var(--ink);
+  padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border); background: var(--card); }
+.inc-scrub { width: 100%; accent-color: #D9822B; }
+.inc-last { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+/* A point on the incident map: a pin with its short name, and a tag with
+   who put it there and when. */
+/* Above the units, below the trailing team (z-index 5, set in squad-ui.js). */
+.inc-mark { display: flex; flex-direction: column; align-items: center; gap: 3px; cursor: pointer; z-index: 3; }
+.inc-pin {
+  min-width: 30px; padding: 4px 7px; border-radius: 9px; text-align: center;
+  font: 800 calc(11 * var(--px)) var(--body); letter-spacing: 0.04em; color: #fff;
+  background: var(--inc-c, #333); border: 2px solid #fff; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
+}
+.inc-mark-tag {
+  white-space: nowrap; padding: 2px 7px; border-radius: 7px; background: rgba(11, 22, 48, 0.86); color: #fff;
+  font: 600 calc(11 * var(--px)) var(--body);
+}
+.inc-k-indication { --inc-c: #1F8A4C; }
+.inc-k-lost { --inc-c: #B3261E; }
+.inc-k-refound { --inc-c: #1F6FB2; }
+.inc-k-article { --inc-c: #7A4FC0; }
+.inc-k-sighting { --inc-c: #B07800; }
+.inc-k-roadblock { --inc-c: #D93025; }
+.inc-k-rally { --inc-c: #0B7A75; }
+.inc-k-lkp { --inc-c: #111827; }
+.inc-draft-pin .inc-pin { border-style: dashed; }
+.inc-mark-tag:empty { display: none; }
+:root[data-theme="dark"] .inc-kicker { color: #FF8A80; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .inc-kicker { color: #FF8A80; } }
+:root[data-theme="dark"] .inc-replay .inc-kicker { color: var(--muted); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .inc-replay .inc-kicker { color: var(--muted); } }
+/* On a phone the pins' short names carry the map; the tags would bury it. */
+@media (max-width: 599px) { .inc-mark-tag { display: none; } }

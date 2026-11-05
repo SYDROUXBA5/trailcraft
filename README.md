@@ -183,6 +183,23 @@ live sharing. Publish it from here, never by pasting into the console:
 `npx --yes firebase-tools@15.32.1 login` first). Full steps in
 `docs/SIGN-IN-SETUP.md`, "Publishing the rules".
 
+### Before the squad rules go live (blocking)
+
+The squad demo's rules promise that a dead phone's last position and an
+incident's movements are deleted on their own. Firestore only does that once a
+TTL policy exists for each, so these come **before** `npm run rules:publish`,
+not after:
+
+1. Firebase console → Firestore → Time-to-live: add a policy on the field
+   `deleteAt` for each of the collection groups `positions`, `incidents`,
+   `marks`, `tracks` and `squads` (a deleted squad's tombstone; live squads
+   have no `deleteAt` and are never touched).
+2. Wait until all five show as serving.
+3. `npm run rules:check`, then `npm run rules:publish`.
+
+Until step 2 is done, the privacy page's "deleted within a day or so" and
+"deleted a week after the incident starts" are not yet true: do not publish.
+
 ## Honest limits
 
 - Weather models report wind at **10 m over open ground**. Under canopy at nose
