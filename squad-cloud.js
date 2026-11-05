@@ -212,7 +212,15 @@ export const TOMBSTONE_MS = 9 * 24 * 3600e3;
     delete the rest). */
 export async function deleteSquad(h, squad, { now = Date.now() } = {}) {
   const sid = squad.id;
-  const incidents = await idsOf(h, PATHS.incidents(sid));
+  const found = (await h.f.getDocs(col(h, PATHS.incidents(sid)))).docs;
+  const incidents = found.map(d => d.id);
+  /* A running incident is ended first: the rules let nobody, Command
+     included, delete a mark while its incident runs, so the live record
+     cannot be thinned out under the squad's feet. */
+  for (const d of found) {
+    const x = d.data();
+    if (x.status === 'active') await h.f.setDoc(ref(h, PATHS.incident(sid, d.id)), { ...x, status: 'ended', endedAt: now });
+  }
   const inner = [];
   for (const iid of incidents) {
     for (const mid of await idsOf(h, PATHS.marks(sid, iid))) inner.push(PATHS.mark(sid, iid, mid));

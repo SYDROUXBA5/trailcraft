@@ -68,7 +68,7 @@ import { searchWords, logRows, recentRuns, runAt, midnight, facets, filterRows, 
          cleanFolderName, putMany, toggleFolder, renameIn, dropFrom, mergeFolders, emptyHeld, folderPatch } from './log.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-11-04a';
+const BUILD = '2026-11-05a';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true,
@@ -11779,6 +11779,8 @@ function start() {
     shareBase: () => SHARE_BASE,
     here: () => (lastFix && Date.now() - lastFix.t < 30 * 60e3 ? { lat: lastFix.lat, lon: lastFix.lon } : null),
     demoPlace: () => ({ lat: 51.2094, lon: -2.6476 }),   // Wells, where the demo trail is
+    /* The buildings round the pretend squad, so its walkers keep out of them. */
+    wallsAround: (pts) => wallsFor(pts).catch(() => null),
     isNative, watchBackground,
   };
   initSquad(squadCtx);
@@ -11792,6 +11794,10 @@ function start() {
     busy: () => rec.on,
     runState: () => ({ on: rec.on, kind: rec.kind, pts: rec.pts, wps: rec.wps, startedAt: run.startedAt }),
     startTrail: () => startBlind(),
+    /* The command screen says the K9 team's calls in the coach's voice, and
+       gives distances in the units Settings is set to. */
+    speak: (text) => coachSpeak(text),
+    imperial: imp,
   });
   /* Back in the app, or back in signal: take what another phone changed since,
      before anything here is edited over it (sync.js resync). */

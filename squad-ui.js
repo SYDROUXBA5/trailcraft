@@ -13,7 +13,9 @@
 import { DEMO_LABEL, ROLES, JOIN_ROLES, roleOf, isCommand, canSetRole, canRemove, canLeave,
          cleanSquadName, cleanCallSign, cleanDogName, codeFromText, showCode, squadLink,
          SEND, shouldSend, headingOf, roster, onDutyCount, fitPoints, freshness, ageWords, compass,
-         createSim, SIM_SQUAD } from './squad.js';
+         createSim, SIM_SQUAD, simUnits, cleanDemoNames, keptLines, CALL_MAX, NAME_MAX } from './squad.js';
+import { ask, info, form } from './sheet.js';
+import { project } from './geo.js';
 import { createSquad, findSquad, joinSquad, myMember, watchSquad, putPosition, clearPosition,
          setRole, removeMember, leaveSquad, newCode, deleteSquad, getSquad } from './squad-cloud.js';
 
@@ -54,6 +56,11 @@ const S = {
   override: null,       // a replay drawing the map instead of the live squad
   simClock: null,       // { real, base, speed }: the pretend squad's own clock
   lead: null,           // the unit drawn above the rest (the trailing K9 team)
+  simName: SIM_SQUAD,   // the department name the chief gave the pretend squad
+  looked: new Set(),    // told when someone moves the map to a unit or to everyone (follow pauses)
+  wall: false,          // Wall mode: the map for a TV or a projector
+  night: true,          // its night look, for a dim room
+  wallers: new Set(),   // told when Wall mode comes on or goes off (the pins shorten)
 };
 const duty = { on: false, watch: 0, bg: null, last: null, prev: null, fix: null, starting: false, beat: 0 };
 /* Moved on by every stop: a start that was waiting (on the iPhone's location
@@ -406,7 +413,7 @@ async function onRosterClick(e) {
       await setRole(h, S.squad.id, uid, to);
       ctx.toast(to === 'command' ? `${them.callSign} is now Command` : `${them.callSign} is no longer Command`);
     } else {
-      if (!confirm(`Remove ${them.callSign} from ${S.squad.name}? They stop seeing the squad at once, and the code changes so they cannot rejoin with the old one.`)) return;
+      if (!await ask({ title: `Remove ${them.callSign}?`, body: `They stop seeing ${S.squad.name} at once, and the code changes so they cannot rejoin with the old one.`, yes: 'Remove', danger: true })) return;
       await removeMember(h, S.squad, uid, { by: myRow()?.callSign || '' });
       ctx.toast(`${them.callSign} removed. The join code has changed`);
     }
@@ -416,7 +423,7 @@ async function onRosterClick(e) {
 }
 
 async function doNewCode() {
-  if (!S.squad || !confirm('Make a new code? The old code and its QR stop working; members already in stay in.')) return;
+  if (!S.squad || !await ask({ title: 'Make a new code?', body: 'The old code and its QR stop working. Members already in stay in.', yes: 'Make a new code' })) return;
   try {
     const h = await handle();
     await newCode(h, S.squad, { by: myRow()?.callSign || '' });
@@ -425,7 +432,7 @@ async function doNewCode() {
 }
 
 async function doLeave() {
-  if (!S.squad || !confirm(`Leave ${S.squad.name}? You stop sharing and seeing the squad. You can join again with its code.`)) return;
+  if (!S.squad || !await ask({ title: `Leave ${S.squad.name}?`, body: 'You stop sharing and seeing the squad. You can join again with its code.', yes: 'Leave', danger: true })) return;
   const sq = S.squad;
   try {
     await stopDuty();
@@ -440,7 +447,7 @@ async function doLeave() {
 }
 
 async function doDelete() {
-  if (!S.squad || !confirm(`Delete ${S.squad.name} for everyone? Every member is taken off it and its code stops working. This cannot be undone.`)) return;
+  if (!S.squad || !await ask({ title: `Delete ${S.squad.name} for everyone?`, body: 'Every member is taken off it and its code stops working. This cannot be undone.', yes: 'Delete the squad', danger: true })) return;
   const sq = S.squad;
   try {
     await stopDuty();
@@ -462,13 +469,14 @@ async function doDelete() {
 
 /** The squad map: the real squad, or the pretend one. */
 export function openCommand({ sim = false } = {}) {
-  if (sim) startSim();
+  if (sim) startSim(demoNames());
   else if (!S.squad) return;
   S.view = true;
   S.fitted = false;
   $('cmdSim').hidden = !S.sim;
   $('cmdDutyRow').hidden = !!S.sim;
   ctx.go('scrCommand');
+  setWall(S.wall);
   const g = ctx.getMap();
   g.map?.on('rotate', turnArrows);
   clearInterval(S.tick);
@@ -486,6 +494,7 @@ export function closeCommand() {
   listKey = '';
   for (const p of S.painters) { try { p(null); } catch { /* their own */ } }
   if (S.sim) stopSim();
+  setWall(false);
 }
 
 function viewState() {
@@ -494,7 +503,7 @@ function viewState() {
     if (o) return { createdBy: S.squad?.createdBy ?? null, sim: !!S.sim, replay: true, ...o };
   }
   if (S.sim) {
-    return { name: SIM_SQUAD, members: S.sim.members(), positions: S.sim.positions(), createdBy: null, sim: true };
+    return { name: S.simName, members: S.sim.members(), positions: S.sim.positions(), createdBy: null, sim: true };
   }
   return { name: S.squad?.name ?? 'Squad', members: S.members, positions: S.positions,
            createdBy: S.squad?.createdBy ?? null, sim: false };
@@ -512,6 +521,11 @@ function paintCommand() {
   $('cmdCount').textContent = `${rows.length} ${rows.length === 1 ? 'member' : 'members'}`;
   paintList(rows, now);
   paintMarkers(rows, now);
+  if (S.wall) {
+    paintWallClock(now);
+    /* The veil is lost when the map's style reloads: put back. */
+    if (S.night && !ctx.getMap().map?.getLayer?.(NIGHT)) setNight(true);
+  }
   if (!S.fitted && on) { S.fitted = true; fitAll(); }
   for (const p of S.painters) { try { p({ ...st, rows, now }); } catch { /* their own */ } }
   if (!st.sim) paintDuty();
@@ -611,8 +625,12 @@ function focusUnit(uid) {
   const p = st.positions.get(uid);
   const g = ctx.getMap();
   if (!p || !g.map) return;
+  looked('unit');
   g.map.easeTo({ center: [p.lon, p.lat], zoom: Math.max(g.map.getZoom(), 16), duration: 600 });
 }
+/* Someone chose where to look: following the K9 team (incident-ui.js)
+   steps aside until they ask for it again. */
+function looked(why) { for (const fn of S.looked) { try { fn(why); } catch { /* their own */ } } }
 
 /** Everyone on duty in view, clear of the panel that lists them. */
 function fitAll() {
@@ -621,6 +639,7 @@ function fitAll() {
   const st = viewState();
   const pts = fitPoints(roster(st.members, st.positions, st.now ?? viewNow()));
   if (!pts.length) return ctx.toast('Nobody is on duty yet');
+  looked('all');
   fitOnMap(pts);
 }
 
@@ -628,6 +647,16 @@ function fitAll() {
 export function fitOnMap(pts, maxZoom = 17) {
   const g = ctx.getMap();
   if (!g.map || !g.GL || !pts.length) return;
+  const pad = mapPad();
+  if (pts.length === 1) return g.map.easeTo({ center: [pts[0].lon, pts[0].lat], zoom: 16, padding: pad, duration: 600 });
+  const b = new g.GL.LngLatBounds();
+  for (const p of pts) b.extend([p.lon, p.lat]);
+  g.map.fitBounds(b, { padding: pad, pitch: 0, bearing: 0, maxZoom, duration: 700 });
+}
+
+/** How much of each edge of the map the panel and the pills cover, in
+    pixels: what a fit leaves clear, and what following counts as out of view. */
+export function mapPad() {
   const panel = $('cmdPanel');
   const wide = window.matchMedia('(min-width: 900px)').matches;
   /* On a phone the weather panel, the pill and the compass take the top
@@ -639,17 +668,16 @@ export function fitOnMap(pts, maxZoom = 17) {
       if (r && r.height) top = Math.max(top, Math.round(r.bottom) + 16);
     }
   }
-  const pad = wide
-    ? { top, bottom: 40, left: 40, right: (panel?.offsetWidth || 340) + 40 }
+  /* In Wall mode the clock and the log sit over the top left of the map. */
+  const wallBox = S.wall ? $('cmdWall') : null;
+  const left = wallBox && !wallBox.hidden && wide ? Math.round(wallBox.getBoundingClientRect().right) + 30 : 40;
+  return wide
+    ? { top, bottom: 40, left, right: (panel?.offsetWidth || 340) + 40 }
     : { top, left: 30, right: 30, bottom: (panel?.offsetHeight || 260) + 30 };
-  if (pts.length === 1) return g.map.easeTo({ center: [pts[0].lon, pts[0].lat], zoom: 16, padding: pad, duration: 600 });
-  const b = new g.GL.LngLatBounds();
-  for (const p of pts) b.extend([p.lon, p.lat]);
-  g.map.fitBounds(b, { padding: pad, pitch: 0, bearing: 0, maxZoom, duration: 700 });
 }
 
 /* ── Pretend officers ─────────────────────────────────────────────────── */
-function startSim() {
+function startSim(names = cleanDemoNames(null)) {
   const g = ctx.getMap();
   const fix = ctx.here();
   const c = g.map?.getCenter?.();
@@ -659,8 +687,15 @@ function startSim() {
   const center = fix || (c && g.map.getZoom() >= 10 ? { lat: c.lat, lon: c.lng } : ctx.demoPlace());
   const now = Date.now();
   S.simClock = { real: now, base: now, speed: 1 };
-  S.sim = createSim({ center, now, seed: (now / 1000) | 0 });
+  S.sim = createSim({ center, now, seed: (now / 1000) | 0, callSigns: names.callSigns });
+  S.simName = names.squad;
   paintSimSpeed();
+  /* The buildings round the pretend squad, so that nobody on foot walks
+     through a house. They come from the map's own tiles, after the squad
+     has started; until then (and with no map key) walkers go as before. */
+  const sim = S.sim;
+  const box = [0, 90, 180, 270].map(b => project(center, b, 650));
+  Promise.resolve(ctx.wallsAround?.(box)).then((W) => { if (W && S.sim === sim) sim.setWalls(W); }, () => {});
 }
 function stopSim() { S.sim = null; S.simClock = null; }
 
@@ -694,6 +729,112 @@ function paintSimSpeed() {
   b.textContent = `Speed ×${S.simClock.speed}`;
   b.setAttribute('aria-label', `Pretend clock at ${S.simClock.speed} times real speed. Change`);
 }
+
+/* ── The pretend squad's names ───────────────────────────────────────── */
+/* A chief believes a demo that uses his own department and call signs. They
+   are kept on this device only, like everything else about the demo. */
+const UNIT_LABEL = { car: 'Patrol car', foot: 'Officer on foot', command: 'Sergeant (Command)' };
+function demoNames() {
+  let raw = null;
+  try { raw = ctx.kv.get('squadDemoNames', null); } catch { /* none */ }
+  return cleanDemoNames(raw);
+}
+async function openDemo() {
+  const was = demoNames();
+  const units = simUnits();
+  const got = await form({
+    title: 'Your department',
+    body: 'Your own names make the pretend squad feel like yours. Leave any blank for the usual one.',
+    fields: [
+      { key: 'squad', label: 'Department or squad', value: was.squad === SIM_SQUAD ? '' : was.squad, placeholder: SIM_SQUAD, max: NAME_MAX },
+      ...units.map((u, i) => ({ key: `c${i}`, label: u.dog ? `K9 team · ${u.dog}` : (UNIT_LABEL[u.role === 'command' ? 'command' : u.mode]),
+                                value: was.callSigns[i], placeholder: u.callSign, max: CALL_MAX })),
+    ],
+    yes: 'Start the pretend squad', grid: true,
+    note: 'Kept on this device only. Nothing is sent.',
+  });
+  if (!got) return;
+  const names = cleanDemoNames({ squad: got.squad, callSigns: units.map((_, i) => got[`c${i}`]) });
+  try { ctx.kv.set('squadDemoNames', names); } catch { /* full: the names last this time only */ }
+  openCommand({ sim: true });
+}
+
+/* ── Wall mode ───────────────────────────────────────────────────────────
+   For a TV or a projector at the back of a room: a big clock, the latest
+   from the incident (incident-ui.js fills #cmdWallLog) and the units in big
+   type down the side, short pins, and a night look for a dim room. */
+function setWall(on) {
+  S.wall = !!on;
+  const scr = $('scrCommand');
+  scr.classList.toggle('cmd-wall', S.wall);
+  $('map')?.classList.toggle('map-wall', S.wall);
+  /* The toast lives outside the screen: it moves clear of the demo label. */
+  document.body.classList.toggle('wall-on', S.wall);
+  $('cmdWall').hidden = !S.wall;
+  const b = $('cmdWallBtn');
+  b.textContent = S.wall ? 'Leave wall' : 'Wall';
+  b.setAttribute('aria-pressed', String(S.wall));
+  setNight(S.wall && S.night);
+  if (S.wall) paintWallClock(viewNow());
+  for (const fn of S.wallers) { try { fn(S.wall); } catch { /* their own */ } }
+}
+function toggleWall() {
+  const on = !S.wall;
+  /* Full screen too where the browser allows it (it needs this tap): a
+     projector shows the map, not the browser round it. */
+  try {
+    const tapped = navigator.userActivation ? navigator.userActivation.isActive : true;
+    if (on && tapped && !document.fullscreenElement) document.documentElement.requestFullscreen?.()?.catch?.(() => {});
+    if (!on && document.fullscreenElement) document.exitFullscreen?.()?.catch?.(() => {});
+  } catch { /* not on this phone */ }
+  setWall(on);
+  if (S.view) paintCommand();
+}
+/* The satellite map's own night light (Mapbox Standard) darkens its labels
+   but not the photo, so a dark veil goes over the map as well: a layer
+   under the incident's lines (incident-ui.js adds them as inc-*), so the
+   perimeter and the trail stay bright, and under the units and pins, which
+   are not drawn on the map's canvas at all. */
+const NIGHT = 'sq-night';
+const WORLD = { type: 'Feature', properties: {}, geometry: { type: 'Polygon',
+  coordinates: [[[-180, -85], [180, -85], [180, 85], [-180, 85], [-180, -85]]] } };
+function setNight(on) {
+  const m = ctx.getMap().map;
+  try { m?.setConfigProperty?.('basemap', 'lightPreset', on ? 'night' : 'day'); } catch { /* not Standard */ }
+  try {
+    if (on && m?.isStyleLoaded?.() && !m.getLayer(NIGHT)) {
+      if (!m.getSource(NIGHT)) m.addSource(NIGHT, { type: 'geojson', data: WORLD });
+      /* Under the incident's own layers, the reach ring's fill the lowest. */
+      const under = ['inc-reach-fill', 'inc-lines'].find(id => m.getLayer(id));
+      m.addLayer({ id: NIGHT, type: 'fill', source: NIGHT, paint: { 'fill-color': '#000814', 'fill-opacity': 0.5 } }, under);
+    } else if (!on && m?.getLayer?.(NIGHT)) {
+      m.removeLayer(NIGHT);
+      m.removeSource(NIGHT);
+    }
+  } catch { /* the style is changing: the next switch puts it right */ }
+  const b = $('cmdNight');
+  if (b) b.setAttribute('aria-pressed', String(!!on));
+}
+function toggleNight() {
+  S.night = !S.night;
+  try { ctx.kv.set('squadWallNight', S.night); } catch { /* full */ }
+  setNight(S.wall && S.night);
+}
+function paintWallClock(now) {
+  const c = $('cmdWallClock');
+  const s = new Date(now).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+  if (c.textContent !== s) c.textContent = s;
+}
+/** Wall mode is on. */
+export const wallOn = () => S.wall;
+/** For the incident layer: told whenever Wall mode comes on or goes off. */
+export function onWall(fn) { S.wallers.add(fn); return () => S.wallers.delete(fn); }
+/** For the incident layer: told when someone sends the map to a unit or to
+    everyone, by the list or Fit everyone. Returns the undo. */
+export function onLook(fn) { S.looked.add(fn); return () => S.looked.delete(fn); }
+
+/** The "What's kept, and for how long" sheet (squad.js keptLines). */
+export const openKept = () => info({ title: 'What’s kept, and for how long', items: keptLines() });
 
 /** For what is drawn on top of the command map (an incident): fn gets the
     view on every paint, and null when the map closes. Returns the undo. */
@@ -761,8 +902,14 @@ export function initSquad(c) {
     try { pending = codeFromText(ctx.kv.get('squadJoinPending', '')); } catch { /* none */ }
     openJoin(pending);
   });
-  $('sqSim').addEventListener('click', () => openCommand({ sim: true }));
-  $('sqSim2').addEventListener('click', () => openCommand({ sim: true }));
+  $('sqSim').addEventListener('click', openDemo);
+  $('sqSim2').addEventListener('click', openDemo);
+  $('sqKept').addEventListener('click', openKept);
+  $('sqKept2').addEventListener('click', openKept);
+  $('cmdKept').addEventListener('click', openKept);
+  $('cmdWallBtn').addEventListener('click', toggleWall);
+  $('cmdNight').addEventListener('click', toggleNight);
+  try { S.night = ctx.kv.get('squadWallNight', true) !== false; } catch { /* the default */ }
   $('sqOpenMap').addEventListener('click', () => openCommand());
   $('sqDuty').addEventListener('change', (e) => (e.target.checked ? startDuty() : stopDuty()));
   $('cmdDuty').addEventListener('change', (e) => (e.target.checked ? startDuty() : stopDuty()));
