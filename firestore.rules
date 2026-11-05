@@ -180,6 +180,28 @@ service cloud.firestore {
       function num(v) { return v is number; }
       function optNum(v) { return v == null || v is number; }
       function role(v) { return v in ['command', 'k9', 'officer']; }
+      // A dog's record card (squad.js dogRecord): a few counts, two dates,
+      // the gaps as one short text and the licence as the handler typed it.
+      // Shared by the handler on their own member record, and copied into
+      // an incident when the team is picked. Bounded field by field.
+      function tally(v) { return v is int && v >= 0 && v <= 100000; }
+      function recordOk(r) {
+        return r == null
+            || (r is map
+                && r.keys().hasOnly(['v', 'dog', 'pretend', 'at', 'trails', 'h1', 'h4', 'older', 'noAge', 'blind',
+                                     'blindReal', 'blindFound', 'wrong', 'last', 'sure', 'sureRight', 'gaps', 'lic', 'licTo'])
+                && r.v == 1 && optText(r.get('dog', null), 40) && r.get('pretend', false) is bool && num(r.at)
+                && tally(r.trails) && tally(r.h1) && tally(r.h4) && tally(r.older) && tally(r.noAge)
+                && tally(r.blind) && tally(r.blindReal) && tally(r.blindFound) && tally(r.wrong)
+                && tally(r.sure) && tally(r.sureRight)
+                && r.blindFound <= r.blindReal && r.blindReal <= r.blind && r.sureRight <= r.sure
+                // Every count is a count of trails: none above them, and
+                // the four age bands add up to them.
+                && r.blind <= r.trails && r.sure <= r.trails
+                && r.h1 + r.h4 + r.older + r.noAge == r.trails
+                && optNum(r.get('last', null)) && optText(r.get('gaps', null), 620)
+                && optText(r.get('lic', null), 60) && optNum(r.get('licTo', null)));
+      }
       // A TTL a little longer than the app's, for a phone whose clock is off.
       function expires(d, hours) {
         return d.expiresAt is number && d.expiresAt <= request.time.toMillis() + hours * 3600000
@@ -226,11 +248,12 @@ service cloud.firestore {
 
       match /members/{uid} {
         function memberOk(d) {
-          return d.keys().hasOnly(['uid', 'role', 'callSign', 'name', 'dog', 'joinedAt', 'code'])
+          return d.keys().hasOnly(['uid', 'role', 'callSign', 'name', 'dog', 'joinedAt', 'code', 'record'])
               && d.uid == uid && role(d.role)
               && text(d.callSign, 24) && d.callSign.size() > 0
               && text(d.get('name', ''), 60) && optText(d.get('dog', null), 40)
-              && num(d.joinedAt) && optText(d.get('code', null), 8);
+              && num(d.joinedAt) && optText(d.get('code', null), 8)
+              && recordOk(d.get('record', null));
         }
         allow read: if isMember();
         // Joining: your own record, as a K9 handler or an officer, with the
@@ -240,9 +263,10 @@ service cloud.firestore {
                            && request.resource.data.code == get(squadPath()).data.code)
                           || (request.resource.data.role == 'command'
                               && getAfter(squadPath()).data.createdBy == request.auth.uid));
-        // Your own record: your call sign, your dog, K9 or officer; never
-        // into or out of Command by yourself. Command changes only someone
-        // else's role, and never the creator's.
+        // Your own record: your call sign, your dog, K9 or officer, your
+        // dog's shared record card; never into or out of Command by
+        // yourself. Command changes only someone else's role, and never the
+        // creator's (so never anyone's record card).
         allow update: if isMember() && memberOk(request.resource.data)
                       && ((uid == request.auth.uid
                            && (request.resource.data.role == resource.data.role
@@ -279,6 +303,7 @@ service cloud.firestore {
         // Last seen: no later than the incident opened, no more than two
         // days before. How they left: walking, running or a vehicle. The
         // handler's brief: a way, a description, a scent article or not.
+        // The cover officer: a member's account, never the handler's own.
         function seenOk(d) {
           return d.get('lastSeenAt', null) == null
               || (num(d.lastSeenAt) && d.lastSeenAt <= d.startedAt && d.lastSeenAt >= d.startedAt - 172800000);
@@ -291,30 +316,42 @@ service cloud.firestore {
         }
         function incidentOk(d) {
           return d.keys().hasOnly(['name', 'lkp', 'k9Uid', 'startedBy', 'startedAt', 'endedAt', 'status',
-                                   'expiresAt', 'deleteAt', 'summary', 'lastSeenAt', 'pace', 'brief'])
+                                   'expiresAt', 'deleteAt', 'summary', 'lastSeenAt', 'pace', 'brief', 'coverUid', 'k9Record'])
               && text(d.name, 80) && d.name.size() > 0
               && d.lkp is map && place(d.lkp.lat, d.lkp.lon)
               && optText(d.get('k9Uid', null), 128)
+              && optText(d.get('coverUid', null), 128)
+              && (d.get('coverUid', null) == null || d.coverUid != d.get('k9Uid', null))
               && d.startedBy is string && num(d.startedAt) && optNum(d.get('endedAt', null))
               && d.status in ['active', 'ended']
               && (d.get('summary', null) == null || d.summary is map)
               && seenOk(d)
               && (d.get('pace', null) == null || d.pace in ['walk', 'run', 'vehicle'])
               && briefOk(d.get('brief', null))
+              && recordOk(d.get('k9Record', null))
+              && (d.get('k9Record', null) == null || d.get('k9Uid', null) != null)
               && expires(d, 192);
         }
         function incidentPath() { return /databases/$(database)/documents/squads/$(squadId)/incidents/$(incidentId); }
         allow read: if isMember();
         allow create: if isCommand() && incidentOk(request.resource.data)
                       && request.resource.data.startedBy == request.auth.uid
-                      && request.resource.data.status == 'active';
+                      && request.resource.data.status == 'active'
+                      // The frozen record is the one the handler shared, as
+                      // stored on their member record: Command cannot write
+                      // one of its own and have it read as the handler's.
+                      && (request.resource.data.get('k9Record', null) == null
+                          || request.resource.data.k9Record == get(/databases/$(database)/documents/squads/$(squadId)/members/$(request.resource.data.k9Uid)).data.get('record', null));
         // Ended is final: what the debrief replays is what happened.
         allow update: if isCommand() && incidentOk(request.resource.data)
                       && resource.data.status == 'active'
                       && request.resource.data.startedBy == resource.data.startedBy
                       // The opening time is what the clock, the rings and the
                       // last-seen limit hang on: it never moves.
-                      && request.resource.data.startedAt == resource.data.startedAt;
+                      && request.resource.data.startedAt == resource.data.startedAt
+                      // The dog's record card is what the team was picked
+                      // on: frozen when the incident opens.
+                      && request.resource.data.get('k9Record', null) == resource.data.get('k9Record', null);
         // Only the creator, deleting the whole squad: Command ends an
         // incident, and an ended one is the debrief's record.
         allow delete: if signedIn() && creator() == request.auth.uid;

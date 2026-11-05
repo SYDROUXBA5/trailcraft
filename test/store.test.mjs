@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { handlerStats, ODOURS, targetText, teachesDrift, runAgeMin, driftRows } from '../public/store.js';
 import { createStore, migrateV1, TARGETS, targetById, verbs, uid,
          dogStats, ageBand, AGE_BANDS, dogAge, SaveError, patchSession, runAgain,
-         askDelete, dogsOf, storageWords, healApproach, healSession, APPROACH_V } from '../public/store.js';
+         askDelete, dogsOf, storageWords, healApproach, healSession, APPROACH_V, licenceKeyOf } from '../public/store.js';
 import { mergeCalibration, calibrationDiffers } from '../public/sync-core.js';
 import { readBackup } from '../public/backup.js';
 import { readFileSync } from 'node:fs';
@@ -419,6 +419,24 @@ t('dogAge: counted from a birthday, so it is never stale', () => {
   assert.equal(dogAge(null, now), null);
   assert.equal(dogAge(undefined, now), null);
   assert.equal(dogAge(on(2027, 1, 1), now), null, 'a birthday in the future is not an age');
+});
+
+t('store: removing a dog deletes the squad licence kept for it on this phone, and only that one', () => {
+  const db = createStore(fakeBackend());
+  db.dogs.upsert({ id: 'bo', handlerId: 'h', name: 'Bo', level: 'Hot', lineM: 10 });
+  db.dogs.upsert({ id: 'rex', handlerId: 'h', name: 'Rex', level: 'Hot', lineM: 10 });
+  db.kv.set(licenceKeyOf('bo'), { body: 'NPCC', expires: 1 });
+  db.kv.set(licenceKeyOf('rex'), { body: 'NAPWDA', expires: 2 });
+  db.dogs.remove('bo');
+  assert.equal(db.kv.get(licenceKeyOf('bo')), null, 'gone with the dog');
+  assert.deepEqual(db.kv.get(licenceKeyOf('rex')), { body: 'NAPWDA', expires: 2 }, 'another dog’s stays');
+  // A handler deleted takes their dogs, and so their licences.
+  db.handlers.upsert({ id: 'h', name: 'Sam' });
+  db.deleteHandler('h');
+  assert.equal(db.kv.get(licenceKeyOf('rex')), null);
+  assert.equal(licenceKeyOf('rex'), 'squadLicence.rex');
+  assert.match(readFileSync(new URL('../public/squad-ui.js', import.meta.url), 'utf8'), /const licenceKey = \(dogId\) => `squadLicence\.\$\{dogId\}`;/,
+    'the squad screen keeps it under the same key');
 });
 
 t('store: every change is announced, and a deletion leaves a tombstone', () => {

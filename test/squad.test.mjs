@@ -11,9 +11,11 @@ import { ROLES, canSetRole, canRemove, canLeave, cleanCallSign, cleanSquadName, 
          showCode, squadLink, CODE_ALPHABET, shouldSend, SEND, writesPerHour, headingOf, freshness, ageWords,
          roster, onDutyCount, fitPoints, cleanMember, cleanPosition, positionDoc, createSim, compass,
          POSITION_TTL, INCIDENT_TTL, PATHS, DEMO_LABEL, FRESH_MS, SIM_SQUAD, simUnits, cleanDemoNames,
-         keptLines } from '../public/squad.js';
+         keptLines, dogRecord, cleanRecord, recordWords, licenceState, licenceEnd, licenceDay, dayWords, pretendRecord,
+         RECORD_KEYS, RECORD_SAYS, RECORD_NOTE, GAPS_MAX, GAP_MAX, callSignsOf } from '../public/squad.js';
+import { calibration, runsOf } from '../public/call.js';
 import { createSquad, findSquad, joinSquad, myMember, watchSquad, putPosition, clearPosition, setRole,
-         removeMember, leaveSquad, newCode, deleteSquad, getSquad, TOMBSTONE_MS } from '../public/squad-cloud.js';
+         removeMember, leaveSquad, newCode, deleteSquad, getSquad, TOMBSTONE_MS, shareRecord } from '../public/squad-cloud.js';
 import { html, esc } from '../public/squad-ui.js';
 import { MARKS, DRAW_TOOLS, RUN_MARKS, incidentDoc, cleanIncident, activeOf, pastOf, markDoc, cleanMark, mayMark, mayUnmark,
          trackBuffer, minuteOf, cleanTrack, joinTracks, trailInfo, aheadLine, elapsedWords, clockWords, countWords,
@@ -21,11 +23,13 @@ import { MARKS, DRAW_TOOLS, RUN_MARKS, incidentDoc, cleanIncident, activeOf, pas
          stripWords, quietLines, followPoints, allInView, SGT, standing, standingOf, PACES, cleanPaces, cleanBrief,
          cleanLastSeen, seenAt, lastSeenFrom, hhmm, reachM, reachRings, nearM, passedLines, warnWords, reachWords,
          isClosed, insideLine,
-         onScentWords, briefWords, logLines, ring, REACH_CAP_M } from '../public/incident.js';
+         onScentWords, briefWords, logLines, ring, REACH_CAP_M, downwindBand, BAND_WORDS, bandWindWords, CALM_MS,
+         sceneWalkers, sceneWords, nameList, SCENE_M, FOOT_MS, speedAt, insideWalkers, insideWords, INSIDE_M,
+         PERIM_GRACE_MS, onFootNow, coverWords, aboutWords, SCENE_NOTE, scentStart, insideNow, GOING_GRACE_MS } from '../public/incident.js';
 import { wallIndex, wallAt, blockStep, outside as outsideWall } from '../public/walls.js';
 import { startIncident, endIncident, watchIncidents, watchIncident, putMark, withdrawMark, putTrack,
-         loadIncident, updateSeen } from '../public/incident-cloud.js';
-import { project, pathLen } from '../public/geo.js';
+         loadIncident, updateSeen, setCover } from '../public/incident-cloud.js';
+import { project, pathLen, bearing } from '../public/geo.js';
 import { dist } from '../public/geo.js';
 
 let pass = 0;
@@ -81,7 +85,7 @@ t('what other people typed is tidied and bounded, and kept out of the page by ht
   assert.equal(cleanCallSign('x'.repeat(50)).length, 24);
   assert.equal(cleanSquadName('y'.repeat(99)).length, 60);
   const m = cleanMember({ uid: 'a', role: 'admin', callSign: '', name: 'A', dog: 'Rex', joinedAt: 'x' }, 'a');
-  assert.deepEqual(m, { uid: 'a', role: 'officer', callSign: 'Unit', name: 'A', dog: null, joinedAt: 0 },
+  assert.deepEqual(m, { uid: 'a', role: 'officer', callSign: 'Unit', name: 'A', dog: null, joinedAt: 0, record: null },
     'an unknown role is an officer, and only a K9 handler has a dog');
   assert.equal(cleanMember(null, 'a'), null);
   const evil = '<img src=x onerror=alert(1)>"\'&';
@@ -471,7 +475,7 @@ t('the command screen’s words: the call said aloud, the phone strip, and a uni
   const ui = read('public/incident-ui.js');
   assert.match(ui, /text\('strip', stripWords\(/);
   assert.match(ui, /seenMs: finite\(v\.inc\.lastSeenAt\) \? v\.now - v\.inc\.lastSeenAt : null/);
-  assert.match(ui, /querySelector\('\.inc-strip'\)\?\.classList\.toggle\('warn', !!rn\.warn\)/, 'on the strip itself, which the CSS colours');
+  assert.match(ui, /querySelector\('\.inc-strip'\)\?\.classList\.toggle\('warn', !!rn\.warn( \|\| insideNow\(inside\)\.length > 0)?\)/, 'on the strip itself, which the CSS colours');
   assert.match(ui, /text\('quiet', quietLines\(st\.rows, v\.now\)/);
 });
 
@@ -887,7 +891,7 @@ t('the incident card: the big clock, the rings, the amber line, the brief, paces
   assert.match(ui, /const cls = \(l, i\) => \[l\.withdrawn \? 'inc-log-off' : '', l\.ahead \? 'inc-log-ahead' : ''/, 'crossed out; in a replay, what is to come dimmed');
   // A replay's log holds the whole incident, so a tap can jump forward too.
   const lo = ui.slice(ui.indexOf('function logOf('), ui.indexOf('function paintLog('));
-  assert.match(lo, /now: Infinity \}\)\n    \.filter\(l => l\.t > v\.now\)\.map\(l => \(\{ \.\.\.l, withdrawn: null, ahead: true \}\)\)/);
+  assert.match(lo, /now: Infinity(?:, scene: whole)? \}\)\n    \.filter\(l => l\.t > v\.now\)\.map\(l => \(\{ \.\.\.l, withdrawn: null, ahead: true \}\)\)/);
   assert.match(read('public/app.css'), /\.inc-log-ahead \.inc-log-line \{ opacity: 0\.5; \}/);
   assert.match(read('public/app.css'), /\.inc-log-off \.inc-log-text \{[^}]*text-decoration: line-through/);
   // Wall mode's slot is the live log now.
@@ -1265,6 +1269,257 @@ t('last seen, pace and the brief in the cloud: Command sets and corrects them, b
   await refused(updateSeen(chief, sq.id, now, { lastSeenAt: null, pace: 'run', brief: null }), 'correcting an ended incident');
 });
 
+t('the cover officer in the cloud: Command picks a member, never the handler, and the end keeps it', async () => {
+  const inc = await startIncident(chief, sq.id, { name: 'Cover test', lkp: { lat: 51.2094, lon: -2.6476 }, k9Uid: 'k9' });
+  const path = `squads/${sq.id}/incidents/${inc.id}`;
+  assert.equal(fake.cloudDoc(path).coverUid, null);
+  await refused(setCover(ofc, sq.id, inc, 'ofc'), 'an officer choosing the cover');
+  await setCover(chief, sq.id, inc, 'ofc');
+  assert.equal(fake.cloudDoc(path).coverUid, 'ofc');
+  const write = (x) => fake.setDoc(fake.doc(chief.fs, ...PATHS.incident(sq.id, inc.id)), { ...fake.cloudDoc(path), ...x });
+  await refused(write({ coverUid: 'k9' }), 'the handler as their own cover');
+  await refused(write({ coverUid: 'x'.repeat(129) }), 'a cover past 128');
+  await refused(write({ coverUid: 7 }), 'a cover that is not an account');
+  const now = cleanIncident(fake.cloudDoc(path), inc.id);
+  assert.equal(now.coverUid, 'ofc');
+  await updateSeen(chief, sq.id, now, { lastSeenAt: null, pace: 'walk', brief: null });
+  assert.equal(fake.cloudDoc(path).coverUid, 'ofc', 'correcting last seen keeps the cover');
+  await endIncident(chief, sq.id, now, summarise({ inc: now, trail: [], marks: [], units: 1, now: Date.now() }));
+  assert.equal(fake.cloudDoc(path).coverUid, 'ofc', 'ending keeps the cover');
+  await refused(setCover(chief, sq.id, now, null), 'changing an ended incident');
+});
+
+/* ── Move D: the dog's record card ─────────────────────────────────────── */
+const DAYMS = 864e5;
+const R0 = 1_760_000_000_000;
+const recRun = (o = {}) => ({
+  id: o.id || `r${Math.round(o.age ?? 0)}-${o.at ?? 0}`, dogId: 'rex', handlerId: o.h ?? 'me', startedAt: o.at ?? R0,
+  data: { track: [{ lat: 51, lon: -2, t: 0 }, { lat: 51.001, lon: -2, t: 60e3 }], trackStarted: o.at ?? R0,
+    ...(o.age == null ? {} : { result: { ageMin: o.age } }), debrief: o.debrief ?? null,
+    ...(o.coach ? { coach: { assisted: true } } : {}), ...(o.shown ? { revealedAt: 5 } : {}),
+    ...(o.imported ? { imported: { at: (o.at ?? R0) + DAYMS } } : {}) },
+});
+
+t('the dog’s record: worked out from this phone’s own runs, the blind figure by its own filter', () => {
+  const real = (outcome, x = {}) => ({ outcome, target: 'real', blind: 'handler', ...x });
+  const runs = [
+    recRun({ id: 'a', age: 20, at: R0 - 5 * DAYMS, debrief: real('found') }),
+    recRun({ id: 'b', age: 90, at: R0 - 4 * DAYMS, debrief: real('false') }),
+    recRun({ id: 'c', age: 300, at: R0 - 3 * DAYMS, coach: true, debrief: real('found') }),     // coach on: not blind
+    recRun({ id: 'd', age: 30, at: R0 - 2 * DAYMS, shown: true, debrief: real('found') }),      // trail shown: not blind
+    recRun({ id: 'e', at: R0 - DAYMS, debrief: { outcome: 'blank', target: 'control', blind: 'open' } }),   // the handler knew
+    recRun({ id: 'f', age: 15, at: R0, imported: true, debrief: real('found') }),               // someone else's run
+    recRun({ id: 'g', age: 10, at: R0 - 6 * DAYMS, debrief: { outcome: 'blank', target: 'control', blind: 'double' } }),
+  ];
+  const now = R0 + 40 * DAYMS;
+  const r = dogRecord({ dog: 'Rex', runs, handlerId: 'me', licence: { body: ' NPCC ', expires: now + 90 * DAYMS }, now });
+  assert.deepEqual([r.trails, r.h1, r.h4, r.older, r.noAge], [6, 3, 1, 1, 1], 'age bands; a run kept from another link is left out');
+  assert.deepEqual([r.blind, r.blindReal, r.blindFound], [3, 2, 1], 'blind: nothing told the handler; found: on a real person only');
+  assert.equal(r.wrong, 1);
+  assert.equal(r.last, R0 - DAYMS, 'the newest own run, not the imported one');
+  assert.equal(r.sure, calibration(runsOf(runs.filter(x => x.id !== 'f'), 'me')).bands.find(b => b.v === 'sure').n);
+  assert.deepEqual(r.gaps.split('\n'), ['No blind runs over 4 h old.', 'Not trained in the last 30 days.', 'No run yet without help.']);
+  assert.deepEqual([r.lic, r.licTo, r.pretend, r.v], ['NPCC', now + 90 * DAYMS, false, 1]);
+  assert.deepEqual(Object.keys(r).sort(), [...RECORD_KEYS].sort(), 'every field, every time');
+  // A dog whose every run the handler knew: the gaps say so, about the handler.
+  const knew = dogRecord({ dog: 'Rex', runs: [recRun({ age: 20, debrief: { outcome: 'found', target: 'real', blind: 'open', help: 'none' } })], now: R0 });
+  assert.match(knew.gaps, /^No blind runs yet\.\nEvery run so far was one the handler knew the answer to\./);
+  assert.doesNotMatch(knew.gaps, /\byou\b/i, 'Command’s card is about the handler, never “you”');
+  const none = dogRecord({ dog: 'Rex', runs: [], now: R0 });
+  assert.deepEqual([none.trails, none.last, none.gaps], [0, null, 'No trails in the handler’s Trailcraft log yet.']);
+});
+
+t('a shared record is bounded field by field on the way in', () => {
+  const big = { v: 1, at: R0, dog: '<b>Rex</b>'.repeat(9), pretend: 'yes', trails: 1e9, h1: 1e9, h4: 2.5, older: '3', noAge: -1,
+    blind: 4, blindReal: 9, blindFound: 12, wrong: 2, last: 'then', sure: 3, sureRight: 8,
+    gaps: ['x'.repeat(300), 'a', 'b', 'c', 'd', 'e', 'f'].join('\n'), lic: 'L'.repeat(90), licTo: 'soon', evil: 1 };
+  const c = cleanRecord(big);
+  assert.equal(c.dog.length, 40);
+  assert.deepEqual([c.trails, c.h1, c.h4, c.older, c.pretend], [100000, 100000, 0, 0, false]);
+  assert.deepEqual([c.blind, c.blindReal, c.blindFound, c.sure, c.sureRight], [4, 4, 4, 3, 3], 'never more found than run');
+  // Every count is a count of trails: none above them, and the age bands add up to them.
+  const few = cleanRecord({ v: 1, at: R0, trails: 10, h1: 6, h4: 2, older: 1, noAge: 1, blind: 61, blindReal: 61, blindFound: 50, sure: 40, sureRight: 40 });
+  assert.deepEqual([few.blind, few.blindReal, few.blindFound, few.sure, few.sureRight], [10, 10, 10, 10, 10], '“Trails 10 · Blind runs 61” cannot be shown');
+  assert.equal(cleanRecord({ v: 1, at: R0, trails: 10, h1: 6, h4: 2, older: 1, noAge: 0 }), null, 'bands that do not add up: not made by the app');
+  assert.deepEqual([c.last, c.licTo, c.lic.length, c.evil], [null, null, 60, undefined]);
+  const gaps = c.gaps.split('\n');
+  assert.deepEqual([gaps.length, gaps[0].length], [GAPS_MAX, GAP_MAX]);
+  assert.equal(cleanRecord({ ...big, v: 2 }), null, 'a record of another shape is not read');
+  assert.equal(cleanRecord(null), null);
+  assert.equal(cleanRecord({ ...big, at: 'x' }), null);
+  // Only a K9 handler carries one; it rides on the member as the cloud gives it.
+  const m = cleanMember({ uid: 'k', role: 'k9', callSign: 'K9-1', dog: 'Rex', joinedAt: 1, record: big }, 'k');
+  assert.equal(m.record.trails, 100000);
+  assert.equal(cleanMember({ uid: 'o', role: 'officer', callSign: '2A12', joinedAt: 1, record: big }, 'o').record, null);
+});
+
+t('the licence chip: as typed, amber in its last 30 days, red after; dates read the same on every phone', () => {
+  const rec = (lic, licTo) => cleanRecord({ v: 1, at: R0, lic, licTo });
+  assert.deepEqual(licenceState(rec(null, null), R0), { cls: 'none', text: 'No licence typed in by the handler' });
+  assert.equal(licenceState(rec('NPCC', null), R0).text, 'NPCC · no end date typed in');
+  assert.equal(licenceState(rec('NPCC', R0 + 200 * DAYMS), R0).cls, 'ok');
+  const soon = licenceState(rec('NAPWDA', R0 + 18 * DAYMS), R0);
+  assert.equal(soon.cls, 'soon');
+  assert.match(soon.text, /^NAPWDA · ends \d{1,2} [A-Z][a-z]{2} \d{4}, in 18 days$/);
+  assert.equal(licenceState(rec('NAPWDA', R0 + 30 * DAYMS), R0).cls, 'soon', '30 days is within 30 days');
+  assert.equal(licenceState(rec('NAPWDA', R0 + 31 * DAYMS), R0).cls, 'ok');
+  assert.match(licenceState(rec('USPCA', R0 - DAYMS), R0).text, /^USPCA · ended /);
+  assert.equal(licenceState(rec('USPCA', R0 - DAYMS), R0).cls, 'late');
+  const end = licenceEnd('2026-12-01');
+  assert.equal(new Date(end).getDate(), 1);
+  assert.equal(licenceDay(end), '2026-12-01', 'back into the date field as it was typed');
+  for (const bad of ['', '2026-02-31', '01/12/2026', 'soon', '1850-01-01']) assert.equal(licenceEnd(bad), null, bad);
+  assert.equal(licenceDay(null), '');
+  assert.equal(dayWords(new Date(2026, 10, 4, 12).getTime()), '4 Nov 2026');
+});
+
+t('the card’s words show the record and leave the decision to the supervisor', () => {
+  const r = cleanRecord({ v: 1, at: R0, dog: 'Rex', trails: 12, h1: 8, h4: 3, older: 1, noAge: 0, blind: 6, blindReal: 6, blindFound: 5,
+    wrong: 2, last: R0 - 2 * DAYMS, sure: 3, sureRight: 3, gaps: 'No blind runs over 4 h old.', lic: 'NPCC', licTo: R0 + 9 * DAYMS });
+  const w = recordWords(r, R0);
+  assert.equal(w.title, 'Rex’s record');
+  const row = (k) => w.rows.find(x => x.k.includes(k));
+  assert.equal(row('Trails').sub, '8 under 1 h old · 3 at 1–4 h · 1 over 4 h', 'counts first, so “1 h 8” never reads as a time');
+  assert.equal(recordWords(cleanRecord({ ...r, h1: 7, noAge: 1 }), R0).rows[0].sub, '7 under 1 h old · 3 at 1–4 h · 1 over 4 h · 1 age not known');
+  assert.equal(row('Blind').sub, '6 on a real person: found 5 of 6 (83%)', 'says why the two numbers differ');
+  assert.equal(row('Wrong').sub, 'in 12 trails, from the handler’s debriefs');
+  assert.equal(row('Last').v, dayWords(R0 - 2 * DAYMS));
+  assert.equal(row('Last').sub, '2 days ago, as of when it was shared');
+  assert.equal(w.old, '', 'shared today: nothing to say');
+  // Shared months ago: last trained is still counted to the day it was shared, and the card asks for it again.
+  const later = recordWords(r, R0 + 183 * DAYMS);
+  assert.equal(later.rows.find(x => x.k.includes('Last')).sub, '2 days ago, as of when it was shared');
+  assert.equal(later.old, 'Shared 183 days ago: ask the handler to share it again');
+  assert.equal(recordWords(r, R0 + 7 * DAYMS).old, '', 'a week is still current');
+  assert.equal(recordWords(cleanRecord({ ...r, pretend: true }), R0 + 30 * DAYMS).old, '', 'never on a pretend card');
+  // Named by the team's dog as the squad knows it, not by what the record says.
+  assert.equal(recordWords(r, R0, 'Bella').title, 'Bella’s record');
+  assert.deepEqual([row('Certain').v, row('Certain').sub], ['3 of 3 right', 'too few to say'], 'no percentage under five');
+  assert.equal(recordWords(cleanRecord({ ...r, blindReal: 2, blindFound: 2 }), R0).rows[1].sub, '2 on a real person: found 2 of 2, too few to read much into');
+  assert.equal(w.lic.cls, 'soon');
+  assert.match(w.from, /^From the handler’s own Trailcraft log, worked out /);
+  const all = [w.title, w.from, later.old, ...w.rows.flatMap(x => [x.k, x.v, x.sub]), ...w.gaps, w.lic.text, RECORD_SAYS, RECORD_NOTE].join(' ');
+  assert.doesNotMatch(all, /secure|evidence|sealed|CJIS|prediction|proof|certified|cleared|approved|justif|deploy/i);
+  assert.equal(RECORD_SAYS, 'It shows the record; the supervisor decides.');
+  assert.match(RECORD_NOTE, /not licensing \(NPCC in the UK\) or certification \(state, POST, NAPWDA or USPCA in the US\)\. A court can ask to see it\./);
+});
+
+t('pretend: Rex and Bella carry made-up records, labelled pretend, frozen into the pretend incident', () => {
+  const t0 = 1_700_000_000_000;
+  const sim = createSim({ center: { lat: 51.2094, lon: -2.6476 }, now: t0, seed: 3, callSigns: ['Dog 1'] });
+  const ms = [...sim.members().values()];
+  const rex = ms.find(m => m.uid === 'sim-1'), bella = ms.find(m => m.uid === 'sim-2');
+  assert.equal(rex.callSign, 'Dog 1', 'his call signs, the same dog');
+  assert.deepEqual([rex.record.dog, rex.record.pretend, bella.record.dog, bella.record.pretend], ['Rex', true, 'Bella', true]);
+  assert.ok(ms.filter(m => m.role !== 'k9').every(m => m.record === null));
+  assert.equal(licenceState(rex.record, t0).cls, 'ok');
+  assert.equal(licenceState(bella.record, t0).cls, 'soon', 'the chief sees the amber chip');
+  assert.equal(recordWords(rex.record, t0).from, 'Pretend: made up for the demo');
+  assert.ok(rex.record.blindFound <= rex.record.blindReal && rex.record.blindReal <= rex.record.blind);
+  const si = createSimIncident({ sim, lkp: { lat: 51.21, lon: -2.646 }, k9Uid: 'sim-1', now: t0, k9Record: rex.record });
+  assert.deepEqual(si.inc.k9Record, rex.record, 'frozen into the incident as picked');
+  // Frozen: the incident carries its own copy, never a link to the member.
+  const d = incidentDoc({ name: 'X', lkp: { lat: 51.2, lon: -2.6 }, k9Uid: 'k9', uid: 'c', now: t0, k9Record: rex.record });
+  assert.deepEqual(cleanIncident(d, 'i').k9Record, rex.record);
+  assert.equal(incidentDoc({ name: 'X', lkp: { lat: 51.2, lon: -2.6 }, uid: 'c', now: t0, k9Record: rex.record }).k9Record, null, 'no team, no card');
+  assert.equal(cleanIncident({ ...d, k9Record: { v: 1, at: 'x' } }, 'i').k9Record, null);
+});
+
+t('the record card screens go by their functions, escape what others typed, and keep the licence on the phone', () => {
+  const ui = read('public/incident-ui.js');
+  assert.match(ui, /k9Record: frozenRecord\(st, k9Uid\) \}\);/, 'the pretend incident freezes the card');
+  assert.match(ui, /startIncident\(h, I\.sid, \{ name: f\.name, lkp: f\.lkp, k9Uid: f\.k9Uid, \.\.\.seen, k9Record: frozenRecord\(st, f\.k9Uid\) \}\)/,
+    'the real incident freezes the card');
+  assert.match(ui, /\$\{pickCardHtml\(k9s, f\.k9Uid, st\.sim \? viewNow\(\) : Date\.now\(\)\)\}/, 'shown as Command picks the team');
+  assert.match(ui, /\$\{frozenCardHtml\(inc, st\.members\?\.get\(inc\.k9Uid\)\?\.dog \?\? null\)\}/, 'on the live card');
+  assert.match(ui, /\$\{frozenCardHtml\(r\.rp\.inc, st\.members\?\.get\(r\.rp\.inc\.k9Uid\)\?\.dog \?\? null\)\}/, 'in the replay');
+  assert.match(ui, /recordCard\(rec, inc\.startedAt, \{ frozen: true, dog \}\)/, 'read as it was when the incident opened');
+  assert.match(ui, /const w = recordWords\(rec, inc\.startedAt, dog\);/, 'the fold says the trails and licence as they were then');
+  assert.match(ui, /if \(I\.recOpen == null\) I\.recOpen = true;/, 'the first pretend incident opens with the record unfolded');
+  const card = ui.slice(ui.indexOf('function recordCard('), ui.indexOf('function pickCardHtml('));
+  assert.match(card, /return html`/);
+  assert.doesNotMatch(card, /innerHTML|safe\(/);
+  // What a handler typed cannot reach the page as markup.
+  const evil = '<img src=x onerror=alert(1)>';
+  const out = html`<b>${recordWords(cleanRecord({ v: 1, at: R0, dog: evil, gaps: evil, lic: evil }), R0).title}</b>`;
+  assert.doesNotMatch(Object.getOwnPropertySymbols(out).map(k => out[k])[0], /<img/);
+  const sq = read('public/squad-ui.js');
+  assert.match(sq, /await shareRecord\(h, S\.squad\.id, dogRecord\(\{ dog: mine\.dog, runs: dog\.runs, handlerId: dog\.handlerId, licence, now: Date\.now\(\) \}\)\)/);
+  assert.match(sq, /note: `\$\{RECORD_NOTE\} The licence is kept on this phone and sent only with the card\.`/, 'the note where it is shared');
+  assert.match(sq, /const licenceKey = \(dogId\) => `squadLicence\.\$\{dogId\}`;/);
+  const share = sq.slice(sq.indexOf('async function doShareRecord'), sq.indexOf('async function doStopRecord'));
+  assert.doesNotMatch(share, /db\.|dogs\.(save|put|patch)|patchDog|\bconfirm\(/, 'the licence never goes on the dog’s synced record');
+  assert.match(share, /await form\(\{/);
+  const app = read('public/app.js');
+  assert.match(app, /dogRuns: \(name\) => \{/);
+  assert.match(read('public/index.html'), /id="sqRecord"[^>]*>Share your dog’s record with the squad</);
+  assert.match(read('public/app.css'), /\.inc-lic-soon(, \.inc-rec-old)? \{/);
+});
+
+t('the record in the cloud: the handler shares it on their own member record, bounded, and it is frozen into the incident', async () => {
+  const mpath = `squads/${sq.id}/members/k9`;
+  const now = Date.now();
+  const rec = dogRecord({ dog: 'Rex', runs: [recRun({ age: 20, at: now - DAYMS, debrief: { outcome: 'found', target: 'real', blind: 'handler' } })],
+    licence: { body: 'NPCC', expires: now + 20 * DAYMS }, now });
+  await shareRecord(k9, sq.id, rec);
+  assert.deepEqual(cleanRecord(fake.cloudDoc(mpath).record), cleanRecord(rec));
+  assert.equal(fake.cloudDoc(mpath).role, 'k9', 'nothing else on the member moves');
+  const mine = await myMember(k9, sq.id);
+  assert.equal(mine.record.trails, 1);
+  // Bounded by the rules, not only by the app.
+  const write = (who, r) => fake.setDoc(fake.doc(who.fs, ...PATHS.member(sq.id, 'k9')), { record: r }, { merge: true });
+  await refused(write(k9, { ...rec, trails: -1 }), 'a count below nought');
+  await refused(write(k9, { ...rec, trails: 1.5 }), 'a count that is not whole');
+  await refused(write(k9, { ...rec, blindFound: 2, blindReal: 1 }), 'more found than run');
+  await refused(write(k9, { ...rec, gaps: 'x'.repeat(621) }), 'gaps past their length');
+  await refused(write(k9, { ...rec, lic: 'L'.repeat(61) }), 'a licence past 60');
+  await refused(write(k9, { ...rec, evil: '<script>' }), 'a record with more in it');
+  await refused(write(k9, { ...rec, v: 2 }), 'a record of another shape');
+  await refused(write(k9, { ...rec, blind: rec.trails + 60, blindReal: 0, blindFound: 0 }), 'more blind runs than trails');
+  await refused(write(k9, { ...rec, sure: rec.trails + 1, sureRight: 0 }), 'more “Certain” calls than trails');
+  await refused(write(k9, { ...rec, h1: rec.h1 + 1 }), 'age bands that do not add up to the trails');
+  await refused(write(chief, { ...rec, trails: 99 }), 'Command writing a handler’s record');
+  await refused(write(chief, null), 'Command taking a handler’s record away');
+  await refused(write(ofc, { ...rec, trails: 99 }), 'another member writing it');
+  await refused(shareRecord(stranger, sq.id, rec), 'a stranger sharing into the squad');
+  // Command picks the team: the card goes into the incident as it stood.
+  const inc = await startIncident(chief, sq.id, { name: 'Record test', lkp: { lat: 51.2094, lon: -2.6476 }, k9Uid: 'k9', k9Record: mine.record });
+  const path = `squads/${sq.id}/incidents/${inc.id}`;
+  assert.deepEqual(cleanRecord(fake.cloudDoc(path).k9Record), mine.record);
+  assert.deepEqual(inc.k9Record, mine.record);
+  // Only the handler's own record, exactly as stored, can be frozen: not one Command made up.
+  const made = (id, k9Record) => fake.setDoc(fake.doc(chief.fs, ...PATHS.incident(sq.id, id)), { name: 'X', lkp: { lat: 51.2, lon: -2.6 },
+    k9Uid: 'k9', startedBy: 'chief', startedAt: Date.now(), endedAt: null, status: 'active', summary: null, k9Record,
+    expiresAt: Date.now() + 3600e3, deleteAt: fake.Timestamp.fromMillis(Date.now() + 3600e3) });
+  const stored = fake.cloudDoc(mpath).record;
+  await refused(made('madeUp', { ...stored, trails: 146, h1: 146, blind: 52, blindReal: 52, blindFound: 52, licTo: Date.now() + 1500 * DAYMS }),
+    'a record Command wrote itself');
+  await refused(made('madeUp2', { ...stored, lic: 'NAPWDA' }), 'the licence changed on the way');
+  const reordered = Object.fromEntries(Object.entries(stored).reverse());
+  await made('exactCopy', reordered);
+  assert.deepEqual(fake.cloudDoc(`squads/${sq.id}/incidents/exactCopy`).k9Record, reordered, 'the same map, in any order');
+  // The app copies it exactly as stored, and says so when the card Command saw has since changed.
+  await assert.rejects(startIncident(chief, sq.id, { name: 'Stale card', lkp: { lat: 51.2094, lon: -2.6476 }, k9Uid: 'k9',
+    k9Record: { ...mine.record, trails: 2, h1: 2 } }), /changed the dog’s record/);
+  // The handler shares a newer one, or stops: the incident keeps what Command saw.
+  await shareRecord(k9, sq.id, null);
+  assert.equal(fake.cloudDoc(mpath).record, null);
+  assert.equal((await myMember(k9, sq.id)).record, null);
+  assert.deepEqual(cleanRecord(fake.cloudDoc(path).k9Record), mine.record);
+  const iw = (x) => fake.setDoc(fake.doc(chief.fs, ...PATHS.incident(sq.id, inc.id)), { ...fake.cloudDoc(path), ...x });
+  await refused(iw({ k9Record: { ...fake.cloudDoc(path).k9Record, blindFound: 0 } }), 'the frozen card changed');
+  await refused(iw({ k9Record: null }), 'the frozen card taken away');
+  const held = cleanIncident(fake.cloudDoc(path), inc.id);
+  await setCover(chief, sq.id, held, 'ofc');
+  await updateSeen(chief, sq.id, held, { lastSeenAt: null, pace: 'walk', brief: null });
+  await endIncident(chief, sq.id, held, summarise({ inc: held, trail: [], marks: [], units: 1, now: Date.now() }));
+  assert.deepEqual(cleanRecord(fake.cloudDoc(path).k9Record), mine.record, 'the cover, last seen and the end all keep it');
+  // A card with no team to belong to is refused.
+  const lone = { name: 'X', lkp: { lat: 51.2, lon: -2.6 }, k9Uid: null, startedBy: 'chief', startedAt: Date.now(), endedAt: null, status: 'active',
+    summary: null, k9Record: mine.record, expiresAt: Date.now() + 3600e3, deleteAt: fake.Timestamp.fromMillis(Date.now() + 3600e3) };
+  await refused(fake.setDoc(fake.doc(chief.fs, ...PATHS.incident(sq.id, 'loneRecord')), lone), 'a card with no K9 team');
+});
+
 t('a mark taken back in the cloud is withdrawn, once, in the withdrawer’s name, and never deleted', async () => {
   const inc = await startIncident(chief, sq.id, { name: 'Withdraw test', lkp: { lat: 51.2094, lon: -2.6476 }, k9Uid: 'k9' });
   const mid = await putMark(ofc, sq.id, inc.id, { kind: 'roadblock', lat: 51.21, lon: -2.64 });
@@ -1347,6 +1602,344 @@ t('the creator deletes the squad: everything in it goes, and a tombstone keeps i
   fake.cloud.docs.delete(`squads/${sq.id}/members/k9`);
 });
 
+/* ── Move C: keeping officers off the track ──────────────────────────── */
+t('the downwind band is a wedge from the last known point the way the wind blows, and none in a calm', () => {
+  const lkp = { lat: 51.2094, lon: -2.6476 };
+  const b = downwindBand(lkp, { speed: 4, from: 270 });          // a westerly blows east
+  assert.ok(b);
+  assert.ok(Math.abs(bearing(lkp, b.tip) - 90) < 0.5, 'it points downwind');
+  assert.equal(b.lengthM, 180);
+  assert.deepEqual(b.pts[0], b.pts[b.pts.length - 1], 'a closed shape');
+  assert.deepEqual(b.pts[0], lkp, 'from the point itself');
+  for (const p of b.pts.slice(1, -1)) {
+    assert.ok(Math.abs(dist(lkp, p) - b.lengthM) < 1, 'the far edge is an arc');
+    assert.ok(Math.abs(bearing(lkp, p) - 90) <= b.half + 0.5, 'inside the spread');
+  }
+  const light = downwindBand(lkp, { speed: 1, from: 0 });
+  assert.ok(light.half > b.half && light.lengthM < b.lengthM, 'a light wind wanders more and carries less');
+  assert.ok(Math.abs(bearing(lkp, light.tip) - 180) < 0.5, 'a northerly blows south');
+  assert.ok(downwindBand(lkp, { speed: 30, from: 90 }).lengthM <= 250, 'never longer than 250 m');
+  assert.equal(downwindBand(lkp, { speed: CALM_MS / 2, from: 90 }), null, 'a calm gives no direction');
+  for (const w of [null, {}, { speed: NaN, from: 10 }, { speed: 3 }]) assert.equal(downwindBand(lkp, w), null);
+  assert.equal(downwindBand({ lat: 99, lon: 0 }, { speed: 3, from: 10 }), null);
+  // Honest words: a modelled guide, never where the person went.
+  assert.match(BAND_WORDS, /modelled guide from the forecast wind, not where the person went/);
+  assert.equal(bandWindWords({ speed: 4, from: 225 }), 'wind from the SW, 14 km/h');
+  assert.equal(bandWindWords({ speed: 4, from: 225 }, true), 'wind from the SW, 9 mph');
+  assert.match(bandWindWords({ speed: 0.2, from: 225 }), /too light to give a direction/);
+  assert.equal(bandWindWords(null), '');
+});
+
+t('who walked the scene: units on foot within about 30 m of the point between the opening and the dog', () => {
+  const lkp = { lat: 51.2094, lon: -2.6476 };
+  const t0 = 1_800_000_000_000;
+  const inc = { lkp, k9Uid: 'k9', startedAt: t0 };
+  const at = (b, m, t, spd) => ({ ...project(lkp, b, m), t, spd });
+  const lines = new Map([
+    ['foot3', { uid: 'foot3', pts: [at(0, 200, t0 + 10e3, 1.4), at(0, 12, t0 + 60e3, 0.8), at(0, 20, t0 + 70e3, 1.2)] }],
+    // A car driving past at 10 m/s, fixes either side of the point: left out by its speed.
+    ['car', { uid: 'car', pts: [at(270, 60, t0 + 30e3), at(270, 15, t0 + 34.5e3), at(90, 30, t0 + 39e3)] }],
+    // A car stopped at the point: its officer may have got out, so it counts.
+    ['car2', { uid: 'car2', pts: [at(180, 25, t0 + 40e3, 0), at(180, 25, t0 + 50e3, 0)] }],
+    ['early', { uid: 'early', pts: [at(0, 5, t0 - 60e3, 0.5), at(0, 300, t0 + 10e3, 1)] }],     // before the opening
+    ['late', { uid: 'late', pts: [at(0, 5, t0 + 200e3, 0.5)] }],                                 // after the dog
+    ['far', { uid: 'far', pts: [at(0, SCENE_M + 5, t0 + 20e3, 0.5)] }],
+    ['k9', { uid: 'k9', pts: [at(0, 2, t0 + 30e3, 1)] }],                                        // the team itself
+  ]);
+  const got = sceneWalkers({ inc, lines, until: t0 + 120e3 });
+  assert.deepEqual(got.map(w => w.uid), ['car2', 'foot3'], 'oldest first');
+  assert.ok(Math.abs(got[1].m - 12) < 1, 'how close they came');
+  assert.deepEqual(sceneWalkers({ inc, lines: [...lines.values()], until: t0 + 50e3 }).map(w => w.uid), ['car2'], 'a list does as well as a Map; only up to the dog');
+  assert.deepEqual(sceneWalkers({ inc: null, lines, until: Infinity }), []);
+  assert.ok(speedAt(lines.get('car').pts, 1) > FOOT_MS, 'a speed worked from the fixes either side');
+  assert.equal(speedAt(lines.get('foot3').pts, 1), 0.8, 'what the phone said comes first');
+  assert.equal(sceneWords([]), '');
+  assert.equal(sceneWords(['Foot 3']), 'Before the dog: Foot 3 was at the last known point');
+  assert.equal(sceneWords(['Foot 3', '2A12']), 'Before the dog: Foot 3 and 2A12 were at the last known point');
+  assert.equal(sceneWords(['Foot 3', '2A12', 'Foot 5'], false), 'At the last known point so far: Foot 3, 2A12 and Foot 5');
+  assert.equal(nameList(['A', 'B', 'C', 'D']), 'A, B, C and D');
+  assert.match(SCENE_NOTE, /about 30 m/);
+  // The folded phone strip names anyone inside the perimeter.
+  assert.match(stripWords({ k9: { callSign: 'K9-1' }, info: { lengthM: 10 }, now: 0, inside: [{ callSign: 'Foot 5' }] }),
+    /Foot 5 inside the perimeter/);
+  assert.doesNotMatch(stripWords({ k9: { callSign: 'K9-1' }, info: { lengthM: 10 }, now: 0 }), /inside/);
+  // The log says it once the dog is there, after the team's own line.
+  const trail = [{ ...project(lkp, 0, 5), t: t0 + 120e3 }];
+  const log = logLines({ inc: { ...inc, startedBy: 'c', name: 'X' }, marks: new Map(), trail, who: () => 'Sgt', team: 'K9-1 Rex',
+                         scene: sceneWords(['Foot 3']) });
+  assert.deepEqual(log.map(l => l.key), ['open', 'trail', 'scene']);
+  assert.equal(log[2].text, 'Before the dog: Foot 3 was at the last known point');
+  assert.deepEqual(logLines({ inc: { ...inc, startedBy: 'c' }, marks: new Map(), trail, who: () => 'Sgt' }).map(l => l.key), ['open', 'trail'],
+    'no line when nobody walked it');
+});
+
+t('inside the perimeter: foot units well inside a ring that has stood a while, not the team, its cover or those doing as told', () => {
+  const c = { lat: 51.2094, lon: -2.6476 };
+  const t0 = 1_800_000_000_000;
+  const now = t0 + PERIM_GRACE_MS + 10e3;
+  const inc = { lkp: c, k9Uid: 'k9', coverUid: 'cover' };
+  const perim = { id: 'p', kind: 'perimeter', at: t0, pts: ring(c, 300, 12) };
+  // A rally point just outside the ring, as a staging point stands.
+  const rally = { id: 'r', kind: 'rally', at: t0, ...project(c, 180, 310) };
+  const row = (uid, b, m, spd = 0.5) => ({ uid, callSign: uid.toUpperCase(), pos: { ...project(c, b, m), at: now - 5e3, spd } });
+  const rows = [row('foot3', 0, 100), row('edge', 90, 300 - INSIDE_M + 8), row('k9', 0, 50), row('cover', 0, 60),
+                row('atRally', 180, 270), row('car', 270, 100, 9), row('outside', 0, 400), row('parked', 300, 150)];
+  // The parked car drove in a minute ago: a car, by its own line.
+  const lines = new Map([['parked', { uid: 'parked', pts: [{ ...project(c, 300, 600), t: now - 60e3 }, { ...project(c, 300, 150), t: now - 20e3 }] }]]);
+  const got = insideWalkers({ inc, marks: [perim, rally], rows, lines, now });
+  assert.deepEqual(got.map(w => w.uid), ['foot3']);
+  assert.ok(Math.abs(got[0].m - 200) < 10, 'how far in');
+  assert.equal(insideWords(got[0]), 'FOOT3 is inside the perimeter, about 190 m in');
+  assert.deepEqual(insideWalkers({ inc, marks: [{ ...perim, at: now - 60e3 }], rows, now }), [], 'a ring just drawn gives officers time to get out');
+  assert.deepEqual(insideWalkers({ inc, marks: [{ ...perim, pts: perim.pts.slice(0, 5) }], rows, now }), [], 'an open line holds nobody in');
+  // A rally point inside the ring excuses nobody: they stand on the ground it holds.
+  const inRally = { ...rally, ...project(c, 180, 250) };
+  assert.deepEqual(insideWalkers({ inc, marks: [perim, inRally], rows, lines, now }).map(w => w.uid), ['foot3', 'atRally']);
+  // Walking out of the ring, or to the rally point, in the first minutes of the ring is doing as told.
+  const out = new Map([['foot3', { uid: 'foot3', pts: [{ ...project(c, 0, 60), t: now - 65e3, spd: 1.2 }, { ...project(c, 0, 100), t: now - 5e3, spd: 1.2 }] }]]);
+  assert.deepEqual(insideWalkers({ inc, marks: [perim, rally], rows, lines: out, now }).map(w => w.uid), ['parked'],
+    'on the way out (and the parked car, with no line here, goes by its last position)');
+  const toRally = new Map([['foot3', { uid: 'foot3', pts: [{ ...project(c, 0, 140), t: now - 65e3 }, { ...project(c, 0, 100), t: now - 5e3 }] }]]);
+  assert.ok(!insideWalkers({ inc, marks: [perim, rally], rows, lines: toRally, now }).some(w => w.uid === 'foot3'), 'straight to the rally point');
+  const behind = { ...rally, ...project(c, 0, 330) };
+  assert.ok(insideWalkers({ inc, marks: [perim, behind], rows, lines: toRally, now }).some(w => w.uid === 'foot3'),
+    'walking inward, away from the rally point: still in');
+  const across = new Map([['foot3', { uid: 'foot3', pts: [{ ...project(c, 300, 120), t: now - 65e3 }, { ...project(c, 0, 100), t: now - 5e3 }] }]]);
+  assert.ok(insideWalkers({ inc, marks: [perim, rally], rows, lines: across, now }).some(w => w.uid === 'foot3'),
+    'a little nearer the rally point on the way across: still in');
+  assert.ok(onFootNow(null, { spd: null }, now) && !onFootNow(null, { spd: 8 }, now), 'with no line, the last position says');
+  assert.deepEqual(insideWalkers({ inc: null, marks: [perim], rows, now }), []);
+});
+
+t('inside the perimeter goes by fresh positions heard since the ring went up, and keeps walking out in softer words', () => {
+  const c = { lat: 51.2094, lon: -2.6476 };
+  const t0 = 1_800_000_000_000;
+  const inc = { lkp: c, k9Uid: 'k9', startedAt: t0 - 60e3 };
+  const perim = { id: 'p', kind: 'perimeter', at: t0, pts: ring(c, 300, 12) };
+  const at = (b, m, heard, spd = 0.4) => ({ ...project(c, b, m), at: heard, spd });
+  // A phone that went quiet five minutes ago inside a ring that has stood three: no live claim.
+  const now = t0 + 8 * 60e3;
+  const quiet = [{ uid: 'f5', callSign: 'Foot 5', pos: at(0, 100, now - 5 * 60e3) }];
+  const got = insideWalkers({ inc, marks: [perim], rows: quiet, now });
+  assert.equal(got.length, 1);
+  assert.ok(got[0].old, 'kept only as last heard');
+  assert.equal(insideWords(got[0], false, now), 'Foot 5 was inside the perimeter, last heard 5 min ago');
+  assert.deepEqual(insideNow(got), [], 'never said out loud or counted as now');
+  assert.doesNotMatch(stripWords({ k9: { callSign: 'K9-1' }, info: { lengthM: 10 }, now, inside: got }), /inside/, 'not on the folded strip');
+  // Heard before the ring went up: it says nothing about the ring.
+  const before = [{ uid: 'f5', callSign: 'Foot 5', pos: at(0, 100, t0 - 30e3) }];
+  assert.deepEqual(insideWalkers({ inc, marks: [perim], rows: before, now: t0 + 3 * 60e3 }), []);
+  // Older than the half hour the map draws: nothing at all.
+  assert.deepEqual(insideWalkers({ inc, marks: [perim], rows: [{ uid: 'f5', callSign: 'Foot 5', pos: at(0, 100, now - 31 * 60e3) }], now }), []);
+  // Walking out along the likely track from the last known point, well after the ring went up: listed.
+  const late = t0 + GOING_GRACE_MS + 60e3;
+  const rows = [{ uid: 'f3', callSign: 'Foot 3', pos: at(90, 120, late - 3e3, 1.3) }];
+  const lines = new Map([['f3', { uid: 'f3', pts: [at(90, 40, late - 63e3, 1.3), at(90, 120, late - 3e3, 1.3)].map(p => ({ ...p, t: p.at })) }]]);
+  const going = insideWalkers({ inc, marks: [perim], rows, lines, now: late });
+  assert.deepEqual(going.map(w => [w.uid, w.going, w.old]), [['f3', true, false]], 'walking out is still on the ground the ring holds');
+  assert.equal(insideWords(going[0]), 'Foot 3 is walking out of the perimeter, about 170 m in');
+  assert.deepEqual(insideNow(going), [], 'in softer words, not spoken');
+  // The same walk in the first minutes of the ring is doing as told.
+  const early = t0 + PERIM_GRACE_MS + 20e3;
+  const rowsE = [{ ...rows[0], pos: { ...rows[0].pos, at: early - 3e3 } }];
+  const linesE = new Map([['f3', { uid: 'f3', pts: lines.get('f3').pts.map(p => ({ ...p, t: p.t - (late - early) })) }]]);
+  assert.deepEqual(insideWalkers({ inc, marks: [perim], rows: rowsE, lines: linesE, now: early }), []);
+  // The log keeps each time a unit went in, so a moment at ×10 is not lost.
+  const seen = [{ uid: 'f5', callSign: 'Foot 5', m: 268, t: t0 + 150e3, at: project(c, 0, 30) }];
+  const log = logLines({ inc: { ...inc, startedBy: 'c' }, marks: new Map(), trail: [], who: () => 'Sgt', inside: seen });
+  assert.deepEqual(log.map(l => l.text), ['Incident opened by Sgt', 'Foot 5 went inside the perimeter, about 270 m in']);
+  assert.deepEqual(logLines({ inc: { ...inc, startedBy: 'c' }, marks: new Map(), trail: [], who: () => 'Sgt', inside: seen, now: t0 + 100e3 })
+    .map(l => l.key), ['open'], 'not before it happened, in a replay');
+});
+
+t('the cover officer’s distance says about, and how old the positions are', () => {
+  const c = { lat: 51.2094, lon: -2.6476 };
+  const now = 1_800_000_000_000;
+  const k9 = { pos: { ...c, at: now - 5e3 } };
+  const cover = { pos: { ...project(c, 90, 38), at: now - 25e3 } };
+  assert.equal(coverWords({ name: 'Foot 3', cover, k9, now }), 'Cover: Foot 3, about 40 m from the handler · positions up to 25 s old, may be out of date');
+  assert.equal(coverWords({ name: 'Foot 3', cover: { pos: { ...cover.pos, at: now - 2e3 } }, k9, now }),
+    'Cover: Foot 3, about 40 m from the handler · positions a few seconds old, may be out of date');
+  assert.equal(coverWords({ name: 'Foot 3', cover: null, k9, now }), 'Cover: Foot 3, no position from the app yet');
+  assert.equal(coverWords({ name: '', cover, k9, now }), '');
+  assert.equal(aboutWords(3), 'about 5 m');
+  assert.equal(aboutWords(137), 'about 140 m');
+  assert.match(aboutWords(40, true), /^about \d+ (ft|yd)$/);
+  // On the incident: a member's account, never the handler's own.
+  const lkp = { lat: 51.2, lon: -2.6 };
+  assert.equal(incidentDoc({ name: 'x', lkp, k9Uid: 'k9', uid: 'c', now, coverUid: 'f3' }).coverUid, 'f3');
+  assert.equal(incidentDoc({ name: 'x', lkp, k9Uid: 'k9', uid: 'c', now, coverUid: 'k9' }).coverUid, null);
+  assert.equal(incidentDoc({ name: 'x', lkp, k9Uid: 'k9', uid: 'c', now }).coverUid, null);
+  assert.equal(cleanIncident({ lkp, startedAt: now, coverUid: 'x'.repeat(129) }, 'i').coverUid, null);
+  assert.equal(cleanIncident({ lkp, startedAt: now, coverUid: 42 }, 'i').coverUid, null);
+  assert.equal(cleanIncident({ lkp, startedAt: now, k9Uid: 'k9', coverUid: 'f3' }, 'i').coverUid, 'f3');
+});
+
+t('the pretend incident walks the scene, picks a cover, and has one officer stop inside the perimeter', () => {
+  const center = { lat: 51.2094, lon: -2.6476 };
+  const t0 = 1_800_000_000_000;
+  const sim = createSim({ center, now: t0, seed: 7 });
+  const si = createSimIncident({ sim, lkp: project(sim.unit('sim-1'), 30, 120), now: t0, seed: 3, lastSeenAt: t0 - 60e3, pace: 'walk' });
+  let scene = null, coverGap = Infinity, insideSeen = new Set(), t = t0, gaps = [], jump = 0, prev = null, held = 0;
+  while (t < t0 + 25 * 60e3 && si.phase !== 'found') {
+    t += 2000;
+    sim.step(t); si.step(t, 10);
+    // The standby team drives to the rally point: never a jump on the map.
+    const k9b = sim.unit('sim-2');
+    if (prev) jump = Math.max(jump, dist(prev, k9b));
+    prev = { lat: k9b.lat, lon: k9b.lon };
+    const lines = new Map([...si.tracks].map(([uid, pts]) => [uid, { uid, pts }]));
+    const on = scentStart(si.trail, si.inc.lkp);
+    if (on && !scene) scene = sceneWalkers({ inc: si.inc, lines, until: on.t });
+    const rows = roster(sim.members(), sim.positions(), t);
+    const inside = insideWalkers({ inc: si.inc, marks: standingOf(si.marks, t), rows, lines, now: t });
+    for (const w of inside) insideSeen.add(w.uid);
+    if (insideNow(inside).some(w => w.uid === 'sim-6')) held += 2000;
+    if (si.inc.coverUid && si.phase === 'trailing') coverGap = Math.min(coverGap, dist(sim.unit(si.inc.coverUid), sim.unit('sim-1')));
+    if (si.inc.coverUid && si.phase === 'trailing' && t - si.trailStart > 60e3) gaps.push(dist(sim.unit(si.inc.coverUid), sim.unit('sim-1')));
+  }
+  gaps.sort((a, b) => a - b);
+  assert.ok(gaps[Math.floor(gaps.length * 0.9)] < 20, 'the cover stays a few metres behind the handler, not 75 m off');
+  assert.ok(jump < 8 * 2 + 5, 'the standby van drives round: no jump');
+  assert.ok(held >= 30e3 * 10, 'at ×10 Foot 5 stays inside for at least half a minute of real time');
+  assert.ok(!insideSeen.has('sim-2'), 'the standby team at the rally point outside the ring is never inside');
+  const rp = [...si.marks.values()].filter(m => m.kind === 'rally' && !m.withdrawnAt);
+  const ringNow = [...si.marks.values()].filter(m => m.kind === 'perimeter' && !m.withdrawnAt);
+  assert.ok(rp.length === 1 && ringNow.every(g => !insideLine(rp[0], g.pts)), 'the rally point stands outside the ring');
+  assert.equal(si.phase, 'found');
+  assert.deepEqual(scene.map(w => w.uid), ['sim-5'], 'the first officer on scene stood at the point before the dog');
+  assert.equal(si.inc.coverUid, 'sim-5', 'the sergeant put them with the team as cover');
+  assert.ok(coverGap < 40, 'the cover walks with the team');
+  assert.ok(insideSeen.has('sim-6'), 'Foot 5 stopped inside the perimeter');
+  assert.ok(!insideSeen.has('sim-1') && !insideSeen.has('sim-5'), 'never the team or its cover');
+  si.setCover('sim-1');
+  assert.equal(si.inc.coverUid, null, 'the handler is never their own cover');
+  si.setCover('sim-3');
+  assert.equal(si.inc.coverUid, 'sim-3');
+  // The stray goes by what the sergeant knows, never the hidden line.
+  const src = read('public/incident.js');
+  const stray = src.slice(src.indexOf('function stray('), src.indexOf('const si = {', src.indexOf('function stray('))).replace(/\/\*[\s\S]*?\*\//g, '');
+  assert.ok(stray.length > 200);
+  assert.doesNotMatch(stray, /\bscent\b|\bperson\b|hiddenRoute|pathAt/);
+  const cover = src.slice(src.indexOf('function cover()'), src.indexOf('function record('));
+  assert.doesNotMatch(cover.replace(/\/\*[\s\S]*?\*\//g, ''), /\bscent\b|\bperson\b|hiddenRoute/);
+});
+
+t('the command screen keeps officers off the track by its own functions, and says so honestly', () => {
+  const ui = read('public/incident-ui.js');
+  // The band: drawn only for a live incident, from the wind the app already has, with its caveat on the map.
+  const bandOf = ui.slice(ui.indexOf('function bandOf('), ui.indexOf('function bandText('));
+  assert.match(bandOf, /v\.inc\.status !== 'active' \|\| v\.replay\) return null;/);
+  assert.match(bandOf, /downwindBand\(v\.inc\.lkp, windAt\(v\.inc\.lkp\)\)/);
+  assert.match(ui, /el\.textContent = 'Downwind · modelled guide';/);
+  assert.match(ui, /setData\(m, 'inc-band', lines\(band \? \[polygon\(band\.pts\)\] : \[\]\)\);/);
+  assert.match(ui, /I\.bandTag\?\.marker\?\.remove\(\); I\.bandTag = null;\n  I\.log = \[\]/, 'torn down with the map');
+  assert.doesNotMatch(ui, /start the dog here/i);
+  // Who walked the scene: on the card, in the log, and to the handler before the run starts.
+  assert.match(ui, /text\('scene', sc\.text \?/);
+  const start = ui.slice(ui.indexOf('async function startTrailing('), ui.indexOf('/* ── The banner, on every screen'));
+  assert.match(start, /await info\(\{ title: 'Before you start', close: 'Start trailing',/);
+  assert.ok(start.indexOf('await info(') < start.indexOf('ctx.startTrail()'), 'told before the run starts');
+  assert.match(ui, /logLines\(\{ \.\.\.base, marks: v\.said \|\| v\.marks, trail: v\.trail, scene: sceneAt\(v\.trail\) \}\)/);
+  // Worked out on the device: positions it already gets, no new cloud reads.
+  assert.match(ui, /if \(!st\.sim\) noteWalkers\(st\);/);
+  const walk = ui.slice(ui.indexOf('function noteWalkers('), ui.indexOf('/** Command puts a cover officer'));
+  assert.doesNotMatch(walk, /onSnapshot|getDocs|watch[A-Z]|loadIncident|ctx\.handle/);
+  // Inside the perimeter: on the card, said once, only with the voice on.
+  assert.match(ui, /text\('inside', inside\.map\(w => insideWords\(w, imperial\(\), v\.now\)\)\.join\('\\n'\)\);/);
+  assert.match(ui, /if \(I\.voice && ctx\.speak && sq\(\)\.view\)/);
+  assert.match(ui, /const inside = amCommand\(\) \? insideOf\(v, st\) : \[\];/, 'a line to Command, not to every member');
+  // The cover: Command picks by a sheet, never confirm(); the card says the positions may be out of date.
+  assert.match(ui, /data-inc-act="cover">Cover officer<\/button>/);
+  assert.match(ui, /if \(act === 'cover'\) return pickCover\(\);/);
+  assert.match(ui, /await setCover\(h, I\.sid, now\.inc, got\.uid \|\| null\)/);
+  assert.doesNotMatch(ui, /\bconfirm\(/);
+  // The wind comes from what app.js already fetched, near the point, never a new ask.
+  const app = read('public/app.js');
+  const wn = app.slice(app.indexOf('windNear: (p) => {'), app.indexOf('});', app.indexOf('windNear: (p) => {')));
+  assert.match(wn, /dist\(wxNow\.near, p\) > 5000/);
+  assert.doesNotMatch(wn, /fetchWeather|weatherHere|geolocation/);
+  assert.match(app, /wxNow\.near = \{ lat: at\.lat, lon: at\.lon \};/);
+  // No words a chief could over-read.
+  const words = read('public/incident.js').slice(read('public/incident.js').indexOf('/* ── Keeping officers off the track'),
+                                                  read('public/incident.js').indexOf('/* ── The live log'));
+  assert.doesNotMatch(words, /secure|evidence|sealed|CJIS|prediction|proof/i);
+  assert.match(read('public/app.css'), /\.inc-band-tag \{/);
+});
+
+t('two members with one call sign stay two everywhere: the cover list, the scene line, the log', () => {
+  const members = new Map([
+    ['a', { uid: 'a', callSign: 'Foot 3', role: 'officer', joinedAt: 1 }],
+    ['b', { uid: 'b', callSign: 'foot 3', role: 'officer', joinedAt: 2 }],
+    ['c', { uid: 'c', callSign: '2A12', role: 'officer', joinedAt: 3 }],
+  ]);
+  const names = callSignsOf(members);
+  assert.deepEqual([...names].map(([uid, n]) => [uid, n.callSign]), [['a', 'Foot 3'], ['b', 'foot 3 (2)'], ['c', '2A12']]);
+  assert.deepEqual(roster(members, new Map(), 0).map(r => r.callSign).sort(), ['2A12', 'Foot 3', 'foot 3 (2)'], 'the roster says the same');
+  const ui = read('public/incident-ui.js');
+  const who = ui.slice(ui.indexOf('function who('), ui.indexOf('/* ── Following the squad'));
+  assert.match(who, /names = callSignsOf\(members\)/, 'every name on the incident screens goes by it');
+  const pick = ui.slice(ui.indexOf('async function pickCover('), ui.indexOf('/* ── The live log'));
+  assert.match(pick, /const rows = roster\(st\.members, st\.positions \|\| new Map\(\), v\.now\);/);
+  assert.match(pick, /r\.uid !== v\.inc\.k9Uid && r\.role !== 'command' && r\.role !== 'k9'/, 'not Command, not the standby dog’s handler');
+  assert.match(pick, /sort\(\(a, b\) => far\(a\) - far\(b\)/, 'nearest the handler first');
+  assert.doesNotMatch(pick, /m\.callSign/, 'never the raw call sign');
+  assert.match(ui, /const team = k9 \? `\$\{who\(v\.inc\.k9Uid, members\)\}/);
+});
+
+t('the map keeps its caveats readable: tags clear of pins, the panel and the Wall box; the cover named with the team', () => {
+  const ui = read('public/incident-ui.js');
+  const room = ui.slice(ui.indexOf('function tagRoom('), ui.indexOf('const TAG_SPOTS'));
+  assert.match(room, /const pad = mapPad\(\);/);
+  assert.match(room, /\.inc-mark \.inc-pin, \.inc-mark-tag, \.sq-unit, \.sq-tag/, 'pins and their labels are taken');
+  assert.match(room, /underWall: /);
+  const band = ui.slice(ui.indexOf('function paintBandTag('), ui.indexOf('function pinEl('));
+  assert.match(band, /if \(len < BAND_MIN_PX\) \{ tag\.el\.hidden = true; return; \}/, 'a band a few pixels long labels nothing');
+  assert.match(band, /const room = tagRoom\(\);/);
+  assert.match(band, /if \(room\.clear\(x0, y0, tw, th\)\)/);
+  assert.doesNotMatch(band, /W - 4|H - 4/, 'not the whole canvas, which runs under the panel');
+  const reach = ui.slice(ui.indexOf('function paintReachTag('), ui.indexOf('const BAND_ANCHORS'));
+  assert.match(reach, /const room = tagRoom\(\);/);
+  assert.match(reach, /room\.clear\(x0, y0, tw, th\)/, 'never on a pin’s label');
+  assert.match(reach, /window\.matchMedia\(NARROW\)\.matches\) \{ tag\.el\.hidden = true; return; \}/);
+  // The band is drawn stronger on the Wall, and again after a style reload.
+  assert.match(ui, /wall: \{ color: '#3FD3EA', fill: 0\.4, width: 3\.5, dash: \[3, 1\.5\] \}/);
+  assert.match(ui, /if \(l\.src === 'inc-band'\) I\.bandLook = null;/);
+  assert.match(ui, /setCoverUnit\(v\.inc\?\.coverUid \?\? null\);/);
+  const sq = read('public/squad-ui.js');
+  const dc = sq.slice(sq.indexOf('function declutter('), sq.indexOf('/* The arrow points'));
+  assert.match(dc, /merged && m === lead \? `\$\{m\.label\} \+ cover \$\{cover\.callSign\}` : m\.label/);
+  assert.match(dc, /m\.tag\.textContent !== label\) m\.tag\.textContent = label/, 'by textContent');
+  assert.match(dc, /m\.tag\.hidden = merged && m === cover;/);
+  assert.match(read('public/app.css'), /\.sq-tag\.sq-tag-up \{ top: auto; bottom: 34px; \}/);
+  // The Demo label stays in view on a phone: the card scrolls, never the panel.
+  const css = read('public/app.css');
+  assert.match(css, /\.cmd-incident \{ flex: 0 1 auto; min-height: 0; overflow-y: auto;/);
+  assert.match(css, /\.cmd-panel \.sq-demo \{ margin: 0; position: sticky; top: 0;/);
+  assert.match(ui, /if \(panel && panel\.scrollTop\) panel\.scrollTop = 0;/);  assert.match(css, /\.cmd-panel\.inc-form \{ max-height: 62vh; \}/, 'the phone start form gets the room for the record card');
+  assert.match(ui, /classList\.toggle\('inc-form', !!I\.form\)/);
+  // The last known point, the calls and the caveats are not faded behind 3D buildings.
+  assert.equal((ui.match(/occludedOpacity: FULL/g) || []).length, 5);
+  // Inside the perimeter is said and logged once per going in, not on every GPS flicker.
+  const speak = ui.slice(ui.indexOf('function speakInside('), ui.indexOf('/** Command puts a cover officer'));
+  assert.match(speak, /if \(last != null && v\.now - last < BACK_IN_MS\) continue;/);
+  assert.match(speak, /for \(const w of insideNow\(list\)\)/, 'only the live line, never the softer ones');
+  assert.match(speak, /if \(!w\.old && w\.going && I\.inside\.ids\.has\(w\.uid\)\) I\.inside\.ids\.set\(w\.uid, v\.now\);/,
+    'walking out but still inside keeps the time fresh, so stopping again is not a second "went inside"');
+  assert.match(ui, /const inside = I\.inside\.for === v\.inc\.id \? I\.inside\.seen : \[\];/, 'into the log, the Wall and the replay');
+});
+
+t('a phone with two dogs of one name shares the right one: the handler’s own first, else it asks', () => {
+  const app = read('public/app.js');
+  const hook = app.slice(app.indexOf('dogRuns: (name) => {'), app.indexOf('shareBase:'));
+  assert.match(hook, /d\.handlerId === hid \|\| \(d\.teams \|\| \[\]\)\.some\(t => t\.handlerId === hid\)/);
+  assert.match(hook, /return \(mine\.length \? mine : named\)\.map/);
+  const sq = read('public/squad-ui.js');
+  const share = sq.slice(sq.indexOf('async function doShareRecord'), sq.indexOf('async function doStopRecord'));
+  assert.match(share, /if \(dogs\.length > 1\) \{\n    const pick = await form\(\{/);
+  assert.doesNotMatch(share, /\bconfirm\(/);
+});
+
 t('firestore.rules says what the fake’s copy of it relies on', () => {
   const rules = read('firestore.rules');
   const at = (s) => { const i = rules.indexOf(s); assert.ok(i > 0, `firestore.rules says: ${s}`); return i; };
@@ -1367,18 +1960,33 @@ t('firestore.rules says what the fake’s copy of it relies on', () => {
   assert.equal((rules.match(/allow delete: if signedIn\(\) && creator\(\) == request\.auth\.uid;/g) || []).length, 2,
     'an incident and a track are deleted only by the creator, with the squad');
   at("allow delete: if signedIn() && creator() == request.auth.uid\n                        && (!exists(incidentPath()) || get(incidentPath()).data.status == 'ended');");
-  at("&& request.resource.data.startedAt == resource.data.startedAt;");
+  at("&& request.resource.data.startedAt == resource.data.startedAt\n");
   at("request.resource.data.code == get(squadPath()).data.code");
   at("getAfter(squadPath()).data.createdBy == request.auth.uid");
   at("&& expires(d, 12);");
   at("get(incidentPath()).data.k9Uid == request.auth.uid");
   at("trackId == request.auth.uid + '_' + string(d.n)");
   at("&& resource.data.status == 'active'");
-  at("&& request.resource.data.status == 'active';");
+  at("&& request.resource.data.status == 'active'\n");
   at("trackOk(request.resource.data) && exists(incidentPath())");
   at("'indication', 'lost', 'refound', 'article', 'sighting', 'roadblock', 'rally', 'perimeter'");
   // Move B: last seen, how they left and the brief on the incident; a mark withdrawn, not deleted.
-  at("'expiresAt', 'deleteAt', 'summary', 'lastSeenAt', 'pace', 'brief'])");
+  at("'expiresAt', 'deleteAt', 'summary', 'lastSeenAt', 'pace', 'brief', 'coverUid', 'k9Record'])");
+  // Move D: the dog's record card, bounded, on the member and frozen into the incident.
+  at("&& request.resource.data.get('k9Record', null) == resource.data.get('k9Record', null);");
+  at("d.keys().hasOnly(['uid', 'role', 'callSign', 'name', 'dog', 'joinedAt', 'code', 'record'])");
+  at("&& recordOk(d.get('record', null));");
+  at("&& recordOk(d.get('k9Record', null))");
+  at("function tally(v) { return v is int && v >= 0 && v <= 100000; }");
+  at("&& r.blindFound <= r.blindReal && r.blindReal <= r.blind && r.sureRight <= r.sure");
+  at("&& r.blind <= r.trails && r.sure <= r.trails");
+  at("&& r.h1 + r.h4 + r.older + r.noAge == r.trails");
+  at("|| request.resource.data.k9Record == get(/databases/$(database)/documents/squads/$(squadId)/members/$(request.resource.data.k9Uid)).data.get('record', null));");
+  at("&& optNum(r.get('last', null)) && optText(r.get('gaps', null), 620)");
+  at("&& optText(r.get('lic', null), 60) && optNum(r.get('licTo', null)));");
+  // Move C: the cover officer, a member's account and never the handler's own.
+  at("&& optText(d.get('coverUid', null), 128)");
+  at("&& (d.get('coverUid', null) == null || d.coverUid != d.get('k9Uid', null))");
   at("(num(d.lastSeenAt) && d.lastSeenAt <= d.startedAt && d.lastSeenAt >= d.startedAt - 172800000)");
   at("(d.get('pace', null) == null || d.pace in ['walk', 'run', 'vehicle'])");
   at("b.keys().hasOnly(['dir', 'desc', 'article'])");

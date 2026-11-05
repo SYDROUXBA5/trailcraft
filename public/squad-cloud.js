@@ -10,7 +10,7 @@
    by the cloud. What comes back is cleaned (squad.js) before it is drawn. */
 
 import { PATHS, squadDoc, memberDoc, joinCodeDoc, positionDoc, cleanMember, cleanPosition,
-         cleanSquadName, newJoinCode } from './squad.js';
+         cleanSquadName, newJoinCode, cleanRecord, RECORD_KEYS } from './squad.js';
 
 const ref = (h, parts) => h.f.doc(h.fs, ...parts);
 const col = (h, parts) => h.f.collection(h.fs, ...parts);
@@ -149,6 +149,16 @@ export async function setRole(h, id, uid, role) {
   /* Only the role: the rules refuse a change to anything else in someone
      else's record. */
   await h.f.setDoc(ref(h, PATHS.member(id, uid)), { role }, { merge: true });
+}
+
+/** The handler shares their dog's record card with the squad, on their own
+    member record (null: stop sharing). Every field is written, so a merge
+    replaces the whole card and leaves nothing of an older one behind. */
+export async function shareRecord(h, id, record) {
+  const r = record ? cleanRecord(record) : null;
+  if (record && !r) throw new Error('That record could not be read');
+  const out = r ? Object.fromEntries(RECORD_KEYS.map(k => [k, r[k] ?? null])) : null;
+  await h.f.setDoc(ref(h, PATHS.member(id, h.uid)), { record: out }, { merge: true });
 }
 
 /** Command removes a member, and their position with them. The code

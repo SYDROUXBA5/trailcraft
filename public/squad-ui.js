@@ -13,11 +13,12 @@
 import { DEMO_LABEL, ROLES, JOIN_ROLES, roleOf, isCommand, canSetRole, canRemove, canLeave,
          cleanSquadName, cleanCallSign, cleanDogName, codeFromText, showCode, squadLink,
          SEND, shouldSend, headingOf, roster, onDutyCount, fitPoints, freshness, ageWords, compass,
-         createSim, SIM_SQUAD, simUnits, cleanDemoNames, keptLines, CALL_MAX, NAME_MAX } from './squad.js';
+         createSim, SIM_SQUAD, simUnits, cleanDemoNames, keptLines, CALL_MAX, NAME_MAX,
+         dogRecord, recordWords, dayWords, licenceEnd, licenceDay, cleanLicence, LIC_MAX, RECORD_NOTE, RECORD_SAYS } from './squad.js';
 import { ask, info, form } from './sheet.js';
 import { project } from './geo.js';
 import { createSquad, findSquad, joinSquad, myMember, watchSquad, putPosition, clearPosition,
-         setRole, removeMember, leaveSquad, newCode, deleteSquad, getSquad } from './squad-cloud.js';
+         setRole, removeMember, leaveSquad, newCode, deleteSquad, getSquad, shareRecord } from './squad-cloud.js';
 
 /* ── Escaping ─────────────────────────────────────────────────────────── */
 const ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
@@ -56,6 +57,7 @@ const S = {
   override: null,       // a replay drawing the map instead of the live squad
   simClock: null,       // { real, base, speed }: the pretend squad's own clock
   lead: null,           // the unit drawn above the rest (the trailing K9 team)
+  cover: null,          // the cover officer with that team, named on its label when the two pins meet
   simName: SIM_SQUAD,   // the department name the chief gave the pretend squad
   looked: new Set(),    // told when someone moves the map to a unit or to everyone (follow pauses)
   wall: false,          // Wall mode: the map for a TV or a projector
@@ -245,7 +247,96 @@ export function paintSquad() {
   put($('sqRoster'), html`${rows.map(r => rosterRow(r, mine))}`);
   $('sqLeave').hidden = !canLeave(mine, S.squad.createdBy);
   $('sqDelete').hidden = !(mine && mine.uid === S.squad.createdBy);
+  paintRecord(mine);
   paintDuty();
+}
+
+/* ── The dog's record card, shared by its handler ─────────────────────────
+   Worked out on this phone from its own runs of the dog (squad.js
+   dogRecord) and sent only when the handler taps Share: a short summary on
+   their own member record, which Command's card reads when it picks the K9
+   team. The licence is typed here and kept on this phone (never on the
+   dog's synced record), and goes out only inside the shared card. */
+const licenceKey = (dogId) => `squadLicence.${dogId}`;
+function licenceOf(dogId) {
+  try { const l = ctx.kv.get(licenceKey(dogId), null); return l && typeof l === 'object' ? l : null; } catch { return null; }
+}
+function paintRecord(mine) {
+  const k9 = mine?.role === 'k9' && !!mine.dog;
+  $('sqRecordWrap').hidden = !k9;
+  if (!k9) return;
+  $('sqRecord').textContent = `Share ${mine.dog}’s record with the squad`;
+  $('sqRecordStop').hidden = !mine.record;
+  $('sqRecordNote').textContent = mine.record
+    ? `Shared, as it stood on ${dayWords(mine.record.at)}. Share again to bring it up to date.`
+    : 'Not shared. Command sees it on the card when picking the K9 team.';
+}
+/** The card's words as plain lines, for the sheet before sharing. */
+function recordText(rec, now) {
+  const w = recordWords(rec, now);
+  return [
+    ...w.rows.map(r => `${r.k}: ${r.v}${r.sub ? ` (${r.sub})` : ''}`),
+    ...(w.gaps.length ? ['Gaps in the record:', ...w.gaps.map(g => `· ${g}`)] : []),
+  ].join('\n');
+}
+async function doShareRecord() {
+  const mine = myRow();
+  if (!S.squad || mine?.role !== 'k9' || !mine.dog) return;
+  const dogs = ctx.dogRuns?.(mine.dog) || [];
+  if (!dogs.length) {
+    await info({ title: `${mine.dog} is not on this phone`, items: [{ head: 'Why', text: `The record is worked out from this phone’s own runs of the dog, and no dog here is called ${mine.dog}. Share it from the phone you train with, or join again with the dog’s name as it is in Team.` }] });
+    return;
+  }
+  /* Two dogs of that name here: the handler says which, so one dog's runs
+     are never shared as another's. */
+  let dog = dogs[0];
+  if (dogs.length > 1) {
+    const pick = await form({
+      title: `Which ${mine.dog}?`,
+      body: `This phone has ${dogs.length} dogs called ${mine.dog}. Pick the one you work with this squad.`,
+      fields: [{ key: 'id', label: 'Dog', value: dogs[0].id, choices: dogs.map(d => ({ value: d.id,
+        text: `${d.name} · ${d.runs.length} run${d.runs.length === 1 ? '' : 's'}${d.last ? ` · last ${dayWords(d.last)}` : ''}` })) }],
+      yes: 'Next',
+    });
+    if (!pick) return;
+    dog = dogs.find(d => d.id === pick.id);
+    if (!dog) return;
+  }
+  const now = Date.now();
+  const lic = licenceOf(dog.id);
+  const preview = dogRecord({ dog: mine.dog, runs: dog.runs, handlerId: dog.handlerId, now });
+  const got = await form({
+    title: `Share ${mine.dog}’s record with the squad`,
+    body: `${recordText(preview, now)}\n\nEvery squad member can see it. ${RECORD_SAYS}`,
+    fields: [
+      { key: 'body', label: 'Licence held (as you would write it)', value: lic?.body || '', placeholder: 'NPCC, NAPWDA, USPCA, state', max: LIC_MAX },
+      { key: 'end', label: 'Licence ends', value: licenceDay(lic?.expires), type: 'date' },
+    ],
+    note: `${RECORD_NOTE} The licence is kept on this phone and sent only with the card.`,
+    yes: 'Share with the squad',
+  });
+  if (!got) return;
+  const licence = { body: got.body, expires: licenceEnd(got.end) };
+  const kept = cleanLicence(licence);
+  try { ctx.kv.set(licenceKey(dog.id), kept.lic || kept.licTo ? { body: kept.lic, expires: kept.licTo } : null); } catch { /* full: sent this time only */ }
+  try {
+    const h = await handle();
+    if (!h) throw new Error('Sign in first');
+    await shareRecord(h, S.squad.id, dogRecord({ dog: mine.dog, runs: dog.runs, handlerId: dog.handlerId, licence, now: Date.now() }));
+    ctx.toast(`${mine.dog}’s record is shared with the squad`);
+  } catch (e) {
+    ctx.toast(String(e?.code || '').includes('permission') ? 'The squad refused it. Check you are still a member' : (e?.message || 'Could not share it'));
+  }
+}
+async function doStopRecord() {
+  const mine = myRow();
+  if (!S.squad || !mine?.record) return;
+  try {
+    const h = await handle();
+    if (!h) throw new Error('Sign in first');
+    await shareRecord(h, S.squad.id, null);
+    ctx.toast(`${mine.dog || 'The dog'}’s record is no longer shared. Incidents already started keep their copy`);
+  } catch (e) { ctx.toast(e?.message || 'Could not stop sharing it'); }
 }
 
 function rosterRow(r, mine) {
@@ -603,12 +694,62 @@ function paintMarkers(rows, now) {
     if (m.el.style.zIndex !== z) m.el.style.zIndex = z;
     m.hdg = r.pos.hdg;
     m.arrow.classList.toggle('still', r.pos.hdg == null);
-    const label = `${r.callSign}${r.dog ? ` · ${r.dog}` : ''}`;
-    if (m.tag.textContent !== label) m.tag.textContent = label;
+    m.label = `${r.callSign}${r.dog ? ` · ${r.dog}` : ''}`;
+    m.callSign = r.callSign;
     m.el.setAttribute('aria-label', `${r.callSign}, ${roleOf(r.role).label}, ${ageWords(r.pos.at, now)}`);
   }
   for (const [uid, m] of S.markers) if (!keep.has(uid)) { m.marker.remove(); S.markers.delete(uid); }
+  declutter(rows);
   turnArrows();
+}
+
+/* Labels that would sit on one another cannot be read, which on the map a
+   chief is shown is worse than no label. The cover officer walks a few
+   metres behind the handler, so when their two pins meet the team's label
+   names the cover ("K9-1 · Rex + cover Foot 3") and the cover's own is
+   left off; otherwise each label, the trailing team's first and the
+   cover's next, goes below its pin, or above it if that is taken, or is
+   left off (the pin stays, and says who it is when tapped or read out).
+   The trailing team's label is never left off: it is the one everyone is
+   watching, so it keeps its place and the others make room.
+   The incident's own pins (the last known point, the calls) count as
+   taken. All in screen pixels, from where the pins are drawn now. */
+const MERGE_PX = 30;
+const TAG_GAP = 34;   // .sq-tag's top: the label sits this far below the pin's top
+function declutter(rows) {
+  const g = ctx.getMap();
+  if (!g.map) return;
+  const lead = S.lead ? S.markers.get(S.lead) : null;
+  const cover = S.cover && S.cover !== S.lead ? S.markers.get(S.cover) : null;
+  let merged = false;
+  if (lead && cover) {
+    const a = lead.marker.getLngLat(), b = cover.marker.getLngLat();
+    const pa = g.map.project(a), pb = g.map.project(b);
+    merged = Math.hypot(pa.x - pb.x, pa.y - pb.y) < MERGE_PX;
+  }
+  for (const m of S.markers.values()) {
+    const label = merged && m === lead ? `${m.label} + cover ${cover.callSign}` : m.label;
+    if (m.tag.textContent !== label) m.tag.textContent = label;
+    m.tag.classList.remove('sq-tag-up');
+    m.tag.hidden = merged && m === cover;
+  }
+  const order = [...S.markers.entries()].sort(([a], [b]) => (b === S.lead) - (a === S.lead) || (b === S.cover) - (a === S.cover)
+    || rows.findIndex(r => r.uid === a) - rows.findIndex(r => r.uid === b));
+  const taken = [...g.map.getContainer().querySelectorAll('.inc-mark .inc-pin, .inc-mark-tag, .sq-unit')]
+    .map(e => e.getBoundingClientRect()).filter(r => r.width > 0);
+  const hits = (r) => taken.some(q => r.left < q.right && r.right > q.left && r.top < q.bottom && r.bottom > q.top);
+  for (const [, m] of order) {
+    if (m.tag.hidden) continue;
+    const below = m.tag.getBoundingClientRect();
+    if (!below.width) continue;
+    if (!hits(below)) { taken.push(below); continue; }
+    /* .sq-tag-up puts the label's foot TAG_GAP above the pin's foot. */
+    const foot = m.el.getBoundingClientRect().bottom - TAG_GAP;
+    const up = { left: below.left, right: below.right, top: foot - (below.bottom - below.top), bottom: foot };
+    if (!hits(up)) { m.tag.classList.add('sq-tag-up'); taken.push(up); continue; }
+    if (m === lead) { taken.push(below); continue; }
+    m.tag.hidden = true;
+  }
 }
 
 /* The arrow points the way the unit is going on the ground, so it turns
@@ -707,6 +848,8 @@ export function viewNow() {
   return S.sim && c ? c.base + (Date.now() - c.real) * c.speed : Date.now();
 }
 const SIM_SPEEDS = [1, 4, 10];
+/** How many times real time the pretend clock runs now. */
+export const simSpeed = () => (S.sim && S.simClock ? S.simClock.speed : 1);
 /** The pretend clock at `speed` (one of SIM_SPEEDS), from now on. */
 export function setSimSpeed(speed) {
   const c = S.simClock;
@@ -846,6 +989,8 @@ export const commandView = () => ({ ...viewState(), squad: S.squad, sim: S.sim, 
 export const paintCommandNow = () => paintCommand();
 /** The unit drawn above all others (the trailing K9 team), or null. */
 export function setLeadUnit(uid) { S.lead = uid || null; }
+/** The cover officer with the lead unit, or null. */
+export function setCoverUnit(uid) { S.cover = uid || null; }
 /** Fold the command panel away (true) or open it, as its own button does. */
 export function foldPanel(folded) {
   const p = $('cmdPanel');
@@ -911,6 +1056,8 @@ export function initSquad(c) {
   $('cmdNight').addEventListener('click', toggleNight);
   try { S.night = ctx.kv.get('squadWallNight', true) !== false; } catch { /* the default */ }
   $('sqOpenMap').addEventListener('click', () => openCommand());
+  $('sqRecord').addEventListener('click', doShareRecord);
+  $('sqRecordStop').addEventListener('click', doStopRecord);
   $('sqDuty').addEventListener('change', (e) => (e.target.checked ? startDuty() : stopDuty()));
   $('cmdDuty').addEventListener('change', (e) => (e.target.checked ? startDuty() : stopDuty()));
   $('sqRoster').addEventListener('click', onRosterClick);

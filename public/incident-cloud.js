@@ -7,8 +7,8 @@
    the scent; each member writes only their own track); what comes back is
    cleaned (incident.js) before anything draws it. */
 
-import { PATHS, INCIDENT_TTL } from './squad.js';
-import { incidentDoc, cleanIncident, markDoc, cleanMark, cleanTrack, joinTracks } from './incident.js';
+import { PATHS, INCIDENT_TTL, cleanRecord } from './squad.js';
+import { incidentDoc, cleanIncident, markDoc, cleanMark, cleanTrack, joinTracks, keptRecord } from './incident.js';
 
 const ref = (h, parts) => h.f.doc(h.fs, ...parts);
 const col = (h, parts) => h.f.collection(h.fs, ...parts);
@@ -26,9 +26,21 @@ const newId = () => {
 
 /** Command starts an incident. Returns it, cleaned, as every member will
     see it. */
-export async function startIncident(h, sid, { name, lkp, k9Uid, lastSeenAt = null, pace = null, brief = null, now = Date.now() }) {
+export async function startIncident(h, sid, { name, lkp, k9Uid, lastSeenAt = null, pace = null, brief = null, k9Record = null, now = Date.now() }) {
   const id = newId();
-  const d = incidentDoc({ name, lkp, k9Uid, uid: h.uid, now, lastSeenAt, pace, brief });
+  /* The record is frozen exactly as the handler stored it on their member
+     record (the rules check it is the same map): read fresh, so a share a
+     moment ago is not refused as a stranger's copy. If it changed from the
+     card Command was looking at, Command looks again first. */
+  let stored = null;
+  if (k9Record && k9Uid) {
+    const snap = await h.f.getDoc(ref(h, PATHS.member(sid, k9Uid)));
+    stored = keptRecord(snap.exists() ? snap.data()?.record : null);
+    if (!stored || JSON.stringify(cleanRecord(stored)) !== JSON.stringify(cleanRecord(k9Record))) {
+      throw new Error('The handler has just changed the dog’s record. Look at the card again, then start');
+    }
+  }
+  const d = incidentDoc({ name, lkp, k9Uid, uid: h.uid, now, lastSeenAt, pace, brief, k9Record: stored });
   await h.f.setDoc(ref(h, PATHS.incident(sid, id)), { ...d, ...ttl(h, d.expiresAt) });
   return cleanIncident(d, id);
 }
@@ -37,22 +49,29 @@ export async function startIncident(h, sid, { name, lkp, k9Uid, lastSeenAt = nul
     An ended incident is final: the rules refuse any change after. */
 export async function endIncident(h, sid, inc, summary, now = Date.now()) {
   await h.f.setDoc(ref(h, PATHS.incident(sid, inc.id)),
-    { ...again(h, inc), status: 'ended', endedAt: now, summary });
+    { ...again(h, inc), status: 'ended', endedAt: now, summary }, { merge: true });
 }
 
 /* The incident written out again whole, as it stands, for Command's next
    change to it: what was said about last seen and the brief rides along, so
-   ending it or correcting one thing never wipes the rest. */
+   ending it or correcting one thing never wipes the rest. The frozen
+   record is left out and the write merged, so it stays exactly as stored:
+   this phone only has it tidied, and the rules refuse any change to it. */
 function again(h, inc, patch = {}) {
-  const d = incidentDoc({ name: inc.name, lkp: inc.lkp, k9Uid: inc.k9Uid, uid: inc.startedBy, now: inc.startedAt,
-    lastSeenAt: inc.lastSeenAt, pace: inc.pace, brief: inc.brief, ...patch });
+  const { k9Record, ...d } = incidentDoc({ name: inc.name, lkp: inc.lkp, k9Uid: inc.k9Uid, uid: inc.startedBy, now: inc.startedAt,
+    lastSeenAt: inc.lastSeenAt, pace: inc.pace, brief: inc.brief, coverUid: inc.coverUid, ...patch });
   return { ...d, ...ttl(h, d.expiresAt) };
 }
 
 /** Command corrects when the person was last seen, how they left, or the
     handler's brief, while the incident runs. */
 export function updateSeen(h, sid, inc, { lastSeenAt, pace, brief }) {
-  return h.f.setDoc(ref(h, PATHS.incident(sid, inc.id)), again(h, inc, { lastSeenAt, pace, brief }));
+  return h.f.setDoc(ref(h, PATHS.incident(sid, inc.id)), again(h, inc, { lastSeenAt, pace, brief }), { merge: true });
+}
+
+/** Command puts a cover officer with the K9 team (null: none). */
+export function setCover(h, sid, inc, coverUid) {
+  return h.f.setDoc(ref(h, PATHS.incident(sid, inc.id)), again(h, inc, { coverUid }), { merge: true });
 }
 
 /** Every incident of the squad, active and ended (ended ones are kept a

@@ -78,6 +78,8 @@ const K = {
   handlers: 'tc.handlers', dogs: 'tc.dogs', layers: 'tc.layers',
   sessions: 'tc.sessions2', kv: 'tc.kv', draft: 'tc.draft',
 };
+/** Where a dog's squad licence is kept in kv (squad-ui.js says the same). */
+export const licenceKeyOf = (dogId) => `squadLicence.${dogId}`;
 
 /** A save that did not happen. `full` means the phone refused for lack of
     room — the one failure a handler can do something about. Thrown, never
@@ -505,12 +507,26 @@ export function createStore(backend) {
   });
 
   const handlers = table(K.handlers, 'handlers');
-  const dogs = table(K.dogs, 'dogs');
+  const dogTable = table(K.dogs, 'dogs');
   const layers = table(K.layers, 'layers');
 
   const kv = {
     get: (k, f = null) => read(K.kv, {})[k] ?? f,
     set(k, v) { const o = read(K.kv, {}); o[k] = v; write(K.kv, o); },
+  };
+  /* The licence a handler typed in to share a dog's record with a squad
+     (squad-ui.js) is kept on this phone only, never on the dog's synced
+     row: it goes when the dog goes, so a handed-down phone does not keep a
+     deleted dog's licence details. */
+  const dogs = {
+    ...dogTable,
+    remove(id) {
+      dogTable.remove(id);
+      try {
+        const o = read(K.kv, {});
+        if (Object.prototype.hasOwnProperty.call(o, licenceKeyOf(id))) { delete o[licenceKeyOf(id)]; write(K.kv, o); }
+      } catch { /* the dog is gone; a licence left behind is cleared on the next removal that saves */ }
+    },
   };
   const flagsHere = () => Object.fromEntries(BACKUP_FLAGS.map(k => [k, kv.get(k) === true]));
 

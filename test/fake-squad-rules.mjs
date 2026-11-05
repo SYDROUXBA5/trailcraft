@@ -26,6 +26,27 @@ const affected = (a, b) => [...new Set([...Object.keys(a), ...Object.keys(b)])]
   .filter(k => JSON.stringify(a[k]) !== JSON.stringify(b[k]));
 const val = (d, k, dflt) => (d && k in d ? d[k] : dflt);
 const recent = (at, now) => isNum(at) && at <= now + 300e3 && at >= now - 600e3;
+/* Firestore compares maps by their entries, whatever order they came in. */
+const same = (a, b) => {
+  if (a === b) return true;
+  if (!a || !b || typeof a !== 'object' || typeof b !== 'object' || Array.isArray(a) !== Array.isArray(b)) return false;
+  const ka = Object.keys(a), kb = Object.keys(b);
+  return ka.length === kb.length && ka.every(k => k in b && same(a[k], b[k]));
+};
+const tally = (v) => Number.isInteger(v) && v >= 0 && v <= 100000;
+const recordOk = (r) => r == null
+  || (typeof r === 'object' && !Array.isArray(r)
+      && hasOnly(r, ['v', 'dog', 'pretend', 'at', 'trails', 'h1', 'h4', 'older', 'noAge', 'blind',
+        'blindReal', 'blindFound', 'wrong', 'last', 'sure', 'sureRight', 'gaps', 'lic', 'licTo'])
+      && r.v === 1 && optText(val(r, 'dog', null), 40) && typeof val(r, 'pretend', false) === 'boolean' && isNum(r.at)
+      && tally(r.trails) && tally(r.h1) && tally(r.h4) && tally(r.older) && tally(r.noAge)
+      && tally(r.blind) && tally(r.blindReal) && tally(r.blindFound) && tally(r.wrong)
+      && tally(r.sure) && tally(r.sureRight)
+      && r.blindFound <= r.blindReal && r.blindReal <= r.blind && r.sureRight <= r.sure
+      && r.blind <= r.trails && r.sure <= r.trails
+      && r.h1 + r.h4 + r.older + r.noAge === r.trails
+      && optNum(val(r, 'last', null)) && optText(val(r, 'gaps', null), 620)
+      && optText(val(r, 'lic', null), 60) && optNum(val(r, 'licTo', null)));
 
 export function allow(op, path, c) {
   const p = path.split('/');
@@ -82,10 +103,11 @@ export function allow(op, path, c) {
   const sub = p[2];
   if (sub === 'members' && p.length === 4) {
     const uid = p[3];
-    const memberOk = (x) => hasOnly(x, ['uid', 'role', 'callSign', 'name', 'dog', 'joinedAt', 'code'])
+    const memberOk = (x) => hasOnly(x, ['uid', 'role', 'callSign', 'name', 'dog', 'joinedAt', 'code', 'record'])
       && x.uid === uid && ROLES.includes(x.role) && text(x.callSign, 24) && x.callSign.length > 0
       && text(val(x, 'name', ''), 60) && optText(val(x, 'dog', null), 40)
-      && isNum(x.joinedAt) && optText(val(x, 'code', null), 8);
+      && isNum(x.joinedAt) && optText(val(x, 'code', null), 8)
+      && recordOk(val(x, 'record', null));
     if (op === 'get' || op === 'list') return isMember;
     if (op === 'create') {
       return signedIn && uid === c.uid && memberOk(d)
@@ -130,21 +152,28 @@ export function allow(op, path, c) {
             && optText(val(b, 'dir', null), 40) && optText(val(b, 'desc', null), 160)
             && (val(b, 'article', null) == null || typeof b.article === 'boolean'));
       const incidentOk = (x) => hasOnly(x, ['name', 'lkp', 'k9Uid', 'startedBy', 'startedAt', 'endedAt', 'status',
-        'expiresAt', 'deleteAt', 'summary', 'lastSeenAt', 'pace', 'brief'])
+        'expiresAt', 'deleteAt', 'summary', 'lastSeenAt', 'pace', 'brief', 'coverUid', 'k9Record'])
         && text(x.name, 80) && x.name.length > 0
         && x.lkp && typeof x.lkp === 'object' && place(x.lkp.lat, x.lkp.lon)
         && optText(val(x, 'k9Uid', null), 128)
+        && optText(val(x, 'coverUid', null), 128)
+        && (val(x, 'coverUid', null) == null || x.coverUid !== val(x, 'k9Uid', null))
         && isStr(x.startedBy) && isNum(x.startedAt) && optNum(val(x, 'endedAt', null))
         && ['active', 'ended'].includes(x.status)
         && (val(x, 'summary', null) == null || typeof x.summary === 'object')
         && seenOk(x)
         && (val(x, 'pace', null) == null || ['walk', 'run', 'vehicle'].includes(x.pace))
         && briefOk(val(x, 'brief', null))
+        && recordOk(val(x, 'k9Record', null))
+        && (val(x, 'k9Record', null) == null || val(x, 'k9Uid', null) != null)
         && expires(x, 192, c.now);
       if (op === 'get' || op === 'list') return isMember;
-      if (op === 'create') return isCommand && incidentOk(d) && d.startedBy === c.uid && d.status === 'active';
+      if (op === 'create') return isCommand && incidentOk(d) && d.startedBy === c.uid && d.status === 'active'
+        && (val(d, 'k9Record', null) == null
+            || same(d.k9Record, val(get(`squads/${sid}/members/${d.k9Uid}`) ?? {}, 'record', null)));
       if (op === 'update') return isCommand && incidentOk(d) && r.status === 'active' && d.startedBy === r.startedBy
-        && d.startedAt === r.startedAt;
+        && d.startedAt === r.startedAt
+        && JSON.stringify(val(d, 'k9Record', null)) === JSON.stringify(val(r, 'k9Record', null));
       if (op === 'delete') return signedIn && creator === c.uid;
       return false;
     }
