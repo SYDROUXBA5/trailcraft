@@ -55,7 +55,10 @@ const S = {
   watchers: new Set(),  // told when the squad or its members change (incidents)
   sent: new Set(),      // told of each position sent while on duty (incident tracks)
   override: null,       // a replay drawing the map instead of the live squad
-  simClock: null,       // { real, base, speed }: the pretend squad's own clock
+  simClock: null,       // { real, base, speed, paused }: the pretend squad's own clock
+  steppers: new Set(),  // told of each pretend second as it is played (the pretend incident)
+  wallsReady: null,     // settles with the pretend squad's buildings, or null
+  wallsFound: null,     // { center, W }: the buildings once they came, for a squad started again there
   lead: null,           // the unit drawn above the rest (the trailing K9 team)
   cover: null,          // the cover officer with that team, named on its label when the two pins meet
   simName: SIM_SQUAD,   // the department name the chief gave the pretend squad
@@ -571,7 +574,7 @@ export function openCommand({ sim = false } = {}) {
   const g = ctx.getMap();
   g.map?.on('rotate', turnArrows);
   clearInterval(S.tick);
-  S.tick = setInterval(() => { if (S.sim) S.sim.step(viewNow()); paintCommand(); }, 1000);
+  S.tick = setInterval(() => { playTo(viewNow()); paintCommand(); }, 1000);
   paintCommand();
 }
 
@@ -680,7 +683,10 @@ function paintMarkers(rows, now) {
       tag.className = 'sq-tag';
       el.append(arrow, tag);
       el.addEventListener('click', () => focusUnit(r.uid));
-      m = { el, arrow, tag, marker: new g.GL.Marker({ element: el, anchor: 'center' }).setLngLat([r.pos.lon, r.pos.lat]).addTo(g.map) };
+      /* Full strength behind 3D buildings and trees: Mapbox fades an
+         occluded marker to a ghost by default, and on a tilted map the dog
+         and its officers were then lost exactly where the trail went in. */
+      m = { el, arrow, tag, marker: new g.GL.Marker({ element: el, anchor: 'center', occludedOpacity: 1 }).setLngLat([r.pos.lon, r.pos.lat]).addTo(g.map) };
       S.markers.set(r.uid, m);
     }
     m.marker.setLngLat([r.pos.lon, r.pos.lat]);
@@ -812,15 +818,27 @@ export function mapPad() {
       if (r && r.height) top = Math.max(top, Math.round(r.bottom) + 16);
     }
   }
+  /* A scenario's captions: over the bottom of the map on a computer, under
+     the pill on a phone. What is fitted stays clear of them. */
+  const cap = $('cmdCap');
+  const cr = cap && !cap.hidden ? cap.getBoundingClientRect() : null;
+  let bottom = 40;
+  if (cr && cr.height) {
+    if (wide && !$('scrCommand').classList.contains('hv-on')) bottom = Math.max(bottom, Math.round(window.innerHeight - cr.top) + 20);
+    else top = Math.max(top, Math.round(cr.bottom) + 16);
+  }
   /* In Wall mode the clock and the log sit over the top left of the map. */
   const wallBox = S.wall ? $('cmdWall') : null;
   const left = wallBox && !wallBox.hidden && wide ? Math.round(wallBox.getBoundingClientRect().right) + 30 : 40;
   return wide
-    ? { top, bottom: 40, left, right: (panel?.offsetWidth || 340) + 40 }
+    ? { top, bottom, left, right: (panel?.offsetWidth || 340) + 40 }
     : { top, left: 30, right: 30, bottom: (panel?.offsetHeight || 260) + 30 };
 }
 
 /* ── Pretend officers ─────────────────────────────────────────────────── */
+/* One seed for the pretend squad: in the same place it starts the same way
+   every time, so a scenario Rémi has rehearsed plays the same for the chief. */
+const SIM_SEED = 7;
 function startSim(names = cleanDemoNames(null)) {
   const g = ctx.getMap();
   const fix = ctx.here();
@@ -830,25 +848,99 @@ function startSim(names = cleanDemoNames(null)) {
      own ground. */
   const center = fix || (c && g.map.getZoom() >= 10 ? { lat: c.lat, lon: c.lng } : ctx.demoPlace());
   const now = Date.now();
-  S.simClock = { real: now, base: now, speed: 1 };
-  S.sim = createSim({ center, now, seed: (now / 1000) | 0, callSigns: names.callSigns });
+  S.simClock = { real: now, base: now, speed: 1, paused: false };
+  S.sim = createSim({ center, now, seed: SIM_SEED, callSigns: names.callSigns });
   S.simName = names.squad;
   paintSimSpeed();
   /* The buildings round the pretend squad, so that nobody on foot walks
      through a house. They come from the map's own tiles, after the squad
-     has started; until then (and with no map key) walkers go as before. */
-  const sim = S.sim;
+     has started; until then (and with no map key) walkers go as before. A
+     squad started again on the same ground (a scenario) gets them too. */
   const box = [0, 90, 180, 270].map(b => project(center, b, 650));
-  Promise.resolve(ctx.wallsAround?.(box)).then((W) => { if (W && S.sim === sim) sim.setWalls(W); }, () => {});
+  S.wallsFound = null;
+  S.wallsReady = Promise.resolve(ctx.wallsAround?.(box)).then((W) => {
+    if (!W) return null;
+    S.wallsFound = { center, W };
+    /* A scenario's squad keeps the ground it started on (restartSim). */
+    if (S.sim?.center === center && !S.sim.wallsLocked) S.sim.setWalls(W);
+    return W;
+  }, () => null);
+}
+/** The buildings round the pretend squad, waited for at most `ms`: true if
+    they are in, false if not yet (offline, slow Wi-Fi, no map key). */
+export function simWallsReady(ms = 4000) {
+  if (!S.sim) return Promise.resolve(false);
+  if (S.sim.walls) return Promise.resolve(true);
+  let timer = null;
+  const late = new Promise((done) => { timer = setTimeout(() => done(null), ms); });
+  return Promise.race([S.wallsReady || Promise.resolve(null), late]).then((W) => { clearTimeout(timer); return !!W; });
 }
 function stopSim() { S.sim = null; S.simClock = null; }
+
+/** The pretend squad again from the top on the same ground, with its clock
+    set to `at`: a scenario's story time (02:16), so every clock, log line
+    and report reads the story's time of day. Same seed, same names, and the
+    buildings it already had. Returns the new squad, or null. */
+export function restartSim(at) {
+  const old = S.sim;
+  if (!old || !Number.isFinite(at)) return null;
+  const names = demoNames();
+  const walls = old.walls || (S.wallsFound?.center === old.center ? S.wallsFound.W : null);
+  S.sim = createSim({ center: old.center, now: at, seed: SIM_SEED, callSigns: names.callSigns, walls });
+  /* The story plays on the ground it started with: buildings that arrive
+     later (slow venue Wi-Fi) would lay a different story from the one
+     rehearsed, and jump walkers out of houses mid-scene. */
+  S.sim.wallsLocked = true;
+  S.simName = names.squad;
+  S.simClock = { real: Date.now(), base: at, speed: S.simClock?.speed ?? 1, paused: false };
+  paintSimSpeed();
+  return S.sim;
+}
+/* The pretend world moves on in whole pretend seconds, each one played in
+   turn (the squad, then whatever listens: the pretend incident), never by
+   however long the last tick happened to take. So a scenario comes out the
+   same at ×1, ×10, paused and stepped: what happens at 02:21:30 does not
+   depend on when the browser got round to drawing. */
+function playTo(t) {
+  const sim = S.sim;
+  if (!sim) return;
+  while (sim.at + 1000 <= t && S.sim === sim) {
+    const s = sim.at + 1000;
+    sim.step(s);
+    for (const fn of S.steppers) { try { fn(s); } catch { /* their own */ } }
+  }
+}
+/** Told of every pretend second as it is played. Returns the undo. */
+export function onSimStep(fn) { S.steppers.add(fn); return () => S.steppers.delete(fn); }
+/** Whether the pretend clock is paused. */
+export const simPaused = () => !!(S.sim && S.simClock?.paused);
+/** Pause the pretend clock, or set it going again from where it stood. */
+export function setSimPaused(on) {
+  const c = S.simClock;
+  if (!c || c.paused === !!on) return;
+  c.base = viewNow(); c.real = Date.now(); c.paused = !!on;
+  paintSimSpeed();
+}
+/** Play the pretend world on, second by second, until `until()` says so or
+    `maxMs` of pretend time has gone: "Next step" in a scenario. The clock
+    then stands at that moment (still paused if it was). */
+export function simJump(until, maxMs = 10 * 60e3) {
+  const c = S.simClock, sim = S.sim;
+  if (!c || !sim) return;
+  playTo(viewNow());
+  const end = sim.at + maxMs;
+  while (sim.at < end && S.sim === sim && !until()) playTo(sim.at + 1000);
+  c.base = sim.at; c.real = Date.now();
+  paintCommand();
+}
 
 /** The clock the map runs on: the pretend squad's, which the demo can run
     faster so that a twenty-minute trail plays out while a chief watches;
     the real one otherwise. */
 export function viewNow() {
   const c = S.simClock;
-  return S.sim && c ? c.base + (Date.now() - c.real) * c.speed : Date.now();
+  if (!S.sim || !c) return Date.now();
+  return c.paused ? c.base : c.base + (Date.now() - c.real) * c.speed;
 }
 const SIM_SPEEDS = [1, 4, 10];
 /** How many times real time the pretend clock runs now. */
@@ -861,7 +953,7 @@ export function setSimSpeed(speed) {
   c.speed = speed; c.base = now; c.real = Date.now();
   paintSimSpeed();
 }
-function nextSimSpeed() {
+export function nextSimSpeed() {
   const c = S.simClock;
   if (!c) return;
   const now = viewNow();
@@ -869,11 +961,18 @@ function nextSimSpeed() {
   c.base = now; c.real = Date.now();
   paintSimSpeed();
 }
+/* Every speed button: the panel's, and the scenario captions' own. */
 function paintSimSpeed() {
-  const b = $('cmdSimSpeed');
-  if (!b || !S.simClock) return;
-  b.textContent = `Speed ×${S.simClock.speed}`;
-  b.setAttribute('aria-label', `Pretend clock at ${S.simClock.speed} times real speed. Change`);
+  const c = S.simClock;
+  if (!c) return;
+  for (const b of document.querySelectorAll('[data-sim-speed]')) {
+    b.textContent = `Speed ×${c.speed}`;
+    b.setAttribute('aria-label', `Pretend clock at ${c.speed} times real speed. Change`);
+  }
+  for (const b of document.querySelectorAll('[data-sim-pause]')) {
+    b.textContent = c.paused ? 'Play' : 'Pause';
+    b.setAttribute('aria-pressed', String(!!c.paused));
+  }
 }
 
 /* ── The pretend squad's names ───────────────────────────────────────── */

@@ -431,4 +431,50 @@ t('the new module is cached for offline use and in the single-file build', () =>
   assert.match(read('package.json'), /node test\/handler\.test\.mjs/);
 });
 
+/* ── The real run screen keeps every squad point where it was put ─────── */
+t('on a real run, two squad points side by side both stay where they were put, and none hides under the box; only the pretend view tidies', () => {
+  const runOnce = (where, alone = false) => {
+    const page = fakePage();
+    const markers = [];
+    /* One pixel a metre-ish: the map projects longitude and latitude
+       straight to pixels, and the box's top sits at y 500. */
+    const project = ([lon, lat]) => ({ x: (lon + 2.6476) * 1e5 + 200, y: (51.2094 - lat) * 1e5 + 300 });
+    initHandler({ kv: { get: () => null, set() {} }, imperial: () => false, toast() {}, runPadding() {},
+      getMap: () => ({ map: { project, getCanvas: () => ({ getBoundingClientRect: () => ({ top: 0, left: 0 }) }),
+        getSource: () => null, getLayer: () => null, addSource() {}, addLayer() {} },
+        GL: { Marker: class { constructor({ element }) { this.el = element; this.off = [0, 0]; markers.push(this); }
+          setLngLat() { return this; } addTo() { return this; } remove() {} setOffset(o) { this.off = o; return this; } } } }) });
+    const box = page.el('div');
+    const lift = { getBoundingClientRect: () => ({ top: 500 }) };
+    const lkp = { lat: 51.2094, lon: -2.6476 };
+    const inc = { id: 'i7', status: 'active', lkp, k9Uid: 'k9', coverUid: 'f5' };
+    const marks = [
+      { id: 'a', kind: 'sighting', by: 'f6', at: 1, lat: 51.2084, lon: -2.6470 },
+      { id: 'b', kind: 'roadblock', by: 'c3', at: 2, lat: 51.2084, lon: -2.64699 },   // a pixel away
+      { id: 'c', kind: 'sighting', by: 'f6', at: 3, lat: 51.2070, lon: -2.6476 },     // behind, under the box
+    ];
+    /* alone: the dog away from the point, nothing else drawn, the cover 10 m behind it. */
+    const me = alone ? { lat: 51.2000, lon: -2.6476 } : lkp;
+    paintHandler({ where, box, lift, inc, marks: alone ? [] : marks, me, heading: 0, now: 10, myUid: 'k9', voice: false,
+      cover: alone ? { lat: 51.19991, lon: -2.6476, at: 9 } : { lat: 51.2084, lon: -2.6470, at: 9 }, coverName: 'Foot 3', call: () => null, undo: () => false });
+    const out = markers.map(mk => ({ kind: [...['lkp', 'sighting', 'roadblock', 'cover']].find(k => mk.el.className.includes(`hv-k-${k}`)),
+      off: mk.off, under: mk.el.classList.contains('hv-under') }));
+    clearHandler();
+    delete globalThis.document; delete globalThis.window;
+    return out;
+  };
+  for (const where of ['run', 'pretend']) {
+    const out = runOnce(where);
+    const points = out.filter(o => o.kind === 'sighting' || o.kind === 'roadblock');
+    assert.equal(points.length, 3, where);
+    for (const o of points) assert.deepEqual(o.off, [0, 0], `${where}: a ${o.kind} is drawn where it was put`);
+    const cover = out.find(o => o.kind === 'cover');
+    assert.ok(cover && cover.off[0] > 0, `${where}: the cover steps aside from the point it stands on`);
+    const hidden = out.filter(o => o.under).length;
+    assert.equal(hidden, where === 'pretend' ? 1 : 0, `${where}: a point under the box is ${where === 'pretend' ? 'left off' : 'still drawn'}`);
+    const alone = runOnce(where, true).find(o => o.kind === 'cover');
+    assert.ok(alone && alone.off[0] > 0, `${where}: the cover 10 m behind steps aside from the dog's own dot`);
+  }
+});
+
 console.log(`${pass} passed total`);

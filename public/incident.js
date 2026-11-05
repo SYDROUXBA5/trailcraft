@@ -887,16 +887,23 @@ export function replayAt(rp, t) {
      re-find, and withdraws the wide line. He never reads the hidden line.
 
    Walkers, the dog and the person keep out of buildings when the map has
-   them (walls.js). Everyone's movements are kept for the replay, as the
-   real phones would send them. */
+   them (walls.js). The dog walks its line on rails (squad.js sim.rail):
+   by distance along a line already laid clear of the buildings, so no
+   corner can hold it short of the point, and every scenario plays to its
+   end. Everyone's movements are kept for the replay, as the real phones
+   would send them. */
 
 /** The pretend scent line from `lkp`: points about 12 m apart, none of its
-    steps through a building when `walls` (walls.js wallIndex) are known. */
+    steps through a building when `walls` (walls.js wallIndex) are known.
+    `pts` is the line the dog works, with its overshoot and cast at the
+    turn; `route` is where the person walked, without them (the only line
+    "where the pretend person walked" ever draws). */
 export function scentPath({ lkp, seed = 3, lengthM = 650, walls = null }) {
   const r = rng(seed);
   let hdg = r() * 360;
   const first = walls ? outside(walls, lkp) : lkp;
   const pts = [{ lat: first.lat, lon: first.lon }];
+  const route = [pts[0]];
   let walked = 0, here = pts[0];
   /* blockStep hands back the very point it was given when nothing is in
      the way. Blocked, the person bears off the way that is open, as anyone
@@ -911,7 +918,7 @@ export function scentPath({ lkp, seed = 3, lengthM = 650, walls = null }) {
         if (clear(here, q)) { hdg = h; next = q; break; }
       }
     }
-    here = next; pts.push(here); walked += 12;
+    here = next; pts.push(here); route.push(here); walked += 12;
   };
   const turnAt = lengthM * (0.35 + r() * 0.1);
   let lostAt = -1, refoundAt = -1;
@@ -946,7 +953,7 @@ export function scentPath({ lkp, seed = 3, lengthM = 650, walls = null }) {
     hdg = (hdg + (r() - 0.5) * 40 + 360) % 360;
     step();
   }
-  return { pts, lostAt, refoundAt };
+  return { pts, route, lostAt, refoundAt };
 }
 
 /** A ring of `n` points round `c`, `m` metres out: a perimeter. */
@@ -981,16 +988,117 @@ const COVER_STEP_M = 4;
    to speak to someone instead, as happens, so the chief sees Command told
    about it. The spot is on the officer's own side of the last known point,
    well clear of the rally point; it never comes from the hidden line. */
-export const STRAY = { holdMs: 2 * 60e3, realMs: 30e3, giveUpMs: 8 * 60e3, nearM: 120, farM: 220, rallyM: 150 };
+export const STRAY = { holdMs: 2 * 60e3, realMs: 30e3, giveUpMs: 8 * 60e3, nearM: 120, farM: 220, rallyM: 150, inM: 60 };
 
-/** A pretend incident on the pretend squad `sim`, starting at `now`. */
+/* ── Scripted scenarios ─────────────────────────────────────────────────
+   "Start scenario" plays one of these on the pretend squad as a call-out on
+   a story clock: the pretend squad starts again at the story's own time of
+   day, so every clock, log line and report reads 02:16, not the time the
+   demo happens to be given. Each is seeded, so it plays the same way every
+   time in the same place. `end` is how it finishes: 'found' (the person is
+   found inside the perimeter) or 'slip' (they get out through a side of
+   the inner perimeter nobody covered yet). `kmh` is the story's own pace
+   for the reach ring, where the app's default does not fit the person (a
+   frail man in slippers). Nothing in a script says which
+   way the person went: the brief carries only what a caller could say. */
+export const SCRIPTS = {
+  burglary: { title: 'Burglary, suspect fled on foot', seen: '02:14', callMs: 2 * 60e3, pace: 'walk', end: 'found', seed: 5,
+              who: 'the suspect', brief: { dir: '', desc: 'Man, dark clothing, hood up', article: false } },
+  missing: { title: 'Missing vulnerable person', seen: '16:40', callMs: 2 * 60e3, pace: 'walk', kmh: { walk: 3 }, end: 'found', seed: 8,
+             who: 'the missing man', brief: { dir: '', desc: 'Man, 78, with dementia, beige coat, slippers', article: true } },
+  slip: { title: 'Burglary, suspect fled on foot', seen: '02:14', callMs: 2 * 60e3, pace: 'walk', end: 'slip', seed: 5,
+          who: 'the suspect', brief: { dir: '', desc: 'Man, dark clothing, hood up', article: false } },
+};
+export const SCRIPT_KEYS = ['burglary', 'missing', 'slip'];
+/** The three buttons on the "Start scenario" sheet. */
+export const scriptChoices = () => [
+  { value: 'burglary', text: 'Burglary, suspect fled on foot, 02:14', hint: 'Found inside the perimeter' },
+  { value: 'missing', text: 'Missing vulnerable person, 16:40', hint: 'Found inside the perimeter' },
+  { value: 'slip', text: 'Burglary, 02:14: the suspect slips out', hint: 'Gets out through a side nobody covered yet' },
+];
+/** When a script's story happens: the last time it was that o'clock with
+    the call already made by `now` (yesterday's if today's is still to
+    come), and the moment the incident opens, `callMs` later. */
+export function scriptClock(key, now) {
+  const sc = SCRIPTS[key];
+  if (!sc || !finite(now)) return null;
+  const [h, m] = sc.seen.split(':').map(Number);
+  const d = new Date(now);
+  d.setHours(h, m, 0, 0);
+  if (d.getTime() + sc.callMs > now) { d.setDate(d.getDate() - 1); d.setHours(h, m, 0, 0); }
+  return { seenAt: d.getTime(), openAt: d.getTime() + sc.callMs };
+}
+/* The scenario's pace: the first officer walks in to the point from about
+   this far, and the K9 team is called, kitted up and walks in this long
+   after the incident opens, so the chief sees the ring go up and the scene
+   walked before the dog arrives. A pretend incident from the form starts
+   the dog at once. */
+export const SCENE = { walkInM: 35, walkMps: 1.3, dogInMs: 40e3, trailMps: 1.5, castMps: 0.9 };
+const RING_BEAT_MS = 6e3;
+/* Where the K9 team waits for the call: clear of ON_SCENT_M, so it is not
+   counted at the point before it has walked in to it. */
+const WAIT_M = ON_SCENT_M + 10;
+const OVER_MS = 20e3;
+/* Found: the person hides this far inside the inner perimeter, in from a
+   car's post (well inside the line, and in sight of the officer there). */
+const HIDE_IN_M = 90;
+const HIDE_TURN = 25;
+/* The slip: the person heads this far past the inner perimeter. */
+const SLIP_M = 80;
+
+/** One caption in plain words: `b` is one of the scenario's steps,
+    `who(uid)` names a unit, `dog` is the K9 team's dog. Words only: the
+    screen puts them on the page as text. */
+export function beatWords(b, { who = (u) => u || 'A unit', dog = '', script = null, imperial = false } = {}) {
+  const sc = SCRIPTS[script] || null;
+  const them = sc?.who || 'the person';
+  const Dog = dog || 'The dog';
+  switch (b?.key) {
+    /* The team is shown waiting near the point straight away: it is called
+       and kits up there, rather than "on the way" while it stands still. */
+    case 'call': return sc
+      ? `${sc.title}, last seen ${sc.seen}. ${who(b.sgt)} calls for a dog: ${who(b.k9)} is called and kits up nearby.`
+      : `${who(b.sgt)} calls for a dog: ${who(b.k9)} is called and kits up nearby.`;
+    case 'ring': return `The ring grows from the last known point with the clock: how far ${them} could be by now. A rough guide, not where they are.`;
+    case 'wide': return `${who(b.uid)} contains wide first: a perimeter about ${metresWords(b.m, imperial)} out, posts round it and a rally point just outside.`;
+    case 'walkin': return `${who(b.k9)} walks ${Dog === 'The dog' ? 'the dog' : Dog} in to the last known point${b.cover ? `, with ${who(b.cover)} as cover` : ''}.`;
+    case 'start': return `${Dog} starts at the last known point, ${elapsedWords(b.sinceMs)} after ${them} was last seen.`;
+    case 'scene': return `${nameList((b.uids || []).map(who))} stood at the last known point before the dog, so the handler sees them under “who walked the scene”: their scent is there too.`;
+    case 'stray': return `${who(b.uid)} has stopped inside the perimeter to speak to someone. Command is told: walking there can lay scent over the track.`;
+    case 'lost': return `${Dog} overshoots a turn and loses the scent. The handler calls it: “${who(b.uid)}, lost it”.`;
+    case 'refound': return `${Dog} casts round and picks the scent up again. Re-found.`;
+    case 'tight': return `With the trail settled, ${who(b.uid)} tightens: an inner perimeter ahead of the team, and the wide one comes down.`;
+    case 'sighting': return `${who(b.uid)} sees someone matching the description from the post.`;
+    case 'found': return `${Dog} finds ${them} inside the perimeter, ${elapsedWords(b.sinceMs)} after the dog was called.`;
+    case 'watch': return `Nobody is posted on the ${SIDE_WORDS[b.side] || 'far'} side of the inner perimeter yet: the officers are still getting to their posts.`;
+    case 'out': return `The trail leaves the inner perimeter on the ${SIDE_WORDS[b.side] || 'far'} side, between the posts. ${them.charAt(0).toUpperCase()}${them.slice(1)} slipped out before the ring closed: Command would widen it now.`;
+    case 'away': return `The trail goes on past the perimeter, and in this scenario ${them} gets away.`;
+    case 'over': return 'End of the scenario. End the incident for the deployment report, then “Show where the pretend person walked”.';
+    default: return '';
+  }
+}
+const SIDE_WORDS = { N: 'north', NE: 'north-east', E: 'east', SE: 'south-east', S: 'south', SW: 'south-west', W: 'west', NW: 'north-west' };
+/** The line drawn at the end, in words that never claim more than it is. */
+export const REVEAL_WORDS = 'Where the pretend person walked';
+export const REVEAL_NOTE = 'Made up for the demo, so the room can see the story. Not a test of the model or the dog.';
+
+/** A pretend incident on the pretend squad `sim`, starting at `now`.
+    `script` (a SCRIPTS key) plays it as a scenario, with its steps in
+    `beats` for the captions; without one it is the free pretend incident
+    the form starts, which plays the same story without the wait. */
 export function createSimIncident({ sim, lkp, k9Uid = 'sim-1', name = 'Missing person', now, seed = 3, by = 'you',
-                                    lastSeenAt = null, pace = null, brief = null, k9Record = null }) {
+                                    lastSeenAt = null, pace = null, brief = null, k9Record = null, script = null, wind = null }) {
+  const sc = SCRIPTS[script] || null;
   const inc = { ...cleanIncident(incidentDoc({ name, lkp, k9Uid, uid: by, now, lastSeenAt, pace, brief, k9Record }), `sim-${now}`) };
   let walls = sim.walls || null;
   const marks = new Map();
   const tracks = new Map();   // uid → [{ lat, lon, t }]
   const done = new Set();     // script steps already played
+  const beats = [];           // the scenario's steps, in order, for the captions
+  /* The K9 team's own calls as the script makes them. What the person at
+     the screen calls from the Handler's view is added beside them; the
+     story (and the sergeant, who goes by the calls) runs on the script's. */
+  const calls = {};
   let markN = 0;
   let phase = 'responding';
   let clock = 1;   // how many times real time the pretend clock runs
@@ -1002,55 +1110,115 @@ export function createSimIncident({ sim, lkp, k9Uid = 'sim-1', name = 'Missing p
     if (m && !finite(m.withdrawnAt)) marks.set(id, { ...m, withdrawnBy: who, withdrawnAt: t });
   };
   const once = (key, fn) => { if (!done.has(key)) { done.add(key); fn(); } };
+  const beat = (key, t, more = {}) => once(`beat-${key}`, () => beats.push({ key, at: t, ...more }));
   const k9 = () => sim.unit(k9Uid);
   /* Open ground near a point: a post or a rally point is never inside a building. */
   const openAt = (p) => (walls ? outside(walls, p) : p);
   const clearLine = (a, b) => !walls || blockStep(walls, a, b) === b;
+  const dogFrom = now + (sc ? SCENE.dogInMs : 0);
+
+  /* The dog works a few metres off the person's own footsteps, on the side
+     the air carries their scent to, as a dog does: so "where the pretend
+     person walked" shows the dog working beside that line, never on it to
+     the metre, which would read as proof the dog was right. The wind is the
+     one the downwind band is drawn from, to the nearest eighth of the
+     compass (so a breeze that has swung a little since the rehearsal plays
+     the same story), or a fixed one for the seed with no forecast. It eases
+     in from the point and out at the end, where the person is; it is never
+     into a building or across a corner, and the dog's own overshoot and
+     cast (`own`) stay where they are. */
+  const driftTo = finite(wind?.from) ? (Math.round(((wind.from + 180) % 360) / 45) * 45) % 360 : Math.floor(rng(seed + 101)() * 8) * 45;
+  const wobble = rng(seed + 202)() * 6.28;
+  function drift(pts, own = () => false, from = 0) {
+    const out = pts.slice(0, from);
+    for (let i = from; i < pts.length; i++) {
+      const p = pts[i];
+      const ease = Math.min(1, i / 3, (pts.length - 1 - i) / 3);
+      const m = own(i) ? 0 : ease * (5.5 + 2.5 * Math.sin(i * 0.6 + wobble));
+      let q = m >= 0.5 ? project(p, driftTo, m) : p;
+      const prev = out[i - 1], next = pts[i + 1];
+      if (q !== p && walls && (outside(walls, q) !== q || (prev && !clearLine(prev, q)) || (next && !clearLine(q, next)))) q = p;
+      out.push(q);
+    }
+    return out;
+  }
 
   /* ── The world's half ── */
-  let scent = scentPath({ lkp, seed, walls });
-  let start = scent.pts[0];
-  let person = scent.pts[scent.pts.length - 1];
+  /* The dog's line (with its overshoot and cast at the turn) and the
+     person's route (without). After the turn the two are the same points,
+     `off` further along the dog's. */
+  let scent, route, off, start, person, shaped = false, slip = null, endAt = 0, walked = [];
+  function lay() {
+    const s = scentPath({ lkp, seed, walls });
+    const theirs = new Set(s.route);
+    scent = { pts: drift(s.pts, (i) => !theirs.has(s.pts[i])), lostAt: s.lostAt, refoundAt: s.refoundAt };
+    route = s.route;
+    off = s.pts.length - s.route.length;
+    start = scent.pts[0];
+    person = route[route.length - 1];
+  }
+  lay();
+
+  /* A team far off would walk for minutes before anything happened while
+     the chief watched; it starts a short walk from the point instead, as a
+     team called to it would be by the time the map mattered: from a spot
+     with a clear walk in. It walks in on rails, so a corner the map draws
+     oddly can never hold it short of the point. */
+  function approach() {
+    const u = k9();
+    if (!u) return;
+    /* The team waits well outside ON_SCENT_M of the point, so the moment it
+       counts as "at the last known point" is the moment it gets there, not
+       the moment it was called: the live card, the captions and the report
+       then say the same minute. */
+    const away = (q) => dist(q, lkp) >= WAIT_M && dist(q, start) >= WAIT_M;
+    let walk = null;
+    if (dist(u, start) > 80 || !away(u) || !clearLine(u, start)) {
+      const from = bearing(start, u);
+      for (const far of [60, 55, 50]) {
+        for (const turn of [0, 40, -40, 80, -80, 120, -120, 160, -160]) {
+          const q = project(start, from + turn, far);
+          if (away(q) && (!walls || (outside(walls, q) === q && clearLine(q, start)))) { walk = [q, start]; break; }
+        }
+        if (walk) break;
+      }
+      /* Boxed in by buildings: out from the point along open ground, round
+         the corners, until far enough, and the team walks that back in. */
+      for (let k = 0; !walk && k < 8; k++) {
+        const leg = [start, ...legTo(start, project(start, from + k * 45, 90))];
+        for (let i = 1; i < leg.length; i++) {
+          if (!clearLine(leg[i - 1], leg[i])) break;
+          if (away(leg[i])) { walk = leg.slice(0, i + 1).reverse(); break; }
+        }
+      }
+      if (!walk) walk = [project(start, from, 55), start];
+      sim.place?.(k9Uid, walk[0]);
+    }
+    sim.rail(k9Uid, walk || [{ lat: u.lat, lon: u.lon }, start], { mps: SCENE.trailMps, from: dogFrom });
+  }
+  approach();
+  /* The call: the sergeant has asked for the dog. */
+  beat('call', now, { sgt: SIM_MARKS_BY.sgt, k9: k9Uid });
   /* The buildings come from the map a few seconds after the pretend squad
      starts. If they arrive while the team is still on its way, the line is
      laid again round them, before the dog has put a nose to it. */
   function rewall() {
     walls = sim.walls;
-    scent = scentPath({ lkp, seed, walls });
-    start = scent.pts[0];
-    person = scent.pts[scent.pts.length - 1];
-    const u = k9();
-    if (u && dist(u, start) > 15) placeNear(u);
-    sim.goTo(k9Uid, start);
+    lay();
+    approach();
   }
 
-  /* A team far off would walk for minutes before anything happened while
-     the chief watched; it starts a short walk from the point instead, as a
-     team called to it would be by the time the map mattered: from a spot
-     with a clear walk in, if a building stands in the way. */
-  function placeNear(u) {
-    const from = bearing(start, u);
-    const far = Math.min(60, dist(u, start));
-    let spot = project(start, from, far);
-    if (walls) {
-      for (const turn of [0, 40, -40, 80, -80, 120, -120, 160, -160]) {
-        const q = project(start, from + turn, far);
-        if (outside(walls, q) === q && clearLine(q, start)) { spot = q; break; }
-      }
-    }
-    sim.place?.(k9Uid, spot);
-  }
-  const u0 = k9();
-  if (u0 && (dist(u0, start) > 80 || (walls && !clearLine(u0, start)))) placeNear(u0);
-  sim.goTo(k9Uid, start);
-  /* The first officer on scene took the report standing at the last known
-     point, as one usually has by the time a dog is called: so "who walked
-     the scene" has someone to name when the dog starts. */
+  /* The first officer on scene took the report at the last known point, as
+     one usually has by the time a dog is called: they walk in to it at the
+     start, so "who walked the scene" has someone to name when the dog
+     starts. */
   const first = sim.unit(SIM_MARKS_BY.footA);
   if (first) {
     const spot = openAt(project(lkp, 200, 12));
-    sim.place?.(SIM_MARKS_BY.footA, spot);
-    sim.goTo(SIM_MARKS_BY.footA, spot);
+    let from = openAt(project(lkp, 200, SCENE.walkInM));
+    if (!clearLine(from, spot)) from = spot;
+    sim.place?.(SIM_MARKS_BY.footA, from);
+    sim.rail(SIM_MARKS_BY.footA, [from, spot], { mps: SCENE.walkMps, from: now });
   }
 
   /* The cover officer walks with the team: a little behind the handler on
@@ -1060,10 +1228,12 @@ export function createSimIncident({ sim, lkp, k9Uid = 'sim-1', name = 'Missing p
     const c = inc.coverUid ? sim.unit(inc.coverUid) : null;
     const u = k9();
     if (!c || !u) return;
+    /* Still walking in to the point it took the report at: it finishes first. */
+    if (c.rail && !sim.railDone(c.uid)) return;
     const goal = phase === 'responding' ? project(u, 90, 8) : u;
     /* A little quicker than the team, so the officer keeps up rather than
        falling further back at each turn. */
-    if (c.coverPace !== u.uid) { c.cruise = Math.max(c.cruise || 0, u.cruise || 1.7) + 0.2; c.coverPace = u.uid; }
+    if (c.coverPace !== u.uid) { c.cruise = Math.max(c.cruise || 0, SCENE.trailMps) + 0.2; c.coverPace = u.uid; }
     if (coverGoal && dist(coverGoal, goal) < COVER_STEP_M) return;
     coverGoal = { lat: goal.lat, lon: goal.lon };
     sim.goTo(c.uid, coverGoal);
@@ -1074,6 +1244,11 @@ export function createSimIncident({ sim, lkp, k9Uid = 'sim-1', name = 'Missing p
       if (!u.report) continue;
       const line = tracks.get(u.uid) || [];
       const last = line[line.length - 1];
+      /* The team's own fixes as it walks in, inside ON_SCENT_M of the point,
+         are left to its trail, which starts the moment it is there: so the
+         report finds it at the point when the live card did, not a few
+         seconds before, on a fix the card never saw. */
+      if (u.uid === k9Uid && (phase === 'responding' || u.report.at < si.trailStart) && dist(u.report, lkp) <= ON_SCENT_M) continue;
       if (!last || u.report.at > last.t) {
         line.push({ lat: u.report.lat, lon: u.report.lon, t: u.report.at, spd: u.report.spd });
         tracks.set(u.uid, line);
@@ -1091,36 +1266,193 @@ export function createSimIncident({ sim, lkp, k9Uid = 'sim-1', name = 'Missing p
   function world(t) {
     const u = k9();
     if (!u) return;
-    if (phase === 'responding' && dist(u, start) < 8) {
+    /* A beat after the call, so the caption follows the ring going up. */
+    if (t >= now + RING_BEAT_MS) beat('ring', t);
+    /* The last word waits a little, so the find (or the trail going out of
+       the perimeter) has the caption to itself for a moment. */
+    if (endAt && t >= endAt + OVER_MS) beat('over', t);
+    if (phase === 'responding') {
+      if (t >= dogFrom) beat('walkin', t, { k9: k9Uid, cover: inc.coverUid });
+      if (!sim.railDone(k9Uid)) return;
       phase = 'trailing';
       si.trailStart = t;
-      sim.follow(k9Uid, scent.pts);
+      /* The trail starts here and now, at the point: its first fix is the
+         moment the card, the captions and the report all count from. */
+      si.trail.push({ lat: u.lat, lon: u.lon, t });
+      sim.rail(k9Uid, scent.pts, { mps: SCENE.trailMps, slow: { a: scent.lostAt, b: scent.refoundAt, mps: SCENE.castMps } });
+      beat('start', t, { k9: k9Uid, sinceMs: t - seenAt(inc) });
+      /* Who stood there before the dog, as the handler's card has it now; the
+         caption waits a beat, so "starts" has the screen to itself first. */
+      const lines = new Map([...tracks].map(([uid, pts]) => [uid, { uid, pts }]));
+      walked = sceneWalkers({ inc, lines, until: t }).map(w => w.uid);
       return;
     }
+    if (walked.length && t >= si.trailStart + RING_BEAT_MS) beat('scene', t, { uids: walked });
     if (phase !== 'trailing') return;
-    const at = sim.pathAt(k9Uid);
-    if (at > scent.lostAt && scent.lostAt > 0) {
-      once('lost', () => add({ kind: 'lost', by: k9Uid, at: t, lat: scent.pts[scent.lostAt].lat, lon: scent.pts[scent.lostAt].lon }));
+    const at = sim.railAt(k9Uid);
+    if (at >= scent.lostAt && scent.lostAt > 0) {
+      once('lost', () => {
+        calls.lost = add({ kind: 'lost', by: k9Uid, at: t, lat: scent.pts[scent.lostAt].lat, lon: scent.pts[scent.lostAt].lon });
+        beat('lost', t, { uid: k9Uid });
+      });
     }
-    if (at > scent.refoundAt && scent.refoundAt > 0) {
-      once('refound', () => add({ kind: 'refound', by: k9Uid, at: t, lat: u.lat, lon: u.lon }));
+    if (at >= scent.refoundAt && scent.refoundAt > 0) {
+      once('refound', () => { calls.refound = add({ kind: 'refound', by: k9Uid, at: t, lat: u.lat, lon: u.lon }); beat('refound', t, { uid: k9Uid }); });
     }
-    /* An officer on a post close enough to see the person says so. */
-    if (sgt.posts) {
+    shape(t);
+    /* An officer on a post close enough to see the person says so: once the
+       story has settled where the person is, and never as they slip out. */
+    if (shaped && !slip && sgt.posts) {
       for (const key of ['footA', 'footB', 'carA', 'carB']) {
         const o = sim.unit(SIM_MARKS_BY[key]);
-        if (!o || dist(o, sgt.posts[key]) > 15 || dist(o, person) > SEE_M) continue;
+        if (!o || o.uid === inc.coverUid || dist(o, sgt.posts[key]) > 15 || dist(o, person) > SEE_M) continue;
         const seen = project(person, bearing(person, o), 10);
-        once('sighting', () => add({ kind: 'sighting', by: o.uid, at: t, lat: seen.lat, lon: seen.lon, label: 'Person seen on foot' }));
+        once('sighting', () => {
+          add({ kind: 'sighting', by: o.uid, at: t, lat: seen.lat, lon: seen.lon, label: 'Person seen on foot' });
+          beat('sighting', t, { uid: o.uid });
+        });
       }
     }
-    if (at >= scent.pts.length - 1 && dist(u, person) < 7) {
-      once('found', () => { add({ kind: 'indication', by: k9Uid, at: t, lat: u.lat, lon: u.lon, label: 'Person found' }); phase = 'found'; });
+    if (slip && at >= slip.watch) beat('watch', t, { side: slip.side });
+    if (slip && at >= slip.at) beat('out', t, { side: slip.side });
+    if (!sim.railDone(k9Uid)) return;
+    endAt = t;
+    if (slip) {
+      phase = 'away';
+      beat('away', t);
+    } else {
+      once('found', () => {
+        calls.found = add({ kind: 'indication', by: k9Uid, at: t, lat: u.lat, lon: u.lon, label: 'Person found' });
+        phase = 'found';
+        beat('found', t, { uid: k9Uid, sinceMs: t - inc.startedAt });
+      });
     }
   }
 
+  /* Where the story ends, settled once the sergeant has drawn his inner
+     perimeter (the world may read his lines; he never reads its route).
+     From just ahead of the team, the person made for cover. Found: a spot
+     well inside that perimeter, near the post of a car on the side the
+     line was bending, so its officer may see them. Slip: the side of it
+     between the posts, and on out. Always just ahead of the dog, which has
+     not worked that ground yet, so nothing on the map so far changes. */
+  function shape(t) {
+    if (shaped || !sgt.inner || phase !== 'trailing') return;
+    shaped = true;
+    const at = sim.railAt(k9Uid);
+    const ri = Math.max(0, Math.max(at, scent.refoundAt) - off);
+    const ringPts = sgt.inner.pts;
+    const j0 = Math.min(route.length - 1, ri + 4);
+    const { mid, heading: h } = sgt.inner;
+    const want = bearing(mid, route[route.length - 1]);
+    const nearer = (x, y) => (turnOff(x, want) <= turnOff(y, want) ? x : y);
+    if (sc?.end === 'slip') {
+      /* Out through the side of the inner perimeter nearest the team that
+         no post covers yet (no officer due within SEE_M of it; the cover
+         officer is with the dog, so its post is empty), on the side the line
+         was bending when that is as near: so it plays in minutes, not a long
+         walk to the far side of the ring. */
+      const posts = Object.keys(sgt.posts || {}).filter(k => SIM_MARKS_BY[k] !== inc.coverUid).map(k => sgt.posts[k]);
+      const edge = ringPts.slice(0, -1);
+      const gapM = (p) => Math.min(Infinity, ...posts.map(q => dist(p, q)));
+      const open = edge.filter(p => gapM(p) > SEE_M);
+      const score = (p) => dist(p, route[j0]) + (turnOff(bearing(mid, p), want) <= 90 ? 0 : 60);
+      const gap = open.length ? open.reduce((a, b) => (score(b) < score(a) ? b : a))
+        : edge.reduce((a, b) => (gapM(b) > gapM(a) ? b : a));
+      const way = bearing(mid, gap);
+      const to = legTo(route[j0], openAt(project(mid, way, SGT.tightM - 15)));
+      const leg = to.concat(legTo(to.length ? to[to.length - 1] : route[j0], openAt(project(mid, way, SGT.tightM + SLIP_M))));
+      route = route.slice(0, j0 + 1).concat(leg);
+      scent.pts = drift(scent.pts.slice(0, j0 + off + 1).concat(leg), () => false, j0 + off + 1);
+      let cross = route.length - 1;
+      for (let j = ri; j < route.length; j++) if (!insideLine(route[j], ringPts)) { cross = j; break; }
+      slip = { at: cross + off, side: compass(way), point: route[cross] };
+      /* Halfway there, the caption says which side nobody holds yet. */
+      slip.watch = Math.round((Math.max(at, j0 + off) + slip.at) / 2);
+    } else {
+      /* Into cover well inside the line, on the side the line was bending,
+         near enough the car's post there for its officer to see; a little
+         round from the car's own line out, so the officer's sighting, the
+         car's roadblock and the find do not all stand on one line. */
+      const side = nearer(h - 70, h + 70);
+      const hide = openAt(project(mid, side + (side === h - 70 ? HIDE_TURN : -HIDE_TURN), SGT.tightM - HIDE_IN_M));
+      const leg = legTo(route[j0], hide);
+      route = route.slice(0, j0 + 1).concat(leg);
+      scent.pts = drift(scent.pts.slice(0, j0 + off + 1).concat(leg), () => false, j0 + off + 1);
+    }
+    person = route[route.length - 1];
+    sim.reroute(k9Uid, scent.pts);
+  }
+  /* A walk from `a` to `b` in 12 m steps, round buildings where the map has
+     them. With buildings it is a shortest walk over a 12 m lattice (eight
+     ways from each point), never through a wall: a walker that only ever
+     steps towards `b` can pace up and down a dead-end street for ever, which
+     held one pretend story on a corner for twenty minutes. A walk the
+     lattice cannot find in its search goes straight, through what the map
+     calls a building (a gate, a passage the map does not draw), so it always
+     gets there. */
+  function legTo(a, b) {
+    if (walls) {
+      const found = latticeWalk(a, b);
+      if (found) return found;
+    }
+    const out = [];
+    let here = a;
+    for (let n = 0; n < 100 && dist(here, b) > 12; n++) {
+      const next = project(here, bearing(here, b), 12);
+      out.push(next);
+      here = next;
+    }
+    if (dist(here, b) > 1) out.push({ lat: b.lat, lon: b.lon });
+    return out;
+  }
+  function latticeWalk(a, b) {
+    const STEP = 12;
+    const ky = STEP / 111320, kx = STEP / (111320 * Math.cos(a.lat * Math.PI / 180));
+    const at = (i, j) => ({ lat: a.lat + j * ky, lon: a.lon + i * kx });
+    const goal = { i: (b.lon - a.lon) / kx, j: (b.lat - a.lat) / ky };
+    const h = (i, j) => Math.hypot(i - goal.i, j - goal.j);
+    const reach = Math.ceil(h(0, 0)) + 25;   // how far round it may go
+    const key = (i, j) => `${i},${j}`;
+    const open = [{ i: 0, j: 0, g: 0, f: h(0, 0) }];
+    const best = new Map([[key(0, 0), 0]]);
+    const from = new Map();
+    const pts = new Map([[key(0, 0), a]]);
+    const pt = (i, j) => { const k = key(i, j); if (!pts.has(k)) pts.set(k, at(i, j)); return pts.get(k); };
+    for (let n = 0; open.length && n < 6000; n++) {
+      let bi = 0;
+      for (let q = 1; q < open.length; q++) if (open[q].f < open[bi].f) bi = q;
+      const c = open[bi];
+      open[bi] = open[open.length - 1]; open.pop();
+      if (c.g > best.get(key(c.i, c.j))) continue;
+      const here = pt(c.i, c.j);
+      if (h(c.i, c.j) <= 1 && clearLine(here, b)) {
+        const out = [];
+        for (let k = key(c.i, c.j); k !== key(0, 0); k = from.get(k)) out.push(pts.get(k));
+        out.reverse();
+        if (dist(out.length ? out[out.length - 1] : a, b) > 1) out.push({ lat: b.lat, lon: b.lon });
+        return out;
+      }
+      for (let di = -1; di <= 1; di++) {
+        for (let dj = -1; dj <= 1; dj++) {
+          if (!di && !dj) continue;
+          const i = c.i + di, j = c.j + dj;
+          if (Math.abs(i) > reach || Math.abs(j) > reach) continue;
+          const g = c.g + Math.hypot(di, dj);
+          const k = key(i, j);
+          if (best.has(k) && best.get(k) <= g) continue;
+          if (!clearLine(here, pt(i, j))) continue;
+          best.set(k, g);
+          from.set(k, key(c.i, c.j));
+          open.push({ i, j, g, f: g + h(i, j) });
+        }
+      }
+    }
+    return null;
+  }
+
   /* ── The sergeant's half: never the hidden line ── */
-  const sgt = { stage: 'none', wide: [], posts: null };
+  const sgt = { stage: 'none', wide: [], posts: null, inner: null };
   function post(posts) {
     sgt.posts = posts;
     for (const key of ['carA', 'carB', 'footA', 'footB']) {
@@ -1130,10 +1462,13 @@ export function createSimIncident({ sim, lkp, k9Uid = 'sim-1', name = 'Missing p
   function sergeant(t) {
     if (sgt.stage === 'none' && t >= now + SGT.wideAfterMs) {
       sgt.stage = 'wide';
+      sgt.wideAt = t;
       /* He puts the first officer on scene with the K9 team as cover,
          unless the person at the screen already chose. */
       if (!coverChosen) { inc.coverUid = SIM_MARKS_BY.footA; coverChosen = true; }
-      sgt.wide.push(add({ kind: 'perimeter', by: SIM_MARKS_BY.sgt, at: t, pts: ring(lkp, SGT.wideM, 12), label: 'Wide perimeter' }));
+      sgt.wideRing = ring(lkp, SGT.wideM, 12);
+      sgt.wide.push(add({ kind: 'perimeter', by: SIM_MARKS_BY.sgt, at: t, pts: sgt.wideRing, label: 'Wide perimeter' }));
+      beat('wide', t, { uid: SIM_MARKS_BY.sgt, m: SGT.wideM });
       /* Nothing yet says which way the person went: the posts go evenly
          round, and the rally point is just outside the ring on the side
          Command came in from. */
@@ -1147,7 +1482,7 @@ export function createSimIncident({ sim, lkp, k9Uid = 'sim-1', name = 'Missing p
     if (sgt.stage === 'wide' && phase !== 'responding') {
       /* What a sergeant can see: the re-find the handler called, and the
          track the team has walked since. */
-      const re = [...marks.values()].find(m => m.kind === 'refound');
+      const re = calls.refound ? marks.get(calls.refound) : null;
       const info = trailInfo(si.trail, inc, t);
       const since = re ? pathLen(si.trail.filter(p => p.t >= re.at)) : 0;
       const mid = info.heading != null ? project(info.head, info.heading, SGT.tightAheadM) : null;
@@ -1161,6 +1496,8 @@ export function createSimIncident({ sim, lkp, k9Uid = 'sim-1', name = 'Missing p
         for (const id of sgt.wide) withdraw(id, SIM_MARKS_BY.sgt, t);
         sgt.wide = [];
         add({ kind: 'perimeter', by: SIM_MARKS_BY.sgt, at: t, pts: tight, label: 'Inner perimeter' });
+        sgt.inner = { mid, heading: info.heading, pts: tight };
+        beat('tight', t, { uid: SIM_MARKS_BY.sgt });
         /* A rally point the new ring takes in moves out past its edge. */
         if (sgt.rally && insideLine(sgt.rally, tight)) {
           withdraw(sgt.rallyId, SIM_MARKS_BY.sgt, t);
@@ -1218,6 +1555,12 @@ export function createSimIncident({ sim, lkp, k9Uid = 'sim-1', name = 'Missing p
     });
     /* The wait is counted from getting there; a walk held up for long ends it anyway. */
     if (!sgt.strayHere && dist(o, sgt.stray) < 15) sgt.strayHere = t;
+    /* The caption says Command is told once the screen would tell them:
+       the ring has stood long enough for its first minutes to be over, and
+       the officer is well inside it (at the spot, or held up on the way by
+       a building but in all the same). */
+    const inside = sgt.strayHere || (insideLine(o, sgt.wideRing) && nearM(o, sgt.wideRing) >= STRAY.inM);
+    if (inside && !done.has('back') && t >= sgt.wideAt + PERIM_GRACE_MS) beat('stray', t, { uid: o.uid });
     /* Held for at least half a minute of real time, so at ×10 the chief
        still has a moment to see it. */
     const over = sgt.strayHere ? sgt.strayHere + Math.max(STRAY.holdMs, STRAY.realMs * speed) : sgt.rallyAt + STRAY.giveUpMs;
@@ -1225,17 +1568,26 @@ export function createSimIncident({ sim, lkp, k9Uid = 'sim-1', name = 'Missing p
   }
 
   const si = {
-    inc, marks, tracks, trail: [], trailStart: 0,
+    inc, marks, tracks, trail: [], trailStart: 0, beats, script: sc ? script : null, dogFrom,
+    /* The story's own pace for the reach ring (a frail man walks slower than
+       the app's 5 km/h), in memory only, never in a synced document. */
+    paces: sc?.kmh ? { ...sc.kmh } : null,
     get phase() { return phase; },
+    /** Whether the story has played to its end (found, or got away). */
+    get over() { return phase === 'found' || phase === 'away'; },
+    /** Whether the scenario has said its last word. */
+    get done() { return beats.some(b => b.key === 'over'); },
     /* The hidden line is not on the object anyone draws from: it is handed
        out only for the end-of-scenario "where the pretend person walked". */
-    hiddenRoute: () => scent.pts.slice(),
+    hiddenRoute: () => route.slice(),
     /** Play the incident on to the pretend squad's clock, running at
         `speed` times real time. */
     step(t, speed = 1) {
       if (inc.status !== 'active') return si;
       if (finite(speed) && speed > 0) clock = speed;
-      if (!walls && sim.walls && phase === 'responding') rewall();
+      /* A scenario keeps the buildings it started with: walls that turn up
+         later would lay a different story from the one rehearsed. */
+      if (!sc && !walls && sim.walls && phase === 'responding') rewall();
       record(t);
       world(t);
       sergeant(t);
@@ -1243,7 +1595,8 @@ export function createSimIncident({ sim, lkp, k9Uid = 'sim-1', name = 'Missing p
       stray(t);
       return si;
     },
-    /** A mark the person at the screen drew (as Command). */
+    /** A mark the person at the screen drew (as Command), or called from
+        the Handler's view: beside the script's own, never instead of them. */
     addMark(m) { return add(m); },
     /** Taken back by `who` at `t`: off the map, crossed out in the log. */
     removeMark(id, who = by, t = null) { withdraw(id, who, finite(t) ? t : Date.now()); },
@@ -1282,10 +1635,20 @@ export function createSimIncident({ sim, lkp, k9Uid = 'sim-1', name = 'Missing p
   };
   return si;
 }
+/* How far apart two bearings are, either way round, 0–180. */
+const turnOff = (a, b) => Math.abs(((a - b) % 360 + 540) % 360 - 180);
 
-/* The K9 team's fine trail and its five-second reports, as one line. */
-const mergeTrail = (reports, trail) => [...reports, ...trail].sort((a, b) => a.t - b.t)
-  .filter((p, i, a) => i === 0 || p.t > a[i - 1].t);
+/* The K9 team's fine trail and its five-second reports, as one line. Once
+   the trail starts it is the line (it takes every step of 3 m or more, to
+   the end): the reports are rougher fixes of the same walk, and threaded
+   between its points, or jittering round a team standing at the find, they
+   zigzag and add length the team never walked, so the report's distance
+   disagreed with the card's. */
+const mergeTrail = (reports, trail) => {
+  const from = trail.length ? trail[0].t : Infinity;
+  return [...reports.filter(p => p.t < from), ...trail].sort((x, y) => x.t - y.t)
+    .filter((p, i, all) => i === 0 || p.t > all[i - 1].t);
+};
 
 /* ── The handler's squad picture (the run screen during an incident) ────
    While the K9 team trails, the handler's phone keeps a slim layer of what

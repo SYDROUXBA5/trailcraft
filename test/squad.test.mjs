@@ -25,12 +25,14 @@ import { MARKS, DRAW_TOOLS, RUN_MARKS, incidentDoc, cleanIncident, activeOf, pas
          isClosed, insideLine,
          onScentWords, briefWords, logLines, ring, REACH_CAP_M, downwindBand, BAND_WORDS, bandWindWords, CALM_MS,
          sceneWalkers, sceneWords, nameList, SCENE_M, FOOT_MS, speedAt, insideWalkers, insideWords, INSIDE_M,
-         PERIM_GRACE_MS, onFootNow, coverWords, aboutWords, SCENE_NOTE, scentStart, insideNow, GOING_GRACE_MS, INC_COLOURS } from '../public/incident.js';
+         PERIM_GRACE_MS, onFootNow, coverWords, aboutWords, SCENE_NOTE, scentStart, insideNow, GOING_GRACE_MS, INC_COLOURS,
+         SCRIPTS, SCRIPT_KEYS, scriptChoices, scriptClock, beatWords, SCENE, REVEAL_WORDS, REVEAL_NOTE } from '../public/incident.js';
 import { wallIndex, wallAt, blockStep, outside as outsideWall } from '../public/walls.js';
 import { startIncident, endIncident, watchIncidents, watchIncident, putMark, withdrawMark, putTrack,
          loadIncident, updateSeen, setCover } from '../public/incident-cloud.js';
 import { project, pathLen, bearing } from '../public/geo.js';
 import { dist } from '../public/geo.js';
+import { reportDoc, reportHeadline, cleanAir, conditionsSection, trailM, STORY_AIR } from '../public/incident-report.js';
 
 let pass = 0;
 const tests = [];
@@ -616,8 +618,13 @@ t('the pretend sergeant contains wide early, then tightens ahead of the team, an
   assert.ok(sgt.length > 500);
   assert.doesNotMatch(sgt, /\bscent\b|\bperson\b|hiddenRoute|pathAt/, 'the sergeant knows what a real one would');
   assert.match(sgt, /trailInfo\(si\.trail, inc, t\)/, 'he goes by the team’s own track');
-  // Nothing on any screen reads the hidden line (only the end-of-scenario line will).
-  for (const f of ['squad-ui.js', 'incident-ui.js', 'squad.js']) assert.doesNotMatch(read(`public/${f}`), /hiddenRoute|\.scent\b/, f);
+  // Nothing on any screen reads the hidden line, but the end-of-scenario line (revealRoute).
+  for (const f of ['squad-ui.js', 'squad.js', 'handler-ui.js', 'incident-report.js']) assert.doesNotMatch(read(`public/${f}`), /hiddenRoute|\.scent\b/, f);
+  const uiSrc = read('public/incident-ui.js');
+  const reveal = uiSrc.slice(uiSrc.indexOf('function revealRoute('), uiSrc.indexOf('\n}\n', uiSrc.indexOf('function revealRoute(')));
+  assert.equal((uiSrc.match(/hiddenRoute/g) || []).length, (reveal.match(/hiddenRoute/g) || []).length, 'only revealRoute reads it');
+  assert.equal((reveal.match(/hiddenRoute\(\)/g) || []).length, 1);
+  assert.doesNotMatch(uiSrc, /\.scent\b/);
   assert.doesNotMatch(read('public/app.js'), /hiddenRoute/);
   assert.equal(si.scent, undefined, 'the line is not on the incident the screens draw from');
 });
@@ -793,7 +800,9 @@ t('in the pretend demo the wide ring goes amber as a moment in the story, and th
     if (firstAmber != null) assert.ok(firstAmber >= 200e3, `seed ${seed}: amber at ${firstAmber / 1e3} s, not from the start`);
   }
   assert.ok(inners > 0, 'some runs reach the tightening');
-  assert.match(read('public/incident-ui.js'), /seenAt: viewNow\(\) - 60e3, pace: 'walk'/);
+  /* The scenarios: seen walking off two minutes before the dog is called. */
+  for (const k of SCRIPT_KEYS) assert.deepEqual([SCRIPTS[k].callMs, SCRIPTS[k].pace], [2 * 60e3, 'walk'], k);
+  assert.match(read('public/incident-ui.js'), /lastSeenAt: when\.seenAt, pace: sc\.pace, brief: sc\.brief/);
 });
 
 t('the live log says what happened in plain words, keeps a withdrawn mark crossed out, and stops at a replay’s moment', () => {
@@ -1893,7 +1902,7 @@ t('the map keeps its caveats readable: tags clear of pins, the panel and the Wal
   const ui = read('public/incident-ui.js');
   const room = ui.slice(ui.indexOf('function tagRoom('), ui.indexOf('const TAG_SPOTS'));
   assert.match(room, /const pad = mapPad\(\);/);
-  assert.match(room, /\.inc-mark \.inc-pin, \.inc-mark-tag, \.sq-unit, \.sq-tag/, 'pins and their labels are taken');
+  assert.match(room, /\.inc-mark \.inc-pin, \.inc-mark-tag:not\(\.inc-tag-off\), \.sq-unit, \.sq-tag/, 'pins and their labels (the ones shown) are taken');
   assert.match(room, /underWall: /);
   const band = ui.slice(ui.indexOf('function paintBandTag('), ui.indexOf('function pinEl('));
   assert.match(band, /if \(len < BAND_MIN_PX\) \{ tag\.el\.hidden = true; return; \}/, 'a band a few pixels long labels nothing');
@@ -2038,6 +2047,441 @@ t('review fixes: nothing said that Command did not say, the wall reads from acro
   assert.match(css, /@media \(max-width: 899px\) \{ \.cmd-follow \{ top: calc\(var\(--top-row, 14px\) \+ max\(56px, var\(--wx-gap, 0px\) \+ 8px\)\); \} \}/);
   // The strip goes amber with the line.
   assert.match(css, /\.cmd-panel\.folded\.inc-on \.inc-strip\.warn \{/);
+});
+
+/* ── Move G: a scripted scenario ─────────────────────────────────────── */
+/* One scenario played to its end (or `untilMs`), second by second as the
+   command screen plays it (squad-ui.js playTo). */
+function playScenario({ key, seed = SCRIPTS[key]?.seed ?? 3, simSeed = 7, walls = null, lkpAt = { brg: 40, m: 70 }, center = TOWN, untilMs = 45 * 60e3, each = null, speed = 4 }) {
+  const t0 = 1_800_000_000_000;
+  const sim = createSim({ center, now: t0, seed: simSeed, walls });
+  const sc = SCRIPTS[key] || null;
+  const si = createSimIncident({ sim, lkp: project(center, lkpAt.brg, lkpAt.m), now: t0, seed, script: key,
+                                 name: sc?.title, lastSeenAt: sc ? t0 - sc.callMs : null, pace: sc?.pace ?? null, brief: sc?.brief ?? null });
+  let t = t0, reachedLkp = null;
+  while (t < t0 + untilMs && !si.done) {
+    t += 1000; sim.step(t); si.step(t, speed);
+    if (reachedLkp == null && si.phase !== 'responding') reachedLkp = t;
+    if (each) each(t, si, sim);
+  }
+  return { si, sim, t0, t, reachedLkp };
+}
+
+t('the pretend dog always reaches the last known point, and every scenario plays to its end, in every seed', () => {
+  const W = townWalls();
+  let runs = 0, stray = 0;
+  for (const walls of [null, W]) {
+    for (const key of [null, ...SCRIPT_KEYS]) {
+      for (let s = 1; s <= 24; s++) {
+        let inWall = 0;
+        /* A different squad, scent line and last known point each time,
+           near the team and far from it. */
+        const r = playScenario({ key, seed: s, simSeed: s + 30, walls, lkpAt: { brg: s * 37, m: 40 + s * 22 },
+          each: walls ? (t, si, sim) => { if (wallAt(W, sim.unit('sim-1')) !== -1) inWall++; } : null });
+        const tag = `${walls ? 'town' : 'open'} ${key || 'free'} seed ${s}`;
+        runs++;
+        assert.ok(r.reachedLkp, `${tag}: the dog reached the last known point`);
+        assert.ok(r.reachedLkp - r.t0 <= (key ? SCENE.dogInMs : 0) + 2 * 60e3, `${tag}: within two minutes of being sent`);
+        assert.ok(dist(r.si.trail[0], r.si.hiddenRoute()[0]) < 10, `${tag}: the trail starts where the line does`);
+        assert.ok(r.si.done && r.si.over, `${tag}: played to its end (${r.si.phase})`);
+        assert.ok(r.t - r.t0 < 25 * 60e3, `${tag}: in under 25 pretend minutes`);
+        if (walls) assert.equal(inWall, 0, `${tag}: the dog never walked through a building`);
+        const end = r.si.hiddenRoute().slice(-1)[0];
+        const inner = standingOf(r.si.marks).find(m => m.label === 'Inner perimeter');
+        assert.ok(inner, `${tag}: the sergeant tightened`);
+        if (key === 'slip') {
+          assert.equal(r.si.phase, 'away');
+          assert.ok(!insideLine(end, inner.pts), `${tag}: the person ended outside the inner perimeter`);
+        } else {
+          assert.equal(r.si.phase, 'found');
+          assert.ok(insideLine(end, inner.pts) && nearM(end, inner.pts) >= 30, `${tag}: found well inside the inner perimeter`);
+          const ind = [...r.si.marks.values()].find(m => m.label === 'Person found');
+          assert.ok(ind && dist(ind, end) < 10, `${tag}: the find is where the person was`);
+        }
+        if (r.si.beats.some(b => b.key === 'stray')) stray++;
+      }
+    }
+  }
+  assert.equal(runs, 192);
+  assert.ok(stray >= runs * 0.8, `an officer stops inside the perimeter in most runs (${stray}/${runs})`);
+});
+
+t('a scenario plays the same every time: same steps at the same pretend moments, same trail', () => {
+  for (const key of SCRIPT_KEYS) {
+    const a = playScenario({ key, walls: townWalls() });
+    const b = playScenario({ key, walls: townWalls() });
+    assert.deepEqual(b.si.beats, a.si.beats, key);
+    assert.deepEqual(b.si.trail, a.si.trail, key);
+    assert.deepEqual(b.si.hiddenRoute(), a.si.hiddenRoute(), key);
+  }
+  // The command screen plays whole pretend seconds, never however long a tick took.
+  const sq = read('public/squad-ui.js');
+  assert.match(sq, /const SIM_SEED = 7;/);
+  assert.match(sq, /createSim\(\{ center, now, seed: SIM_SEED, callSigns: names\.callSigns \}\)/);
+  assert.doesNotMatch(sq, /seed: \(now \/ 1000\) \| 0|seed: \(Date\.now\(\)/);
+  assert.match(sq, /while \(sim\.at \+ 1000 <= t && S\.sim === sim\) \{\s*const s = sim\.at \+ 1000;\s*sim\.step\(s\);\s*for \(const fn of S\.steppers\)/);
+  assert.match(sq, /S\.tick = setInterval\(\(\) => \{ playTo\(viewNow\(\)\); paintCommand\(\); \}, 1000\);/);
+  const ui = read('public/incident-ui.js');
+  assert.match(ui, /onSimStep\(\(t\) => \{ if \(I\.sim\) I\.sim\.step\(t, simSpeed\(\)\); \}\);/);
+  assert.doesNotMatch(ui, /I\.sim\.step\(viewNow\(\)/, 'nothing steps the pretend incident off the whole seconds');
+  assert.doesNotMatch(ui, /seed: \(Date\.now\(\)/);
+});
+
+t('the captions tell it in police order, in plain honest words, with his department’s call signs', () => {
+  const order = ['call', 'ring', 'wide', 'walkin', 'start', 'scene', 'lost', 'refound', 'tight'];
+  for (const key of SCRIPT_KEYS) {
+    const { si, sim } = playScenario({ key });
+    const keys = si.beats.map(b => b.key);
+    const at = (k) => keys.indexOf(k);
+    for (let i = 1; i < order.length; i++) assert.ok(at(order[i - 1]) >= 0 && at(order[i - 1]) < at(order[i]), `${key}: ${order[i - 1]} before ${order[i]} in ${keys}`);
+    const end = key === 'slip' ? ['watch', 'out', 'away', 'over'] : ['found', 'over'];
+    assert.deepEqual(keys.slice(-end.length), end, `${key}: ends ${end}`);
+    if (key !== 'slip') assert.ok(at('sighting') > at('tight') && at('sighting') < at('found'), `${key}: an officer on a post sees them`);
+    else assert.equal(at('sighting'), -1, 'nobody sees them slip out');
+    assert.ok(si.beats.every((b, i) => i === 0 || b.at >= si.beats[i - 1].at), 'in time order');
+    const over = si.beats.find(b => b.key === 'over'), last = si.beats[si.beats.length - 2];
+    assert.ok(over.at - last.at >= 20e3, 'the find has the caption to itself for a moment');
+    /* "Starts" has the screen to itself before "who walked the scene": two
+       stops for Next step, so a phone (which shows only the latest line)
+       sees the delay from last seen. */
+    const st0 = si.beats.find(b => b.key === 'start'), sc0 = si.beats.find(b => b.key === 'scene');
+    assert.ok(sc0.at - st0.at >= 5e3, `${key}: the scene caption waits a beat after the start`);
+    assert.equal(keys.indexOf('scene'), keys.indexOf('start') + 1);
+    // The scene step names the officer who took the report at the point.
+    assert.deepEqual(si.beats.find(b => b.key === 'scene').uids, ['sim-5']);
+    // Words, with the call signs he typed.
+    const names = new Map([['sim-1', 'Dog 1'], ['sim-5', 'Beat 3'], ['sim-7', 'Sarge'], ['sim-3', 'Car 12'], ['sim-4', 'Car 14'], ['sim-6', 'Beat 5']]);
+    const words = si.beats.map(b => beatWords(b, { who: (u) => names.get(u) || 'A unit', dog: 'Rex', script: key }));
+    for (const w of words) {
+      assert.ok(w.length > 20 && w.length < 260, w);
+      assert.doesNotMatch(w, /secure|evidence|sealed|CJIS|predict|proof|guarantee|undefined|NaN|null/i, w);
+    }
+    assert.match(words[0], new RegExp(`^${SCRIPTS[key].title}, last seen ${SCRIPTS[key].seen}\\. Sarge calls for a dog: Dog 1 is called and kits up nearby\\.$`));
+    assert.match(words[1], /rough guide, not where they are/i);
+    assert.match(words[keys.indexOf('scene')], /^Beat 3 stood at the last known point before the dog/);
+    assert.match(words[keys.indexOf('lost')], /“Dog 1, lost it”/);
+    if (key === 'slip') assert.match(words[keys.indexOf('watch')] || '', /^Nobody is posted on the (north|south|east|west|north-east|north-west|south-east|south-west) side of the inner perimeter yet/);
+    if (key === 'slip') assert.match(words[keys.indexOf('out')], /^The trail leaves the inner perimeter on the (north|south|east|west|north-east|north-west|south-east|south-west) side/);
+    else assert.match(words[keys.indexOf('found')], /^Rex finds (the suspect|the missing man) inside the perimeter, \d+ min after the dog was called\.$/);
+    assert.ok(sim);
+  }
+  assert.equal(beatWords({ key: 'nope' }), '');
+  assert.match(beatWords({ key: 'call', sgt: 'a', k9: 'b' }, {}), /^a calls for a dog: b is called and kits up nearby\.$/, 'the free pretend incident has no story title');
+  // The scripts' briefs say only what a caller could: no direction of travel.
+  for (const k of SCRIPT_KEYS) assert.equal(SCRIPTS[k].brief.dir, '', k);
+  assert.deepEqual(scriptChoices().map(c => c.value), SCRIPT_KEYS);
+  assert.deepEqual(scriptChoices().map(c => c.text), ['Burglary, suspect fled on foot, 02:14', 'Missing vulnerable person, 16:40', 'Burglary, 02:14: the suspect slips out']);
+});
+
+t('the story clock: the last 02:14 with the call already made, and the incident two minutes on', () => {
+  const day = (h, m) => { const d = new Date(2026, 10, 5, h, m, 0, 0); return d.getTime(); };
+  const c = scriptClock('burglary', day(10, 0));
+  assert.deepEqual([new Date(c.seenAt).getDate(), new Date(c.seenAt).getHours(), new Date(c.seenAt).getMinutes()], [5, 2, 14]);
+  assert.equal(c.openAt - c.seenAt, 2 * 60e3);
+  const early = scriptClock('burglary', day(2, 15));
+  assert.deepEqual([new Date(early.seenAt).getDate(), new Date(early.seenAt).getHours()], [4, 2], 'before the call: yesterday’s');
+  const m = scriptClock('missing', day(16, 50));
+  assert.deepEqual([new Date(m.seenAt).getDate(), new Date(m.seenAt).getHours(), new Date(m.seenAt).getMinutes()], [5, 16, 40]);
+  assert.ok(m.openAt <= day(16, 50));
+  assert.equal(scriptClock('nope', day(10, 0)), null);
+  // The screen starts the pretend squad again at that moment, on the same ground.
+  const sq = read('public/squad-ui.js');
+  assert.match(sq, /export function restartSim\(at\) \{/);
+  assert.match(sq, /const walls = old\.walls \|\| \(S\.wallsFound\?\.center === old\.center \? S\.wallsFound\.W : null\);\s*S\.sim = createSim\(\{ center: old\.center, now: at, seed: SIM_SEED, callSigns: names\.callSigns, walls \}\);/);
+  const ui = read('public/incident-ui.js');
+  assert.match(ui, /const when = scriptClock\(key, Date\.now\(\)\);\s*const sim = restartSim\(when\.openAt\);/);
+});
+
+t('the presenter’s calls from the Handler’s view sit beside the script’s: the story does not change', () => {
+  const plain = playScenario({ key: 'burglary' });
+  let added = 0;
+  const tapped = playScenario({ key: 'burglary', each: (t, si) => {
+    // Re-found and Lost it tapped early, as a presenter might.
+    if (si.phase === 'trailing' && added < 2 && t - si.trailStart > 10e3) {
+      si.addMark({ kind: added ? 'lost' : 'refound', by: 'sim-1', at: t, lat: si.inc.lkp.lat, lon: si.inc.lkp.lon });
+      added++;
+    }
+  } });
+  assert.equal(added, 2);
+  assert.deepEqual(tapped.si.beats, plain.si.beats, 'same steps at the same moments');
+  const kinds = (si) => [...si.marks.values()].filter(m => m.by === 'sim-1').map(m => m.kind);
+  assert.equal(kinds(tapped.si).length, kinds(plain.si).length + 2, 'both kept, beside the script’s own');
+  const src = read('public/incident.js');
+  const sgt = src.slice(src.indexOf('function sergeant('), src.indexOf('function rallyAt('));
+  assert.match(sgt, /const re = calls\.refound \? marks\.get\(calls\.refound\) : null;/, 'the sergeant goes by the script’s re-find');
+});
+
+t('where the pretend person walked: their own route, read once at the end, worded as the story and never as proof', () => {
+  const path = scentPath({ lkp: TOWN, seed: 5 });
+  const inRoute = new Set(path.route);
+  assert.ok(path.route.every(p => path.pts.includes(p)), 'the route is the dog’s line without the cast');
+  assert.ok(!inRoute.has(path.pts[path.lostAt]), 'the overshoot is the dog’s, not the person’s');
+  assert.equal(path.pts.length - path.route.length, path.refoundAt - path.pts.indexOf(path.pts[path.refoundAt]));
+  const { si } = playScenario({ key: 'burglary' });
+  const route = si.hiddenRoute();
+  assert.notEqual(route, si.hiddenRoute(), 'a copy each time');
+  assert.ok(dist(route[route.length - 1], [...si.marks.values()].find(m => m.label === 'Person found')) < 10);
+  assert.equal(REVEAL_WORDS, 'Where the pretend person walked');
+  assert.match(REVEAL_NOTE, /^Made up for the demo.*Not a test of the model or the dog\.$/);
+  for (const w of [REVEAL_WORDS, REVEAL_NOTE]) assert.doesNotMatch(w, /proof|prove|predict|accurate|correct|evidence/i);
+  const ui = read('public/incident-ui.js');
+  const fn = ui.slice(ui.indexOf('async function revealRoute('), ui.indexOf('\n}\n', ui.indexOf('async function revealRoute(')));
+  assert.match(fn, /ended\.inc\.status !== 'ended'\) return;/, 'only once the incident has ended');
+  assert.match(fn, /if \(!sq\(\)\.sim/, 'only pretend');
+  assert.match(fn, /I\.reveal = ended\.hiddenRoute\(\);/);
+  // Never in the report: the replay video films the live map, so the line comes off it first.
+  assert.match(ui, /async function openReport\(source\) \{\s*if \(I\.report\) return;[\s\S]{0,200}if \(I\.reveal\) \{ I\.reveal = null; paintCommandNow\(\); \}/);
+  assert.match(ui, /\$\{I\.reveal \? 'Hide where the pretend person walked' : 'Show where the pretend person walked'\}/);
+  assert.match(ui, /\{ id: 'inc-reveal', src: 'inc-reveal', type: 'line'/);
+});
+
+t('the scenario screen: Start scenario replaces the pretend incident, captions as text with the demo label, motion only where it is on', () => {
+  const ui = read('public/incident-ui.js');
+  assert.match(ui, /data-inc-act="scenario">Start scenario<\/button>/);
+  assert.doesNotMatch(ui, /data-inc-act="quick"|function quickSim/);
+  assert.match(ui, /if \(act === 'scenario'\) return startScenario\(\);/);
+  assert.match(ui, /options: scriptChoices\(\),/);
+  const cap = ui.slice(ui.indexOf('function paintCaption('), ui.indexOf('\n}\n', ui.indexOf('function paintCaption(')));
+  assert.ok(cap.length > 400);
+  assert.doesNotMatch(cap, /innerHTML|insertAdjacentHTML|outerHTML|html`/, 'names reach the captions as text only');
+  assert.match(cap, /\$\('cmdCapText'\)/);
+  assert.match(cap, /who: \(uid\) => who\(uid, st\.members\)/, 'his call signs');
+  assert.match(cap, /const title = `\$\{st\.name\} · /, 'his department');
+  const page = read('public/index.html');
+  const box = page.slice(page.indexOf('<div class="cmd-cap" id="cmdCap" hidden>'), page.indexOf('</div>\n  </div>', page.indexOf('id="cmdCap"')));
+  for (const id of ['cmdCapClock', 'cmdCapTitle', 'cmdCapPrev', 'cmdCapText', 'cmdCapPause', 'cmdCapSpeed', 'cmdCapNext']) assert.match(box, new RegExp(`id="${id}"`), id);
+  assert.match(box, /data-demo-label>Demo — not for real operations</, 'the demo label on every frame');
+  assert.match(box, /id="cmdCapText" aria-live="polite"/);
+  assert.match(box, /id="cmdCapSpeed" data-sim-speed/);
+  assert.match(page, /id="cmdSimSpeed" data-sim-speed/);
+  const css = read('public/app.css');
+  assert.match(css, /html\[data-motion="on"\] \.cmd-cap-text\.cap-new \{ animation: cap-in/);
+  assert.doesNotMatch(css.replace(/html\[data-motion="on"\] \.cmd-cap-text\.cap-new \{[^}]*\}/, ''), /\.cmd-cap[^{]*\{[^}]*(animation|transition)/, 'nothing else on it moves');
+  // The presenter's clock: pause, speed and next step.
+  const sq = read('public/squad-ui.js');
+  assert.match(sq, /return c\.paused \? c\.base : c\.base \+ \(Date\.now\(\) - c\.real\) \* c\.speed;/);
+  assert.match(sq, /export function simJump\(until, maxMs = 10 \* 60e3\)/);
+  assert.match(ui, /\$\('cmdCapNext'\)\.addEventListener\('click', nextBeat\);/);
+  assert.match(ui, /simJump\(\(\) => I\.sim !== si \|\| si\.beats\.length > n \|\| si\.done\);/);
+});
+
+t('the pretend squad on rails: walked by distance along the line, carries on when the line ahead changes, and let go by any other order', () => {
+  const t0 = 1_800_000_000_000;
+  const sim = createSim({ center: TOWN, now: t0, seed: 3 });
+  const pts = [project(TOWN, 0, 0), project(TOWN, 90, 30), project(project(TOWN, 90, 30), 0, 30)];
+  sim.place('sim-1', pts[0]);
+  sim.rail('sim-1', pts, { mps: 1.5, from: t0 + 5000 });
+  sim.step(t0 + 4000);
+  assert.ok(dist(sim.unit('sim-1'), pts[0]) < 0.5, 'waits for its moment');
+  sim.step(t0 + 14000);
+  assert.ok(Math.abs(dist(sim.unit('sim-1'), pts[0]) - 15) < 0.5, '1.5 m a second');
+  assert.equal(sim.railAt('sim-1'), 0);
+  sim.reroute('sim-1', [pts[0], pts[1], project(pts[1], 180, 30)]);
+  sim.step(t0 + 45000);
+  assert.equal(sim.railDone('sim-1'), true);
+  assert.equal(sim.railAt('sim-1'), 2);
+  assert.ok(dist(sim.unit('sim-1'), project(pts[1], 180, 30)) < 0.5, 'the new line ahead');
+  sim.goTo('sim-1', pts[0]);
+  assert.equal(sim.railAt('sim-1'), -1, 'off rails');
+});
+
+t('fixes from the walk-through: pins stand side by side, a point under the box is not half drawn, the PDF keeps the map credit', () => {
+  const hv = read('public/handler-ui.js');
+  assert.match(hv, /const points = pic\.lkp \? \[\{ id: 'lkp', kind: 'lkp', pos: pic\.lkp \}\] : \[\];\s*points\.push\(\.\.\.pic\.items\.filter\(i => i\.pos\)\);\s*if \(pic\.cover\?\.pos\) points\.push\(pic\.cover\);/);
+  assert.match(hv, /p\.el\.classList\.toggle\('hv-under', H\.v\?\.where === 'pretend' && !!at && at\.y > under\);/, 'only the pretend view leaves a point under the box off (handler.test.mjs drives it)');
+  assert.match(hv, /if \(it\.kind === 'cover'\) while \(placed\.some/, 'only the cover steps aside');
+  assert.match(read('public/app.css'), /\.hv-mark\.hv-under \{ visibility: hidden; \}/);
+  assert.match(hv, /p\.marker\.setOffset\?\.\(\[dx, 0\]\)/);
+  const pdf = read('public/pdf.js');
+  assert.match(pdf, /const MAP_R = 10, MAP_IMG_R = 2;/);
+  assert.match(pdf, /const r = hasImage \? MAP_IMG_R : MAP_R;/);
+  // The last incident and its Deployment report come before the start buttons.
+  const ui = read('public/incident-ui.js');
+  const card = ui.slice(ui.indexOf('const shownEnded ='), ui.indexOf('\n}\n', ui.indexOf('const shownEnded =')));
+  assert.ok(card.indexOf('Deployment report') < card.indexOf('Start incident'));
+  const end = ui.slice(ui.indexOf('async function doEnd('), ui.indexOf('\n}\n', ui.indexOf('async function doEnd(')));
+  assert.match(end, /if \(!window\.matchMedia\('\(min-width: 900px\)'\)\.matches\) foldPanel\(true\);/, 'on a phone the list folds for the ended card');
+  // The map is fitted clear of the captions.
+  assert.match(read('public/squad-ui.js'), /const cap = \$\('cmdCap'\);/);
+});
+
+/* ── Round 4 review fixes ────────────────────────────────────────────── */
+t('the report, the live card and the captions say the same minute and the same distance for the dog at the point', () => {
+  for (const walls of [null, townWalls()]) {
+    for (const key of SCRIPT_KEYS) {
+      for (let s = 1; s <= 8; s++) {
+        const { si, sim, t } = playScenario({ key, seed: SCRIPTS[key].seed + s, simSeed: 7 + s, walls, lkpAt: { brg: s * 41, m: 50 + s * 15 } });
+        const tag = `${walls ? 'town' : 'open'} ${key} ${s}`;
+        si.end(t + 1000);
+        const rp = si.replay(sim.members());
+        const live = scentStart(si.trail, si.inc.lkp);
+        assert.ok(live, tag);
+        assert.equal(live.t, si.trailStart, `${tag}: the live trail is at the point the moment the dog starts`);
+        // The wait for the call is outside ON_SCENT_M: no fix before the start counts as "at the point".
+        const k9 = rp.units.find(u => u.uid === 'sim-1').pts;
+        assert.equal(scentStart(k9, si.inc.lkp).t, live.t, `${tag}: the report finds it at the point when the card did`);
+        const names = callSignsOf(sim.members());
+        const who = (uid) => names.get(uid)?.callSign || 'A member';
+        const air = cleanAir({ temp: 12, soil_temp: 9, humidity: 80, wind_speed: 3, wind_direction: 200, fetchedAt: rp.start }, live.t);
+        const doc = reportDoc({ rp, who, air, pretend: true });
+        const rows = Object.fromEntries(doc.sections.flatMap(x => x.rows.map(r => [r[0], r[1]])));
+        assert.equal(rows['Dog at the last known point'], hhmm(live.t), tag);
+        const card = onScentWords({ inc: si.inc, trail: si.trail, now: t });
+        assert.ok(card.includes(`about ${rows.Delay.replace(/^about /, '')} after last seen`), `${tag}: ${card} / ${rows.Delay}`);
+        const start = si.beats.find(b => b.key === 'start');
+        assert.equal(start.sinceMs, live.t - si.inc.lastSeenAt, `${tag}: the caption's delay is the same one`);
+        const cond = doc.sections.find(x => /^Weather and scent/.test(x.title));
+        assert.match(cond.note, new RegExp(`reached the point at ${hhmm(live.t)}\\.`), tag);
+        // Distance: from the point on, as the live card's "of trail".
+        const liveM = pathLen(si.trail);
+        assert.ok(Math.abs(trailM(rp) - liveM) <= Math.max(5, liveM * 0.02), `${tag}: ${trailM(rp)} vs ${liveM}`);
+        assert.equal(rows['Distance from the point'], metresWords(trailM(rp)), tag);
+      }
+    }
+  }
+  // The K9 team waits for the call well outside ON_SCENT_M of the point.
+  const { sim } = playScenario({ key: 'burglary', untilMs: 1000 });
+  assert.ok(dist(sim.unit('sim-1'), project(TOWN, 40, 70)) >= 50, 'kits up 50 m or more out');
+});
+
+t('the slip story never stalls: every script steps on within about four pretend minutes, in every seed', () => {
+  const W = townWalls();
+  for (const walls of [null, W]) {
+    for (const key of SCRIPT_KEYS) {
+      for (let s = 1; s <= 24; s++) {
+        const { si } = playScenario({ key, seed: s, simSeed: s + 30, walls, lkpAt: { brg: s * 37, m: 40 + s * 22 } });
+        const b = si.beats;
+        for (let i = 1; i < b.length; i++) {
+          assert.ok(b[i].at - b[i - 1].at <= 4 * 60e3, `${walls ? 'town' : 'open'} ${key} ${s}: ${b[i - 1].key} → ${b[i].key} took ${Math.round((b[i].at - b[i - 1].at) / 1000)} s`);
+        }
+        if (key === 'slip') {
+          const watch = b.find(x => x.key === 'watch'), out = b.find(x => x.key === 'out');
+          assert.ok(watch && out && watch.at < out.at && watch.side === out.side, `${key} ${s}: the caption says the open side before the trail goes out of it`);
+        }
+      }
+    }
+  }
+  // A dead-end street no longer holds a walk: the leg goes round the block.
+  const src = read('public/incident.js');
+  assert.match(src, /function latticeWalk\(a, b\) \{/);
+});
+
+t('the dog works beside the person’s route, never on it to the metre, and never through a building', () => {
+  for (const walls of [null, townWalls()]) {
+    for (const key of SCRIPT_KEYS) {
+      const { si, sim } = playScenario({ key, walls });
+      const route = si.hiddenRoute();
+      const tr = si.trail;
+      // Most of the trail stands a few metres off the route, downwind.
+      const off = tr.slice(5, -5).map(p => Math.min(...route.map(q => dist(p, q))));
+      const beside = off.filter(m => m >= 2 && m <= 14).length;
+      assert.ok(beside >= off.length * 0.5, `${key}: the dog works beside the line (${beside}/${off.length})`);
+      assert.ok(dist(tr[0], route[0]) < 3, `${key}: it starts at the point`);
+      assert.ok(dist(sim.unit('sim-1'), route[route.length - 1]) < 3, `${key}: it ends where the person is`);
+    }
+  }
+  // The same seed and wind always lay the same line; a breeze within the same eighth of the compass too.
+  const a = playScenario({ key: 'burglary', walls: townWalls() });
+  const b = playScenario({ key: 'burglary', walls: townWalls() });
+  assert.deepEqual(a.si.trail, b.si.trail);
+});
+
+t('the reveal never carries into a new incident: a form incident or a scenario clears it, and nothing draws it while one runs', () => {
+  const ui = read('public/incident-ui.js');
+  const start = ui.slice(ui.indexOf('async function doStart('), ui.indexOf('\n}\n', ui.indexOf('async function doStart(')));
+  assert.match(start, /I\.simEnded = null; lastSim = null; I\.reveal = null;/);
+  const form = ui.slice(ui.indexOf('function openForm('), ui.indexOf('\n}\n', ui.indexOf('function openForm(')));
+  assert.match(form, /if \(I\.reveal\) \{ I\.reveal = null;/);
+  assert.match(ui, /setData\(m, 'inc-reveal', lines\(revealShown\(v\) \? \[lineFeature\(I\.reveal\)\] : \[\]\)\);/);
+  // Drive the gate itself: revealed after the end, then a new pretend incident starts.
+  const src = ui.slice(ui.indexOf('function revealShown('), ui.indexOf('\n}\n', ui.indexOf('function revealShown(')) + 3);
+  const gate = new Function('I', 'sq', 'lastSim', `${src}; return revealShown;`);
+  const ended = { inc: { id: 'a', status: 'ended' } };
+  const route = [{ lat: 1, lon: 1 }, { lat: 1.001, lon: 1 }];
+  const I = { reveal: route, sim: null };
+  const sq = () => ({ sim: {} });
+  assert.equal(gate(I, sq, { ended })({ inc: null }), true, 'after the end, asked for: drawn');
+  assert.equal(gate(I, sq, { ended })({ inc: ended.inc, replay: true }), true, 'over the replay');
+  I.sim = { inc: { id: 'b', status: 'active' } };
+  assert.equal(gate(I, sq, { ended })({ inc: I.sim.inc }), false, 'a new pretend incident running: never drawn');
+  I.sim = null;
+  assert.equal(gate(I, sq, { ended })({ inc: { id: 'c', status: 'active' } }), false, 'any live incident on the map: never drawn');
+  assert.equal(gate(I, sq, null)({ inc: null }), false, 'the story it belonged to is gone');
+  assert.equal(gate(I, () => ({ sim: null }), { ended })({ inc: null }), false, 'never on a real squad');
+});
+
+t('a scenario plays the story it was laid with: buildings that arrive late change nothing', () => {
+  const W = townWalls();
+  for (const key of SCRIPT_KEYS) {
+    const plain = playScenario({ key });
+    // The same open-ground story, with the buildings turning up once the dog is trailing.
+    const late = playScenario({ key, each: (t, si, sim) => { if (si.phase === 'trailing' && !sim.walls) sim.setWalls(W); } });
+    assert.deepEqual(late.si.beats.map(b => b.key), plain.si.beats.map(b => b.key), key);
+    assert.deepEqual(late.si.hiddenRoute(), plain.si.hiddenRoute(), `${key}: the same route`);
+  }
+  const sq = read('public/squad-ui.js');
+  assert.match(sq, /if \(S\.sim\?\.center === center && !S\.sim\.wallsLocked\) S\.sim\.setWalls\(W\);/);
+  assert.match(sq, /S\.sim\.wallsLocked = true;/);
+  const ui = read('public/incident-ui.js');
+  assert.match(ui, /ready = await Promise\.race\(\[simWallsReady\(WALLS_WAIT_MS\), wait\.stopped\.then\(\(\) => 'stop'\)\]\);/);
+  assert.match(read('public/incident.js'), /if \(!sc && !walls && sim\.walls && phase === 'responding'\) rewall\(\);/);
+});
+
+t('the story fits its details: a frail man’s slower pace on the ring, today’s forecast said as today’s, the state after the end', () => {
+  assert.deepEqual(SCRIPTS.missing.kmh, { walk: 3 });
+  const { si } = playScenario({ key: 'missing', untilMs: 60e3 });
+  assert.deepEqual(si.paces, { walk: 3 });
+  const reach = reachRings({ inc: si.inc, now: si.inc.startedAt + 10 * 60e3, paces: { ...cleanPaces(null), ...si.paces } });
+  assert.equal(reach.main.kmh, 3);
+  assert.equal(playScenario({ key: 'burglary', untilMs: 60e3 }).si.paces, null, 'the burglar walks at the app’s pace');
+  const ui = read('public/incident-ui.js');
+  assert.match(ui, /paces: story && \(v\.sim \|\| I\.replay\?\.source === 'sim'\) \? \{ \.\.\.I\.paces, \.\.\.story\.paces \} : I\.paces/);
+  assert.doesNotMatch(ui.slice(ui.indexOf('function reachNow('), ui.indexOf('\n}\n', ui.indexOf('function reachNow('))), /kv\.set/, 'the story pace is never saved');
+  // The report: today's forecast, said as today's, for a story on its own clock.
+  const air = cleanAir({ temp: 14, soil_temp: 13, wind_speed: 3, wind_direction: 200, fetchedAt: 1 }, 2);
+  const story = conditionsSection(air, false, { story: true });
+  assert.match(story.title, /today’s forecast, pretend/);
+  assert.ok(story.note.startsWith(STORY_AIR));
+  assert.doesNotMatch(story.note, /Forecast fetched|reached the point at/);
+  assert.match(conditionsSection(air).note, /Forecast fetched/, 'a real incident is as before');
+  assert.match(ui, /story: pretend && !!lastSim\?\.ended\?\.script && lastSim\.ended\.inc\.id === rp\.inc\.id,/);
+  // The weather card's line while a story plays.
+  const app = read('public/app.js');
+  assert.match(app, /const STORY_WX = 'Today’s forecast \(demo\)';/);
+  assert.match(app, /if \(!felt\?\.note && storyOn\(\)\) \$\('wxNote'\)\.textContent = STORY_WX;/);
+  assert.match(ui, /if \(I\.capOn !== on\) \{ I\.capOn = on; ctx\.storyWeather\?\.\(\); \}/);
+  // After the end, the state says so, not "trailing".
+  const fn = ui.slice(ui.indexOf('function simState('), ui.indexOf('\n}\n', ui.indexOf('function simState(')));
+  assert.match(fn, /if \(si\.phase === 'found'\) return 'found, standing by';/);
+  assert.match(fn, /if \(si\.phase === 'away'\) return 'stood down';/);
+  // At the 'starts' caption the trail is one fix on the point: not "on the way".
+  assert.match(fn, /if \(si\.phase === 'trailing' && \(!v\.trail \|\| v\.trail\.length < 2\)\) return 'at the last known point, starting';/);
+  assert.match(ui, /text\('state', story \? `\$\{story\}\$\{lastCall\}` :/);
+  assert.match(ui, /\$\{simState\(v\) \|\| \(going \? 'trailing' : 'on the way to the last known point'\)\}/);
+});
+
+t('the dog and its officers stay at full strength behind 3D buildings, on the command map and the Handler’s view', () => {
+  const sq = read('public/squad-ui.js');
+  assert.match(sq, /new g\.GL\.Marker\(\{ element: el, anchor: 'center', occludedOpacity: 1 \}\)/);
+  assert.doesNotMatch(sq, /new g\.GL\.Marker\(\{ element: el, anchor: 'center' \}\)/);
+  // The cover pin also steps aside from the handler's own spot.
+  assert.match(read('public/handler-ui.js'), /if \(H\.v\?\.me\) \{ try \{ const me = m\.project\(\[H\.v\.me\.lon, H\.v\.me\.lat\]\); if \(me\) placed\.push/);
+});
+
+t('the ending fills the screen and its labels stand clear; on a phone the reveal is brought into view', () => {
+  const ui = read('public/incident-ui.js');
+  const place = ui.slice(ui.indexOf('function placeTags('), ui.indexOf('\n}\n', ui.indexOf('function placeTags(')));
+  assert.match(place, /const tries = mk\.kind === 'roadblock' \? \[\[home\.x, home\.y\]\] : \[/, 'a roadblock’s label is left off, not moved');
+  assert.match(place, /p\.tag\.classList\.toggle\('inc-tag-off', !shown\);/);
+  assert.doesNotMatch(place, /innerHTML|setAttribute\('style'/, 'CSP: styles through the CSSOM only');
+  assert.match(ui, /placeTags\(g, marks, w\);/);
+  assert.match(read('public/app.css'), /\.inc-mark-tag\.inc-tag-off \{ visibility: hidden; \}/);
+  const follow = ui.slice(ui.indexOf('function followTeam('), ui.indexOf('\n}\n', ui.indexOf('function followTeam(')));
+  assert.match(follow, /const ending = I\.sim\?\.script && I\.sim\.over && I\.sim\.inc === live && k9 \? endingPoints\(v\.trail, k9, v\.marks\) : null;/);
+  const end = ui.slice(ui.indexOf('async function doEnd('), ui.indexOf('\n}\n', ui.indexOf('async function doEnd(')));
+  assert.match(end, /querySelector\('\[data-inc-act="reveal"\]'\)\?\.scrollIntoView\?\.\(\{ block: 'nearest' \}\)/);
+  // The find is round from the car's own line out, so the sighting, the roadblock and the find do not stack.
+  assert.match(read('public/incident.js'), /project\(mid, side \+ \(side === h - 70 \? HIDE_TURN : -HIDE_TURN\), SGT\.tightM - HIDE_IN_M\)/);
 });
 
 t('nothing is published: the rules reach Firebase only by npm run rules:publish', () => {

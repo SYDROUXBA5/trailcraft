@@ -999,9 +999,21 @@
   </div>
   <!-- Shown when following the K9 team has been paused by a hand on the map (incident-ui.js). -->
   <button type="button" class="btn moss cmd-follow" id="cmdFollow" hidden>Follow K9</button>
+  <!-- Pretend mode, "Start scenario": the story clock, each step in words, and the presenter's controls (incident-ui.js). -->
+  <div class="cmd-cap" id="cmdCap" hidden>
+    <div class="cmd-cap-top"><b class="cmd-cap-clock" id="cmdCapClock">00:00</b><span class="cmd-cap-title" id="cmdCapTitle"></span></div>
+    <p class="cmd-cap-prev" id="cmdCapPrev"></p>
+    <p class="cmd-cap-text" id="cmdCapText" aria-live="polite"></p>
+    <div class="cmd-cap-acts">
+      <button type="button" class="btn ghost small" id="cmdCapPause" data-sim-pause aria-pressed="false">Pause</button>
+      <button type="button" class="btn ghost small" id="cmdCapSpeed" data-sim-speed>Speed ×4</button>
+      <button type="button" class="btn ghost small" id="cmdCapNext">Next step</button>
+      <p class="sq-demo cmd-cap-demo" role="note" data-demo-label>Demo — not for real operations</p>
+    </div>
+  </div>
   <aside class="cmd-panel" id="cmdPanel" aria-label="Squad members">
     <p class="sq-demo" role="note" data-demo-label>Demo — not for real operations</p>
-    <p class="cmd-sim" id="cmdSim" hidden>Pretend officers · this device only <button type="button" class="btn ghost small" id="cmdSimSpeed">Speed ×1</button> <button type="button" class="btn ghost small" id="cmdSimStop">Stop</button></p>
+    <p class="cmd-sim" id="cmdSim" hidden>Pretend officers · this device only <button type="button" class="btn ghost small" id="cmdSimSpeed" data-sim-speed>Speed ×1</button> <button type="button" class="btn ghost small" id="cmdSimStop">Stop</button></p>
     <div class="cmd-head">
       <h2 class="cmd-title" id="cmdTitle">Squad</h2>
       <span class="cmd-count" id="cmdCount"></span>

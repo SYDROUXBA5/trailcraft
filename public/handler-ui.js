@@ -146,6 +146,8 @@ async function openHear() {
 }
 
 /* ── The map: perimeter lines as a layer, points as markers ──────────── */
+/* About one pin and its tag across and down, in pixels: closer than this two pins overlap. */
+const PIN_W = 64, PIN_H = 44;
 function paintMap(pic) {
   const g = ctx.getMap();
   const m = g?.map;
@@ -167,9 +169,24 @@ function paintMap(pic) {
     } catch { /* the style is reloading: the next paint puts it back */ }
   }
   const keep = new Set();
-  const points = pic.items.filter(i => i.pos);
+  /* The last known point first, the cover officer last: when the cover
+     stands on another pin (at the point as the dog starts), it steps aside,
+     never the point. Only the cover moves: a squad point (a sighting, a
+     roadblock) is always drawn where it was put, as a real handler needs. */
+  const points = pic.lkp ? [{ id: 'lkp', kind: 'lkp', pos: pic.lkp }] : [];
+  points.push(...pic.items.filter(i => i.pos));
   if (pic.cover?.pos) points.push(pic.cover);
-  if (pic.lkp) points.push({ id: 'lkp', kind: 'lkp', pos: pic.lkp });
+  /* Where the box covers the map (the map canvas's own pixels): in the
+     pretend Handler's view a point under it is not drawn at all, rather than
+     a pin cut off at its edge. On a real run screen nothing is hidden: a
+     danger behind the handler shows through the glass, as it always has. */
+  const canvas = m.getCanvas?.()?.getBoundingClientRect?.();
+  const boxTop = H.v?.lift?.getBoundingClientRect?.()?.top;
+  const under = canvas && Number.isFinite(boxTop) ? boxTop - canvas.top : Infinity;
+  const placed = [];
+  /* The handler's own spot counts as taken: the cover walks about 10 m
+     behind, so its pin would otherwise stand right over the dog's dot. */
+  if (H.v?.me) { try { const me = m.project([H.v.me.lon, H.v.me.lat]); if (me) placed.push({ x: me.x, y: me.y }); } catch { /* no projection yet */ } }
   for (const it of points) {
     keep.add(it.id);
     let p = H.markers.get(it.id);
@@ -182,6 +199,15 @@ function paintMap(pic) {
       H.markers.set(it.id, p);
     }
     p.marker.setLngLat([it.pos.lon, it.pos.lat]);
+    let at = null;
+    try { at = m.project([it.pos.lon, it.pos.lat]); } catch { /* no projection yet */ }
+    p.el.classList.toggle('hv-under', H.v?.where === 'pretend' && !!at && at.y > under);
+    let dx = 0;
+    if (at) {
+      if (it.kind === 'cover') while (placed.some(q => Math.abs(q.x - (at.x + dx)) < PIN_W && Math.abs(q.y - at.y) < PIN_H)) dx += PIN_W;
+      placed.push({ x: at.x + dx, y: at.y });
+    }
+    if (p.dx !== dx) { p.dx = dx; p.marker.setOffset?.([dx, 0]); }
     const tag = it.kind === 'cover' ? it.name : (it.label || '');
     if (p.tag.textContent !== tag) p.tag.textContent = tag;
     p.el.setAttribute('aria-label', it.kind === 'cover' ? `Cover officer ${it.name}` : it.kind === 'lkp' ? 'Last known point' : MARKS[it.kind].label);

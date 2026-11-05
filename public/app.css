@@ -2472,6 +2472,8 @@ html[data-motion="on"] .lu-title:not([hidden]) { animation: lu-plate 300ms steps
 .inc-k-lkp { --inc-c: #111827; }
 .inc-draft-pin .inc-pin { border-style: dashed; }
 .inc-mark-tag:empty { display: none; }
+/* A label with nowhere clear to go at a crowded spot (incident-ui.js placeTags): the pin stays. */
+.inc-mark-tag.inc-tag-off { visibility: hidden; }
 :root[data-theme="dark"] .inc-kicker { color: #FF8A80; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .inc-kicker { color: #FF8A80; } }
 :root[data-theme="dark"] .inc-replay .inc-kicker { color: var(--muted); }
@@ -2740,6 +2742,54 @@ html[data-motion="off"] .hv-call:active { transform: none; }
 /* Pretend mode's Handler's view: the command card, the Wall box and the
    other units step aside, and the handler's card sits where a phone's run
    controls would. */
+/* Scenario captions (pretend mode, "Start scenario"): the story clock and
+   each step in words over the map, with the presenter's own controls and the
+   demo label. Top of the map on a phone (the sheet has the bottom), bottom
+   centre on a computer, beside the Wall box on a TV, at the top again while
+   Handler's view has the bottom. A new step slides in only where motion is
+   on (Reduce Motion keeps it still; ?motion=on shows it). */
+.cmd-cap { position: fixed; z-index: 6; left: 16px; right: 16px; top: calc(var(--top-row, 14px) + 56px);
+  display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border-radius: 16px;
+  background: rgba(11, 22, 48, 0.9); color: #F4F6FA; box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35); }
+.cmd-cap[hidden] { display: none; }
+.cmd-cap-top { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.cmd-cap-clock { flex: none; font: 800 calc(22 * var(--px))/1 var(--display); font-variant-numeric: tabular-nums; }
+.cmd-cap-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 700 calc(13 * var(--px)) var(--body); color: #C9D2E3; }
+.cmd-cap-prev { margin: 0; font: 500 calc(13 * var(--px))/1.35 var(--body); color: #AEB8CC; overflow-wrap: anywhere; }
+.cmd-cap-prev:empty { display: none; }
+.cmd-cap-text { margin: 0; font: 700 calc(16 * var(--px))/1.35 var(--body); overflow-wrap: anywhere; }
+.cmd-cap-acts { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.cmd-cap .btn.ghost { color: #fff; border-color: rgba(255, 255, 255, 0.45); background: transparent; }
+.cmd-cap .btn[aria-pressed="true"] { background: rgba(255, 255, 255, 0.18); }
+.cmd-cap .btn:disabled { opacity: 0.45; }
+.cmd-cap .cmd-cap-demo { margin: 0 0 0 auto; }
+html[data-motion="on"] .cmd-cap-text.cap-new { animation: cap-in 420ms cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+@keyframes cap-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@media (max-width: 899px) {
+  .cmd-cap { top: calc(var(--top-row, 14px) + max(56px, var(--wx-gap, 0px) + 8px)); padding: 10px 12px; gap: 4px; }
+  .cmd-cap-prev { display: none; }
+  .cmd-cap-text { font-size: calc(14 * var(--px)); }
+  .cmd-cap .cmd-cap-demo { margin: 0; }
+  /* Follow K9 moves under the captions rather than behind them. */
+  #scrCommand.cap-on .cmd-follow { top: auto; bottom: calc(var(--panel-h, 120px) + 14px); }
+}
+@media (min-width: 900px) {
+  .cmd-cap { top: auto; bottom: 40px; left: 24px; right: 400px; max-width: 780px; margin: 0 auto; padding: 14px 18px; }
+  .cmd-cap-text { font-size: calc(19 * var(--px)); }
+  #scrCommand.hv-on .cmd-cap { top: calc(var(--top-row, 14px) + 56px); bottom: auto; }
+}
+.cmd-wall .cmd-cap { left: calc(min(460px, 34vw) + 30px); right: 474px; max-width: none; }
+.cmd-wall .cmd-cap-clock { font-size: calc(30 * var(--px)); }
+.cmd-wall .cmd-cap-title { font-size: calc(17 * var(--px)); }
+.cmd-wall .cmd-cap-prev { font-size: calc(17 * var(--px)); }
+.cmd-wall .cmd-cap-text { font-size: clamp(calc(20 * var(--px)), 1.6vw, calc(30 * var(--px))); }
+/* A squad point under the handler's box is not drawn half cut off at its edge. */
+.hv-mark.hv-under { visibility: hidden; }
+/* Where the pretend person walked: a plain note under its button. */
+.inc-reveal-row { margin: 4px 0 0; }
+.inc-reveal-btn { background: #E040A0; border-color: #E040A0; color: #fff; }
+.inc-reveal-note { margin: 4px 0 0; font-size: calc(13 * var(--px)); color: var(--muted); }
+.inc-reveal-note b { color: var(--ink); }
 .hv-pretend { position: fixed; z-index: 7; left: 0; right: 0; bottom: 0; max-width: 560px; margin: 0 auto;
   display: flex; flex-direction: column; gap: 8px; padding: 12px 16px calc(var(--safe-b) + 14px); }
 .hv-pretend[hidden] { display: none; }
