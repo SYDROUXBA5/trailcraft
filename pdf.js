@@ -156,9 +156,13 @@ function circle(cx, cy, r) {
 
 /** The map box: picture (or paper), then every line and dot, clipped to
     rounded corners. Lines and dots come in 0–1 coordinates, y downward. */
+/* A fetched map carries its own credit in its bottom corners, running to
+   the very edge: a tight corner keeps the last letters of it on the page. */
+const MAP_R = 10, MAP_IMG_R = 2;
 function mapOps(map, x, y, w, h, hasImage) {
   const px = (p) => `${n(x + p[0] * w)} ${n(y + h - p[1] * h)}`;
-  const ops = ['q', roundRect(x, y, w, h, 10), 'W n'];
+  const r = hasImage ? MAP_IMG_R : MAP_R;
+  const ops = ['q', roundRect(x, y, w, h, r), 'W n'];
   if (hasImage) ops.push(`q ${n(w)} 0 0 ${n(h)} ${n(x)} ${n(y)} cm /Im1 Do Q`);
   else ops.push(`${rgb(PAPER, 'rg')} ${n(x)} ${n(y)} ${n(w)} ${n(h)} re f`);
   ops.push('1 J 1 j');
@@ -173,7 +177,7 @@ function mapOps(map, x, y, w, h, hasImage) {
     ops.push(`q ${rgb(dot.fill, 'rg')} ${rgb(dot.rim ?? [1, 1, 1], 'RG')} 1.2 w ${circle(cx, cy, dot.r ?? 4)} B Q`);
   }
   ops.push('Q');
-  ops.push(`q ${rgb(RULE, 'RG')} 0.8 w ${roundRect(x, y, w, h, 10)} S Q`);
+  ops.push(`q ${rgb(RULE, 'RG')} 0.8 w ${roundRect(x, y, w, h, r)} S Q`);
   return ops.join('\n');
 }
 
@@ -225,7 +229,7 @@ export function buildPdf(doc) {
        exactly what gets forwarded alone: the word goes again over the map,
        see-through (/Wm), so the lines still read beneath it. Pale letters
        edged in the stamp's red read on dark fields and on plain paper. */
-    if (doc.watermark) ops.push(`q ${roundRect(M, y - h, COL, h, 10)} W n /Wm gs ${rgb(STAMP, 'RG')} 0.9 w 2 Tr ${watermarkOp(doc.watermark)} Q`);
+    if (doc.watermark) ops.push(`q ${roundRect(M, y - h, COL, h, hasImage ? MAP_IMG_R : MAP_R)} W n /Wm gs ${rgb(STAMP, 'RG')} 0.9 w 2 Tr ${watermarkOp(doc.watermark)} Q`);
     y -= h + 6;
   }
   // What the map's lines and dots are, under it

@@ -83,9 +83,13 @@ export function cleanAir(wx, at) {
 }
 
 /** The weather and scent section: what the forecast said, and what the
-    app's scent model makes of the ground against the air. */
-export function conditionsSection(air, imperial = false) {
-  const title = 'Weather and scent when the dog started';
+    app's scent model makes of the ground against the air. `story`: a
+    pretend scenario on a story clock (02:16), whose forecast is the one
+    the device held today; the section says so rather than reading as the
+    air at the story's time. */
+export const STORY_AIR = 'Today’s forecast, used for the demo: not the weather at the story’s time.';
+export function conditionsSection(air, imperial = false, { story = false } = {}) {
+  const title = story ? 'Weather and scent (today’s forecast, pretend)' : 'Weather and scent when the dog started';
   if (!air) {
     return { title, rows: [['Recorded', 'Not on this device']],
       note: 'This device had no forecast near the last known point when the dog reached it.' };
@@ -100,6 +104,7 @@ export function conditionsSection(air, imperial = false) {
   if (air.humidity != null) rows.push(['Humidity', `${Math.round(air.humidity)}%`]);
   const st = stability(air.soil, air.temp);
   rows.push(['Scent (modelled guide)', st.label]);
+  if (story) return { title, rows: [['Forecast', 'Today’s, not the story’s time'], ...rows], note: `${STORY_AIR} ${st.plain} Not measured on the ground.` };
   const from = air.fetchedAt != null
     ? `Forecast fetched ${hhmm(air.fetchedAt)} near the last known point (Open-Meteo); the dog reached the point at ${hhmm(air.at)}.`
     : `From a forecast this device held near the last known point when the dog reached it at ${hhmm(air.at)} (Open-Meteo).`;
@@ -123,10 +128,19 @@ export function reportHeadline(rp, who, imperial = false) {
      "not at the point yet" is for an incident still running. */
   const miss = scentStart(track, rp.inc.lkp) ? '' : ' The dog did not reach the last known point.';
   if (!team) return `${rp.inc.name}: no K9 team on it.${miss}`;
-  const m = pathLen(track.filter(p => p.t >= rp.start));
+  const m = trailM(rp);
   const calls = ['indication', 'lost', 'refound'].map(k => [k, rp.marks.filter(x => x.kind === k && x.by === rp.inc.k9Uid).length])
     .filter(([, n]) => n).map(([k, n]) => countWords(k, n));
   return `${team} covered ${metresWords(m, imperial)}, ${calls.length ? calls.join(', ') : 'no calls'}.${miss}`;
+}
+
+/** How far the K9 team went from the last known point on: the track from
+    its first fix there, as the live card counts "of trail". The walk in to
+    the point is not trail; a team that never got there counts it all. */
+export function trailM(rp) {
+  const track = k9Track(rp);
+  const on = scentStart(track, rp.inc.lkp);
+  return pathLen(track.filter(p => p.t >= (on ? on.t : rp.start) && p.t <= rp.end));
 }
 
 /** The PDF's words and rows (pdf.js buildPdf), without the map, which the
@@ -135,7 +149,7 @@ export function reportHeadline(rp, who, imperial = false) {
     go inside the perimeter (incident-ui.js), as the log has them, or null
     when this device did not watch the incident's map and so cannot say;
     `pretend` marks every page. */
-export function reportDoc({ rp, who, squad = '', air = null, inside = null, imperial = false, pretend = false }) {
+export function reportDoc({ rp, who, squad = '', air = null, inside = null, imperial = false, pretend = false, story = false }) {
   const inc = rp.inc;
   const track = k9Track(rp);
   const team = teamOf(rp, who);
@@ -165,7 +179,7 @@ export function reportDoc({ rp, who, squad = '', air = null, inside = null, impe
   sections.push({ title: 'K9 team', rows: [
     ['Team', team || 'None picked'],
     inc.coverUid ? ['Cover officer', who(inc.coverUid)] : null,
-    team ? ['Distance covered', metresWords(pathLen(track.filter(p => p.t >= rp.start)), imperial)] : null,
+    team ? [on ? 'Distance from the point' : 'Distance covered', metresWords(trailM(rp), imperial)] : null,
     team ? ['Calls', calls.some(([, n]) => n) ? calls.filter(([, n]) => n).map(([k, n]) => countWords(k, n)).join(' · ') : 'None'] : null,
   ].filter(Boolean) });
 
@@ -186,7 +200,7 @@ export function reportDoc({ rp, who, squad = '', air = null, inside = null, impe
       : { title: 'Officers inside the perimeter', rows: [['Recorded', 'None seen by this device']],
           note: 'As this device saw it during the incident, from the app’s positions.' });
 
-  sections.push(conditionsSection(air, imperial));
+  sections.push(conditionsSection(air, imperial, { story: pretend && story }));
 
   const units = [...rp.units].sort((a, b) => (ROLES[a.role]?.order ?? 9) - (ROLES[b.role]?.order ?? 9)
     || who(a.uid).localeCompare(who(b.uid), undefined, { numeric: true }));

@@ -640,8 +640,37 @@ export function createSim({ center, now = Date.now(), seed = 7, count = SIM_UNIT
     return best ? { lat: best.lat, lon: best.lon } : null;
   }
 
+  /* On rails: a scripted walk along a line already laid clear of the
+     buildings (the pretend dog on its trail, an officer walking in). It
+     goes by distance along the line, never by heading and wall checks, so
+     it cannot be boxed in short of the end: the scenario always plays to
+     its finish, the same way every time. */
+  function railMove(u, dtS, t) {
+    const R = u.rail;
+    if (t < R.from) { u.spd = 0; return; }
+    const slow = R.slow && R.i >= R.slow.a && R.i < R.slow.b;
+    const mps = slow ? R.slow.mps : R.mps;
+    R.d = Math.min(R.len, R.d + mps * dtS);
+    while (R.i < R.pts.length - 2 && R.cum[R.i + 1] <= R.d) R.i++;
+    const a = R.pts[R.i], b = R.pts[Math.min(R.i + 1, R.pts.length - 1)];
+    const seg = R.cum[Math.min(R.i + 1, R.pts.length - 1)] - R.cum[R.i];
+    const f = seg > 0 ? Math.min(1, (R.d - R.cum[R.i]) / seg) : 1;
+    u.lat = a.lat + (b.lat - a.lat) * f; u.lon = a.lon + (b.lon - a.lon) * f;
+    if (seg > 0) u.hdg = bearing(a, b);
+    u.spd = R.d < R.len ? mps : 0;
+  }
+  const railOf = (pts, d = 0) => {
+    const cum = [0];
+    for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + dist(pts[i - 1], pts[i]));
+    const len = cum[cum.length - 1];
+    let i = 0;
+    while (i < pts.length - 2 && cum[i + 1] <= d) i++;
+    return { pts, cum, len, d: Math.min(d, len), i };
+  };
+
   function move(u, dtS, t) {
     const mode = MODES[u.mode];
+    if (u.rail) { railMove(u, dtS, t); return; }
     if (t < u.pauseUntil) { u.spd = 0; return; }
     /* On a path (a K9 team on a trail), the next point of it is the goal. */
     if (u.path) u.goal = u.path[u.pathAt] ?? u.goal;
@@ -719,8 +748,33 @@ export function createSim({ center, now = Date.now(), seed = 7, count = SIM_UNIT
   /** Send a unit to a point, where it waits (a perimeter post, a trail). */
   sim.goTo = (uid, point) => {
     const u = units.find(x => x.uid === uid);
-    if (u) { u.goal = point ? { lat: point.lat, lon: point.lon } : null; u.path = null; u.via = null; u.best = null; u.pauseUntil = 0; }
+    if (u) { u.goal = point ? { lat: point.lat, lon: point.lon } : null; u.path = null; u.rail = null; u.via = null; u.best = null; u.pauseUntil = 0; }
   };
+  /** Put a unit on rails: along `pts` at `mps` metres a second, from the
+      pretend moment `from`, holding at the end. `slow` ({ a, b, mps }) is a
+      stretch of the line, by point index, walked slower (a dog casting). */
+  sim.rail = (uid, pts, { mps = 1.4, from = 0, slow = null } = {}) => {
+    const u = units.find(x => x.uid === uid);
+    if (!u || !pts?.length) return;
+    u.goal = null; u.path = null; u.target = null; u.via = null; u.pauseUntil = 0;
+    u.rail = { ...railOf(pts.map(p => ({ lat: p.lat, lon: p.lon }))), mps, from, slow };
+  };
+  /** The same rails with a new line ahead: the part already walked is the
+      same, so the unit carries on from where it is. */
+  sim.reroute = (uid, pts) => {
+    const u = units.find(x => x.uid === uid);
+    if (!u?.rail || !pts?.length) return;
+    u.rail = { ...u.rail, ...railOf(pts.map(p => ({ lat: p.lat, lon: p.lon })), u.rail.d) };
+  };
+  /** How far along its rails a unit is: the index of the last point it has
+      passed (the last one once it is there), or -1 off rails. */
+  sim.railAt = (uid) => {
+    const R = units.find(x => x.uid === uid)?.rail;
+    if (!R) return -1;
+    return R.d >= R.len ? R.pts.length - 1 : R.i;
+  };
+  /** Whether a unit on rails has reached the end of them. */
+  sim.railDone = (uid) => { const R = units.find(x => x.uid === uid)?.rail; return !!R && R.d >= R.len; };
   /** Send a unit by vehicle at `mps`: a K9 van driving round to a rally
       point. Like the pretend cars it is not kept out of buildings, and its
       speed on the map says it is driving, not walking. */
@@ -749,14 +803,14 @@ export function createSim({ center, now = Date.now(), seed = 7, count = SIM_UNIT
     const u = units.find(x => x.uid === uid);
     if (!u || !point) return;
     u.lat = point.lat; u.lon = point.lon;
-    u.goal = null; u.path = null; u.target = null;
+    u.goal = null; u.path = null; u.target = null; u.rail = null;
     u.nextReport = sim.at;
   };
   /** Send a unit along a path, point by point, at its own pace, holding at
       the end: a K9 team working a trail. */
   sim.follow = (uid, pts) => {
     const u = units.find(x => x.uid === uid);
-    if (u && pts?.length) { u.path = pts.map(p => ({ lat: p.lat, lon: p.lon })); u.pathAt = 0; u.goal = u.path[0]; u.pauseUntil = 0; }
+    if (u && pts?.length) { u.path = pts.map(p => ({ lat: p.lat, lon: p.lon })); u.pathAt = 0; u.goal = u.path[0]; u.rail = null; u.pauseUntil = 0; }
   };
   /** How far along its path a unit is: the index of the point it is making for. */
   sim.pathAt = (uid) => units.find(x => x.uid === uid)?.pathAt ?? 0;

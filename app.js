@@ -68,7 +68,7 @@ import { searchWords, logRows, recentRuns, runAt, midnight, facets, filterRows, 
          cleanFolderName, putMany, toggleFolder, renameIn, dropFrom, mergeFolders, emptyHeld, folderPatch } from './log.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-11-05c';
+const BUILD = '2026-11-05d';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true,
@@ -2260,6 +2260,12 @@ const wxKey = (wx) => (wx?.wind_speed == null ? ''
    short words (field.js feltPanel), for a screen about a run that has one:
    the direction and the speed above it are already the felt ones (windAt),
    and the note says so in place of the forecast's time. */
+/* A scenario on the squad map runs on its story's clock (02:16), but the
+   forecast is today's: the corner says so, rather than "09:15" beside a
+   02:16 clock (incident-ui.js marks the screen cap-on while a story plays). */
+const STORY_WX = 'Today’s forecast (demo)';
+const storyOn = () => currentScreen === 'scrCommand' && !!$('scrCommand')?.classList.contains('cap-on');
+const wxNoteWords = (wx) => (storyOn() ? STORY_WX : forecastNote(wx.t ?? wx.time));
 function showWeather(wx, felt = null) {
   wxShown.gen++;
   wxShown.key = '';
@@ -2299,6 +2305,7 @@ function showWeather(wx, felt = null) {
      moment keeps the laid forecast's own time beside it, which labelled the
      run's wind with the hour the trail was laid. */
   $('wxNote').textContent = felt?.note ?? forecastNote(wx.t ?? wx.time);
+  if (!felt?.note && storyOn()) $('wxNote').textContent = STORY_WX;
   wxShown.key = wxKey(wx);
   wxGap();
   /* The wind moves on every map screen once it is known, not only when a
@@ -11930,6 +11937,11 @@ function start() {
     runPadding: (px) => runPadding(px),
     /* The squad's spoken lines wait for the coach to finish a cue. */
     speakSoon: (text) => speakSoon(text),
+    /* A scenario came on or went: the forecast's line says whose time it is. */
+    storyWeather: () => {
+      const wx = wxNow.wx, n = $('wxNote');
+      if (n && wx?.wind_speed != null && !$('wxPanel')?.hidden) n.textContent = wxNoteWords(wx);
+    },
   });
   /* Back in the app, or back in signal: take what another phone changed since,
      before anything here is edited over it (sync.js resync). */
