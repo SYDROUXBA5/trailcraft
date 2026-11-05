@@ -12,19 +12,20 @@
    phones. They reach the page through textContent, or through html``
    (squad-ui.js), which escapes every value put into it. */
 
-import { isCommand } from './squad.js';
-import { project } from './geo.js';
+import { isCommand, recordWords, RECORD_SAYS, callSignsOf, roster } from './squad.js';
+import { project, dist } from './geo.js';
 import { MARKS, countWords, DRAW_TOOLS, RUN_MARKS, LINE_MAX, activeOf, pastOf, trailInfo, aheadLine, elapsedWords, clockWords,
          metresWords, summarise, mayMark, mayUnmark, mayShareRun, trackBuffer, buildReplay, replayAt, createSimIncident,
          cleanIncidentName, callWords, stripWords, quietLines, followPoints, allInView, standingOf, PACES, PACE_KEYS,
          DIR_MAX, DESC_MAX, cleanPaces, cleanBrief, seenAt, lastSeenFrom, hhmm, reachRings, passedLines, warnWords,
-         reachWords, onScentWords, briefWords, logLines, ring } from './incident.js';
+         reachWords, onScentWords, briefWords, logLines, ring, scentStart, downwindBand, BAND_WORDS, bandWindWords,
+         sceneWalkers, sceneWords, SCENE_NOTE, insideWalkers, insideWords, insideNow, coverWords, aboutWords } from './incident.js';
 import { startIncident, endIncident, watchIncidents, watchIncident, putMark, withdrawMark, putTrack,
-         loadIncident, updateSeen } from './incident-cloud.js';
+         loadIncident, updateSeen, setCover } from './incident-cloud.js';
 import { html, put, onCommandPaint, commandView, onSquadChange, onPositionSent, setViewOverride, squadState,
-         openCommand, viewNow, fitOnMap, paintCommandNow, setSimSpeed, setLeadUnit, foldPanel, mapPad, onLook, wallOn,
+         openCommand, viewNow, fitOnMap, paintCommandNow, setSimSpeed, simSpeed, setLeadUnit, setCoverUnit, foldPanel, mapPad, onLook, wallOn,
          onWall } from './squad-ui.js';
-import { ask, form } from './sheet.js';
+import { ask, form, info } from './sheet.js';
 
 const EMPTY = { type: 'FeatureCollection', features: [] };
 const finite = (v) => typeof v === 'number' && Number.isFinite(v);
@@ -62,10 +63,15 @@ const I = {
   follow: { paused: false, at: 0, for: null },  // the map following the K9 team, until a hand moves it
   said: { for: null, ids: new Set() },          // K9 calls already spoken on this screen
   voice: true,              // the command screen speaks the K9 team's calls
+  recOpen: null,            // the dog's record card unfolded on the live card, kept across redraws (null: not yet chosen)
   wallKey: '',
   paces: cleanPaces(null),  // km/h for the reach rings, this device's own guess
   log: [], logKey: '',      // the live log as last drawn, for a tap on a line
   reachTag: null,           // the ring's "rough guide" tag on the map
+  bandTag: null,            // the downwind band's "modelled guide" tag
+  walked: { for: null, lines: new Map() },     // positions this device saw during the incident (real squad)
+  bandLook: null,           // 'day' | 'wall': how the downwind band is drawn now (null: set it again)
+  inside: { for: null, ids: new Map(), seen: [] }, // uid → when last inside the perimeter; and each time one went in
 };
 /* The last pretend incident, ended, with the pretend squad it ran on: kept
    when the map closes, so the debrief replay is not lost to one tap on
@@ -98,11 +104,17 @@ function shown() {
   return { inc: I.active, marks: standingOf(I.marks), said: [...I.marks.values()], trail: I.trail, now: Date.now() };
 }
 
-/** Who a uid is, in the words of the map: a call sign. */
+/** Who a uid is, in the words of the map: a call sign, with the "(2)" the
+    roster gives a second member using the same one (squad.js callSignsOf),
+    so the log, the scene line and the cover never show two units as one.
+    Worked out once for each members map. */
+const marked = new WeakMap();
 function who(uid, members) {
   if (uid === SIM_ME && sq().sim) return 'You';
-  const m = members?.get(uid);
-  return m ? m.callSign : 'A member';
+  if (!members?.get?.(uid)) return 'A member';
+  let names = marked.get(members);
+  if (!names) { names = callSignsOf(members); marked.set(members, names); }
+  return names.get(uid)?.callSign || 'A member';
 }
 
 /* ── Following the squad's incidents ─────────────────────────────────── */
@@ -296,6 +308,10 @@ function openForm() {
   I.form = { name: 'Missing person', lkp: null, k9Uid: k9s.find(k => k.on)?.uid ?? k9s[0]?.uid ?? null,
              seen: '', pace: null, dir: '', desc: '', article: null };
   I.tool = null;
+  /* On a phone the panel is short, and the form (with the dog's record
+     under the K9 chips) needs it more than the member list does: the list
+     folds away, as it does when an incident comes on. */
+  if (!window.matchMedia('(min-width: 900px)').matches) foldPanel(true);
   paintCommandNow();
 }
 
@@ -303,7 +319,7 @@ function k9Options(st) {
   const out = [];
   for (const m of st.members.values()) {
     if (m.role !== 'k9') continue;
-    out.push({ uid: m.uid, callSign: m.callSign, dog: m.dog, on: st.positions.has(m.uid) });
+    out.push({ uid: m.uid, callSign: m.callSign, dog: m.dog, on: st.positions.has(m.uid), record: m.record ?? null });
   }
   return out.sort((a, b) => Number(b.on) - Number(a.on) || a.callSign.localeCompare(b.callSign));
 }
@@ -318,6 +334,46 @@ function readForm(box) {
     const v = val(field);
     if (v != null) f[k] = v;
   }
+}
+
+/* ── The dog's record card ────────────────────────────────────────────────
+   The record the handler shared (squad.js dogRecord), shown when Command
+   picks the K9 team and copied into the incident as it opens: the debrief
+   shows what the team was picked on. It shows the record; the supervisor
+   decides. */
+/** The picked team's record as it stands now, to be frozen into the incident. */
+const frozenRecord = (st, k9Uid) => (k9Uid ? st.members.get(k9Uid)?.record ?? null : null);
+/** The card. `frozen`: the copy kept with the incident, read at the moment
+    it opened, so "last trained" and the licence chip are as they were then. */
+function recordCard(rec, now, { frozen = false, dog = null } = {}) {
+  const w = recordWords(rec, now, dog);
+  return html`<div class="inc-rec-card">
+    <p class="inc-rec-head"><b>${w.title}</b>${w.pretend ? html` <span class="inc-rec-pretend">Pretend</span>` : ''}</p>
+    <p class="inc-rec-from">${frozen ? `As it stood when the team was picked. ${w.from}` : w.from}</p>
+    ${w.old ? html`<p class="inc-rec-old">${w.old}</p>` : ''}
+    <dl class="inc-rec-rows">${w.rows.map(r => html`<div><dt>${r.k}</dt><dd><b>${r.v}</b>${r.sub ? html` <span>${r.sub}</span>` : ''}</dd></div>`)}</dl>
+    ${w.gaps.length ? html`<p class="inc-rec-label">Gaps in the record</p><ul class="inc-rec-gaps">${w.gaps.map(g => html`<li>${g}</li>`)}</ul>` : ''}
+    <p class="inc-rec-lic inc-lic-${w.lic.cls}"><span>Licence, as typed by the handler</span> ${w.lic.text}</p>
+    <p class="inc-rec-says">${RECORD_SAYS}</p>
+  </div>`;
+}
+/** Under the K9 chips while Command fills the form in. */
+function pickCardHtml(k9s, uid, now) {
+  const k = k9s.find(x => x.uid === uid);
+  if (!k) return '';
+  if (k.record) return recordCard(k.record, now, { dog: k.dog });
+  return html`<p class="inc-hint">${k.callSign} has not shared ${k.dog ? `${k.dog}’s` : 'the dog’s'} record. The handler can share it from the Squad screen.</p>`;
+}
+/** The frozen copy, folded on the live card and in the replay, with what
+    matters most on the fold itself (how many trails, the licence), so it
+    is seen even folded. `dog`: the team's dog as the squad knows it. */
+function frozenCardHtml(inc, dog = null) {
+  const rec = inc?.k9Record;
+  if (!rec) return '';
+  const w = recordWords(rec, inc.startedAt, dog);
+  const lic = w.lic.cls === 'none' ? '' : ` · ${w.lic.text}`;
+  return html`<details class="inc-rec"${I.recOpen ? ' open' : ''}><summary>${w.title} · ${rec.trails} trail${rec.trails === 1 ? '' : 's'}${lic}${rec.pretend ? ' (pretend)' : ''}</summary>
+    ${recordCard(rec, inc.startedAt, { frozen: true, dog })}</details>`;
 }
 
 async function doStart() {
@@ -337,9 +393,14 @@ async function doStart() {
   if (Number.isNaN(lastSeenAt)) return err('That time is after now');
   const seen = { lastSeenAt, pace: f.pace, brief: cleanBrief({ dir: f.dir, desc: f.desc, article: f.article }) };
   if (st.sim) {
-    I.sim = createSimIncident({ sim: st.sim, lkp: f.lkp, k9Uid: f.k9Uid || 'sim-1', name: f.name, now,
-                                seed: (Date.now() / 1000) | 0, by: SIM_ME, ...seen });
+    const k9Uid = f.k9Uid || 'sim-1';
+    I.sim = createSimIncident({ sim: st.sim, lkp: f.lkp, k9Uid, name: f.name, now,
+                                seed: (Date.now() / 1000) | 0, by: SIM_ME, ...seen, k9Record: frozenRecord(st, k9Uid) });
     I.simEnded = null; lastSim = null;
+    /* The first pretend incident opens with the dog's record unfolded, so
+       the chief sees what the team was picked on whichever button started
+       it; after that it stays as the person at the screen left it. */
+    if (I.recOpen == null) I.recOpen = true;
     /* Four times real speed: a trail that takes twenty minutes plays out in
        five while the chief watches. The switch beside it goes back to ×1. */
     setSimSpeed(4);
@@ -354,7 +415,7 @@ async function doStart() {
   try {
     const h = await ctx.handle();
     if (!h) throw new Error('Sign in first');
-    const inc = await startIncident(h, I.sid, { name: f.name, lkp: f.lkp, k9Uid: f.k9Uid, ...seen });
+    const inc = await startIncident(h, I.sid, { name: f.name, lkp: f.lkp, k9Uid: f.k9Uid, ...seen, k9Record: frozenRecord(st, f.k9Uid) });
     I.seen.add(inc.id); saveSeen();
     I.form = null;
     fitIncident();
@@ -509,7 +570,12 @@ function closeReplay(repaint = true) {
    perimeter line the main ring has grown past turns amber. */
 const RING_C = '#4F5BD5';
 const WARN_C = '#F2A900';
+/* The downwind band sits lowest of all: a pale wash the rest draws over. */
+const BAND_C = '#1A9BB0';
 const LAYERS = [
+  { id: 'inc-band-fill', src: 'inc-band', type: 'fill', paint: { 'fill-color': BAND_C, 'fill-opacity': 0.24 } },
+  { id: 'inc-band-edge', src: 'inc-band', type: 'line',
+    paint: { 'line-color': BAND_C, 'line-width': 2, 'line-opacity': 0.9, 'line-dasharray': [1.5, 1.5] } },
   { id: 'inc-reach-fill', src: 'inc-reach', type: 'fill', paint: { 'fill-color': RING_C, 'fill-opacity': 0.1 } },
   { id: 'inc-reach-edge', src: 'inc-reach', type: 'line', paint: { 'line-color': RING_C, 'line-width': 2, 'line-opacity': 0.8 } },
   { id: 'inc-reach-wide', src: 'inc-reach-wide', type: 'line',
@@ -523,7 +589,7 @@ const LAYERS = [
   { id: 'inc-trail', src: 'inc-trail', type: 'line', paint: { 'line-color': '#D9822B', 'line-width': 5 } },
   { id: 'inc-ahead', src: 'inc-ahead', type: 'line', paint: { 'line-color': '#D9822B', 'line-width': 3, 'line-dasharray': [1.5, 1.5] } },
 ];
-const SOURCES = ['inc-reach', 'inc-reach-wide', 'inc-lines', 'inc-draft', 'inc-draft-pts', 'inc-trail', 'inc-ahead'];
+const SOURCES = ['inc-band', 'inc-reach', 'inc-reach-wide', 'inc-lines', 'inc-draft', 'inc-draft-pts', 'inc-trail', 'inc-ahead'];
 
 function ensureLayers(m) {
   if (!m.isStyleLoaded?.()) return false;
@@ -535,6 +601,7 @@ function ensureLayers(m) {
   const lit = typeof m.setConfigProperty === 'function';
   for (const l of LAYERS) {
     if (m.getLayer(l.id)) continue;
+    if (l.src === 'inc-band') I.bandLook = null;   // put back with the day look: set again
     const paint = lit ? { ...l.paint, [`${l.type}-emissive-strength`]: 1 } : l.paint;
     /* In order, under any the style already has above them. */
     const above = LAYERS.slice(LAYERS.indexOf(l) + 1).find(x => m.getLayer(x.id));
@@ -556,10 +623,35 @@ const lines = (list) => ({ type: 'FeatureCollection', features: list.filter(Bool
 const polygon = (pts) => ({ type: 'Feature', properties: {},
   geometry: { type: 'Polygon', coordinates: [pts.map(p => [p.lon, p.lat])] } });
 
+/* On the dimmed Wall map, across a room, the band's pale wash is a smudge:
+   it is drawn stronger there, so "keep cars off this side" can be read on
+   the TV. Set again whenever the layers are put back (a style reload). */
+const BAND_LOOK = {
+  day: { color: BAND_C, fill: 0.24, width: 2, dash: [1.5, 1.5] },
+  /* Lighter teal: the night look darkens the map, and the day teal sinks into it. */
+  wall: { color: '#3FD3EA', fill: 0.4, width: 3.5, dash: [3, 1.5] },
+};
+function bandLook(m) {
+  const look = wallOn() ? 'wall' : 'day';
+  if (I.bandLook === look) return;
+  const k = BAND_LOOK[look];
+  try {
+    m.setPaintProperty('inc-band-fill', 'fill-color', k.color);
+    m.setPaintProperty('inc-band-fill', 'fill-opacity', k.fill);
+    m.setPaintProperty('inc-band-edge', 'line-color', k.color);
+    m.setPaintProperty('inc-band-edge', 'line-width', k.width);
+    m.setPaintProperty('inc-band-edge', 'line-dasharray', k.dash);
+    I.bandLook = look;
+  } catch { I.bandLook = null; /* style still loading: next paint */ }
+}
 function paintLayers(v) {
   const { map: m } = map();
   if (!m || !ensureLayers(m)) return;
+  bandLook(m);
   const rn = reachNow(v);
+  const band = bandOf(v);
+  setData(m, 'inc-band', lines(band ? [polygon(band.pts)] : []));
+  paintBandTag(band);
   const passed = new Set(rn.passed);
   const perim = v.marks.filter(x => MARKS[x.kind]?.line && x.pts?.length >= 2);
   setData(m, 'inc-lines', lines(perim.map(x => lineFeature(x.pts, { id: x.id, warn: passed.has(x.id) }))));
@@ -577,17 +669,54 @@ function paintLayers(v) {
     geometry: { type: 'Point', coordinates: [p.lon, p.lat] } })) });
 }
 
+/* Where a caveat tag on the map can be read: inside what the side panel,
+   the phone sheet and the status pill leave (mapPad), clear of the Wall
+   box (clock and log, over one corner rather than a whole side) and clear
+   of the pins and their labels. Both tags go by this, so neither can hide
+   its "rough guide" or "modelled guide" under something else. Boxes are in
+   the map canvas's pixels: x0, y0 its top-left corner, tw by th. */
+function tagRoom() {
+  const g = map();
+  const box = g.map.getCanvas();
+  const W = box.clientWidth, H = box.clientHeight;
+  const pad = mapPad();
+  const cr = box.getBoundingClientRect();
+  const wb = wallOn() ? $('cmdWall') : null;
+  const wr = wb && !wb.hidden ? wb.getBoundingClientRect() : null;
+  const pins = [...g.map.getContainer().querySelectorAll('.inc-mark .inc-pin, .inc-mark-tag, .sq-unit, .sq-tag, .inc-band-tag, .inc-reach-tag')]
+    .map(e => e.getBoundingClientRect()).filter(r => r.width > 0);
+  const lo = { x: 4, y: Math.min(pad.top, H / 3) };
+  const hi = { x: W - Math.min(pad.right, W / 2) - 4, y: H - Math.min(pad.bottom, H / 2) - 4 };
+  const over = (r, x0, y0, tw, th, m) => x0 + cr.left < r.right + m && x0 + tw + cr.left > r.left - m &&
+    y0 + cr.top < r.bottom + m && y0 + th + cr.top > r.top - m;
+  return {
+    W, H, lo, hi,
+    /** Under the Wall box. */
+    underWall: (x0, y0, tw, th) => !!wr && wr.width > 0 && over(wr, x0, y0, tw, th, 6),
+    /** On a pin or a pin's label. */
+    onPin: (x0, y0, tw, th) => pins.some(r => over(r, x0, y0, tw, th, 2)),
+    /** Inside the room left and clear of the Wall box and the pins. */
+    clear(x0, y0, tw, th) {
+      return x0 >= lo.x && y0 >= lo.y && x0 + tw <= hi.x && y0 + th <= hi.y
+        && !this.underWall(x0, y0, tw, th) && !this.onPin(x0, y0, tw, th);
+    },
+  };
+}
+
 /* A small tag on the ring's edge, so the chief never reads the ring as
    where the person is. On a phone it is the only caveat the map shows, so
    it goes on whichever edge it can be read whole: west first (the status
    pill covers the north, the panel the south), then east, south, north;
-   inside the ring each time. Hidden when no edge is on screen. */
+   inside the ring each time, and never on a pin's label. Hidden when no
+   edge will do, and on a phone while the downwind tag shows, so the two
+   caveats do not crowd the small screen; the card says both. */
 const TAG_SPOTS = [
   { i: 54, anchor: 'left', offset: [6, 0] },     // west
   { i: 18, anchor: 'right', offset: [-6, 0] },   // east
   { i: 36, anchor: 'bottom', offset: [0, -6] },  // south (the ring runs clockwise from north)
   { i: 0, anchor: 'top', offset: [0, 6] },       // north
 ];
+const NARROW = '(max-width: 899px)';
 function paintReachTag(main, reach) {
   const g = map();
   if (!main || !g.map || !g.GL) { I.reachTag?.marker.remove(); I.reachTag = null; return; }
@@ -596,30 +725,21 @@ function paintReachTag(main, reach) {
     const el = document.createElement('div');
     el.className = 'inc-reach-tag';
     el.setAttribute('aria-hidden', 'true');
-    I.reachTag = { el, spot: null, marker: new g.GL.Marker({ element: el, anchor: 'left', offset: [6, 0] }).setLngLat([main[54].lon, main[54].lat]).addTo(g.map) };
+    I.reachTag = { el, spot: null, marker: new g.GL.Marker({ element: el, anchor: 'left', offset: [6, 0], occludedOpacity: FULL }).setLngLat([main[54].lon, main[54].lat]).addTo(g.map) };
   }
   const tag = I.reachTag;
   if (tag.el.textContent !== text) tag.el.textContent = text;
-  const box = g.map.getCanvas();
-  const W = box.clientWidth, H = box.clientHeight;
+  if (I.bandTag && !I.bandTag.el.hidden && window.matchMedia(NARROW).matches) { tag.el.hidden = true; return; }
+  tag.el.hidden = false;
   const tw = tag.el.offsetWidth || 160, th = tag.el.offsetHeight || 20;
-  const pad = mapPad();
-  /* The Wall box (clock and log) sits over a corner of the map, not along a
-     whole side, so the padding alone lets the tag slide under it: the tag
-     must clear its box as well, or the caveat is hidden on the big screen. */
-  const wb = wallOn() ? $('cmdWall') : null;
-  const cr = box.getBoundingClientRect();
-  const wr = wb && !wb.hidden ? wb.getBoundingClientRect() : null;
-  const under = (x0, y0) => !!wr && wr.width > 0 &&
-    x0 + cr.left < wr.right + 6 && x0 + tw + cr.left > wr.left - 6 &&
-    y0 + cr.top < wr.bottom + 6 && y0 + th + cr.top > wr.top - 6;
-  /* Where the tag's box would be for each edge, inside what the panel leaves. */
+  tag.el.hidden = true;   // its own box is not a pin to keep clear of
+  const room = tagRoom();
+  /* Where the tag's box would be for each edge. */
   const fits = (s) => {
     const p = g.map.project([main[s.i].lon, main[s.i].lat]);
     const x0 = s.anchor === 'left' ? p.x + 6 : s.anchor === 'right' ? p.x - 6 - tw : p.x - tw / 2;
     const y0 = s.anchor === 'bottom' ? p.y - 6 - th : s.anchor === 'top' ? p.y + 6 : p.y - th / 2;
-    return x0 >= 4 && y0 >= Math.min(pad.top, H / 3) && x0 + tw <= W - Math.min(pad.right, W / 2) - 4 &&
-      y0 + th <= H - Math.min(pad.bottom, H / 2) - 4 && !under(x0, y0);
+    return room.W > 0 && room.clear(x0, y0, tw, th);
   };
   const spot = TAG_SPOTS.find(fits) || null;
   tag.el.hidden = !spot;
@@ -627,13 +747,73 @@ function paintReachTag(main, reach) {
   /* Mapbox anchors a marker once: a different edge means a new marker. */
   if (tag.spot !== spot) {
     tag.marker.remove();
-    tag.marker = new g.GL.Marker({ element: tag.el, anchor: spot.anchor, offset: spot.offset })
+    tag.marker = new g.GL.Marker({ element: tag.el, anchor: spot.anchor, offset: spot.offset, occludedOpacity: FULL })
       .setLngLat([main[spot.i].lon, main[spot.i].lat]).addTo(g.map);
     tag.spot = spot;
   }
   tag.marker.setLngLat([main[spot.i].lon, main[spot.i].lat]);
 }
 
+/* The band's tag hangs off its far end, on the side away from the last
+   known point, so it clears the pins crowded there and is never read as a
+   route. Zoomed out, the band is a few pixels long and lies under the pins
+   at the point: then the tag is left off (it would label nothing) and the
+   card's line, which says "modelled guide" too, carries it. Otherwise it is
+   pushed on out along the band, then turned to either side, until it is
+   clear of the pins, the panel and the Wall box; and left off if nowhere
+   is. Mapbox anchors a marker once: another side is a new marker. */
+const BAND_ANCHORS = ['bottom', 'bottom-left', 'left', 'top-left', 'top', 'top-right', 'right', 'bottom-right'];
+const BAND_CLEAR_PX = 80;
+const BAND_MIN_PX = 40;
+function paintBandTag(band) {
+  const g = map();
+  if (!band || !g.map || !g.GL) { I.bandTag?.marker?.remove(); I.bandTag = null; return; }
+  const anchor = BAND_ANCHORS[Math.round(band.to / 45) % 8];
+  if (!I.bandTag) {
+    const el = document.createElement('div');
+    el.className = 'inc-band-tag';
+    el.setAttribute('aria-hidden', 'true');
+    el.textContent = 'Downwind · modelled guide';
+    I.bandTag = { el, anchor: null, marker: null };
+  }
+  const tag = I.bandTag;
+  if (tag.anchor !== anchor) {
+    tag.marker?.remove();
+    tag.marker = new g.GL.Marker({ element: tag.el, anchor, occludedOpacity: FULL }).setLngLat([band.tip.lon, band.tip.lat]).addTo(g.map);
+    tag.anchor = anchor;
+  }
+  tag.marker.setLngLat([band.tip.lon, band.tip.lat]);
+  const a = g.map.project([band.pts[0].lon, band.pts[0].lat]), b = g.map.project([band.tip.lon, band.tip.lat]);
+  const len = Math.hypot(b.x - a.x, b.y - a.y);
+  if (len < BAND_MIN_PX) { tag.el.hidden = true; return; }
+  tag.el.hidden = false;
+  const tw = tag.el.offsetWidth || 160, th = tag.el.offsetHeight || 20;
+  tag.el.hidden = true;   // its own box is not a pin to keep clear of
+  const room = tagRoom();
+  if (!room.W || !room.H) return;
+  const ux = (b.x - a.x) / len, uy = (b.y - a.y) / len;
+  const corner = (x, y) => [x - (anchor.includes('left') ? 0 : anchor.includes('right') ? tw : tw / 2),
+                            y - (anchor.startsWith('top') ? 0 : anchor.startsWith('bottom') ? th : th / 2)];
+  /* Out along the band first, then a little to either side of it. */
+  const tries = [];
+  for (const out of [Math.max(0, BAND_CLEAR_PX - len), Math.max(0, BAND_CLEAR_PX - len) + 50, Math.max(0, BAND_CLEAR_PX - len) + 100]) {
+    for (const side of [0, 1, -1]) tries.push([ux * out - uy * side * (th + 8), uy * out + ux * side * (th + 8)]);
+  }
+  for (const [ox, oy] of tries) {
+    const [x0, y0] = corner(b.x + ox, b.y + oy);
+    if (room.clear(x0, y0, tw, th)) {
+      tag.marker.setOffset([ox, oy]);
+      tag.el.hidden = false;
+      return;
+    }
+  }
+}
+
+/* Mapbox fades a marker behind a 3D building on the satellite map. The
+   last known point, the calls and the caveat tags are what the chief must
+   see wherever the camera is, so they stay at full strength. (MapLibre, the
+   map with no key, has no 3D buildings and ignores it.) */
+const FULL = 1;
 function pinEl(cls, short, tagText) {
   const el = document.createElement('div');
   el.className = `inc-mark ${cls}`;
@@ -663,7 +843,7 @@ function paintPins(v, members) {
     if (!p) {
       const parts = pinEl(`inc-k-${mk.kind}`, MARKS[mk.kind].short, text);
       parts.el.addEventListener('click', (e) => onPinClick(e, mk.id));
-      p = { ...parts, mk, marker: new g.GL.Marker({ element: parts.el, anchor: 'bottom' }).setLngLat([mk.lon, mk.lat]).addTo(g.map) };
+      p = { ...parts, mk, marker: new g.GL.Marker({ element: parts.el, anchor: 'bottom', occludedOpacity: FULL }).setLngLat([mk.lon, mk.lat]).addTo(g.map) };
       I.markers.set(mk.id, p);
     }
     p.mk = mk;
@@ -723,7 +903,7 @@ function pin(key, at, cls) {
   if (!p) {
     const parts = pinEl(cls, 'LKP', '');
     parts.el.setAttribute('aria-label', 'Last known point');
-    p = { ...parts, marker: new g.GL.Marker({ element: parts.el, anchor: 'bottom' }).setLngLat([at.lon, at.lat]).addTo(g.map) };
+    p = { ...parts, marker: new g.GL.Marker({ element: parts.el, anchor: 'bottom', occludedOpacity: FULL }).setLngLat([at.lon, at.lat]).addTo(g.map) };
     I.pins.set(key, p);
   }
   p.marker.setLngLat([at.lon, at.lat]);
@@ -768,6 +948,7 @@ function teardown() {
   for (const p of I.pins.values()) p.marker.remove();
   I.pins.clear();
   I.reachTag?.marker.remove(); I.reachTag = null;
+  I.bandTag?.marker?.remove(); I.bandTag = null;
   I.log = []; I.logKey = '';
   dropLayers(m);
   I.form = null; I.tool = null;
@@ -777,6 +958,7 @@ function teardown() {
   I.sim = null; I.simEnded = null;
   I.foldedFor = null;
   setLeadUnit(null);
+  setCoverUnit(null);
   I.panelKey = '';
   const box = $('cmdIncident');
   if (box) { box.hidden = true; box.textContent = ''; }
@@ -789,11 +971,13 @@ function paint(st) {
   if (!st) return teardown();
   const { map: m } = map();
   if (!I.on && m) { m.on('click', onMapClick); handsOn(m); I.on = true; }
-  if (I.sim) I.sim.step(viewNow());
+  if (I.sim) I.sim.step(viewNow(), simSpeed());
   const v = shown();
   const live = v.inc && v.inc.status === 'active' && !v.replay ? v.inc : null;
   setLeadUnit(v.inc?.k9Uid ?? null);
+  setCoverUnit(v.inc?.coverUid ?? null);
   $('cmdPanel')?.classList.toggle('inc-on', !!live);
+  $('cmdPanel')?.classList.toggle('inc-form', !!I.form);
   /* Close in, Wall mode's short pins show their details again. */
   if (m) $('map').classList.toggle('map-zoomed', m.getZoom() >= 17);
   /* On a phone the incident card and the map matter more than the list:
@@ -941,7 +1125,7 @@ function paintPanel(st, v = shown()) {
   const running = !st.sim && sharingRun() && !!runGoing();
   const k9s = md === 'form' ? k9Options(st) : [];
   const key = JSON.stringify([md, v.inc?.id, I.tool?.kind, cmd, me, running, lastEnded?.id,
-    k9s.map(k => [k.uid, k.on]), I.form?.k9Uid, !!I.form?.lkp, I.form?.pace, I.form?.article, I.replay?.playing, I.replay?.speed, I.voice]);
+    k9s.map(k => [k.uid, k.on, k.record?.at ?? 0]), I.form?.k9Uid, !!I.form?.lkp, I.form?.pace, I.form?.article, I.replay?.playing, I.replay?.speed, I.voice]);
   if (md === 'none' && !cmd && !lastEnded) { box.hidden = true; I.panelKey = ''; return; }
   box.hidden = false;
   if (key !== I.panelKey) {
@@ -951,6 +1135,11 @@ function paintPanel(st, v = shown()) {
   }
   paintLive(box, st, v);
   paintLog(box, st, v);
+  /* A focus or a jump inside the card can scroll the panel itself, which
+     has no scroll bar of its own: put it back, so the Demo label at its
+     top is always in view (the card scrolls inside itself instead). */
+  const panel = $('cmdPanel');
+  if (panel && panel.scrollTop) panel.scrollTop = 0;
 }
 
 function panelHtml(md, { st, v, me, cmd, lastEnded, running, k9s }) {
@@ -968,6 +1157,7 @@ function panelHtml(md, { st, v, me, cmd, lastEnded, running, k9s }) {
         <button type="button" class="btn ghost small" data-inc-act="speed">×${r.speed}</button>
         <button type="button" class="btn ghost small" data-inc-act="unreplay">Back to live</button>
       </div>
+      ${frozenCardHtml(r.rp.inc, st.members?.get(r.rp.inc.k9Uid)?.dog ?? null)}
       ${logHtml()}
     </div>`;
   }
@@ -993,6 +1183,7 @@ function panelHtml(md, { st, v, me, cmd, lastEnded, running, k9s }) {
         <button type="button" class="chip" data-inc-k9="" aria-pressed="${String(!f.k9Uid)}">None yet</button>
       </div>
       ${k9s.some(k => k.uid === f.k9Uid && !k.on) ? html`<p class="inc-hint">That team is off duty: nothing of theirs is shared until they go On duty and tap Start trailing.</p>` : ''}
+      ${pickCardHtml(k9s, f.k9Uid, st.sim ? viewNow() : Date.now())}
       <p class="sq-err" data-inc-err role="alert"></p>
       <div class="inc-tools">
         <button type="button" class="btn small moss" data-inc-act="go">Start incident</button>
@@ -1013,11 +1204,16 @@ function panelHtml(md, { st, v, me, cmd, lastEnded, running, k9s }) {
       <p class="inc-seen"><b class="inc-seen-clock" data-inc-text="seenClock"></b><span class="inc-seen-sub" data-inc-text="seenSub"></span></p>
       <p class="inc-warn" data-inc-text="warn" role="status"></p>
       <p class="inc-team"><b>${team}</b> <span data-inc-text="state"></span></p>
+      <p class="inc-cover" data-inc-text="cover"></p>
       <p class="inc-onscent" data-inc-text="onScent"></p>
+      <p class="inc-scene" data-inc-text="scene"></p>
+      <p class="inc-inside" data-inc-text="inside" role="status"></p>
       <p class="inc-facts" data-inc-text="facts"></p>
       <p class="inc-brief" data-inc-text="brief"></p>
       <p class="inc-reach" data-inc-text="reach"></p>
+      <p class="inc-band" data-inc-text="band"></p>
       <p class="inc-quiet" data-inc-text="quiet"></p>
+      ${frozenCardHtml(inc, st.members?.get(inc.k9Uid)?.dog ?? null)}
       ${me === inc.k9Uid && !st.sim ? html`<div class="inc-tools">
         ${running ? html`<span class="inc-hint">Your run is streaming to the squad. Marks you drop on the run screen show here.</span>`
                   : html`<button type="button" class="btn small moss" data-inc-act="trail">Start trailing</button>
@@ -1035,7 +1231,8 @@ function panelHtml(md, { st, v, me, cmd, lastEnded, running, k9s }) {
       </div>` : ''}
       <div class="inc-tools">
         <button type="button" class="btn ghost small" data-inc-act="fit">Show the incident</button>
-        ${cmd ? html`<button type="button" class="btn ghost small" data-inc-act="seen">Last seen &amp; brief</button>` : ''}
+        ${cmd ? html`<button type="button" class="btn ghost small" data-inc-act="seen">Last seen &amp; brief</button>
+          <button type="button" class="btn ghost small" data-inc-act="cover">Cover officer</button>` : ''}
         <button type="button" class="btn ghost small" data-inc-act="paces">Paces</button>
         ${ctx.speak ? html`<button type="button" class="btn ghost small" data-inc-act="voice" aria-pressed="${String(I.voice)}">${I.voice ? 'Voice on' : 'Voice off'}</button>` : ''}
         ${cmd ? html`<button type="button" class="btn danger small" data-inc-act="end">End incident</button>` : ''}
@@ -1064,6 +1261,128 @@ function reachNow(v) {
   return { reach, passed, warn: passed.length ? warnWords(reach.pace) : '' };
 }
 
+/* ── Keeping officers off the track ───────────────────────────────────────
+   Worked out on this device from what it already has (incident.js): the
+   pretend squad's own tracks, a replay's, or for a real squad the positions
+   this device has seen since the incident opened. Nothing more is read
+   from the cloud, and nothing of it is written there. */
+const WALK_MAX = 2000;   // fixes kept a member: hours at the duty rate
+function noteWalkers(st) {
+  const a = I.active;
+  if (!a || a.status !== 'active') return;
+  if (I.walked.for !== a.id) I.walked = { for: a.id, lines: new Map() };
+  for (const p of st.positions?.values?.() ?? []) {
+    if (!(p.at >= a.startedAt)) continue;
+    let u = I.walked.lines.get(p.uid);
+    if (!u) I.walked.lines.set(p.uid, (u = { uid: p.uid, pts: [] }));
+    const last = u.pts[u.pts.length - 1];
+    if (last && p.at <= last.t) continue;
+    u.pts.push({ lat: p.lat, lon: p.lon, t: p.at, spd: p.spd });
+    if (u.pts.length > WALK_MAX) u.pts.shift();
+  }
+}
+/** Everyone's movements for the incident on the map, uid → { uid, pts }. */
+function linesOf(v) {
+  if (v.replay && I.replay) return new Map(I.replay.rp.units.map(u => [u.uid, u]));
+  if (v.sim) return new Map([...(I.sim?.tracks ?? [])].map(([uid, pts]) => [uid, { uid, pts }]));
+  return I.walked.for === v.inc?.id ? I.walked.lines : new Map();
+}
+/** Who walked the scene before the dog (or so far, while it is on its way). */
+function sceneOf(v, members, trail = v.trail, now = v.now) {
+  if (!v.inc) return { names: [], started: false, text: '' };
+  const on = scentStart(trail, v.inc.lkp);
+  const started = !!on && on.t <= now;
+  const names = sceneWalkers({ inc: v.inc, lines: linesOf(v), until: started ? on.t : now }).map(w => who(w.uid, members));
+  return { names, started, text: sceneWords(names, started) };
+}
+/** The wind at the last known point, as the app already fetched it. */
+const windAt = (p) => (p && ctx.windNear ? ctx.windNear(p) : null);
+/** The downwind band, for a live incident only: today's wind says nothing
+    about the air during a replay. */
+function bandOf(v) {
+  if (!v.inc || v.inc.status !== 'active' || v.replay) return null;
+  return downwindBand(v.inc.lkp, windAt(v.inc.lkp));
+}
+function bandText(v) {
+  if (!v.inc || v.inc.status !== 'active' || v.replay) return '';
+  const w = windAt(v.inc.lkp);
+  if (!w) return '';
+  const said = bandWindWords(w, imperial());
+  return bandOf(v) ? `${BAND_WORDS} (${said})` : `No downwind band: ${said}`;
+}
+/** Units inside the perimeter on foot, for a live incident. */
+function insideOf(v, st) {
+  if (!v.inc || v.inc.status !== 'active' || v.replay) return [];
+  return insideWalkers({ inc: v.inc, marks: v.marks, rows: st.rows || [], lines: linesOf(v), now: v.now });
+}
+/* Each unit is said once as it goes in. Out for a couple of minutes and
+   back in, it is said again; out for a moment (a detour round a building
+   reads as walking out, GPS jumps) it is not, or the log would fill with
+   the same line. Only one heard just now and staying put: walking out, or
+   last heard minutes ago, is on the card in softer words but never said
+   out loud. Each time is kept for the log too, so a moment that lasts
+   seconds at ×10 is still there on the Wall and in the replay (this device
+   only). Times are the incident's clock (the pretend one runs fast). */
+const SEEN_IN_MAX = 200;
+const BACK_IN_MS = 2 * 60e3;
+function speakInside(v, list) {
+  if (I.inside.for !== v.inc?.id) I.inside = { for: v.inc?.id ?? null, ids: new Map(), seen: [] };
+  /* One already said who now reads as walking out is still inside: keep
+     their time fresh, or stopping again a few minutes later would log a
+     second "went inside" for someone who never left. One never said is
+     not marked, so they are still said if they stop inside. */
+  for (const w of list || []) {
+    if (!w.old && w.going && I.inside.ids.has(w.uid)) I.inside.ids.set(w.uid, v.now);
+  }
+  for (const w of insideNow(list)) {
+    const last = I.inside.ids.get(w.uid);
+    I.inside.ids.set(w.uid, v.now);
+    if (last != null && v.now - last < BACK_IN_MS) continue;
+    if (I.inside.seen.length < SEEN_IN_MAX) {
+      I.inside.seen.push({ uid: w.uid, callSign: w.callSign, m: w.m, t: v.now, at: { lat: w.lat, lon: w.lon } });
+    }
+    if (I.voice && ctx.speak && sq().view) { try { ctx.speak(`${w.callSign} is inside the perimeter`); } catch { /* no voice */ } }
+  }
+}
+
+/** Command puts a cover officer with the K9 team. */
+async function pickCover() {
+  const v = shown();
+  if (!v.inc || v.inc.status !== 'active' || v.replay || !amCommand()) return;
+  const st = commandView();
+  const rows = roster(st.members, st.positions || new Map(), v.now);
+  /* Officers only: Command runs the scene and another dog's handler is the
+     standby team. Nearest the handler first, by the app's positions; the
+     roster's names, so a second "Foot 3" shows as "Foot 3 (2)". */
+  const k9 = rows.find(r => r.uid === v.inc.k9Uid);
+  const far = (r) => (r.pos && k9?.pos ? dist(r.pos, k9.pos) : Infinity);
+  const officers = rows.filter(r => r.uid !== v.inc.k9Uid && r.role !== 'command' && r.role !== 'k9')
+    .sort((a, b) => far(a) - far(b) || a.callSign.localeCompare(b.callSign, undefined, { numeric: true }));
+  const choices = [{ value: '', text: 'None' }, ...officers.map(r => ({ value: r.uid,
+    text: Number.isFinite(far(r)) ? `${r.callSign} · ${aboutWords(far(r), imperial())} from the handler` : r.callSign }))];
+  /* An officer who was cover but has since been made Command still shows, so saving keeps them. */
+  const kept = v.inc.coverUid && !officers.some(r => r.uid === v.inc.coverUid) ? rows.find(r => r.uid === v.inc.coverUid) : null;
+  if (kept) choices.push({ value: kept.uid, text: kept.callSign });
+  const got = await form({
+    title: 'Cover officer',
+    body: 'Who goes with the K9 team. The card shows how far they are from the handler, from the app’s positions.',
+    fields: [{ key: 'uid', label: 'Cover', value: v.inc.coverUid || officers[0]?.uid || '', choices }],
+    note: 'Positions can be 10–30 s old and 5–20 m off: the radio stays the way to check.',
+    yes: 'Save',
+  });
+  if (!got) return;
+  /* The sheet was up a while: the incident may have ended under it. */
+  const now = shown();
+  if (!now.inc || now.inc.id !== v.inc.id || now.inc.status !== 'active') return;
+  if (now.sim) { I.sim.setCover(got.uid || null); paintCommandNow(); return; }
+  try {
+    const h = await ctx.handle();
+    await setCover(h, I.sid, now.inc, got.uid || null);
+  } catch (e) {
+    ctx.toast(String(e?.code || '').includes('permission') ? 'Only Command can choose the cover' : 'Could not save it');
+  }
+}
+
 /* ── The live log ─────────────────────────────────────────────────────────
    Built from the incident, the trail and every mark (incident.js logLines),
    newest first on the card. A tap on a line takes the map there, and in a
@@ -1073,16 +1392,19 @@ const logHtml = () => html`<p class="inc-label">Log</p><ol class="inc-log" data-
 function logOf(v, members) {
   if (!v.inc) return [];
   const k9 = v.inc.k9Uid ? members?.get(v.inc.k9Uid) : null;
-  const team = k9 ? `${k9.callSign}${k9.dog ? ` ${k9.dog}` : ''}` : '';
-  const base = { inc: v.inc, who: (uid) => who(uid, members), team };
-  if (!v.replay || !I.replay) return logLines({ ...base, marks: v.said || v.marks, trail: v.trail });
+  const team = k9 ? `${who(v.inc.k9Uid, members)}${k9.dog ? ` ${k9.dog}` : ''}` : '';
+  const sceneAt = (trail) => { const sc = sceneOf(v, members, trail, Infinity); return sc.started ? sc.text : ''; };
+  const inside = I.inside.for === v.inc.id ? I.inside.seen : [];
+  const base = { inc: v.inc, who: (uid) => who(uid, members), team, inside, imperial: imperial() };
+  if (!v.replay || !I.replay) return logLines({ ...base, marks: v.said || v.marks, trail: v.trail, scene: sceneAt(v.trail) });
   /* A replay lists the whole incident, so a tap can jump forward as well as
      back, and no line arrives under a finger: what had happened by the
      slider's moment as it stood then, and what is still to come, dimmed. */
   const rp = I.replay.rp;
-  const past = logLines({ ...base, marks: v.said, trail: v.trail, now: v.now });
   const unit = rp.units.find(u => u.uid === rp.inc.k9Uid);
-  const ahead = logLines({ ...base, marks: rp.marks, trail: unit ? unit.pts : [], now: Infinity })
+  const whole = sceneAt(unit ? unit.pts : []);
+  const past = logLines({ ...base, marks: v.said, trail: v.trail, now: v.now, scene: whole });
+  const ahead = logLines({ ...base, marks: rp.marks, trail: unit ? unit.pts : [], now: Infinity, scene: whole })
     .filter(l => l.t > v.now).map(l => ({ ...l, withdrawn: null, ahead: true }));
   return [...past, ...ahead];
 }
@@ -1213,9 +1535,11 @@ function paintLive(box, st, v) {
     /* The clock from last seen, and how far that is at the chosen pace. */
     const rn = reachNow(v);
     /* The folded phone strip carries the same clock and warning as the card. */
-    text('strip', stripWords({ k9, info, call, now: v.now, warn: rn.warn,
+    /* Who is inside the perimeter is for Command, who decides what to do. */
+    const inside = amCommand() ? insideOf(v, st) : [];
+    text('strip', stripWords({ k9, info, call, now: v.now, warn: rn.warn, inside,
                                seenMs: finite(v.inc.lastSeenAt) ? v.now - v.inc.lastSeenAt : null }));
-    box.querySelector('.inc-strip')?.classList.toggle('warn', !!rn.warn);
+    box.querySelector('.inc-strip')?.classList.toggle('warn', !!rn.warn || insideNow(inside).length > 0);
     text('quiet', quietLines(st.rows, v.now).join('\n'));
     const from = seenAt(v.inc);
     text('seenClock', clockWords(v.now - from));
@@ -1224,6 +1548,15 @@ function paintLive(box, st, v) {
     text('onScent', onScentWords({ inc: v.inc, trail: v.trail, now: v.now }));
     text('brief', briefWords(v.inc.brief, v.inc.pace));
     text('reach', reachWords(rn.reach, imperial()));
+    const sc = sceneOf(v, st.members);
+    text('scene', sc.text ? `${sc.text} (within about 30 m, by the app’s positions)` : '');
+    text('inside', inside.map(w => insideWords(w, imperial(), v.now)).join('\n'));
+    speakInside(v, inside);
+    const row = (uid) => (st.rows || []).find(r => r.uid === uid) || null;
+    const cover = v.inc.coverUid ? row(v.inc.coverUid) : null;
+    text('cover', v.inc.coverUid ? coverWords({ name: cover?.callSign || who(v.inc.coverUid, st.members), cover,
+      k9: row(v.inc.k9Uid), now: v.now, imperial: imperial() }) : '');
+    text('band', bandText(v));
   }
 }
 
@@ -1255,6 +1588,7 @@ function onPanelClick(e) {
   if (act === 'voice') return setVoice(!I.voice);
   if (act === 'seen') return editSeen();
   if (act === 'paces') return editPaces();
+  if (act === 'cover') return pickCover();
   if (act === 'trail') return startTrailing();
   if (act.startsWith('k9:')) {
     const fix = sq().fix;
@@ -1288,9 +1622,21 @@ function onScrub(e) {
 
 /** The trailing team starts a run: a blind trail from where they stand,
     recorded as any run is, and streamed into the incident as it goes. */
-function startTrailing() {
+async function startTrailing() {
   if (!I.active || !trailing()) return;
   if (!sq().onDuty) return ctx.toast('Switch On duty first: your trail is shared only while you are on duty');
+  /* Before the dog goes: who has already walked the point, from the
+     positions this phone has seen, so the handler knows whose scent is
+     on it. The run itself starts on the same tap. */
+  const inc = I.active;
+  const v = { inc, trail: I.trail, now: Date.now() };
+  const sc = sceneOf(v, sq().members, [], v.now);
+  if (sc.names.length) {
+    await info({ title: 'Before you start', close: 'Start trailing',
+      items: [{ head: 'Who walked the scene', text: sceneWords(sc.names, true) },
+              { head: 'From the app', text: SCENE_NOTE }] });
+    if (I.active?.id !== inc.id || !trailing()) return;
+  }
   I.consent = I.active.id;
   hideBanner();
   /* A run already going (the team was out when it was called) streams from
@@ -1359,6 +1705,7 @@ export function initIncidents(c) {
   onSquadChange((st) => {
     const sid = st.squad?.id ?? null;
     if (sid !== I.sid) follow(sid);
+    if (!st.sim) noteWalkers(st);
   });
   try { I.voice = ctx.kv.get('squadVoice', true) !== false; } catch { /* the default */ }
   try { I.paces = cleanPaces(ctx.kv.get('squadPaces', null)); } catch { /* the defaults */ }
@@ -1367,6 +1714,9 @@ export function initIncidents(c) {
   $('cmdFollow').addEventListener('click', resumeFollow);
   $('cmdIncident').addEventListener('click', onPanelClick);
   $('cmdIncident').addEventListener('input', onScrub);
+  /* A toggle does not bubble: caught on the way down, so the record card
+     stays open when the panel is drawn again. */
+  $('cmdIncident').addEventListener('toggle', (e) => { if (e.target.classList?.contains('inc-rec')) I.recOpen = e.target.open; }, true);
   $('incBannerOpen').addEventListener('click', () => { hideBanner(); openCommand(); });
   $('incBannerHide').addEventListener('click', hideBanner);
   $('incBannerTrail').addEventListener('click', startTrailing);

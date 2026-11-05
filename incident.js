@@ -12,7 +12,8 @@
 
 import { dist, bearing, project, pathLen, fmtDist, crossTrackSigned } from './geo.js';
 import { blockStep, outside } from './walls.js';
-import { MARK_KINDS, K9_MARKS, INCIDENT_TTL, ROLES, cleanCallSign, compass, rng } from './squad.js';
+import { MARK_KINDS, K9_MARKS, INCIDENT_TTL, ROLES, cleanCallSign, compass, rng, cleanRecord, RECORD_KEYS, STALE_MS, STALE_HIDE_MS,
+         ageWords } from './squad.js';
 
 /* ── Marks ──────────────────────────────────────────────────────────────
    short is what fits on the pin; label is the word for it everywhere else. */
@@ -49,16 +50,37 @@ const placeOf = (p) => ({ lat: round6(p.lat), lon: round6(p.lon) });
 /* ── The cloud's documents (squad.js PATHS) ──────────────────────────── */
 /** A new incident. One at a time per squad is the app's habit, not a rule:
     two at once would only be confusing, never unsafe. */
-export function incidentDoc({ name, lkp, k9Uid, uid, now, lastSeenAt = null, pace = null, brief = null }) {
+export function incidentDoc({ name, lkp, k9Uid, uid, now, lastSeenAt = null, pace = null, brief = null, coverUid = null, k9Record = null }) {
+  const k9 = typeof k9Uid === 'string' && k9Uid ? k9Uid : null;
   return {
     name: cleanIncidentName(name) || 'Incident',
     lkp: placeOf(lkp),
-    k9Uid: typeof k9Uid === 'string' && k9Uid ? k9Uid : null,
+    k9Uid: k9,
+    coverUid: cleanCover(coverUid, k9Uid),
+    /* The dog's record card as the handler shared it when the team was
+       picked (squad.js dogRecord). Copied, not linked: the debrief shows
+       what the decision was made on, and the rules refuse any change to it
+       and any copy that is not the handler's own, field for field. */
+    k9Record: k9 ? keptRecord(k9Record) : null,
     startedBy: uid, startedAt: now, endedAt: null, status: 'active', summary: null,
     lastSeenAt: cleanLastSeen(lastSeenAt, now), pace: cleanPace(pace), brief: cleanBrief(brief),
     expiresAt: now + INCIDENT_TTL,
   };
 }
+
+/** A record copied exactly as it was stored, if it reads as one at all:
+    tidied, it might no longer be the same map as the handler's, and the
+    rules compare the two. Shown only ever through cleanRecord. */
+export function keptRecord(r) {
+  if (!r || typeof r !== 'object' || !cleanRecord(r)) return null;
+  const out = {};
+  for (const k of Object.keys(r)) if (RECORD_KEYS.includes(k)) out[k] = r[k];
+  return out;
+}
+
+/* The cover officer Command put with the K9 team: a member's account, never
+   the handler themselves. */
+const cleanCover = (v, k9Uid) => (typeof v === 'string' && v && v.length <= 128 && v !== k9Uid ? v : null);
 
 /** An incident as another phone wrote it, or null. */
 export function cleanIncident(d, id) {
@@ -69,6 +91,8 @@ export function cleanIncident(d, id) {
     name: cleanIncidentName(d.name) || 'Incident',
     lkp: { lat: d.lkp.lat, lon: d.lkp.lon },
     k9Uid: typeof d.k9Uid === 'string' && d.k9Uid ? d.k9Uid : null,
+    coverUid: cleanCover(d.coverUid, d.k9Uid),
+    k9Record: typeof d.k9Uid === 'string' && d.k9Uid ? cleanRecord(d.k9Record) : null,
     startedBy: typeof d.startedBy === 'string' ? d.startedBy : '',
     startedAt: d.startedAt,
     endedAt: finite(d.endedAt) ? d.endedAt : null,
@@ -275,12 +299,17 @@ export function callWords(kind, callSign) {
     time is the card's clock: from last seen when Command said, else from
     the opening. `warn` is the perimeter warning, kept short with its
     "rough guide", since the strip is all a folded phone shows. */
-export function stripWords({ k9, info, call, now, seenMs = null, warn = '' }) {
+export function stripWords({ k9, info, call, now, seenMs = null, warn = '', inside = [] }) {
   const bits = [k9 ? `${k9.callSign}${k9.dog ? ` ${k9.dog}` : ''}` : 'No K9 team'];
   if (info?.heading != null) bits.push(`heading ${info.compass}`);
   else if (!info?.lengthM) bits.push('on the way');
   if (call) bits.push(`${MARKS[call.kind].label} ${elapsedWords(Math.max(0, now - call.at))} ago`);
   if (warn) bits.push(`${warn.replace(/^Perimeter now inside/, 'Inside')} (rough guide)`);
+  /* A unit inside the perimeter (insideWalkers): the folded card still says
+     so, for the ones heard just now and staying put. Walking out, or last
+     heard minutes ago, is for the full card, in its softer words. */
+  const here = insideNow(inside);
+  if (here.length) bits.push(`${nameList(here.map(w => w.callSign))} inside the perimeter`);
   bits.push(finite(seenMs) ? `${elapsedWords(Math.max(0, seenMs))} since seen` : elapsedWords(info?.elapsedMs ?? 0));
   return bits.join(' · ');
 }
@@ -489,6 +518,223 @@ export function briefWords(brief, pace = null) {
   return bits.join(' · ');
 }
 
+/* ── Keeping officers off the track ─────────────────────────────────────
+   Doctrine says a dog's track often leads to the officers who walked the
+   scene before it arrived, and that anyone wandering inside the perimeter
+   lays fresh scent where the dog has to work. All of it is worked out on
+   the device from positions it already has: nothing more is read from the
+   cloud. GPS is 5–20 m off in town, so every distance says "about". */
+
+/** "About 40 m": rounded to 5 m close in and 10 m further out, as GPS
+    allows no finer. */
+export const aboutWords = (m, imperial = false) =>
+  `about ${metresWords(m < 100 ? Math.max(5, Math.round(m / 5) * 5) : m < 1000 ? Math.round(m / 10) * 10 : m, imperial)}`;
+
+/* The downwind band: a wedge from the last known point the way the
+   forecast wind blows, so Command can keep cars and people off the side the
+   scent most likely drifted to. A modelled guide from a 10 m forecast, not
+   where the person went: under trees and between buildings the air near
+   the ground can turn. Below about half a metre a second the forecast gives
+   no useful direction, so there is no band at all. */
+export const CALM_MS = 0.5;
+export function downwindBand(lkp, wind) {
+  if (!isPlace(lkp) || !wind || !finite(wind.speed) || !finite(wind.from) || wind.speed < CALM_MS) return null;
+  const to = (((wind.from + 180) % 360) + 360) % 360;
+  /* Longer in a stronger wind; wider in a light one, which wanders more. */
+  const lengthM = Math.round(Math.min(250, 80 + wind.speed * 25));
+  const half = Math.max(15, Math.min(35, 38 - wind.speed * 3));
+  const arc = [];
+  for (let i = 0; i <= 8; i++) arc.push(project(lkp, to - half + (2 * half * i) / 8, lengthM));
+  const c = { lat: lkp.lat, lon: lkp.lon };
+  return { pts: [c, ...arc, c], tip: project(lkp, to, lengthM), to, lengthM, half };
+}
+export const BAND_WORDS = 'Downwind band: modelled guide from the forecast wind, not where the person went';
+/** "Wind from the SW, about 4 m/s" in words for the panel. */
+export const bandWindWords = (wind, imperial = false) => (wind && finite(wind.speed) && finite(wind.from)
+  /* Whole km/h, as the weather corner shows it: a tenth would be false
+     precision on a forecast. */
+  ? `wind from the ${compass(wind.from)}, ${wind.speed < CALM_MS ? 'too light to give a direction' : speedWords(Math.round(wind.speed * 3.6), imperial)}`
+  : '');
+
+/* A fix this quick (metres a second, a fast run) or quicker is a vehicle,
+   not someone on foot. */
+export const FOOT_MS = 3;
+/* Within this of the last known point is "at" it. */
+export const SCENE_M = 30;
+
+/** How fast someone was going at fix `i` of their line: what the phone said
+    (spd), else worked from the fixes either side. */
+export function speedAt(pts, i) {
+  const p = pts[i];
+  if (finite(p.spd)) return p.spd;
+  let best = 0;
+  for (const q of [pts[i - 1], pts[i + 1]]) {
+    if (q && q.t !== p.t) best = Math.max(best, (dist(p, q) * 1000) / Math.abs(q.t - p.t));
+  }
+  return best;
+}
+
+/** Who walked the scene: the units (not the K9 team itself) that came
+    within about 30 m of the last known point on foot between the incident
+    opening and `until` (when the dog got there, or now). `lines` are
+    members' movements ({ uid, pts }, a Map or a list, as joinTracks or the
+    replay hand them over). Cars driving past are left out by their speed;
+    a car stopped at the point counts, because its officer may have got
+    out. Oldest first: [{ uid, at, m }]. */
+export function sceneWalkers({ inc, lines, until }) {
+  if (!inc?.lkp) return [];
+  const out = [];
+  for (const u of lines?.values?.() ?? lines ?? []) {
+    if (!u || !u.uid || u.uid === inc.k9Uid || !u.pts?.length) continue;
+    let hit = null;
+    for (let i = 0; i < u.pts.length; i++) {
+      const p = u.pts[i];
+      if (p.t < inc.startedAt || p.t > until) continue;
+      const m = dist(p, inc.lkp);
+      if (m > SCENE_M || speedAt(u.pts, i) > FOOT_MS) continue;
+      if (!hit) hit = { uid: u.uid, at: p.t, m };
+      else hit.m = Math.min(hit.m, m);
+    }
+    if (hit) out.push(hit);
+  }
+  return out.sort((a, b) => a.at - b.at);
+}
+
+/** "Foot 3", "Foot 3 and 2A12", "Foot 3, 2A12 and Foot 5". */
+export function nameList(names) {
+  if (names.length <= 1) return names[0] || '';
+  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+}
+/** The line the handler and Command read. `started`: the dog is at the
+    point, so the list is closed; before that it says "so far". */
+export function sceneWords(names, started = true) {
+  if (!names.length) return '';
+  const were = names.length === 1 ? 'was' : 'were';
+  return started ? `Before the dog: ${nameList(names)} ${were} at the last known point`
+                 : `At the last known point so far: ${nameList(names)}`;
+}
+export const SCENE_NOTE = 'Within about 30 m, from the app’s own positions. Officers whose app was off are not in it.';
+
+/* Inside the perimeter: a ring Command drew round the ground, closed, and
+   standing for `PERIM_GRACE_MS` so the officers it sends out have had time
+   to get clear. More than `INSIDE_M` in from its edge, so someone standing
+   at a post on the line is not called in by GPS drift. */
+export const INSIDE_M = 20;
+/* A rally point is a patch of ground where people gather, not a dot. */
+export const RALLY_M = 50;
+export const PERIM_GRACE_MS = 2 * 60e3;
+/* A unit that went faster than a person walks within this long is a car. */
+export const FOOT_WINDOW_MS = 2 * 60e3;
+
+/** Whether a unit is on foot now, by how fast its last couple of minutes
+    went (its own line, else what its last position said). */
+export function onFootNow(line, pos, now) {
+  const pts = line?.pts || [];
+  let seen = false;
+  for (let i = pts.length - 1; i >= 0 && pts[i].t >= now - FOOT_WINDOW_MS; i--) {
+    if (pts[i].t > now) continue;
+    seen = true;
+    if (speedAt(pts, i) > FOOT_MS) return false;
+  }
+  return seen || !(finite(pos?.spd) && pos.spd > FOOT_MS);
+}
+
+/* Over the last minute, someone who has got this much further from the
+   ring's middle is on their way out of it, or this much nearer a rally
+   point outside it, on their way there. Just after a ring goes up that is
+   doing as Command said, so for `GOING_GRACE_MS` after it was drawn (the
+   two minutes before it counts, and one more) they are not called in.
+   After that they are listed, in softer words ("walking out"), because a
+   track usually leads outward from the last known point and someone
+   walking out along it is laying scent over it. A rally point inside the
+   ring excuses nobody: people gathered there are standing on the ground
+   the ring holds. */
+export const GOING_MS = 60e3;
+export const GOING_M = 10;
+export const GOING_GRACE_MS = PERIM_GRACE_MS + GOING_MS;
+const middle = (pts) => {
+  const n = pts.length - (dist(pts[0], pts[pts.length - 1]) < 1 ? 1 : 0);
+  let lat = 0, lon = 0;
+  for (let i = 0; i < n; i++) { lat += pts[i].lat; lon += pts[i].lon; }
+  return { lat: lat / n, lon: lon / n };
+};
+/** Where a unit was a minute ago and where it is now, by its own line. */
+function lastMinute(line, now) {
+  const pts = (line?.pts || []).filter(p => p.t <= now);
+  if (pts.length < 2) return null;
+  const to = pts[pts.length - 1];
+  let from = null;
+  for (let i = pts.length - 2; i >= 0; i--) { from = pts[i]; if (pts[i].t <= to.t - GOING_MS) break; }
+  return from && to.t - from.t >= GOING_MS / 2 ? { from, to } : null;
+}
+
+/** Who is inside the perimeter on foot: `rows` (squad.js roster) minus the
+    K9 team, its cover officer and anyone at a rally point outside the
+    ring. A position counts only if it was heard after the ring went up:
+    one from before says nothing about the ring. Heard in the last two
+    minutes (STALE_MS) it is a live line; older, up to the half hour the
+    map still draws it, it is kept with `old` and its time, for a softer
+    "was inside, last heard" line that is never spoken, because the officer
+    may have left long since. `going`: walking out of the ring, or to a
+    rally point outside it, after the first minutes of the ring. By each
+    one's own line in `lines` (uid → { pts }). [{ uid, callSign, m, at,
+    lat, lon, going, old }] with m how far in: live first, deepest first. */
+export function insideWalkers({ inc, marks, rows, lines = null, now }) {
+  if (!inc) return [];
+  const rings = (marks || []).filter(m => m.kind === 'perimeter' && isClosed(m.pts) && now - m.at >= PERIM_GRACE_MS);
+  if (!rings.length) return [];
+  const rallies = (marks || []).filter(m => m.kind === 'rally' && isPlace(m));
+  const out = [];
+  for (const r of rows || []) {
+    const pos = r?.pos;
+    if (!pos || !finite(pos.at) || r.uid === inc.k9Uid || r.uid === inc.coverUid) continue;
+    const age = now - pos.at;
+    if (!(age < STALE_HIDE_MS)) continue;
+    const old = age >= STALE_MS;
+    const line = lines?.get?.(r.uid);
+    /* On foot when last heard: an old position is judged at its own time. */
+    if (!onFootNow(line, pos, old ? pos.at : now)) continue;
+    const went = old ? null : lastMinute(line, now);
+    /* Mostly towards it, not just a little nearer on the way somewhere else. */
+    const moved = went ? dist(went.from, went.to) : 0;
+    let best = null;
+    for (const g of rings) {
+      if (pos.at < g.at || !insideLine(pos, g.pts)) continue;
+      const m = nearM(pos, g.pts);
+      if (m <= INSIDE_M) continue;
+      const away = rallies.filter(p => !insideLine(p, g.pts));
+      if (away.some(p => dist(p, pos) <= RALLY_M)) continue;
+      const c = middle(g.pts);
+      const going = !!went && (dist(went.to, c) - dist(went.from, c) >= GOING_M
+        || away.some(p => dist(went.from, p) - dist(went.to, p) >= Math.max(GOING_M, 0.7 * moved)));
+      if (going && now - g.at < GOING_GRACE_MS) continue;
+      if (!best || m > best.m) best = { m, going };
+    }
+    if (best) out.push({ uid: r.uid, callSign: r.callSign, m: best.m, at: pos.at, lat: pos.lat, lon: pos.lon, going: best.going, old });
+  }
+  const rank = (w) => (w.old ? 2 : w.going ? 1 : 0);
+  return out.sort((a, b) => rank(a) - rank(b) || b.m - a.m);
+}
+/** "Foot 3 is inside the perimeter, about 60 m in"; softer for one walking
+    out, and for one last heard minutes ago, with how long ago. */
+export function insideWords(w, imperial = false, now = Date.now()) {
+  if (w.old) return `${w.callSign} was inside the perimeter, last heard ${ageWords(w.at, now)}`;
+  return `${w.callSign} ${w.going ? 'is walking out of' : 'is inside'} the perimeter, ${aboutWords(w.m, imperial)} in`;
+}
+/** The ones to say out loud and to log: heard just now, and staying put. */
+export const insideNow = (list) => (list || []).filter(w => !w.old && !w.going);
+
+/** The cover officer's line: how far from the handler, and how old the two
+    positions it comes from are, since either may be out of date. */
+export function coverWords({ name, cover, k9, now, imperial = false }) {
+  if (!name) return '';
+  if (!cover?.pos || !k9?.pos) return `Cover: ${name}, no position from the app yet`;
+  const m = dist(cover.pos, k9.pos);
+  const oldest = Math.min(cover.pos.at, k9.pos.at);
+  const age = now - oldest < 10e3 ? 'a few seconds' : `up to ${elapsedWords(now - oldest)}`;
+  return `Cover: ${name}, ${aboutWords(m, imperial)} from the handler · positions ${age} old, may be out of date`;
+}
+
 /* ── The live log ───────────────────────────────────────────────────────
    What happened, in plain words, as it happened, built from the incident,
    the K9 team's trail and the marks: nothing typed, nothing to keep up. A
@@ -504,8 +750,12 @@ function markWords(m, by) {
 /** The log up to `now` (a replay's moment, or Infinity), oldest first. Each
     line is { key, t, time, text, at: { lat, lon }, pts (a line's points, for
     a tap to show it whole), withdrawn }. `who(uid)`
-    names a member; `team` is the K9 team as the log names it ("K9-1 Rex"). */
-export function logLines({ inc, marks, trail, who, team = '', now = Infinity }) {
+    names a member; `team` is the K9 team as the log names it ("K9-1 Rex");
+    `scene` is who walked the scene before the dog (sceneWords); `inside`
+    is each time this device saw a unit go inside the perimeter
+    ({ uid, callSign, m, t, at }), so a moment that lasts seconds at ×10
+    still stays in the log, on the Wall and in the replay. */
+export function logLines({ inc, marks, trail, who, team = '', now = Infinity, scene = '', inside = [], imperial = false }) {
   if (!inc) return [];
   const name = (uid) => (uid ? who(uid) : 'Command');
   const out = [];
@@ -517,6 +767,12 @@ export function logLines({ inc, marks, trail, who, team = '', now = Infinity }) 
   if (inc.startedAt <= now) push('open', inc.startedAt, inc.lkp, `Incident opened by ${name(inc.startedBy)}`);
   const on = scentStart(trail, inc.lkp);
   if (on && on.t <= now) push('trail', on.t, on, `${team || name(inc.k9Uid)} at the last known point`);
+  /* Who walked the scene first, as the handler was told at the start. */
+  if (on && on.t <= now && scene) push('scene', on.t, inc.lkp, scene);
+  for (const w of inside || []) {
+    if (!(w.t <= now) || !(w.t >= inc.startedAt)) continue;
+    push(`in:${w.uid}:${w.t}`, w.t, w.at, `${w.callSign} went inside the perimeter, ${aboutWords(w.m, imperial)} in`);
+  }
   for (const m of marks?.values?.() ?? []) {
     if (!(m.at <= now)) continue;
     const off = finite(m.withdrawnAt) && m.withdrawnAt <= now ? `withdrawn by ${name(m.withdrawnBy)}, ${hhmm(m.withdrawnAt)}` : null;
@@ -524,8 +780,9 @@ export function logLines({ inc, marks, trail, who, team = '', now = Infinity }) 
     push(`m:${m.id}`, m.at, line ? line[0] : m, markWords(m, name(m.by)), off, line);
   }
   if (finite(inc.endedAt) && inc.endedAt <= now) push('end', inc.endedAt, null, 'Incident ended');
-  const rank = { seen: 0, open: 1, trail: 2, end: 9 };
-  return out.sort((a, b) => a.t - b.t || (rank[a.key] ?? 5) - (rank[b.key] ?? 5));
+  const rank = { seen: 0, open: 1, trail: 2, scene: 3, end: 9 };
+  const of = (k) => (k.startsWith('in:') ? 2.5 : rank[k] ?? 5);
+  return out.sort((a, b) => a.t - b.t || of(a.key) - of(b.key));
 }
 
 /** What is kept on the incident when it ends, for the list of past ones. */
@@ -700,17 +957,33 @@ const SIM_MARKS_BY = { sgt: 'sim-7', carA: 'sim-3', carB: 'sim-4', footA: 'sim-5
 export const SGT = { wideAfterMs: 20e3, wideM: 450, tightAheadM: 150, tightM: 250, settleM: 100, anywayM: 600 };
 /* How far an officer on a post can pick out a person in a street. */
 const SEE_M = 150;
+/* The rally point stands this far outside the ring, as a staging point
+   does: people gathered at it are not on the ground the ring holds. */
+const RALLY_OUT_M = 40;
+/* The standby team's van, metres a second: on the map it drives round, as
+   the pretend cars do, never walking across the ground inside the ring. */
+const VAN_MS = 8;
+/* The cover officer makes for the handler and holds a few metres short
+   (the pretend squad's walkers stop about 6 m from where they are sent),
+   so on the trail they stay a few metres behind, as a cover officer does. */
+const COVER_STEP_M = 4;
+/* One officer on foot, sent out to a post, stops inside the wide perimeter
+   to speak to someone instead, as happens, so the chief sees Command told
+   about it. The spot is on the officer's own side of the last known point,
+   well clear of the rally point; it never comes from the hidden line. */
+export const STRAY = { holdMs: 2 * 60e3, realMs: 30e3, giveUpMs: 8 * 60e3, nearM: 120, farM: 220, rallyM: 150 };
 
 /** A pretend incident on the pretend squad `sim`, starting at `now`. */
 export function createSimIncident({ sim, lkp, k9Uid = 'sim-1', name = 'Missing person', now, seed = 3, by = 'you',
-                                    lastSeenAt = null, pace = null, brief = null }) {
-  const inc = { ...cleanIncident(incidentDoc({ name, lkp, k9Uid, uid: by, now, lastSeenAt, pace, brief }), `sim-${now}`) };
+                                    lastSeenAt = null, pace = null, brief = null, k9Record = null }) {
+  const inc = { ...cleanIncident(incidentDoc({ name, lkp, k9Uid, uid: by, now, lastSeenAt, pace, brief, k9Record }), `sim-${now}`) };
   let walls = sim.walls || null;
   const marks = new Map();
   const tracks = new Map();   // uid → [{ lat, lon, t }]
   const done = new Set();     // script steps already played
   let markN = 0;
   let phase = 'responding';
+  let clock = 1;   // how many times real time the pretend clock runs
 
   const add = (m) => { const id = `m${++markN}`; marks.set(id, { id, label: null, ...m }); return id; };
   /* Taken back as the cloud does it: kept, with who and when, for the log. */
@@ -760,13 +1033,41 @@ export function createSimIncident({ sim, lkp, k9Uid = 'sim-1', name = 'Missing p
   const u0 = k9();
   if (u0 && (dist(u0, start) > 80 || (walls && !clearLine(u0, start)))) placeNear(u0);
   sim.goTo(k9Uid, start);
+  /* The first officer on scene took the report standing at the last known
+     point, as one usually has by the time a dog is called: so "who walked
+     the scene" has someone to name when the dog starts. */
+  const first = sim.unit(SIM_MARKS_BY.footA);
+  if (first) {
+    const spot = openAt(project(lkp, 200, 12));
+    sim.place?.(SIM_MARKS_BY.footA, spot);
+    sim.goTo(SIM_MARKS_BY.footA, spot);
+  }
+
+  /* The cover officer walks with the team: a little behind the handler on
+     the trail, or beside them while they wait at the point. */
+  let coverChosen = false, coverGoal = null;
+  function cover() {
+    const c = inc.coverUid ? sim.unit(inc.coverUid) : null;
+    const u = k9();
+    if (!c || !u) return;
+    const goal = phase === 'responding' ? project(u, 90, 8) : u;
+    /* A little quicker than the team, so the officer keeps up rather than
+       falling further back at each turn. */
+    if (c.coverPace !== u.uid) { c.cruise = Math.max(c.cruise || 0, u.cruise || 1.7) + 0.2; c.coverPace = u.uid; }
+    if (coverGoal && dist(coverGoal, goal) < COVER_STEP_M) return;
+    coverGoal = { lat: goal.lat, lon: goal.lon };
+    sim.goTo(c.uid, coverGoal);
+  }
 
   function record(t) {
     for (const u of sim.units) {
       if (!u.report) continue;
       const line = tracks.get(u.uid) || [];
       const last = line[line.length - 1];
-      if (!last || u.report.at > last.t) { line.push({ lat: u.report.lat, lon: u.report.lon, t: u.report.at }); tracks.set(u.uid, line); }
+      if (!last || u.report.at > last.t) {
+        line.push({ lat: u.report.lat, lon: u.report.lon, t: u.report.at, spd: u.report.spd });
+        tracks.set(u.uid, line);
+      }
     }
     /* The trail is the K9 team's own line: where the handler actually is,
        every step, as the run screen records it, not only each report. */
@@ -812,18 +1113,22 @@ export function createSimIncident({ sim, lkp, k9Uid = 'sim-1', name = 'Missing p
   const sgt = { stage: 'none', wide: [], posts: null };
   function post(posts) {
     sgt.posts = posts;
-    for (const key of ['carA', 'carB', 'footA', 'footB']) sim.goTo(SIM_MARKS_BY[key], posts[key]);
+    for (const key of ['carA', 'carB', 'footA', 'footB']) {
+      if (SIM_MARKS_BY[key] !== inc.coverUid) sim.goTo(SIM_MARKS_BY[key], posts[key]);
+    }
   }
   function sergeant(t) {
     if (sgt.stage === 'none' && t >= now + SGT.wideAfterMs) {
       sgt.stage = 'wide';
+      /* He puts the first officer on scene with the K9 team as cover,
+         unless the person at the screen already chose. */
+      if (!coverChosen) { inc.coverUid = SIM_MARKS_BY.footA; coverChosen = true; }
       sgt.wide.push(add({ kind: 'perimeter', by: SIM_MARKS_BY.sgt, at: t, pts: ring(lkp, SGT.wideM, 12), label: 'Wide perimeter' }));
       /* Nothing yet says which way the person went: the posts go evenly
-         round, and the rally point is on the side Command came in from. */
+         round, and the rally point is just outside the ring on the side
+         Command came in from. */
       const boss = sim.unit(SIM_MARKS_BY.sgt);
-      const rally = openAt(project(lkp, boss ? bearing(lkp, boss) : 180, 60));
-      add({ kind: 'rally', by: SIM_MARKS_BY.sgt, at: t, lat: rally.lat, lon: rally.lon, label: null });
-      sim.goTo(SIM_MARKS_BY.k9b, rally);
+      rallyAt(openAt(project(lkp, boss ? bearing(lkp, boss) : 180, SGT.wideM + RALLY_OUT_M)), t);
       post({
         carA: project(lkp, 45, SGT.wideM), carB: project(lkp, 225, SGT.wideM),
         footA: openAt(project(lkp, 135, SGT.wideM)), footB: openAt(project(lkp, 315, SGT.wideM)),
@@ -846,6 +1151,11 @@ export function createSimIncident({ sim, lkp, k9Uid = 'sim-1', name = 'Missing p
         for (const id of sgt.wide) withdraw(id, SIM_MARKS_BY.sgt, t);
         sgt.wide = [];
         add({ kind: 'perimeter', by: SIM_MARKS_BY.sgt, at: t, pts: tight, label: 'Inner perimeter' });
+        /* A rally point the new ring takes in moves out past its edge. */
+        if (sgt.rally && insideLine(sgt.rally, tight)) {
+          withdraw(sgt.rallyId, SIM_MARKS_BY.sgt, t);
+          rallyAt(openAt(project(mid, bearing(mid, sgt.rally), SGT.tightM + RALLY_OUT_M)), t);
+        }
         const h = info.heading;
         post({
           carA: project(mid, h - 70, SGT.tightM), carB: project(mid, h + 70, SGT.tightM),
@@ -866,25 +1176,77 @@ export function createSimIncident({ sim, lkp, k9Uid = 'sim-1', name = 'Missing p
     }
   }
 
+  /* The rally point, and the standby team sent to it. On foot through the
+     pretend town it could be held up by walls the map does not open (a
+     yard, a gate), or walk across the ground the perimeter holds: so it
+     drives round in its van, as the pretend cars do, and is never seen to
+     jump there. */
+  function rallyAt(p, t) {
+    sgt.rallyId = add({ kind: 'rally', by: SIM_MARKS_BY.sgt, at: t, lat: p.lat, lon: p.lon, label: null });
+    sgt.rally = p; sgt.rallyAt = t;
+    if (sim.drive) sim.drive(SIM_MARKS_BY.k9b, p, VAN_MS);
+    else sim.goTo(SIM_MARKS_BY.k9b, p);
+  }
+
+  /* ── An officer stopping inside ── */
+  function stray(t) {
+    const speed = clock;
+    if (sgt.stage !== 'wide' || !sgt.posts) return;
+    const key = SIM_MARKS_BY.footB === inc.coverUid ? 'footA' : 'footB';
+    const o = sim.unit(SIM_MARKS_BY[key]);
+    if (!o || o.uid === inc.coverUid) return;
+    once('stray', () => {
+      const rally = [...marks.values()].find(m => m.kind === 'rally');
+      const m = Math.max(STRAY.nearM, Math.min(STRAY.farM, dist(lkp, o) * 0.6));
+      let spot = null;
+      for (const turn of [0, 50, -50, 100, -100, 150, -150]) {
+        spot = openAt(project(lkp, bearing(lkp, o) + turn, m));
+        if (!rally || dist(spot, rally) >= STRAY.rallyM) break;
+      }
+      sgt.stray = spot;
+      sim.goTo(o.uid, spot);
+    });
+    /* The wait is counted from getting there; a walk held up for long ends it anyway. */
+    if (!sgt.strayHere && dist(o, sgt.stray) < 15) sgt.strayHere = t;
+    /* Held for at least half a minute of real time, so at ×10 the chief
+       still has a moment to see it. */
+    const over = sgt.strayHere ? sgt.strayHere + Math.max(STRAY.holdMs, STRAY.realMs * speed) : sgt.rallyAt + STRAY.giveUpMs;
+    if (t >= over) once('back', () => sim.goTo(o.uid, sgt.posts[key]));
+  }
+
   const si = {
     inc, marks, tracks, trail: [], trailStart: 0,
     get phase() { return phase; },
     /* The hidden line is not on the object anyone draws from: it is handed
        out only for the end-of-scenario "where the pretend person walked". */
     hiddenRoute: () => scent.pts.slice(),
-    /** Play the incident on to the pretend squad's clock. */
-    step(t) {
+    /** Play the incident on to the pretend squad's clock, running at
+        `speed` times real time. */
+    step(t, speed = 1) {
       if (inc.status !== 'active') return si;
+      if (finite(speed) && speed > 0) clock = speed;
       if (!walls && sim.walls && phase === 'responding') rewall();
       record(t);
       world(t);
       sergeant(t);
+      cover();
+      stray(t);
       return si;
     },
     /** A mark the person at the screen drew (as Command). */
     addMark(m) { return add(m); },
     /** Taken back by `who` at `t`: off the map, crossed out in the log. */
     removeMark(id, who = by, t = null) { withdraw(id, who, finite(t) ? t : Date.now()); },
+    /** Command puts a cover officer with the K9 team, or none (null). */
+    setCover(uid) {
+      coverChosen = true;
+      coverGoal = null;
+      const was = inc.coverUid;
+      inc.coverUid = cleanCover(uid, k9Uid);
+      /* The one let go goes back to the post the sergeant gave them. */
+      const key = Object.keys(SIM_MARKS_BY).find(k => SIM_MARKS_BY[k] === was);
+      if (was && was !== inc.coverUid) sim.goTo(was, sgt.posts?.[key] ?? null);
+    },
     /** Command corrects when the person was last seen, how they left, the brief. */
     setSeen({ lastSeenAt, pace, brief }) {
       inc.lastSeenAt = cleanLastSeen(lastSeenAt, inc.startedAt);

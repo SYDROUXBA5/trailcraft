@@ -11,6 +11,8 @@
 
 import { dist, bearing, project } from './geo.js';
 import { blockStep, outside } from './walls.js';
+import { ownRun, ranBlind, debriefRates, varietyGaps, unwalkedPlan } from './debrief.js';
+import { calibration, runsOf, MIN_PER_BAND, labelOf as confLabel } from './call.js';
 
 export const DEMO_LABEL = 'Demo — not for real operations';
 
@@ -84,7 +86,7 @@ export const squadLink = (base, code) => `${base}#squad=${showCode(code)}`;
 
 /* ── The cloud's documents ──────────────────────────────────────────────
    squads/{squadId}                         name, code, createdBy, createdAt, v, demo
-   squads/{squadId}/members/{uid}           uid, role, callSign, name, dog, joinedAt, code
+   squads/{squadId}/members/{uid}           uid, role, callSign, name, dog, joinedAt, code, record
    squads/{squadId}/positions/{uid}         uid, lat, lon, acc, hdg, spd, at, expiresAt, deleteAt
    squads/{squadId}/incidents/{incidentId}  name, lkp, k9Uid, startedBy, startedAt, endedAt, status, expiresAt, deleteAt
      …/incidents/{incidentId}/marks/{markId}   kind, by, at, lat, lon, pts, label, expiresAt, deleteAt
@@ -129,9 +131,214 @@ export function keptLines() {
     { head: 'Your position', text: `Shared with your squad only while On duty is on. Switch it off and it is deleted at once. If a phone dies on duty, its last position is set to be deleted ${hoursWords(POSITION_TTL)} after it was sent, and the map stops drawing it after ${Math.round(STALE_HIDE_MS / 60e3)} min.` },
     { head: 'Incidents', text: `The trail, the points on the map and everyone's movements are kept ${daysWords(INCIDENT_TTL)} for the debrief, then set to be deleted. When the person was last seen, how they left, and the brief (direction and description) are kept with the incident ${daysWords(INCIDENT_TTL)}, and every squad member can see them. Save anything you need to keep before then.` },
     { head: 'The squad', text: 'Its name, and each member\'s name, call sign, role and dog, stay until you leave or Command deletes the squad.' },
+    { head: 'A dog\'s record', text: `Only when the handler taps Share: a short summary of the dog's training log (counts, dates, gaps and the licence as the handler typed it), seen by every squad member until they stop sharing or leave. A copy goes with an incident the dog is picked for and is kept ${daysWords(INCIDENT_TTL)}. The licence details stay on the handler's phone otherwise, and are deleted from it with the dog.` },
     { head: 'Pretend officers', text: 'Everything in the demo stays on this device. Nothing is sent and no account is needed. Your department name and call signs for it are kept on this device only.' },
     { head: 'Clean-up', text: 'The cloud\'s clean-up can run up to a day after the time above. This is a demo, not a records system.' },
   ];
+}
+
+/* ── The dog's record card ──────────────────────────────────────────────
+   When Command picks the K9 team, the card shows what that dog's own
+   training log says: how many trails and how old, how it did when nobody
+   could steer it, the wrong calls, when it last trained, how often the
+   handler's "Certain" was right, and what the dog has never been asked to
+   do. It shows the record; the supervisor decides. Nothing here says the
+   app clears a dog for anything.
+
+   The handler's own phone works it out from its own sessions, with the same
+   questions the rest of the app asks of a run (debrief.js ranBlind,
+   debriefRates, varietyGaps; call.js calibration), so the card can never
+   count a run differently from the dog's page. What goes to the squad is a
+   short summary of counts and dates, bounded field by field, never a run.
+
+   The card is copied into the incident when the dog is picked, so the
+   debrief shows what Command saw then, not what the log says a week on. */
+export const RECORD_V = 1;
+export const LIC_MAX = 60;
+export const GAP_MAX = 120;
+export const GAPS_MAX = 5;
+const COUNT_MAX = 100000;
+const DAY = 86400e3;
+const OLD_MIN = 240;           // "over 4 h old": a cold trail by any handler's measure
+export const RECORD_KEYS = ['v', 'dog', 'pretend', 'at', 'trails', 'h1', 'h4', 'older', 'noAge', 'blind', 'blindReal',
+  'blindFound', 'wrong', 'last', 'sure', 'sureRight', 'gaps', 'lic', 'licTo'];
+/** Said wherever the card is shown: the card informs a decision a person makes. */
+export const RECORD_SAYS = 'It shows the record; the supervisor decides.';
+/** Said where the card is shared: a training log is not a licence, and it can be asked for. */
+export const RECORD_NOTE = 'A self-kept training log is not licensing (NPCC in the UK) or certification (state, POST, NAPWDA or USPCA in the US). A court can ask to see it.';
+
+/* store.js runAgeMin, asked the same way (store.js is not loaded here): a
+   run graded against a drawn plan has no age until the walk is scanned. */
+const runAge = (s) => (unwalkedPlan(s?.data) ? null : s?.data?.result?.ageMin ?? null);
+const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
+const count = (v) => (Number.isInteger(v) && v >= 0 ? Math.min(v, COUNT_MAX) : 0);
+/* The gaps are written to the handler ("one you knew"); on Command's card
+   they are about the handler. */
+const aboutHandler = (s) => s.replace(/\byour\b/g, 'the handler’s').replace(/\byou\b/g, 'the handler');
+const packGaps = (list) => {
+  const out = [];
+  for (const g of list) {
+    const t = tidy(g, GAP_MAX);
+    if (t && !out.includes(t) && out.length < GAPS_MAX) out.push(t);
+  }
+  return out.length ? out.join('\n') : null;
+};
+
+/** The licence as the handler typed it: a body and an end date (ms), kept on
+    the handler's phone and sent only inside a shared record. */
+export function cleanLicence(l) {
+  const lic = tidy(l?.body, LIC_MAX) || null;
+  const licTo = isNum(l?.expires) ? l.expires : null;
+  return { lic, licTo };
+}
+/** A date field's "2026-12-01" as the end of that day here, or null. */
+export function licenceEnd(text) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(text ?? '').trim());
+  if (!m) return null;
+  const d = new Date(+m[1], +m[2] - 1, +m[3], 23, 59, 0, 0);
+  return d.getMonth() === +m[2] - 1 && d.getFullYear() >= 2000 && d.getFullYear() <= 2100 ? d.getTime() : null;
+}
+/** The other way, for the date field: ms → "2026-12-01". */
+export function licenceDay(ms) {
+  if (!isNum(ms)) return '';
+  const d = new Date(ms), p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+/** The record of one dog, from this phone's own sessions. `runs` are that
+    dog's sessions; `handlerId` narrows the "Certain" figure to the handler
+    sharing it (call.js runsOf: calibration measures one person). */
+export function dogRecord({ dog, runs, handlerId = null, licence = null, now = Date.now() }) {
+  /* A run kept from someone else's link is their dog and their judgement. */
+  const own = (runs ?? []).filter(s => s?.data?.track && ownRun(s));
+  const out = { v: RECORD_V, dog: cleanDogName(dog) || null, pretend: false, at: now,
+    trails: own.length, h1: 0, h4: 0, older: 0, noAge: 0, blind: 0, blindReal: 0, blindFound: 0, wrong: 0,
+    last: null, sure: 0, sureRight: 0, gaps: null, ...cleanLicence(licence) };
+  for (const s of own) {
+    const age = runAge(s);
+    if (!isNum(age) || age < 0) out.noAge++;
+    else if (age < 60) out.h1++;
+    else if (age < OLD_MIN) out.h4++;
+    else out.older++;
+    const at = s.data.trackStarted ?? s.startedAt;
+    if (isNum(at) && at <= now) out.last = out.last == null ? at : Math.max(out.last, at);
+  }
+  /* debrief.js findRate covers every run on a real person, the ones the
+     handler could steer included. The blind figure is its own filter:
+     only runs where nothing told the handler the answer. */
+  const blind = own.filter(s => ranBlind(s.data));
+  const blindReal = blind.filter(s => s.data.debrief?.target === 'real' && s.data.debrief?.outcome);
+  out.blind = blind.length;
+  out.blindReal = blindReal.length;
+  out.blindFound = blindReal.filter(s => s.data.debrief.outcome === 'found').length;
+  out.wrong = debriefRates(own).falseCalls;
+  const sure = calibration(handlerId ? runsOf(own, handlerId) : own).bands.find(b => b.v === 'sure');
+  out.sure = sure?.n ?? 0;
+  out.sureRight = sure?.right ?? 0;
+  const gaps = [];
+  if (!own.length) gaps.push('No trails in the handler’s Trailcraft log yet.');
+  else {
+    if (!blind.length) gaps.push('No blind runs yet.');
+    else if (!blind.some(s => runAge(s) >= OLD_MIN)) gaps.push('No blind runs over 4 h old.');
+    if (out.last != null && now - out.last > 30 * DAY) gaps.push('Not trained in the last 30 days.');
+    for (const g of varietyGaps(own)) gaps.push(aboutHandler(g));
+  }
+  out.gaps = packGaps(gaps);
+  return out;
+}
+
+/** A record as another phone wrote it, bounded field by field, or null.
+    Every count is a count of trails, so none is more than the trails, and
+    the four age bands add up to them (dogRecord makes them so): a record
+    where they do not was not made by the app, and is not shown at all
+    (the rules refuse it too). */
+export function cleanRecord(d) {
+  if (!d || typeof d !== 'object' || d.v !== RECORD_V || !isNum(d.at)) return null;
+  const trails = count(d.trails);
+  if (count(d.h1) + count(d.h4) + count(d.older) + count(d.noAge) !== trails) return null;
+  const blind = Math.min(count(d.blind), trails);
+  const blindReal = Math.min(count(d.blindReal), blind);
+  const sure = Math.min(count(d.sure), trails);
+  return {
+    v: RECORD_V, dog: cleanDogName(d.dog) || null, pretend: d.pretend === true, at: d.at,
+    trails, h1: count(d.h1), h4: count(d.h4), older: count(d.older), noAge: count(d.noAge),
+    blind, blindReal, blindFound: Math.min(count(d.blindFound), blindReal), wrong: count(d.wrong),
+    last: isNum(d.last) ? d.last : null, sure, sureRight: Math.min(count(d.sureRight), sure),
+    gaps: typeof d.gaps === 'string' ? packGaps(d.gaps.split('\n')) : null,
+    ...cleanLicence({ body: d.lic, expires: d.licTo }),
+  };
+}
+
+const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+/** "4 Nov 2026", the same on every phone whatever its language. */
+export const dayWords = (ms) => { const d = new Date(ms); return `${d.getDate()} ${MON[d.getMonth()]} ${d.getFullYear()}`; };
+function agoWords(at, now) {
+  const d = Math.floor((now - at) / DAY);
+  return d <= 0 ? 'today' : d === 1 ? 'yesterday' : d < 60 ? `${d} days ago` : `${Math.round(d / 30)} months ago`;
+}
+const ofWords = (got, n) => (n >= MIN_PER_BAND ? `${got} of ${n} (${Math.round((got / n) * 100)}%)` : `${got} of ${n}, too few to read much into`);
+
+/** The licence chip at `now`: amber within 30 days of the end, red after. */
+export function licenceState(rec, now) {
+  if (!rec?.lic && !isNum(rec?.licTo)) return { cls: 'none', text: 'No licence typed in by the handler' };
+  const body = rec.lic || 'Licence';
+  if (!isNum(rec.licTo)) return { cls: 'none', text: `${body} · no end date typed in` };
+  if (rec.licTo < now) return { cls: 'late', text: `${body} · ended ${dayWords(rec.licTo)}` };
+  const days = Math.ceil((rec.licTo - now) / DAY);
+  if (days <= 30) return { cls: 'soon', text: `${body} · ends ${dayWords(rec.licTo)}, in ${days} day${days === 1 ? '' : 's'}` };
+  return { cls: 'ok', text: `${body} · to ${dayWords(rec.licTo)}` };
+}
+
+/* A record shared longer ago than this may not be the dog as it is now:
+   the card says so, and asks for it again. */
+export const RECORD_OLD_DAYS = 7;
+/** The card's words, at `now` (a frozen card: when the dog was picked).
+    `dog`: the team's dog as the squad knows it, which names the card, so a
+    record shared under another name cannot pass for this dog's. Everything
+    in it is as of the day it was shared, and says so. */
+export function recordWords(rec, now, dog = null) {
+  if (!rec) return null;
+  const certain = confLabel('sure');
+  const sharedDays = Math.floor((now - rec.at) / DAY);
+  return {
+    title: `${dog || rec.dog || 'The dog'}’s record`,
+    pretend: rec.pretend,
+    from: rec.pretend ? 'Pretend: made up for the demo'
+      : `From the handler’s own Trailcraft log, worked out ${dayWords(rec.at)}`,
+    old: !rec.pretend && sharedDays > RECORD_OLD_DAYS ? `Shared ${sharedDays} days ago: ask the handler to share it again` : '',
+    rows: [
+      { k: 'Trails', v: String(rec.trails),
+        sub: `${rec.h1} under 1 h old · ${rec.h4} at 1–4 h · ${rec.older} over 4 h${rec.noAge ? ` · ${rec.noAge} age not known` : ''}` },
+      { k: 'Blind runs', v: String(rec.blind),
+        sub: rec.blindReal ? `${rec.blindReal} on a real person: found ${ofWords(rec.blindFound, rec.blindReal)}` : 'none on a real person yet' },
+      { k: 'Wrong calls', v: String(rec.wrong), sub: `in ${rec.trails} trail${rec.trails === 1 ? '' : 's'}, from the handler’s debriefs` },
+      /* Counted to the day it was shared, not to today: the record knows
+         nothing of the runs since. */
+      { k: 'Last trained', v: rec.last != null ? dayWords(rec.last) : 'not known',
+        sub: rec.last != null ? `${agoWords(rec.last, rec.at)}, as of when it was shared` : '' },
+      { k: `“${certain}” calls`, v: rec.sure ? `${rec.sureRight} of ${rec.sure} right` : 'none scored yet',
+        sub: rec.sure >= MIN_PER_BAND ? `${Math.round((rec.sureRight / rec.sure) * 100)}%` : rec.sure ? 'too few to say' : '' },
+    ],
+    gaps: rec.gaps ? rec.gaps.split('\n') : [],
+    lic: licenceState(rec, now),
+  };
+}
+
+/* Two made-up dogs for the pretend squad: a seasoned one with an honest
+   gap, and a younger one whose licence runs out this month, so the chief
+   sees the amber chip. Labelled pretend wherever they show. */
+const PRETEND_RECORDS = [
+  { trails: 146, h1: 84, h4: 43, older: 14, noAge: 5, blind: 61, blindReal: 52, blindFound: 41, wrong: 6, lastDays: 2,
+    sure: 23, sureRight: 21, gaps: ['No double-blind run yet, so nobody present has been unable to cue.'], lic: 'NPCC', licDays: 240 },
+  { trails: 38, h1: 29, h4: 9, older: 0, noAge: 0, blind: 9, blindReal: 8, blindFound: 5, wrong: 3, lastDays: 6,
+    sure: 4, sureRight: 3, gaps: ['No blind runs over 4 h old.', 'No blank searches yet — nothing has tested whether the dog will call an empty field.'],
+    lic: 'NPCC', licDays: 18 },
+];
+/** The pretend record of the i-th pretend K9 team's dog. */
+export function pretendRecord(i, dog, now) {
+  const p = PRETEND_RECORDS[i] ?? PRETEND_RECORDS[PRETEND_RECORDS.length - 1];
+  return cleanRecord({ ...p, v: RECORD_V, dog, pretend: true, at: now, last: now - p.lastDays * DAY,
+    gaps: p.gaps.join('\n'), licTo: now + p.licDays * DAY });
 }
 
 export const MARK_KINDS = ['indication', 'lost', 'refound', 'article', 'sighting', 'roadblock', 'rally', 'perimeter'];
@@ -184,6 +391,8 @@ export function cleanMember(d, id) {
     name: tidy(d.name, NAME_MAX),
     dog: role === 'k9' ? (cleanDogName(d.dog) || null) : null,
     joinedAt: finite(d.joinedAt) ? d.joinedAt : 0,
+    /* The dog's record, when the handler shared it (dogRecord). */
+    record: role === 'k9' ? cleanRecord(d.record) : null,
   };
 }
 
@@ -283,25 +492,33 @@ export function compass(hdg) {
     chief reads a roster: on duty first, Command, then K9, then officers,
     then by call sign. Positions with no member (removed a moment ago) and
     positions too old to mean anything are left out. */
-export function roster(members, positions, now) {
-  const rows = [];
-  /* A call sign is typed by its member, so two can be the same, by mistake
-     or to pass for another unit. The first to join keeps it; each later one
-     shows a number after it, "(2)", and carries `dup` for Command to see. */
+/* A call sign is typed by its member, so two can be the same, by mistake
+   or to pass for another unit. The first to join keeps it; each later one
+   shows a number after it, "(2)", and carries `dup` for Command to see.
+   Every screen that names a member goes by this, so a picker or a log line
+   never shows two units as one. uid → { callSign, n }. */
+export function callSignsOf(members) {
   const seen = new Map();
-  const byJoin = [...members.values()].sort((a, b) => (a.joinedAt ?? 0) - (b.joinedAt ?? 0) || (a.uid < b.uid ? -1 : 1));
-  const nth = new Map();
+  const out = new Map();
+  const byJoin = [...(members?.values?.() ?? [])].sort((a, b) => (a.joinedAt ?? 0) - (b.joinedAt ?? 0) || (a.uid < b.uid ? -1 : 1));
   for (const m of byJoin) {
-    const k = m.callSign.toLowerCase();
+    const raw = String(m.callSign ?? '');
+    const k = raw.toLowerCase();
     const n = (seen.get(k) ?? 0) + 1;
     seen.set(k, n);
-    nth.set(m.uid, n);
+    out.set(m.uid, { callSign: n > 1 ? `${raw} (${n})` : raw, n });
   }
+  return out;
+}
+
+export function roster(members, positions, now) {
+  const rows = [];
+  const marked = callSignsOf(members);
   for (const m of members.values()) {
     const p = positions.get(m.uid) || null;
     const fresh = p ? freshness(p.at, now) : 'off';
-    const n = nth.get(m.uid) ?? 1;
-    rows.push({ ...m, callSign: n > 1 ? `${m.callSign} (${n})` : m.callSign, dup: n > 1,
+    const c = marked.get(m.uid);
+    rows.push({ ...m, callSign: c.callSign, dup: c.n > 1,
                 pos: fresh === 'gone' ? null : p, fresh: fresh === 'gone' ? 'off' : fresh });
   }
   const rank = (r) => (r.pos ? 0 : 1);
@@ -376,6 +593,8 @@ export function createSim({ center, now = Date.now(), seed = 7, count = SIM_UNIT
     const start = project(center, r() * 360, span(80, mode.radius * 0.7));
     return {
       ...u, callSign: cleanCallSign(callSigns?.[i]) || u.callSign, uid: `sim-${i + 1}`, joinedAt: now,
+      /* As if each pretend handler had shared their dog's record. */
+      record: u.role === 'k9' ? pretendRecord(i, u.dog, now) : null,
       lat: start.lat, lon: start.lon, hdg: r() * 360, spd: 0,
       target: null, pauseUntil: now + span(0, 6) * 1000, goal: null,
       /* The third unit drops out for a few minutes: long enough to go grey. */
@@ -501,6 +720,15 @@ export function createSim({ center, now = Date.now(), seed = 7, count = SIM_UNIT
   sim.goTo = (uid, point) => {
     const u = units.find(x => x.uid === uid);
     if (u) { u.goal = point ? { lat: point.lat, lon: point.lon } : null; u.path = null; u.via = null; u.best = null; u.pauseUntil = 0; }
+  };
+  /** Send a unit by vehicle at `mps`: a K9 van driving round to a rally
+      point. Like the pretend cars it is not kept out of buildings, and its
+      speed on the map says it is driving, not walking. */
+  sim.drive = (uid, point, mps) => {
+    const u = units.find(x => x.uid === uid);
+    if (!u || !point) return;
+    u.mode = 'car'; u.cruise = mps;
+    sim.goTo(uid, point);
   };
   /** The buildings, once the map has them (they arrive after the squad
       starts). A walker already inside one, where the map put no building

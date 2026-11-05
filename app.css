@@ -2339,7 +2339,7 @@ html[data-motion="on"] .lu-title:not([hidden]) { animation: lu-plate 300ms steps
   left: 0; right: 0; bottom: 0; max-height: 46vh; overflow: hidden;
   border-radius: 20px 20px 0 0; padding: 12px 16px calc(var(--safe-b) + 12px);
 }
-.cmd-panel .sq-demo { margin: 0; }
+.cmd-panel .sq-demo { margin: 0; position: sticky; top: 0; z-index: 1; flex: none; }
 /* Folded, the pretend squad's speed switch stays: it is what a demo reaches for mid-incident. */
 .cmd-panel.folded .cmd-list, .cmd-panel.folded .cmd-duty { display: none; }
 .cmd-head { display: flex; align-items: center; gap: 10px; }
@@ -2395,6 +2395,8 @@ html[data-motion="on"] .lu-title:not([hidden]) { animation: lu-plate 300ms steps
 .sq-unit.sq-quiet .sq-arrow { opacity: 0.85; }
 .sq-unit.sq-stale { --sq-c: #8A93A3; }
 .sq-unit.sq-stale .sq-tag { background: rgba(90, 98, 112, 0.9); }
+/* Above the pin when the place below it is taken (squad-ui.js declutter). */
+.sq-tag.sq-tag-up { top: auto; bottom: 34px; }
 .sq-unit.sq-me .sq-arrow { border-color: #FFE7A8; }
 @media (prefers-reduced-motion: reduce) { .sq-arrow { transition: none; } }
 :root[data-theme="dark"] .sq-demo { background: #3A2E10; color: #F3D891; border-color: #6B5520; }
@@ -2420,7 +2422,10 @@ html[data-motion="on"] .lu-title:not([hidden]) { animation: lu-plate 300ms steps
 .inc-banner .btn.ghost { color: #fff; border-color: rgba(255, 255, 255, 0.5); background: transparent; }
 .inc-banner .btn:not(.ghost):not(.moss) { background: #fff; color: #7F1D1D; border-color: #fff; }
 
-.cmd-incident { flex: none; overflow-y: auto; max-height: 34vh; }
+/* The incident card shrinks to what the panel has left and scrolls inside
+   itself, so the panel never overflows: the Demo label above it stays on
+   screen however long the card grows (record, cover, scene lines). */
+.cmd-incident { flex: 0 1 auto; min-height: 0; overflow-y: auto; max-height: 34vh; }
 .cmd-panel.folded .cmd-incident { max-height: 22vh; }
 @media (min-width: 900px) { .cmd-incident { max-height: 55vh; } }
 .inc-card { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border-radius: 14px;
@@ -2486,6 +2491,8 @@ html[data-motion="on"] .lu-title:not([hidden]) { animation: lu-plate 300ms steps
 .app-sheet-title { margin: 0; font: 700 calc(19 * var(--px)) var(--display); overflow-wrap: anywhere; }
 .app-sheet-title:focus { outline: none; }
 .app-sheet-body, .app-sheet-note { margin: 0; font-size: calc(15 * var(--px)); line-height: 1.45; overflow-wrap: anywhere; }
+/* A body of several lines (the dog's record before it is shared) keeps them. */
+.app-sheet-body { white-space: pre-line; }
 .app-sheet-note { font-size: calc(13 * var(--px)); color: var(--muted); }
 .app-sheet-hint { font-size: calc(13 * var(--px)); font-weight: 400; color: var(--muted); }
 .app-sheet-btns { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
@@ -2519,6 +2526,11 @@ html[data-motion="on"] .lu-title:not([hidden]) { animation: lu-plate 300ms steps
 /* On a phone, folded, the incident is one slim line that opens on a tap:
    "K9-1 Rex · heading E · Re-found 1 min ago · 10 min". */
 @media (max-width: 899px) {
+  /* Starting an incident on a phone: the form and the dog's record get the
+     room, with the top of the map left for placing the last known point. */
+  .cmd-panel.inc-form { max-height: 62vh; }
+  .cmd-panel.folded.inc-form .cmd-kept { display: none; }
+  .cmd-panel.inc-form .cmd-incident { max-height: none; }
   .cmd-panel.folded.inc-on { gap: 6px; padding-top: 8px; }
   .cmd-panel.folded.inc-on .cmd-head { display: none; }
   .cmd-panel.folded.inc-on .inc-live > :not(.inc-strip) { display: none; }
@@ -2562,7 +2574,7 @@ html[data-motion="on"] .lu-title:not([hidden]) { animation: lu-plate 300ms steps
 .cmd-wall .cmd-age { font-size: calc(17 * var(--px)); }
 .cmd-wall .sq-dot { width: 16px; height: 16px; }
 .cmd-wall .inc-name { font-size: calc(22 * var(--px)); }
-.cmd-wall .inc-team, .cmd-wall .inc-facts, .cmd-wall .inc-quiet { font-size: calc(18 * var(--px)); }
+.cmd-wall .inc-team, .cmd-wall .inc-facts, .cmd-wall .inc-quiet, .cmd-wall .inc-inside { font-size: calc(18 * var(--px)); }
 .cmd-wall .cmd-duty, .cmd-wall .cmd-kept, .cmd-wall #cmdFit { display: none; }
 /* Wall mode is a screen to watch, not to work on: the drawing tools stay on
    the laptop's own view, and the units get the room. */
@@ -2570,7 +2582,7 @@ html[data-motion="on"] .lu-title:not([hidden]) { animation: lu-plate 300ms steps
 /* The card keeps to its name, the clock, the warning and the team: the
    wall box already shows the log, and the units need the height. */
 .cmd-wall .inc-live .inc-log, .cmd-wall .inc-live .inc-brief, .cmd-wall .inc-live .inc-reach,
-.cmd-wall .inc-live .inc-facts, .cmd-wall .inc-live .inc-onscent { display: none; }
+.cmd-wall .inc-live .inc-facts, .cmd-wall .inc-live .inc-onscent, .cmd-wall .inc-live .inc-band { display: none; }
 .cmd-wall .cmd-incident { max-height: 36vh; overflow: hidden; }
 .cmd-wall .cmd-list { flex: 1; min-height: 40vh; }
 /* The toast goes to the foot of the map, beside the panel: never over the
@@ -2595,7 +2607,51 @@ body.wall-on .toast { top: auto; bottom: 24px; left: auto; right: 474px;
 .inc-onscent { margin: 0; font: 700 calc(14 * var(--px)) var(--body); }
 .inc-brief, .inc-reach { margin: 0; font-size: calc(13.5 * var(--px)); color: var(--muted); overflow-wrap: anywhere; }
 .inc-reach { font-style: italic; }
+/* Keeping officers off the track: who walked the scene, who is inside the
+   perimeter (amber, it asks Command to act), the cover officer, the band. */
+.inc-scene, .inc-cover { margin: 0; font-size: calc(13.5 * var(--px)); font-weight: 600; overflow-wrap: anywhere; }
+.inc-band { margin: 0; font-size: calc(13 * var(--px)); font-style: italic; color: var(--muted); overflow-wrap: anywhere; }
+.inc-inside { margin: 0; font-size: calc(14 * var(--px)); font-weight: 700; color: #8A5A00; white-space: pre-line; }
+:root[data-theme="dark"] .inc-inside { color: #F3D891; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .inc-inside { color: #F3D891; } }
+.inc-scene:empty, .inc-cover:empty, .inc-band:empty, .inc-inside:empty { display: none; }
+/* The band's tag on the map: a modelled guide, never a route. */
+.inc-band-tag { padding: 2px 8px; border-radius: 8px; background: rgba(26, 155, 176, 0.92); color: #fff; white-space: nowrap;
+  font: 700 calc(11 * var(--px)) var(--body); pointer-events: none; z-index: 1; }
 .inc-warn:empty, .inc-onscent:empty, .inc-brief:empty, .inc-reach:empty { display: none; }
+/* The dog's record card: what the training log says, laid out to be read
+   at a glance. The licence chip goes amber in its last 30 days, red after. */
+.inc-rec-card { display: grid; gap: 6px; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--border);
+  background: var(--well, rgba(15, 31, 61, 0.04)); }
+.inc-rec-card p { margin: 0; overflow-wrap: anywhere; }
+.inc-rec-head { font-size: calc(15 * var(--px)); }
+.inc-rec-pretend { display: inline-block; margin-left: 4px; padding: 1px 7px; border-radius: 999px; border: 1px dashed var(--muted);
+  font: 700 calc(11 * var(--px)) var(--body); letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); vertical-align: 2px; }
+.inc-rec-from, .inc-rec-says { font-size: calc(12.5 * var(--px)); color: var(--muted); }
+.inc-rec-says { font-style: italic; }
+.inc-rec-rows { display: grid; gap: 3px; margin: 0; }
+.inc-rec-rows > div { display: grid; grid-template-columns: 6.5em 1fr; gap: 8px; align-items: baseline; }
+.inc-rec-rows dt { font-size: calc(13 * var(--px)); color: var(--muted); }
+.inc-rec-rows dd { margin: 0; font-size: calc(13.5 * var(--px)); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.inc-rec-rows dd span { display: block; color: var(--muted); font-size: calc(12.5 * var(--px)); line-height: 1.3; }
+.inc-rec-label { font: 700 calc(12 * var(--px)) var(--body); color: var(--muted); }
+.inc-rec-gaps { margin: 0; padding-left: 1.1em; font-size: calc(13 * var(--px)); }
+.inc-rec-lic { padding: 5px 9px; border-radius: 10px; border: 1px solid var(--border); font: 700 calc(13 * var(--px)) var(--body); }
+.inc-rec-lic span { display: block; font: 500 calc(11.5 * var(--px)) var(--body); color: var(--muted); }
+.inc-lic-soon, .inc-rec-old { background: #FFF1C7; color: #6B4700; border-color: #F2A900; }
+/* A record shared more than a week ago says so, in the same amber. */
+.inc-rec-old { padding: 5px 9px; border-radius: 10px; border: 1px solid #F2A900; font: 700 calc(12.5 * var(--px)) var(--body); }
+.inc-lic-late { background: #FDE2DE; color: #8A1C10; border-color: #D9472F; }
+.inc-lic-soon span, .inc-lic-late span { color: inherit; opacity: 0.8; }
+:root[data-theme="dark"] .inc-lic-soon, :root[data-theme="dark"] .inc-rec-old { background: #3D2E00; color: #FFE08A; }
+:root[data-theme="dark"] .inc-lic-late { background: #45140D; color: #FFC2B8; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .inc-lic-soon, :root:not([data-theme="light"]) .inc-rec-old { background: #3D2E00; color: #FFE08A; }
+  :root:not([data-theme="light"]) .inc-lic-late { background: #45140D; color: #FFC2B8; }
+}
+.inc-rec summary { cursor: pointer; min-height: 32px; display: flex; align-items: center; font: 700 calc(13.5 * var(--px)) var(--body); overflow-wrap: anywhere; }
+.inc-rec[open] summary { margin-bottom: 6px; }
+.cmd-wall .inc-live .inc-rec { display: none; }
 :root[data-theme="dark"] .inc-warn { background: #3D2E00; color: #FFE08A; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .inc-warn { background: #3D2E00; color: #FFE08A; } }
 .inc-log { list-style: none; margin: 0; padding: 0; max-height: 15em; overflow-y: auto; border-radius: 10px; border: 1px solid var(--border); }

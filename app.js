@@ -68,7 +68,7 @@ import { searchWords, logRows, recentRuns, runAt, midnight, facets, filterRows, 
          cleanFolderName, putMany, toggleFolder, renameIn, dropFrom, mergeFolders, emptyHeld, folderPatch } from './log.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-11-05a';
+const BUILD = '2026-11-05b';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true,
@@ -2419,7 +2419,7 @@ function headingStop() {
    refreshes it every quarter hour, which is far finer than a forecast
    actually changes. A session's own weather still wins where there is one:
    looking at a trail from last week should show last week's air. */
-const wxNow = { at: 0, wx: null, asking: null };
+const wxNow = { at: 0, wx: null, asking: null, near: null };
 
 function weatherHere(hint = null) {
   if (wxNow.wx && Date.now() - wxNow.at < 15 * 60000) return Promise.resolve(wxNow.wx);
@@ -2446,7 +2446,7 @@ async function askWeatherHere(hint) {
       at = { lat: pos.coords.latitude, lon: pos.coords.longitude };
     }
     const wx = await fetchWeather(at.lat, at.lon, Date.now(), { within: WX_WAIT });
-    wxNow.wx = wx; wxNow.at = Date.now();
+    wxNow.wx = wx; wxNow.at = Date.now(); wxNow.near = { lat: at.lat, lon: at.lon };
     return wx;
   } catch { return wxNow.wx; }          // offline or blocked: the panel stays away
 }
@@ -11776,6 +11776,22 @@ function start() {
     user: () => sync.user, configured: () => sync.configured, onSync,
     handle: squadHandle, openSignIn: () => openSignIn(),
     kv: db.kv, dogs: () => S.dogs,
+    /* The dogs a K9 member could mean, for the record card the handler may
+       share (squad.js dogRecord): each with this phone's own sessions of
+       it, and the handler using the phone, whose "Certain" calls the card
+       counts. A phone shared by two handlers can hold two dogs of one
+       name: the current handler's own come first, and if more than one is
+       left the screen asks which, rather than share the wrong dog's runs. */
+    dogRuns: (name) => {
+      const hid = S.handler?.id ?? null;
+      const named = S.dogs.filter(x => x.name === name);
+      const mine = named.filter(d => hid && (d.handlerId === hid || (d.teams || []).some(t => t.handlerId === hid)));
+      return (mine.length ? mine : named).map(d => {
+        const runs = S.sessions.filter(s => s.dogId === d.id);
+        const last = runs.reduce((m, s) => Math.max(m, s.startedAt || 0), 0);
+        return { id: d.id, name: d.name, runs, last: last || null, handlerId: hid };
+      });
+    },
     shareBase: () => SHARE_BASE,
     here: () => (lastFix && Date.now() - lastFix.t < 30 * 60e3 ? { lat: lastFix.lat, lon: lastFix.lon } : null),
     demoPlace: () => ({ lat: 51.2094, lon: -2.6476 }),   // Wells, where the demo trail is
@@ -11798,6 +11814,16 @@ function start() {
        gives distances in the units Settings is set to. */
     speak: (text) => coachSpeak(text),
     imperial: imp,
+    /* The wind the command screen already fetched (the corner panel), for
+       the downwind band at the last known point: only when it was fetched
+       within a few kilometres of it, about one forecast cell, and is under
+       an hour old. Nothing new is asked for. */
+    windNear: (p) => {
+      const wx = wxNow.wx;
+      if (!wx || !wxNow.near || Date.now() - wxNow.at > 3600e3 || dist(wxNow.near, p) > 5000) return null;
+      return Number.isFinite(wx.wind_speed) && Number.isFinite(wx.wind_direction)
+        ? { speed: wx.wind_speed, from: wx.wind_direction } : null;
+    },
   });
   /* Back in the app, or back in signal: take what another phone changed since,
      before anything here is edited over it (sync.js resync). */
