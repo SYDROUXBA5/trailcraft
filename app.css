@@ -2498,6 +2498,15 @@ html[data-motion="on"] .lu-title:not([hidden]) { animation: lu-plate 300ms steps
 .app-sheet-btns { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
 .app-sheet-btns .btn { min-height: 48px; }
 .app-sheet-list { margin: 0; display: flex; flex-direction: column; gap: 4px; }
+/* A few things to do, one big button each (the deployment report). */
+.app-sheet-choices { display: flex; flex-direction: column; gap: 8px; }
+.app-sheet-choice { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-height: 56px;
+  padding: 10px 14px; text-align: left; white-space: normal; }
+.app-sheet-choice-text { font-weight: 700; }
+/* The replay video's preview while it records: the frame is 9:16, so on a
+   phone it is kept short enough to leave Stop in reach. */
+.app-sheet-clip { display: block; align-self: center; height: min(46vh, 420px); width: auto; aspect-ratio: 9 / 16;
+  max-width: 100%; border-radius: 12px; background: #0B1630; }
 .app-sheet-list dt { font: 700 calc(14 * var(--px)) var(--body); margin-top: 6px; }
 .app-sheet-list dd { margin: 0; font-size: calc(14.5 * var(--px)); line-height: 1.45; color: var(--muted); }
 .app-sheet-fields { display: flex; flex-direction: column; gap: 10px; }
@@ -2679,3 +2688,73 @@ body.wall-on .toast { top: auto; bottom: 24px; left: auto; right: 474px;
 .cmd-wall-log .inc-log-why { color: rgba(255, 255, 255, 0.7); }
 .cmd-wall .inc-seen-clock { font-size: calc(44 * var(--px)); }
 .cmd-wall .inc-warn, .cmd-wall .inc-onscent { font-size: calc(18 * var(--px)); }
+
+/* ── The handler's squad picture (handler-ui.js) ───────────────────────
+   On the run screen during an incident, and in pretend mode's Handler's
+   view. A dark glass card so the words read on the satellite picture in
+   either theme; big call buttons, answered one-handed with a dog on the line. */
+.hv-box { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border-radius: 16px;
+  background: rgba(11, 22, 48, 0.86); color: #F4F6FA; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35); }
+.hv-box[hidden] { display: none; }
+.hv-line { margin: 0; font: 700 calc(16 * var(--px))/1.3 var(--body); overflow-wrap: anywhere; }
+.hv-note-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.hv-note { margin: 0; font: 600 calc(12 * var(--px))/1.3 var(--body); color: rgba(244, 246, 250, 0.75); }
+.screen.glass .hv-box .btn.ghost.hv-hear { flex: none; background: transparent; color: #F4F6FA; border-color: rgba(255, 255, 255, 0.45); }
+.hv-calls { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+@media (max-width: 520px) { .hv-calls { grid-template-columns: repeat(2, 1fr); } }
+.hv-call { min-height: 60px; padding: 8px 6px; border-radius: 14px; border: 2px solid rgba(255, 255, 255, 0.85); cursor: pointer;
+  font: 800 calc(18 * var(--px)) var(--body); color: #fff; background: var(--hv-c, #333);
+  transition: transform 120ms var(--ease-out); }
+.hv-call:active { transform: scale(0.96); }
+html[data-motion="off"] .hv-call:active { transform: none; }
+.hv-call:focus-visible { outline: 3px solid #FFD15C; outline-offset: 2px; }
+.hv-c-lost { --hv-c: #B3261E; }
+.hv-c-refound { --hv-c: #1F6FB2; }
+.hv-c-indication { --hv-c: #1F8A4C; }
+.hv-c-article { --hv-c: #7A4FC0; }
+/* At night every call button goes dim red: bright colours on a black street
+   cost the handler their night sight. The words tell them apart. Night is
+   the sun below the horizon where the handler is (run screen) or the
+   squad's Night look (Handler's view), set as .hv-night by handler-ui.js;
+   never the phone's dark theme, which many phones keep all day and which
+   would take the four colours away in daylight. */
+.hv-box.hv-night .hv-call { --hv-c: #2A0805; color: #FF8474; border-color: #6E1C14; }
+.hv-undo { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 6px 6px 12px;
+  border-radius: 12px; background: rgba(255, 255, 255, 0.12); font: 700 calc(14 * var(--px)) var(--body); }
+.hv-undo[hidden] { display: none; }
+.hv-undo-btn { min-height: 44px; min-width: 88px; background: #FFD15C; color: #1A1300; border: 0; font-weight: 800; }
+/* The squad's points on the run screen's map: the command map's colours. */
+.hv-mark { display: flex; flex-direction: column; align-items: center; gap: 3px; z-index: 3; pointer-events: none; }
+.hv-pin { min-width: 30px; padding: 4px 7px; border-radius: 9px; text-align: center; color: #fff;
+  font: 800 calc(12 * var(--px)) var(--body); letter-spacing: 0.04em;
+  background: var(--inc-c, #333); border: 2px solid #fff; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45); }
+.hv-tag { white-space: nowrap; padding: 2px 7px; border-radius: 7px; background: rgba(11, 22, 48, 0.86); color: #fff;
+  font: 600 calc(11 * var(--px)) var(--body); }
+.hv-tag:empty { display: none; }
+.hv-k-sighting { --inc-c: #B07800; }
+.hv-k-roadblock { --inc-c: #D93025; }
+.hv-k-rally { --inc-c: #0B7A75; }
+.hv-k-cover { --inc-c: #4F5BD5; }
+.hv-k-lkp { --inc-c: #111827; }
+
+/* Pretend mode's Handler's view: the command card, the Wall box and the
+   other units step aside, and the handler's card sits where a phone's run
+   controls would. */
+.hv-pretend { position: fixed; z-index: 7; left: 0; right: 0; bottom: 0; max-width: 560px; margin: 0 auto;
+  display: flex; flex-direction: column; gap: 8px; padding: 12px 16px calc(var(--safe-b) + 14px); }
+.hv-pretend[hidden] { display: none; }
+.hv-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.hv-kick { padding: 6px 10px; border-radius: 10px; background: rgba(11, 22, 48, 0.86); color: #F4F6FA;
+  font: 700 calc(13 * var(--px)) var(--body); }
+.hv-hud { margin: 0; align-self: flex-start; padding: 8px 14px; border-radius: 999px; background: rgba(11, 22, 48, 0.86); color: #F4F6FA;
+  font: 700 calc(15 * var(--px)) var(--body); }
+.hv-hud:empty { display: none; }
+.hv-pretend .hv-demo { margin: 0; }
+#scrCommand.hv-on .cmd-panel, #scrCommand.hv-on .cmd-wall-box { display: none; }
+#map.hv-on .sq-unit:not(.sq-lead), #map.hv-on .inc-mark, #map.hv-on .inc-reach-tag, #map.hv-on .inc-band-tag { display: none; }
+/* While the handler's box is up (run screen or Handler's view), the map's
+   corner buttons sit above it, not under it (--hv-gap is the box's height
+   from the bottom, measured by handler-ui.js). */
+html.hv-lift .map-fab { bottom: calc(var(--hv-gap, 0px) + 12px); }
+html.hv-lift .map-style { bottom: calc(var(--hv-gap, 0px) + 72px); }
+html.hv-lift .style-pick { bottom: calc(var(--hv-gap, 0px) + 132px); }

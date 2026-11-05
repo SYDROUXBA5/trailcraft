@@ -12,6 +12,7 @@
 
 import { dist, bearing, project, pathLen, fmtDist, crossTrackSigned } from './geo.js';
 import { blockStep, outside } from './walls.js';
+import { solarPosition } from './field.js';
 import { MARK_KINDS, K9_MARKS, INCIDENT_TTL, ROLES, cleanCallSign, compass, rng, cleanRecord, RECORD_KEYS, STALE_MS, STALE_HIDE_MS,
          ageWords } from './squad.js';
 
@@ -26,6 +27,15 @@ export const MARKS = {
   roadblock: { label: 'Roadblock', short: 'RB', many: 'roadblocks' },
   rally: { label: 'Rally point', short: 'RP', many: 'rally points' },
   perimeter: { label: 'Perimeter', short: '', line: true, one: 'perimeter line', many: 'perimeter lines' },
+};
+/* The incident's colours, one set for every picture of it: the command
+   map, the handler's phone, the replay video and the report's map. A red
+   dashed line is a standing perimeter and orange is the K9 team's track
+   wherever a chief sees them. */
+export const INC_COLOURS = {
+  perimeter: '#D93025', trail: '#D9822B', lkp: '#111827', cover: '#4F5BD5',
+  indication: '#1F8A4C', lost: '#B3261E', refound: '#1F6FB2', article: '#7A4FC0',
+  sighting: '#B07800', roadblock: '#D93025', rally: '#0B7A75',
 };
 /** "3 roadblocks", "1 lost it". */
 export const countWords = (kind, n) => `${n} ${n === 1 ? (MARKS[kind].one || MARKS[kind].label.toLowerCase()) : MARKS[kind].many}`;
@@ -1276,3 +1286,300 @@ export function createSimIncident({ sim, lkp, k9Uid = 'sim-1', name = 'Missing p
 /* The K9 team's fine trail and its five-second reports, as one line. */
 const mergeTrail = (reports, trail) => [...reports, ...trail].sort((a, b) => a.t - b.t)
   .filter((p, i, a) => i === 0 || p.t > a[i - 1].t);
+
+/* ── The handler's squad picture (the run screen during an incident) ────
+   While the K9 team trails, the handler's phone keeps a slim layer of what
+   the squad put on the map (perimeter lines, sightings, roadblocks, rally
+   points) and the cover officer, with one line of words and a few spoken
+   ones. It is a rough guide from positions that are often 10–30 s old and
+   a minute or more from a phone standing still or locked (squad.js sends a
+   standing member once a minute): never a safety cue. The radio
+   stays the main channel, and the words say so where they are set. */
+
+/* The squad's marks the handler's phone shows. The team's own calls are
+   the run's own marks, and the reach ring and the downwind band are
+   Command's planning, not something to walk by. */
+export const HANDLER_KINDS = ['sighting', 'roadblock', 'rally', 'perimeter'];
+/* What the phone can say out loud, each one switchable. */
+export const HEAR_KINDS = ['sighting', 'roadblock', 'rally', 'perimeter', 'cover'];
+export const HEAR_LABELS = { sighting: 'Sightings', roadblock: 'Roadblocks', rally: 'Rally points', perimeter: 'Perimeter lines', cover: 'Cover officer' };
+/** This device's choice of what to hear: every kind on unless switched off. */
+export function cleanHear(v) {
+  const out = {};
+  for (const k of HEAR_KINDS) out[k] = !(v && typeof v === 'object' && v[k] === false);
+  return out;
+}
+/* No hard limit is promised: a standing member is sent once a minute and a
+   locked phone sends nothing, so "up to 30 s" would be a claim the app does
+   not keep. */
+export const HANDLER_NOTE = 'Squad positions are often 10–30 s old, and a minute or more when a phone is standing still or locked; the website goes quiet with the screen locked. This is a rough guide, not a safety cue: the radio comes first.';
+export const HANDLER_SHORT = 'Rough guide · positions can be a minute or more old · radio first';
+
+/* The call buttons: the run's own marks (RUN_MARKS), big, with a few
+   seconds to take one back before the squad sees it. A call is held off
+   the cloud a second longer than Undo is offered, so an Undo never races a
+   send. */
+export const CALL_KEYS = ['Lost it', 'Re-found', 'Indication', 'Article'];
+export const CALL_UNDO_MS = 5000;
+export const CALL_HOLD_MS = 6000;
+/** How far into `wps` (from `from`) the calls may go to the squad by `now`:
+    up to the first one still inside its undo time. A run that has ended
+    (`drain`) sends the rest at once: "Indication" then "Found" is the most
+    natural pair of taps there is, and the indication must not be lost. */
+export function callsReady(wps, from, now, drain = false) {
+  const n = wps?.length || 0;
+  let i = Math.min(Math.max(0, from | 0), n);
+  for (; i < n; i++) if (!drain && finite(wps[i]?.t) && now - wps[i].t < CALL_HOLD_MS) break;
+  return i;
+}
+
+/* Ahead, behind and the sides, from the way the handler is going. Without
+   a heading yet (standing at the point), a compass word instead. */
+const SIDES = [[30, 'ahead'], [75, 'ahead-#'], [120, '#'], [150, 'behind-#']];
+/** "ahead-left", "behind", "right"; "to the NE" with no heading. */
+export function sideWords(from, heading, to) {
+  if (!from || !to) return '';
+  const b = bearing(from, to);
+  if (!finite(heading)) return `to the ${compass(b)}`;
+  const rel = ((b - heading + 540) % 360) - 180;   // -180..180, negative to the left
+  const a = Math.abs(rel);
+  const lr = rel < 0 ? 'left' : 'right';
+  for (const [lim, w] of SIDES) if (a <= lim) return w.replace('#', lr);
+  return 'behind';
+}
+
+/** The nearest place on a line to `c`, and how far it is. */
+export function nearestOn(c, pts) {
+  if (!pts?.length) return null;
+  if (pts.length === 1) return { m: dist(c, pts[0]), at: pts[0] };
+  let best = null;
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i - 1], b = pts[i];
+    const x = crossTrackSigned(a, b, c);
+    const t = x.along == null ? 0 : Math.max(0, Math.min(1, x.along));
+    if (!best || x.off < best.m) best = { m: x.off, at: { lat: a.lat + (b.lat - a.lat) * t, lon: a.lon + (b.lon - a.lon) * t } };
+  }
+  return best;
+}
+
+/** What the handler's phone shows: each standing squad mark of the kinds
+    above, with how far and which side it is from the handler, and the
+    cover officer. `me` is the handler's own position ({ lat, lon }, or null
+    before a fix), `heading` their way in degrees (or null), `cover` the
+    cover officer's last position ({ lat, lon, at }, or null) and
+    `coverName` their call sign. */
+export function handlerPicture({ inc, marks, me = null, heading = null, cover = null, coverName = '', now = Date.now() }) {
+  if (!inc || inc.status !== 'active') return { items: [], cover: null };
+  const items = [];
+  for (const mk of marks || []) {
+    if (!HANDLER_KINDS.includes(mk.kind) || !standing(mk, now)) continue;
+    if (MARKS[mk.kind].line) {
+      if (!mk.pts || mk.pts.length < 2) continue;
+      const near = me ? nearestOn(me, mk.pts) : null;
+      const inside = !!me && isClosed(mk.pts) && insideLine(me, mk.pts);
+      items.push({ id: mk.id, kind: mk.kind, by: mk.by, at: mk.at, label: mk.label || null, pts: mk.pts,
+                   m: near ? near.m : null, near: near ? near.at : null, side: near ? sideWords(me, heading, near.at) : '', inside });
+    } else {
+      if (!finite(mk.lat) || !finite(mk.lon)) continue;
+      const pos = { lat: mk.lat, lon: mk.lon };
+      items.push({ id: mk.id, kind: mk.kind, by: mk.by, at: mk.at, label: mk.label || null, pos,
+                   m: me ? dist(me, pos) : null, side: me ? sideWords(me, heading, pos) : '' });
+    }
+  }
+  items.sort((a, b) => a.at - b.at);
+  let cov = null;
+  if (inc.coverUid) {
+    const has = !!cover && finite(cover.lat) && finite(cover.lon);
+    cov = { id: `cover:${inc.coverUid}`, kind: 'cover', uid: inc.coverUid, name: coverName || 'Cover officer',
+            pos: has ? { lat: cover.lat, lon: cover.lon } : null, at: has && finite(cover.at) ? cover.at : null,
+            m: has && me ? dist(me, cover) : null, side: has && me ? sideWords(me, heading, cover) : '' };
+  }
+  /* The last known point too: the handler walks to it first, and it is
+     where every distance on Command's screen is measured from. */
+  return { items, cover: cov, lkp: inc.lkp ? { lat: inc.lkp.lat, lon: inc.lkp.lon } : null };
+}
+
+/* A distance close enough to say: 10 m steps close in, 50 m further out,
+   as GPS allows no finer. */
+const roughM = (m) => (m < 300 ? Math.max(10, Math.round(m / 10) * 10) : m < 1000 ? Math.round(m / 50) * 50 : m);
+/** How old a position or a point is, when it is old enough to matter. */
+const ageBit = (at, now) => (finite(at) && now - at >= 60e3 ? `, ${elapsedWords(now - at)} ago` : '');
+
+/** The one line on the run screen:
+    "Sighting 180 m ahead-left · cover 2A12 about 40 m behind". The newest
+    sighting first; with none, the nearest perimeter line; then the cover
+    officer. Ages show once a minute old, as a sighting moves on. */
+export function handlerLine(pic, { imperial = false, now = Date.now() } = {}) {
+  const bits = [];
+  const items = pic?.items || [];
+  const seen = items.filter(i => i.kind === 'sighting');
+  if (seen.length) {
+    const s = seen[seen.length - 1];
+    bits.push(s.m == null ? `Sighting${ageBit(s.at, now)}` : `Sighting ${metresWords(roughM(s.m), imperial)} ${s.side}${ageBit(s.at, now)}`);
+  } else {
+    const lines = items.filter(i => i.kind === 'perimeter' && i.m != null);
+    const inside = lines.find(i => i.inside);
+    if (inside) bits.push('Inside the perimeter');
+    else if (lines.length) {
+      const p = lines.reduce((a, b) => (b.m < a.m ? b : a));
+      bits.push(`Perimeter ${metresWords(roughM(p.m), imperial)} ${p.side}`);
+    }
+  }
+  const c = pic?.cover;
+  if (c) {
+    if (!c.pos) bits.push(`cover ${c.name}, no position yet`);
+    else if (c.m == null) bits.push(`cover ${c.name}`);
+    else bits.push(`cover ${c.name} ${aboutWords(c.m, imperial)} ${c.side}${ageBit(c.at, now)}`);
+  }
+  if (!bits.length) return 'No squad points on the map yet';
+  const s = bits.join(' · ');
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+/* Spoken: whole words, as a voice reads them best. */
+const YD_PER_M = 1 / 0.9144;
+const SPOKEN_COMPASS = { N: 'north', NE: 'north east', E: 'east', SE: 'south east', S: 'south', SW: 'south west', W: 'west', NW: 'north west' };
+/** "200 metres", "1.2 kilometres", "220 yards", "0.6 miles". */
+export function spokenDist(m, imperial = false) {
+  /* Yards are rounded as yards: 200 m is "220 yards", not "219". */
+  if (imperial && m * YD_PER_M < 880) return `${roughM(m * YD_PER_M)} yards`;
+  const w = metresWords(roughM(m), imperial);
+  return w.replace(/ km$/, ' kilometres').replace(/ m$/, ' metres').replace(/ yd$/, ' yards').replace(/ mi$/, ' miles');
+}
+const spokenSide = (side) => side.replace(/^to the (\w+)$/, (_, c) => `to the ${SPOKEN_COMPASS[c] || c}`).replace('-', ', ');
+
+/** What the phone says for a new squad point: "Sighting, Foot 5, 200
+    metres ahead, left". `by` names who put it there. */
+export function sayWords(item, by = '', imperial = false) {
+  if (!item) return '';
+  const where = item.m != null ? `, ${spokenDist(item.m, imperial)} ${spokenSide(item.side)}` : '';
+  switch (item.kind) {
+    case 'sighting': return `Sighting${by ? `, ${by}` : ''}${where}`;
+    case 'roadblock': return `Roadblock${by ? `, ${by}` : ''}${where}`;
+    case 'rally': return `Rally point${where}`;
+    case 'perimeter': return item.inside ? `Perimeter up${by ? `, ${by}` : ''}. You are inside it`
+      : `Perimeter up${by ? `, ${by}` : ''}${item.m != null ? `, nearest ${spokenDist(item.m, imperial)} ${spokenSide(item.side)}` : ''}`;
+    case 'cover': return `Cover officer, ${item.name}`;
+    default: return '';
+  }
+}
+
+/** The new points to say since last time. `said` is the ids already dealt
+    with, or null the first time: then everything already on the map counts
+    as heard, so opening the run screen does not read out the whole map.
+    The handler's own points, and kinds switched off, are never said. */
+export function freshSays({ pic, said, hear, me = null }) {
+  const first = !said;
+  const next = new Set(said || []);
+  const say = [];
+  const all = [...(pic?.items || []), ...(pic?.cover ? [pic.cover] : [])];
+  for (const it of all) {
+    if (next.has(it.id)) continue;
+    next.add(it.id);
+    if (first || (me && it.by === me) || !hear?.[it.kind]) continue;
+    say.push(it);
+  }
+  return { say, said: next };
+}
+
+/** Whether the run screen shows the squad layer at all: only on the run
+    screen, while an incident is in force and this phone's run is its
+    trail. A training run with no incident never does. */
+export const runSquadOn = ({ screen, inc, sharing, running }) =>
+  screen === 'scrRun' && !!inc && inc.status === 'active' && !!sharing && !!running;
+
+/* ── The run's share of the incident, one second at a time ─────────────
+   The K9 phone's run streams into the incident: its fixes as the trail,
+   its calls once their Undo time is over. `run` is how far this phone has
+   sent ({ for: the run's start, idx: fixes sent, wps: calls sent, list:
+   the run's calls while sharing }); `rec` is the run being recorded, or
+   null. Returns the new `run` and what to send now. Pure, so the promises
+   below are tested in node (test/handler.test.mjs). */
+export function runShareStep(run, { rec = null, sharing = false, onDuty = false, startedAt = 0, now = Date.now() } = {}) {
+  let next = run || { for: 0, idx: 0, wps: 0, list: null };
+  const pts = [], calls = [];
+  const take = (list, end) => {
+    for (let i = next.wps; i < end; i++) {
+      const w = list[i];
+      if (RUN_MARKS[w?.kind] && w.t >= startedAt) calls.push(w);
+    }
+  };
+  if (sharing && rec) {
+    /* A run started before the incident (the team was already out) counts
+       from the incident's start. */
+    if (next.for !== rec.startedAt) next = { for: rec.startedAt, idx: 0, wps: 0, list: null };
+    next = { ...next, list: rec.wps };
+    for (let i = next.idx; i < rec.pts.length; i++) if (rec.pts[i].t >= startedAt) pts.push(rec.pts[i]);
+    const end = callsReady(rec.wps, next.wps, now);
+    take(rec.wps, end);
+    next = { ...next, idx: rec.pts.length, wps: Math.max(next.wps, end) };
+  } else if (sharing && !rec && next.list) {
+    /* The run has ended (Found, Done): a call still inside its Undo time
+       goes now, or "Indication" then "Found" would lose the indication. */
+    const end = callsReady(next.list, next.wps, now, true);
+    take(next.list, end);
+    next = { ...next, wps: Math.max(next.wps, end), list: null };
+  } else if (!onDuty && rec) {
+    /* Off duty mid-run: nothing is shared with the switch off, and nothing
+       is kept back to go later either. Back on duty, the run is sent from
+       that moment, not from where it stopped. */
+    next = { for: rec.startedAt, idx: rec.pts.length, wps: rec.wps.length, list: null };
+  }
+  return { run: next, pts, calls };
+}
+
+/** The calls of a run this phone made but has not sent yet (still in their
+    hold), for an incident that has just ended or been left: they cannot go
+    to a closed incident (the rules refuse it), so the handler is told they
+    stayed on the phone, in the run's own marks. */
+export function heldCalls(run, startedAt = 0) {
+  const list = run?.list;
+  if (!Array.isArray(list)) return 0;
+  let n = 0;
+  for (let i = Math.max(0, run.wps | 0); i < list.length; i++) if (RUN_MARKS[list[i]?.kind] && list[i].t >= startedAt) n++;
+  return n;
+}
+
+/* ── Handler's view: what the picture must hold ──────────────────────── */
+/** The ground Handler's view frames round the dog: the dog, the cover
+    officer, the nearest few squad points and the nearest stretch of each
+    perimeter line, from the same picture the box describes. Only those
+    within `maxM` of the dog, so the dog's street stays readable: a point
+    two kilometres off is in the line of words, not squeezed onto the map. */
+export function handlerFrame(pic, me, { maxM = Infinity, most = 3 } = {}) {
+  if (!me || !finite(me.lat) || !finite(me.lon)) return [];
+  const out = [{ lat: me.lat, lon: me.lon }];
+  const near = (p) => p && finite(p.lat) && finite(p.lon) && dist(me, p) <= maxM;
+  if (near(pic?.cover?.pos)) out.push(pic.cover.pos);
+  const items = pic?.items || [];
+  items.filter(i => i.pos && near(i.pos)).sort((a, b) => dist(me, a.pos) - dist(me, b.pos))
+    .slice(0, most).forEach(i => out.push(i.pos));
+  for (const i of items) if (i.pts && near(i.near)) out.push(i.near);
+  return out;
+}
+
+/** Night by the sun where the handler is: below the horizon. The run
+    screen's call buttons go dim red then, whatever theme the phone is in. */
+export function darkAt(p, t = Date.now()) {
+  if (!p || !finite(p.lat) || !finite(p.lon) || !finite(t)) return false;
+  return solarPosition(t, p.lat, p.lon).elevation < 0;
+}
+
+/** The camera that holds `pts` ({ lat, lon }) in a picture `w` × `h`
+    pixels (inside the paddings): the middle of them, and the closest zoom
+    that fits, kept between `min` and `max`. Worked out on the map's own
+    Web Mercator grid (512 px tiles), so it needs no map to test and adds
+    no padding of its own to the map's. */
+export function frameCamera(pts, w, h, { min = 0, max = 22 } = {}) {
+  const ok = (pts || []).filter(p => finite(p?.lat) && finite(p?.lon));
+  if (!ok.length) return null;
+  const X = (lon) => (lon + 180) / 360;
+  const Y = (lat) => { const r = Math.max(-85, Math.min(85, lat)) * Math.PI / 180; return (1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2; };
+  const xs = ok.map(p => X(p.lon)), ys = ok.map(p => Y(p.lat));
+  const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+  const fit = (ext, px) => (ext > 0 ? Math.log2(Math.max(1, px) / (ext * 512)) : Infinity);
+  const zoom = Math.max(min, Math.min(max, fit(x1 - x0, w), fit(y1 - y0, h)));
+  const cy = (y0 + y1) / 2;
+  const lat = Math.atan(Math.sinh(Math.PI * (1 - 2 * cy))) * 180 / Math.PI;
+  return { center: { lat, lon: ((x0 + x1) / 2) * 360 - 180 }, zoom };
+}

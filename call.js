@@ -56,6 +56,13 @@ export const MIN_PER_BAND = 5;
     knows this for free and it decides whether the call counts at all. */
 export const stampCall = (conf, seen) => ({ v: CALL_V, conf: conf ?? null, seen: !!seen, at: Date.now() });
 
+/** Whether the run screen asks "How sure are you?" on this mark: the first
+    indication only, while the answer is still hidden and the coach is off.
+    During an incident (the run is a squad's trail) it is never asked: the
+    handler has a dog on a live track, and nobody will ever score that call. */
+export const asksHowSure = ({ firstInd, revealed, coach, incident = false }) =>
+  !!firstInd && !revealed && !coach && !incident;
+
 /* ── Reading the record ───────────────────────────────────────────────── */
 
 /** Every indication in a session that carries a call. */

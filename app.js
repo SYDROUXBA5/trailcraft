@@ -33,7 +33,7 @@ import { sync, onSync, initSync, signInWithGoogle, signInWithApple, signOut, del
          signUpWithEmail, signInWithEmail, resetPassword, resendConfirmation, checkConfirmed,
          startLive, pushLive, endLive, watchLive, resumeLive, dropLive, squadHandle } from './sync.js';
 import { initSquad, paintSquad, openJoin, closeCommand, squadSignOut, squadForget, squadCodeIn, squadCentre } from './squad-ui.js';
-import { initIncidents, incidentScreen, incidentAirPoint } from './incident-ui.js';
+import { initIncidents, incidentScreen, incidentAirPoint, incidentRunOn } from './incident-ui.js';
 import { trailModel, encodeShared, decodeShared, sharedUrl, toGpx, fileBase,
          detailSections, headline, notes, liveMeta, liveModel, cleanResult,
          resultSentence, sessionFromModel, keptSession, peopleOf, parseGpx, gpxTracks, blindSummary, GPX_MAX_BYTES } from './share.js';
@@ -44,7 +44,7 @@ import { coachStep, initialCoach, coachPhrase, coachLine, TOL_OPTIONS, COACH_DEF
          fromNativeVoice } from './coach.js';
 import { DEBRIEF, FLAGS, NOTE_TAGS, blankDebrief, debriefLine, labelOf, ownRun, stickyDebrief,
          unwalkedPlan, noLineYet, trailShown, ranBlind } from './debrief.js';
-import { CONFIDENCE, stampCall, confidenceOf, firstCall, firstCallWasFind, calibration, calibrationLine, callVerdict, runsOf } from './call.js';
+import { CONFIDENCE, stampCall, asksHowSure, confidenceOf, firstCall, firstCallWasFind, calibration, calibrationLine, callVerdict, runsOf } from './call.js';
 import { placeMark, addMark, removeMark, callOwed, callMovedTo, removable, markingSave } from './marks.js';
 import { CLIP, CLIP_SAYS, clipSupport, canHoldScreen, clipOffered, answerPlan, withoutAnswer, clipLines, clipClosing, windLine,
          creditLine, cssUrl, clipName, clipProgress, recordClip } from './clip.js';
@@ -68,7 +68,7 @@ import { searchWords, logRows, recentRuns, runAt, midnight, facets, filterRows, 
          cleanFolderName, putMany, toggleFolder, renameIn, dropFrom, mergeFolders, emptyHeld, folderPatch } from './log.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-11-05b';
+const BUILD = '2026-11-05c';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true,
@@ -3553,6 +3553,19 @@ function closeClip() {
   if (currentScreen === 'scrReplay' && !$('repClip').hidden) $('repClip').focus({ preventScroll: true });
 }
 
+/** The credit the live map is showing, read off it, and Mapbox's wordmark
+    with it, out of the map's own stylesheet: what the squad's deployment
+    video must carry. Read the same way as a run's video (clipHost below),
+    which is left exactly as it was. */
+function mapCredit() {
+  const logo = GL === mapboxgl ? $('map').querySelector('.mapboxgl-ctrl-logo') : null;
+  return {
+    credit: creditLine($('map').querySelector('.mapboxgl-ctrl-attrib-inner, .maplibregl-ctrl-attrib-inner')?.textContent,
+      { mapbox: GL === mapboxgl }),
+    logo: logo ? cssUrl(getComputedStyle(logo).backgroundImage) : null,
+  };
+}
+
 /** The replay as the video needs it (clip.js recordClip's `host`). */
 function clipHost(s) {
   const kind = targetById(s.targetId).kind;
@@ -4249,7 +4262,7 @@ function plumeFrame() {
    are walking somewhere, not the north-up chart they expect when planning.
    It yields the moment the map is touched — looking around is not a bug —
    and the re-centre button takes it back. */
-const nav = { follow: false, brg: null, onRoute: null, courseUp: false };
+const nav = { follow: false, brg: null, onRoute: null, courseUp: false, pad: 0 };
 
 /* Course-up ONLY when following a route. On a dog run the map stays
    north-up: this app tells you the wind pushed scent to the RIGHT of the
@@ -4279,6 +4292,17 @@ function releaseFollow() {
   if (!nav.follow) return;
   nav.follow = false;
   $('btnRecentre').classList.add('nudge');
+}
+/* The run camera's bottom padding while the incident squad box is up
+   (asked by the incident screens). The map keeps an ease's padding, so it is eased back
+   to none when the box goes, and every later ease is centred as before. */
+function runPadding(px) {
+  const v = Math.max(0, Math.round(Number(px) || 0));
+  if (!map || v === nav.pad) return;
+  /* Never more than half the map: the handler stays on the screen. */
+  const h = map.getContainer?.()?.clientHeight || window.innerHeight;
+  nav.pad = v;
+  try { map.easeTo({ padding: { top: 0, left: 0, right: 0, bottom: Math.min(v, Math.round(h / 2)) }, duration: 300 }); } catch { /* the map is busy */ }
 }
 function recentre() {
   nav.follow = true;
@@ -6582,7 +6606,7 @@ function paintReveal() {
 
 function addWaypoint(kind) {
   const last = rec.pts[rec.pts.length - 1];
-  if (!last) return toast('No fix yet');
+  if (!last) { toast('No fix yet'); return null; }
   /* Stamped before anything else happens. Whatever is asked next, the mark is
      already at the place and the moment the handler committed. It can only go
      where the last usable fix was; when that is old the dog may be well past
@@ -6598,7 +6622,21 @@ function addWaypoint(kind) {
      with the trail drawn on the map there is nothing to be sure about. */
   const isFirstInd = kind === 'Indication'
     && rec.wps.filter(w => w.kind === 'Indication').length === 1;
-  if (isFirstInd && !run.revealedAt && !coach.on) openCall(wp);   // asking after they have looked means nothing
+  /* Asking after they have looked means nothing; during an incident it is
+     not asked at all (call.js asksHowSure). */
+  if (asksHowSure({ firstInd: isFirstInd, revealed: !!run.revealedAt, coach: coach.on, incident: incidentRunOn() })) openCall(wp);
+  return wp;
+}
+
+/** A call taken back with Undo on the run screen during an incident, in
+    its first few seconds, before the squad has seen it (incident-ui.js
+    holds it back from the cloud till then). */
+function dropWaypoint(wp) {
+  const i = rec.wps.indexOf(wp);
+  if (i < 0) return false;
+  rec.wps.splice(i, 1);
+  setSrc('wps', pointsOf(rec.wps, 'kind'));
+  return true;
 }
 
 /* A copy made for a run that never got going is not a session: nothing was
@@ -7530,6 +7568,21 @@ async function reportMap(m) {
   const pic = await staticJpeg(view).catch(() => null);   // offline, no token: paper instead
   return { aspect: RPT_W / RPT_H, ...(pic ?? {}), paths, dots };
 }
+/* The deployment report's map: the same picture as a trail report's, with
+   the incident's own lines and dots (incident-report.js reportShapes, on
+   the ground) drawn over it in vector. */
+async function incidentReportMap({ points, paths, dots }) {
+  const all = (points || []).filter(p => Number.isFinite(p?.lat) && Number.isFinite(p?.lon));
+  if (!all.length) return null;
+  const view = miniView(all.length > 1 ? all : [all[0], all[0]], RPT_W, RPT_H);
+  const at = (p) => { const [x, y] = view.at(p); return [x / RPT_W, y / RPT_H]; };
+  const pic = await staticJpeg(view).catch(() => null);   // offline, no token: paper instead
+  return {
+    aspect: RPT_W / RPT_H, ...(pic ?? {}),
+    paths: (paths || []).map(p => ({ ...p, pts: p.pts.map(at) })),
+    dots: (dots || []).map(d => { const [x, y] = at(d.p); return { x, y, fill: d.fill, rim: d.rim, r: d.r }; }),
+  };
+}
 async function staticJpeg(view) {
   const url = miniImgUrl(view, RPT_W, RPT_H);
   if (!url) return null;
@@ -7944,7 +7997,7 @@ function audioUnlock() {
    list is settled: the phone is not naming its voices, and the coach
    speaks in its default one. In the iPhone app (`native`) the voices are
    iOS's own, every one on the phone, and come from nativeVoicesFresh. */
-const voiceCache = { list: [], all: false, settled: false, native: false };
+const voiceCache = { list: [], all: false, settled: false, native: false, talking: 0 };
 function voiceList() {
   if (voiceCache.native) return voiceCache.list;
   if (!voiceCache.list.length && 'speechSynthesis' in window) {
@@ -7977,14 +8030,40 @@ async function nativeVoicesFresh() {
 function coachSpeak(text, { unheard = null } = {}) {
   if (!voiceCache.native) return webSpeak(text);
   const v = pickVoice(voiceList(), navigator.language, settings.coachVoiceURI);
+  /* Counted while iOS speaks, so a squad line knows to wait (speakSoon). */
+  voiceCache.talking = (voiceCache.talking || 0) + 1;
   speakNative(v ? { text, voice: v.voiceURI, lang: v.lang, rate: voiceRate(voiceQuality(v)) }
     : { text, lang: speechLang(navigator.language), rate: 1.05 })
+    .finally(() => { voiceCache.talking = Math.max(0, (voiceCache.talking || 1) - 1); })
     .then((ok) => {
       if (ok === 'unheard') { unheard?.(); return; }
       if (ok || !voiceCache.native) return;
       voiceCache.native = false; voiceCache.list = []; voiceCache.settled = false;
       webSpeak(text);
     });
+}
+
+/* A squad line during a run (the incident screens) waits for the coach to finish
+   rather than cutting a cue off mid-word, as speaking straight through
+   coachSpeak would (the web voice cancels whatever is playing). One line
+   waits at most, the newest, and one older than a few seconds is dropped:
+   by then it is the line of words on the screen that counts. The coach's
+   own cues are unchanged and still come first. */
+const SOON_MAX_MS = 8000;
+const soon = { text: null, at: 0, timer: 0 };
+const coachTalking = () => (voiceCache.native ? voiceCache.talking > 0
+  : ('speechSynthesis' in window && !!speechSynthesis.speaking));
+function speakSoon(text) {
+  if (!coachTalking() && !soon.text) return coachSpeak(text);
+  soon.text = text; soon.at = Date.now();
+  if (soon.timer) return;
+  soon.timer = setInterval(() => {
+    if (coachTalking()) { if (Date.now() - soon.at <= SOON_MAX_MS) return; }
+    clearInterval(soon.timer); soon.timer = 0;
+    const said = soon.text, fresh = Date.now() - soon.at <= SOON_MAX_MS;
+    soon.text = null;
+    if (fresh && said) coachSpeak(said);
+  }, 300);
 }
 
 function webSpeak(text) {
@@ -11824,6 +11903,33 @@ function start() {
       return Number.isFinite(wx.wind_speed) && Number.isFinite(wx.wind_direction)
         ? { speed: wx.wind_speed, from: wx.wind_direction } : null;
     },
+    /* The deployment report (incident-report.js). The forecast as fetched,
+       on the same terms as the wind above, kept when the dog reaches the
+       point; the files go out as every other file of the app does; its map
+       is a trail report's picture with the incident's own lines; the video
+       carries the live map's credit, as a run's video does. */
+    airNear: (p) => {
+      const wx = wxNow.wx;
+      if (!wx || !wxNow.near || Date.now() - wxNow.at > 3600e3 || dist(wxNow.near, p) > 5000) return null;
+      /* With when it was fetched: the report prints that time, not the
+         dog's, which can be up to an hour away from it. */
+      return { ...wx, fetchedAt: wxNow.at };
+    },
+    deliver: (bytes, name, type) => deliverFile(bytes, name, type),
+    reportMap: (shapes) => incidentReportMap(shapes),
+    clipLook: () => mapCredit(),
+    keepAwake: (on) => keepAwake(on),
+    /* The handler's call buttons on the run screen during an incident: a
+       call is the run's own mark, stamped where the dog is, and Undo takes
+       it off again in its first few seconds. */
+    addCall: (kind) => (rec.on && rec.kind === 'run' ? addWaypoint(kind) : null),
+    undoCall: (wp) => dropWaypoint(wp),
+    /* The squad box covers the bottom of the run screen's map: the camera
+       keeps the handler above it. Asked only while the box is up (0 when
+       it goes), so a training run's camera is never touched. */
+    runPadding: (px) => runPadding(px),
+    /* The squad's spoken lines wait for the coach to finish a cue. */
+    speakSoon: (text) => speakSoon(text),
   });
   /* Back in the app, or back in signal: take what another phone changed since,
      before anything here is edited over it (sync.js resync). */

@@ -8,7 +8,12 @@
 
    What comes in is already words and numbers: the headline, a map as an
    optional JPEG plus lines and dots in 0–1 box coordinates, and sections of
-   [label, value] rows. Nothing here knows what a trail is. */
+   [label, value] rows. Nothing here knows what a trail is.
+
+   The same file makes the squad's deployment report (incident-report.js),
+   which asks for three things a trail report does not: a stamp on every
+   page (what the file is and is not), a pale word across every page when
+   the data is pretend, and a log laid out as a list of times and lines. */
 
 const PAGE = { w: 595, h: 842 };            // A4, in points
 const M = 48;                               // margin
@@ -17,6 +22,9 @@ const INK = [0.059, 0.122, 0.239];          // #0F1F3D
 const MUTED = [0.357, 0.416, 0.522];        // #5B6A85
 const RULE = [0.847, 0.871, 0.918];         // #D8DEEA
 const PAPER = [0.965, 0.969, 0.98];         // #F6F7FA
+const STAMP = [0.70, 0.13, 0.13];           // a dark red, the colour of a "draft" stamp
+const WATER = [0.98, 0.86, 0.86];          // the pretend word, pale enough to read through
+const LOG_COL = 46;                         // the log's time column
 
 /* ── Text: WinAnsi bytes and Helvetica widths ──────────────────────── */
 
@@ -128,6 +136,15 @@ function roundRect(x, y, w, h, r) {
   ].join(' ');
 }
 
+/* One word set large and pale on a slant across the middle of the page. */
+function watermarkOp(word, colour = WATER) {
+  const size = 64, w = textWidth(word, size, true);
+  const c = Math.SQRT1_2;
+  /* Rotated 45° about the page's middle: start half the word back along the slant. */
+  const x = PAGE.w / 2 - (w / 2) * c + (size / 3) * c, y = PAGE.h / 2 - (w / 2) * c - (size / 3) * c;
+  return `BT /${FONT.bold} ${size} Tf ${rgb(colour, 'rg')} 0 Tc ${n(c)} ${n(c)} ${n(-c)} ${n(c)} ${n(x)} ${n(y)} Tm ${lit(word)} Tj ET`;
+}
+
 function circle(cx, cy, r) {
   const k = 0.5523 * r;
   return `${n(cx + r)} ${n(cy)} m `
@@ -163,11 +180,20 @@ function mapOps(map, x, y, w, h, hasImage) {
 /* ── Layout ──────────────────────────────────────────────────────── */
 
 /** Lays the report out and returns the PDF as bytes.
-    doc = { title, eyebrow, headline, meta, map, sections, notes, footer } */
+    doc = { title, eyebrow, headline, meta, map, mapNote, sections, notes, footer,
+            stamp, watermark }
+    `stamp` is said at the top of every page; `watermark` is written large
+    and pale across every page, under everything else. A section with
+    `log: true` is a list: each row [time, line, { struck }], the line
+    left-aligned and wrapped, a struck one crossed through. */
 export function buildPdf(doc) {
   const pages = [];
   let ops = null, y = 0;
-  const newPage = () => { ops = []; pages.push(ops); y = PAGE.h - M; };
+  const newPage = () => {
+    ops = []; pages.push(ops); y = PAGE.h - M;
+    /* First on the page, so every word and line is drawn over it. */
+    if (doc.watermark) ops.push(watermarkOp(doc.watermark));
+  };
   const need = (h) => { if (y - h < M + 22) newPage(); };
   newPage();
 
@@ -195,16 +221,57 @@ export function buildPdf(doc) {
     need(h + 12);
     y -= 8;
     ops.push(mapOps(doc.map, M, y - h, COL, h, hasImage));
+    /* The picture hides the pale word drawn under it, and a cropped map is
+       exactly what gets forwarded alone: the word goes again over the map,
+       see-through (/Wm), so the lines still read beneath it. Pale letters
+       edged in the stamp's red read on dark fields and on plain paper. */
+    if (doc.watermark) ops.push(`q ${roundRect(M, y - h, COL, h, 10)} W n /Wm gs ${rgb(STAMP, 'RG')} 0.9 w 2 Tr ${watermarkOp(doc.watermark)} Q`);
     y -= h + 6;
+  }
+  // What the map's lines and dots are, under it
+  if (doc.map && doc.mapNote) {
+    for (const line of wrap(doc.mapNote, 8.5, false, COL)) {
+      need(12);
+      ops.push(textOp(M, y - 9, line, { size: 8.5, font: 'italic', color: MUTED }));
+      y -= 11;
+    }
   }
 
   // Sections
   for (const sec of doc.sections ?? []) {
     if (!sec.rows?.length) continue;
-    need(46);
+    /* The heading and its first row together: room for both, or a new page,
+       so no heading is left alone at the foot of a page. */
+    need(56);
     y -= 14;
     ops.push(textOp(M, y - 8, String(sec.title || '').toUpperCase(), { size: 8.5, font: 'bold', color: MUTED, spacing: 1.1 }));
     y -= 18;
+    if (sec.log) {
+      /* A list read top to bottom, as a log is: the time in its own column
+         and the line beside it, left-aligned, wrapped under itself. */
+      for (const [time, text, opt] of sec.rows) {
+        const lines = wrap(text, 10, false, COL - LOG_COL);
+        need(lines.length * 13 + 3);
+        ops.push(textOp(M, y - 11, time, { size: 9.5, font: 'bold', color: MUTED }));
+        lines.forEach((ln, j) => {
+          const ly = y - 11 - j * 13;
+          ops.push(textOp(M + LOG_COL, ly, ln, { size: 10, color: opt?.struck ? MUTED : INK }));
+          if (opt?.struck) {
+            const w = textWidth(ln, 10);
+            ops.push(`q ${rgb(MUTED, 'RG')} 0.7 w ${n(M + LOG_COL)} ${n(ly + 3.4)} m ${n(M + LOG_COL + w)} ${n(ly + 3.4)} l S Q`);
+          }
+        });
+        y -= lines.length * 13 + 3;
+      }
+      if (sec.note) {
+        for (const line of wrap(sec.note, 8.5, false, COL)) {
+          need(13);
+          ops.push(textOp(M, y - 10, line, { size: 8.5, font: 'italic', color: MUTED }));
+          y -= 12;
+        }
+      }
+      continue;
+    }
     sec.rows.forEach(([label, value], i) => {
       const lw = textWidth(label, 10);
       const avail = Math.max(120, COL - lw - 14);
@@ -221,9 +288,14 @@ export function buildPdf(doc) {
       }
     });
     if (sec.note) {
-      need(14);
-      ops.push(textOp(M, y - 10, sec.note, { size: 8.5, font: 'italic', color: MUTED }));
-      y -= 14;
+      /* Wrapped: the squad report's notes are a sentence or two, longer
+         than a trail report's one line. */
+      for (const line of wrap(sec.note, 8.5, false, COL)) {
+        need(14);
+        ops.push(textOp(M, y - 10, line, { size: 8.5, font: 'italic', color: MUTED }));
+        y -= 12;
+      }
+      y -= 2;
     }
   }
 
@@ -240,8 +312,12 @@ export function buildPdf(doc) {
     }
   }
 
-  // Footer, once every page is known
+  // Footer, once every page is known; and the stamp, at the head of each
   pages.forEach((p, i) => {
+    if (doc.stamp) {
+      const said = String(doc.stamp).toUpperCase();
+      p.push(textOp(PAGE.w - M - textWidth(said, 8, true, 0.6), PAGE.h - M + 16, said, { size: 8, font: 'bold', color: STAMP, spacing: 0.6 }));
+    }
     const right = `Page ${i + 1} of ${pages.length}`;
     p.push(textOp(M, M - 18, doc.footer || 'Trailcraft', { size: 7.5, color: MUTED }));
     p.push(textOp(PAGE.w - M - textWidth(right, 7.5), M - 18, right, { size: 7.5, color: MUTED }));
@@ -282,7 +358,8 @@ function assemble(pages, doc, image) {
   for (const ops of pages) {
     const content = latin1(ops.join('\n'));
     const cNo = add({ dict: `<< /Length ${content.length} >>`, stream: content });
-    const res = `<< /Font << /F1 3 0 R /F2 4 0 R /F3 5 0 R >>${imgNo ? ` /XObject << /Im1 ${imgNo} 0 R >>` : ''} >>`;
+    const res = `<< /Font << /F1 3 0 R /F2 4 0 R /F3 5 0 R >>${imgNo ? ` /XObject << /Im1 ${imgNo} 0 R >>` : ''}`
+      + `${doc.watermark ? ' /ExtGState << /Wm << /Type /ExtGState /ca 0.55 /CA 0.7 >> >>' : ''} >>`;
     kids.push(add(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PAGE.w} ${PAGE.h}] /Resources ${res} /Contents ${cNo} 0 R >>`));
   }
   objs[0] = '<< /Type /Catalog /Pages 2 0 R >>';
