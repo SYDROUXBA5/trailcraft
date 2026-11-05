@@ -688,6 +688,9 @@ function paintMarkers(rows, now) {
     for (const role of Object.keys(ROLES)) m.el.classList.toggle(`sq-role-${role}`, role === r.role);
     for (const c of FRESH_CLASSES) m.el.classList.toggle(c, c === fresh);
     m.el.classList.toggle('sq-me', r.uid === me() && !S.sim);
+    /* Named, so the pretend Handler's view can keep the trailing team's
+       arrow when the other units step aside (incident-ui.js setHv). */
+    m.el.classList.toggle('sq-lead', r.uid === S.lead);
     /* The trailing team above everything else on the map, its calls' pins
        included: it is the unit everyone is watching. */
     const z = r.uid === S.lead ? '5' : '';
@@ -1017,7 +1020,9 @@ export function onPositionSent(fn) { S.sent.add(fn); return () => S.sent.delete(
 export function setViewOverride(fn) { S.override = fn; if (S.view) paintCommand(); }
 /** The squad as this phone knows it, for the incident layer. */
 export const squadState = () => ({ squad: S.squad, members: S.members, positions: S.positions, me: me(), member: myRow(),
-                                   onDuty: duty.on, fix: duty.fix, view: S.view, sim: S.sim });
+                                   onDuty: duty.on, fix: duty.fix, view: S.view, sim: S.sim, simName: S.simName,
+                                   /* The map's night look is on (Wall, Night): Handler's view dims its call buttons with it. */
+                                   night: !!(S.wall && S.night) });
 
 /* ── Everything that shows squad state ───────────────────────────────── */
 function paintAll() {

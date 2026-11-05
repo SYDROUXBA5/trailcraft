@@ -152,3 +152,66 @@ export function form({ title, body = '', fields, yes = 'OK', no = 'Cancel', note
 
 /** Whether a sheet is up (the map's keys leave it alone then). */
 export const sheetOpen = () => !!current;
+
+/** A few things to do, one button each. Resolves the picked option's
+    `value`, or null for Close. Each option is { value, text, hint }; the
+    hint is a short line under the button's words. */
+export function choose({ title, body = '', options, note = '', no = 'Close' }) {
+  return sheet(title, (card, finish) => {
+    if (body) card.append(el('p', 'app-sheet-body', body));
+    const list = el('div', 'app-sheet-choices');
+    for (const o of options) {
+      const btn = el('button', 'btn ghost app-sheet-choice');
+      btn.type = 'button';
+      btn.dataset.choice = o.value;
+      btn.append(el('span', 'app-sheet-choice-text', o.text));
+      if (o.hint) btn.append(el('span', 'app-sheet-hint', o.hint));
+      btn.addEventListener('click', () => finish(o.value));
+      list.append(btn);
+    }
+    card.append(list);
+    if (note) card.append(el('p', 'app-sheet-note', note));
+    buttons(card, [{ text: no, cls: 'moss', safe: true, on: () => finish(null) }]);
+  }, null);
+}
+
+/** A sheet that stays up while something is being made: a line of what is
+    happening, an element of the caller's (the video's preview, which has to
+    be in the page for a browser to record it) and Stop.
+
+    Returns { stopped, say(text), offer({ body, yes, no }), close() }.
+    `stopped` settles 'stop' on Stop, Escape or a tap outside, 'closed' on
+    close(), or the answer to offer(): 'yes' or 'no'. offer() swaps Stop for
+    a last choice (Save video / Discard) once the thing is made; `yes` null
+    leaves only `no`. */
+export function progress({ title, body = '', extra = null, stop = 'Stop' }) {
+  let fin = null, bodyEl = null, status = null, row = null, card = null;
+  const stopped = sheet(title, (c, finish) => {
+    card = c;
+    fin = finish;
+    bodyEl = el('p', 'app-sheet-body', body);
+    c.append(bodyEl);
+    if (extra) c.append(extra);
+    status = el('p', 'app-sheet-note', '');
+    status.setAttribute('role', 'status');
+    c.append(status);
+    buttons(c, [{ text: stop, cls: 'ghost', safe: true, on: () => finish('stop') }]);
+    row = c.lastElementChild;
+  }, 'stop');
+  return {
+    stopped,
+    say: (text) => { if (status) status.textContent = text; },
+    offer({ body: said = '', yes = null, no = 'Close' }) {
+      if (!card || !row) return;
+      if (said) bodyEl.textContent = said;
+      status.textContent = '';
+      const list = [{ text: no, cls: 'ghost', safe: true, on: () => fin('no') }];
+      if (yes) list.push({ text: yes, cls: 'moss', on: () => fin('yes') });
+      row.remove();
+      buttons(card, list);
+      row = card.lastElementChild;
+      (row.querySelector('.moss') || row.querySelector('button'))?.focus({ preventScroll: true });
+    },
+    close: () => fin?.('closed'),
+  };
+}

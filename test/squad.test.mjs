@@ -25,7 +25,7 @@ import { MARKS, DRAW_TOOLS, RUN_MARKS, incidentDoc, cleanIncident, activeOf, pas
          isClosed, insideLine,
          onScentWords, briefWords, logLines, ring, REACH_CAP_M, downwindBand, BAND_WORDS, bandWindWords, CALM_MS,
          sceneWalkers, sceneWords, nameList, SCENE_M, FOOT_MS, speedAt, insideWalkers, insideWords, INSIDE_M,
-         PERIM_GRACE_MS, onFootNow, coverWords, aboutWords, SCENE_NOTE, scentStart, insideNow, GOING_GRACE_MS } from '../public/incident.js';
+         PERIM_GRACE_MS, onFootNow, coverWords, aboutWords, SCENE_NOTE, scentStart, insideNow, GOING_GRACE_MS, INC_COLOURS } from '../public/incident.js';
 import { wallIndex, wallAt, blockStep, outside as outsideWall } from '../public/walls.js';
 import { startIncident, endIncident, watchIncidents, watchIncident, putMark, withdrawMark, putTrack,
          loadIncident, updateSeen, setCover } from '../public/incident-cloud.js';
@@ -630,7 +630,7 @@ t('hear it: the command screen says the K9 team’s new calls in the coach voice
   const say = ui.slice(ui.indexOf('function speakCalls('), ui.indexOf('function setVoice('));
   assert.match(say, /I\.said = \{ for: live\.id, ids: new Set\(v\.marks/, 'calls made before the screen opened are not said');
   assert.match(say, /mk\.by !== meUid\(\)/, 'a handler does not hear their own');
-  assert.match(say, /if \(!I\.voice \|\| !ctx\.speak\) return;/);
+  assert.match(say, /if \(!I\.voice \|\| !ctx\.speak \|\| I\.hv\) return;/);
   assert.match(say, /callWords\(mk\.kind, who\(mk\.by, st\.members\)\)/);
   assert.match(ui, /data-inc-act="voice" aria-pressed=/, 'a switch on the incident card');
   assert.match(ui, /ctx\.kv\.set\('squadVoice', I\.voice\)/, 'remembered on the device');
@@ -880,7 +880,8 @@ t('the incident card: the big clock, the rings, the amber line, the brief, paces
   const layers = ui.slice(ui.indexOf('const LAYERS = ['), ui.indexOf('const SOURCES'));
   assert.ok(layers.indexOf("'inc-reach-fill'") < layers.indexOf("'inc-lines'"), 'the rings under the lines');
   assert.match(layers, /'line-dasharray': \[2, 2\]/, 'the running ring dashed');
-  assert.match(layers, /\['case', \['boolean', \['get', 'warn'\], false\], WARN_C, '#D93025'\]/);
+  assert.match(layers, /\['case', \['boolean', \['get', 'warn'\], false\], WARN_C, INC_COLOURS\.perimeter\]/);
+  assert.equal(INC_COLOURS.perimeter, '#D93025', 'the one red every picture of the incident uses');
   assert.match(ui, /`\$\{PACES\[reach\.pace\]\.label\} range · rough guide`/, 'the ring says it is a rough guide on the map too');
   // The log: a tap moves the map, and in a replay the slider, to that moment.
   const tap = ui.slice(ui.indexOf('function onLogLine('), ui.indexOf('/* ── Last seen, the brief and the paces'));
@@ -925,7 +926,8 @@ t('a handler’s run reaches the incident only on duty, and only after Start tra
   // flush, and the duty positions all stop with the switch off.
   const ui = read('public/incident-ui.js');
   const fn = (name) => ui.slice(ui.indexOf(`function ${name}(`), ui.indexOf('\n}\n', ui.indexOf(`function ${name}(`)));
-  assert.match(fn('everySecond'), /const r = sharingRun\(\) \? runGoing\(\) : null;/);
+  assert.match(fn('everySecond'), /const sharing = sharingRun\(\);\s*const r = sharing \? runGoing\(\) : null;/);
+  assert.match(fn('everySecond'), /runShareStep\(I\.run, \{ rec: runGoing\(\), sharing, onDuty: sq\(\)\.onDuty,/, 'the run goes by incident.js runShareStep');
   assert.match(fn('flush'), /if \(!sq\(\)\.onDuty\) return;/);
   assert.match(fn('onSent'), /!sq\(\)\.onDuty/);
   assert.match(fn('startTrailing'), /if \(!sq\(\)\.onDuty\) return[\s\S]*I\.consent = I\.active\.id;/);
@@ -1847,7 +1849,7 @@ t('the command screen keeps officers off the track by its own functions, and say
   assert.doesNotMatch(walk, /onSnapshot|getDocs|watch[A-Z]|loadIncident|ctx\.handle/);
   // Inside the perimeter: on the card, said once, only with the voice on.
   assert.match(ui, /text\('inside', inside\.map\(w => insideWords\(w, imperial\(\), v\.now\)\)\.join\('\\n'\)\);/);
-  assert.match(ui, /if \(I\.voice && ctx\.speak && sq\(\)\.view\)/);
+  assert.match(ui, /if \(I\.voice && ctx\.speak && sq\(\)\.view && !I\.hv\)/);
   assert.match(ui, /const inside = amCommand\(\) \? insideOf\(v, st\) : \[\];/, 'a line to Command, not to every member');
   // The cover: Command picks by a sheet, never confirm(); the card says the positions may be out of date.
   assert.match(ui, /data-inc-act="cover">Cover officer<\/button>/);

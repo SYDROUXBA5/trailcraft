@@ -142,4 +142,31 @@ t('a date the calendar cannot hold still makes a report', () => {
   }
 });
 
+t('a trail report carries no stamp and no pretend word; a squad report asks for both', () => {
+  /* The deployment report (incident-report.js) adds three things to the
+     layout. A trail report asks for none of them and comes out as before. */
+  const plain = bin(buildPdf(doc()));
+  assert.doesNotMatch(plain, / Tm \(/, 'nothing set on a slant');
+  assert.doesNotMatch(plain, /DRAFT RECORD/);
+  const s = bin(buildPdf(doc({ stamp: 'Draft record, not an evidence system', watermark: 'PRETEND DATA', mapNote: 'Yellow: the track.',
+    sections: [{ title: 'Log', log: true, rows: [['14:04', 'K9-1 Rex at the last known point'], ['14:09', 'Sgt 1 roadblock (withdrawn by Sgt 1, 14:12)', { struck: true }]] }] })));
+  assert.match(s, /\(DRAFT RECORD, NOT AN EVIDENCE SYSTEM\) Tj/);
+  assert.match(s, /0\.71 0\.71 -0\.71 0\.71 [\d.]+ [\d.]+ Tm \(PRETEND DATA\) Tj/);
+  assert.match(s, /\(Yellow: the track\.\) Tj/);
+  assert.match(s, /\(14:04\) Tj/);
+  assert.ok(s.indexOf('(PRETEND DATA) Tj') < s.indexOf('(14:04) Tj'), 'the pretend word under everything on the page');
+});
+
+t('a pretend report says so over its map too, see-through; a trail report has no see-through layer', () => {
+  /* The map picture covers the pale word drawn under it, and a map is the
+     part most likely to be cropped and forwarded on its own. */
+  const map = { aspect: 1.6, paths: [{ pts: [[0.1, 0.1], [0.9, 0.9]], stroke: [0.85, 0.5, 0.17], width: 3 }], dots: [] };
+  const s = bin(buildPdf(doc({ watermark: 'PRETEND DATA', map })));
+  assert.match(s, /W n \/Wm gs [\d. ]+RG 0\.9 w 2 Tr BT .* Tm \(PRETEND DATA\) Tj ET Q/, 'the word again, clipped to the map, edged');
+  assert.match(s, /\/ExtGState << \/Wm << \/Type \/ExtGState \/ca 0\.55 \/CA 0\.7 >> >>/);
+  assert.equal((s.match(/\(PRETEND DATA\) Tj/g) || []).length, 2, 'under the page and over the map, once each');
+  const plain = bin(buildPdf(doc({ map })));
+  assert.doesNotMatch(plain, /ExtGState|\/Wm gs/);
+});
+
 console.log(`\n${pass} passed total`);

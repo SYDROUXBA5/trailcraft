@@ -818,7 +818,7 @@ const CHUNK_MS = 60e3;
    server has it, which with no signal is never. Share live waits this long
    for the run to be taken, then says so rather than doing nothing. */
 const LIVE_WAIT = 15e3;
-let live = null;   // { id, startedAt, chunks: Map<n, signature>, expiresAt, wpsN }
+let live = null;   // { id, startedAt, chunks: Map<n, signature>, expiresAt, wpsSig }
 
 const liveId = () => {
   const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
@@ -855,7 +855,7 @@ export async function startLive(meta, { waitMs = LIVE_WAIT } = {}) {
     dropLive(id);
     throw new Error('No signal, so the run is not live. Try again when you have some.');
   }
-  live = { id, startedAt: meta.startedAt, chunks: new Map(), expiresAt, wpsN: -1 };
+  live = { id, startedAt: meta.startedAt, chunks: new Map(), expiresAt, wpsSig: null };
   return id;
 }
 
@@ -876,7 +876,7 @@ export const liveNow = () => live?.id ?? null;
     are simply written again — the same points, the same ids, no duplicates. */
 export function resumeLive(id, startedAt) {
   if (!fs || !sync.user || !id || sync.status === 'verify') return false;
-  live = { id, startedAt: startedAt ?? Date.now(), chunks: new Map(), expiresAt: Date.now() + LIVE_TTL, wpsN: -1 };
+  live = { id, startedAt: startedAt ?? Date.now(), chunks: new Map(), expiresAt: Date.now() + LIVE_TTL, wpsSig: null };
   return true;
 }
 
@@ -905,10 +905,21 @@ export function pushLive(pts, wps = []) {
     fb.setDoc(fb.doc(fs, 'live', live.id, 'chunks', String(n)),
       { n, ...expiry(Date.now() + CHUNK_TTL), ...packPoints(clean) }).catch(() => {});
   }
-  if (wps.length !== live.wpsN) {
-    live.wpsN = wps.length;
+  /* The marks go again when they change, not only when their count does:
+     a call taken back (Undo) and another made before the next push leave
+     the count as it was, and a viewer would keep the one taken back. */
+  const sig = liveWpsSig(wps);
+  if (sig !== live.wpsSig) {
+    live.wpsSig = sig;
     fb.setDoc(fb.doc(fs, 'live', live.id), { wps: packPoints(wps), at: Date.now() }, { merge: true }).catch(() => {});
   }
+}
+
+/** What a live run's marks are, for telling whether they changed: how many,
+    and the newest one's time, place and kind. */
+export function liveWpsSig(wps = []) {
+  const w = wps.length ? wps[wps.length - 1] : null;
+  return w ? `${wps.length}|${w.t}|${w.kind ?? ''}|${w.lat},${w.lon}` : '0';
 }
 
 /** The run is over: the last points, the verdict, and 24 more hours to read it. */

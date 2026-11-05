@@ -533,6 +533,9 @@
 <section id="scrRun" class="screen glass" hidden>
   <div class="hud-pill" id="runHud"><span class="rec-dot"></span><span id="runHudText"></span></div>
   <div class="glass-bottom">
+    <!-- During an incident only: the squad's points round the dog, one line,
+         the big call buttons with Undo (handler-ui.js). A training run never shows it. -->
+    <div class="hv-box" id="runSquadBox" hidden></div>
     <div class="live-row">
       <button class="btn small moss-on-dark live-btn coach-btn" id="btnCoach" hidden>Coach</button>
       <button class="btn small moss-on-dark live-btn" id="btnLive" hidden>Share live</button>
@@ -983,6 +986,16 @@
     <p class="cmd-wall-inc" id="cmdWallInc"></p>
     <p class="cmd-wall-seen" id="cmdWallSeen"></p>
     <ol class="cmd-wall-log" id="cmdWallLog" aria-label="Latest from the incident"></ol>
+  </div>
+  <!-- Pretend mode: what K9-1's phone shows on its run screen, from the same pretend incident (incident-ui.js, handler-ui.js). -->
+  <div class="hv-pretend" id="cmdHandler" hidden>
+    <div class="hv-head">
+      <span class="hv-kick" id="cmdHandlerKick">Handler’s view · pretend</span>
+      <button type="button" class="btn small moss" id="cmdHandlerBack">Command view</button>
+    </div>
+    <p class="hv-hud" id="cmdHandlerHud"></p>
+    <p class="sq-demo hv-demo" role="note" data-demo-label>Demo — not for real operations</p>
+    <div class="hv-box" id="cmdHandlerBox"></div>
   </div>
   <!-- Shown when following the K9 team has been paused by a hand on the map (incident-ui.js). -->
   <button type="button" class="btn moss cmd-follow" id="cmdFollow" hidden>Follow K9</button>

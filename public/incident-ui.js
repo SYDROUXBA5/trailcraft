@@ -19,13 +19,19 @@ import { MARKS, countWords, DRAW_TOOLS, RUN_MARKS, LINE_MAX, activeOf, pastOf, t
          cleanIncidentName, callWords, stripWords, quietLines, followPoints, allInView, standingOf, PACES, PACE_KEYS,
          DIR_MAX, DESC_MAX, cleanPaces, cleanBrief, seenAt, lastSeenFrom, hhmm, reachRings, passedLines, warnWords,
          reachWords, onScentWords, briefWords, logLines, ring, scentStart, downwindBand, BAND_WORDS, bandWindWords,
-         sceneWalkers, sceneWords, SCENE_NOTE, insideWalkers, insideWords, insideNow, coverWords, aboutWords } from './incident.js';
+         sceneWalkers, sceneWords, SCENE_NOTE, insideWalkers, insideWords, insideNow, coverWords, aboutWords,
+         runShareStep, heldCalls, handlerFrame, frameCamera, darkAt, INC_COLOURS, runSquadOn, CALL_UNDO_MS } from './incident.js';
+import { initHandler, paintHandler, clearHandler, handlerOn } from './handler-ui.js';
 import { startIncident, endIncident, watchIncidents, watchIncident, putMark, withdrawMark, putTrack,
          loadIncident, updateSeen, setCover } from './incident-cloud.js';
 import { html, put, onCommandPaint, commandView, onSquadChange, onPositionSent, setViewOverride, squadState,
          openCommand, viewNow, fitOnMap, paintCommandNow, setSimSpeed, simSpeed, setLeadUnit, setCoverUnit, foldPanel, mapPad, onLook, wallOn,
          onWall } from './squad-ui.js';
-import { ask, form, info } from './sheet.js';
+import { ask, form, info, choose, progress } from './sheet.js';
+import { reportDoc, reportShapes, reportGpx, reportFileBase, reportClipWords, reportClipMarks, cleanAir,
+         REPORT_STAMP, PRETEND_MARK } from './incident-report.js';
+import { buildPdf } from './pdf.js';
+import { recordClip, clipSupport, windLine, creditLine, CLIP, CLIP_SAYS } from './clip.js';
 
 const EMPTY = { type: 'FeatureCollection', features: [] };
 const finite = (v) => typeof v === 'number' && Number.isFinite(v);
@@ -72,6 +78,10 @@ const I = {
   walked: { for: null, lines: new Map() },     // positions this device saw during the incident (real squad)
   bandLook: null,           // 'day' | 'wall': how the downwind band is drawn now (null: set it again)
   inside: { for: null, ids: new Map(), seen: [] }, // uid → when last inside the perimeter; and each time one went in
+  air: new Map(),           // incident id → the forecast held here when the dog reached the point (for the report)
+  report: null,             // the deployment report being made: { kind } while one is in hand
+  hv: false,                // pretend mode: "Handler's view", what K9-1's phone shows
+  hvLayers: null,           // whether the command layers are hidden for it now (null: set them again)
 };
 /* The last pretend incident, ended, with the pretend squad it ran on: kept
    when the map closes, so the debrief replay is not lost to one tap on
@@ -121,8 +131,12 @@ function who(uid, members) {
 async function follow(sid) {
   I.stopAll?.(); I.stopAll = null;
   I.stopOne?.(); I.stopOne = null;
+  if (I.active) leftHeld(I.active, 'You left the squad.');
   I.incidents = new Map(); I.active = null; I.marks = new Map(); I.trail = [];
   stopContributing();
+  /* Out of the squad, the run screen is a training run's again at once:
+     with no incident paintRun takes the squad box and its markers away. */
+  paintRun();
   I.sid = sid;
   if (!sid) return paintOutside();
   let h;
@@ -145,13 +159,18 @@ function setActive(h, sid, a) {
   if (was) {
     /* The last of this phone's movements goes before the door shuts. */
     flush(true);
-    stopContributing();
     const ended = I.incidents.get(was.id);
-    if (ended?.status === 'ended') ctx.toast(`${ended.name}: incident ended`);
+    const said = ended?.status === 'ended' ? `${ended.name}: incident ended.` : '';
+    if (!leftHeld(was, said) && said) ctx.toast(said.slice(0, -1));
+    stopContributing();
   }
   I.active = a;
   I.marks = new Map(); I.trail = [];
   I.tool = null;
+  /* The ticks that kept the run screen's squad box fresh stop with the
+     incident, so it is taken down here, not left frozen as if live: the
+     rest of the run is a training run and looks like one. */
+  paintRun();
   if (!a) return;
   I.stopOne = watchIncident(h, sid, a, ({ marks, trail }) => {
     if (I.active?.id !== a.id) return;
@@ -187,7 +206,7 @@ function announce(a) {
 function startContributing(a) {
   I.buf = trackBuffer(a.startedAt);
   I.bufFor = a.id;
-  I.run = { for: 0, idx: 0, wps: 0 };
+  I.run = { for: 0, idx: 0, wps: 0, list: null };
   I.flushAt = Date.now() + TRAIL_FLUSH_MS;
   const fix = sq().fix;
   if (sq().onDuty && fix) I.buf.add({ lat: fix.lat, lon: fix.lon, t: Math.max(fix.at, a.startedAt) });
@@ -198,6 +217,19 @@ function stopContributing() {
   clearInterval(I.tick); I.tick = 0;
   I.buf = null; I.bufFor = null;
   I.consent = null;
+}
+/* A call made in the last few seconds is still in its hold when the
+   incident ends or the squad is left. It cannot go now (the rules refuse a
+   mark on a closed incident), so it is not tried: it stays in the run's
+   own marks, and the handler is told so rather than left thinking the
+   squad has it. True when the handler was told. */
+function leftHeld(inc, said) {
+  if (!sharingRun()) return false;
+  const r = runGoing();
+  const n = heldCalls(r && I.run?.for === r.startedAt ? { ...I.run, list: r.wps } : I.run, inc.startedAt);
+  if (!n) return false;
+  ctx.toast(`${said ? `${said} ` : ''}Your last ${n === 1 ? 'call' : `${n} calls`} stayed on this phone, not sent to the squad.`);
+  return true;
 }
 
 const trailing = () => !!I.active && I.active.k9Uid === sq().me;
@@ -217,28 +249,66 @@ function everySecond() {
   const a = I.active;
   if (!a || !I.buf) return;
   /* Off duty, or picked but not yet said yes with Start trailing: the run
-     stays on this phone. */
-  const r = sharingRun() ? runGoing() : null;
-  if (r) {
-    /* A run started before the incident (it happens: the team was already
-       out) counts from the incident's start. */
-    if (I.run.for !== r.startedAt) I.run = { for: r.startedAt, idx: 0, wps: 0 };
-    for (; I.run.idx < r.pts.length; I.run.idx++) {
-      const p = r.pts[I.run.idx];
-      if (p.t >= a.startedAt) I.buf.add({ lat: p.lat, lon: p.lon, t: p.t });
-    }
-    for (; I.run.wps < r.wps.length; I.run.wps++) {
-      const w = r.wps[I.run.wps];
-      const kind = RUN_MARKS[w.kind];
-      if (kind && w.t >= a.startedAt) cloudMark(kind, { lat: w.lat, lon: w.lon });
-    }
-  }
+     stays on this phone. A call waits out its few seconds of Undo before
+     the squad sees it; a run that ends sends the rest; a stretch off duty
+     is skipped, never queued (incident.js runShareStep). */
+  const sharing = sharingRun();
+  const r = sharing ? runGoing() : null;
+  const step = runShareStep(I.run, { rec: runGoing(), sharing, onDuty: sq().onDuty,
+                                     startedAt: a.startedAt, now: Date.now() });
+  I.run = step.run;
+  for (const p of step.pts) I.buf.add({ lat: p.lat, lon: p.lon, t: p.t });
+  for (const w of step.calls) cloudMark(RUN_MARKS[w.kind], { lat: w.lat, lon: w.lon });
   if (Date.now() >= I.flushAt) {
     I.flushAt = Date.now() + (r ? TRAIL_FLUSH_MS : (trailing() ? TRAIL_FLUSH_MS : TRACK_FLUSH_MS));
     flush();
   }
   paintBanner();
+  paintRun();
 }
+
+/* ── The handler's run screen during an incident (handler-ui.js) ────────
+   The squad's points round the dog, one line of words and the big call
+   buttons, on the run screen itself, only while this phone's run is the
+   incident's trail. A training run with no incident never gets here: there
+   is no incident, so runSquadOn is false and nothing is drawn. */
+function paintRun() {
+  const r = runGoing();
+  const a = I.active;
+  if (!runSquadOn({ screen: ctx.screen(), inc: a, sharing: sharingRun(), running: r })) {
+    if (handlerOn() === 'run') clearHandler();
+    return;
+  }
+  const st = sq();
+  const me = r.pts.length ? r.pts[r.pts.length - 1] : null;
+  /* The way the handler is going, from the last stretch of the run. */
+  const heading = trailInfo(r.pts.slice(-400), null, Date.now()).heading;
+  paintHandler({
+    where: 'run', box: $('runSquadBox'), inc: a, marks: standingOf(I.marks), me, heading,
+    cover: a.coverUid ? st.positions.get(a.coverUid) ?? null : null,
+    coverName: a.coverUid ? who(a.coverUid, st.members) : '',
+    now: Date.now(), myUid: st.me, name: (uid) => who(uid, st.members), voice: true,
+    /* Dim red by the sun where the handler stands, not by the phone's
+       theme: a phone left in dark mode all day keeps its colours. */
+    night: darkAt(me, Date.now()),
+    /* The box covers the lower part of the map: the run's camera keeps the
+       handler above it (app.js runPadding). */
+    lift: $('runSquadBox')?.closest?.('.glass-bottom') || $('runSquadBox'),
+    call: (key) => ctx.addCall?.(key) ?? null,
+    undo: (wp) => undoRunCall(wp),
+  });
+}
+/** Undo on the run screen: only a call the squad has not been sent yet. */
+function undoRunCall(wp) {
+  const r = runGoing();
+  const i = r ? r.wps.indexOf(wp) : -1;
+  if (i < 0 || i < I.run.wps || Date.now() - wp.t >= CALL_UNDO_MS) return false;
+  return !!ctx.undoCall?.(wp);
+}
+
+/** This phone's run is an incident's trail right now: the run screen then
+    leaves out "How sure are you?" (call.js asksHowSure). */
+export const incidentRunOn = () => !!ctx && !!I.active && sharingRun() && !!runGoing();
 
 async function flush(all = false) {
   const a = I.active;
@@ -458,7 +528,7 @@ async function doEnd() {
     I.simEnded = I.sim;
     lastSim = { ended: I.sim, members: commandView().sim.members() };
     I.sim = null;
-    ctx.toast('Incident ended. Replay it for the debrief');
+    ctx.toast('Incident ended. Replay it, or make the deployment report');
     paintCommandNow();
     return;
   }
@@ -493,27 +563,29 @@ const ringAround = (c) => [0, 90, 180, 270].map(b => project(c, b, 250));
 const REPLAY_SPEEDS = [10, 30, 60, 120];
 const REPLAY_STEP_MS = 250;
 
-async function openReplay(source) {
-  let rp;
+/** An ended incident's replay: the pretend one from this device, a real
+    one loaded from the cloud. Null (and said) when it cannot be had. */
+async function loadReplay(source) {
   try {
-    if (source === 'sim') {
-      if (!lastSim) return;
-      rp = lastSim.ended.replay(lastSim.members);
-    } else {
-      const inc = I.incidents.get(source);
-      if (!inc) return;
-      const h = await ctx.handle();
-      if (!h) throw new Error('Sign in first');
-      const { tracks, marks } = await loadIncident(h, I.sid, inc.id);
-      rp = buildReplay({ inc, tracks, marks, members: sq().members });
-    }
-  } catch (e) { ctx.toast(e?.message || 'Could not load the replay'); return; }
+    if (source === 'sim') return lastSim ? lastSim.ended.replay(lastSim.members) : null;
+    const inc = I.incidents.get(source);
+    if (!inc) return null;
+    const h = await ctx.handle();
+    if (!h) throw new Error('Sign in first');
+    const { tracks, marks } = await loadIncident(h, I.sid, inc.id);
+    return buildReplay({ inc, tracks, marks, members: sq().members });
+  } catch (e) { ctx.toast(e?.message || 'Could not load the replay'); return null; }
+}
+
+async function openReplay(source, loaded = null) {
+  const rp = loaded || await loadReplay(source);
+  if (!rp) return;
   closeReplay(false);
   if (!sq().view) openCommand();
   const dur = rp.end - rp.start;
   /* Fast enough that a whole incident plays in about a minute. */
   const speed = REPLAY_SPEEDS.find(s => dur / s <= 75e3) ?? REPLAY_SPEEDS[REPLAY_SPEEDS.length - 1];
-  I.replay = { rp, t: rp.start, playing: true, speed, timer: 0, scene: null, fitted: false };
+  I.replay = { rp, t: rp.start, playing: true, speed, timer: 0, scene: null, fitted: false, source };
   I.form = null; I.tool = null;
   setViewOverride(() => {
     const r = I.replay;
@@ -560,6 +632,208 @@ function closeReplay(repaint = true) {
   if (repaint) paintCommandNow();
 }
 
+/* ── The deployment report ────────────────────────────────────────────────
+   After End, Command makes the record of it to forward: a PDF, a GPX of the
+   K9 team's track, and a replay video (incident-report.js has the words and
+   shapes; pdf.js, share.js and clip.js make the files). It is made on this
+   device and saved to it, because the cloud deletes incidents after seven
+   days. A draft record, never presented as evidence: every page, the video
+   and the GPX say so, and a pretend one says PRETEND DATA. */
+
+/* The forecast this device held near the last known point when the dog got
+   there, kept for the report. Tried each paint until the dog is at the
+   point and a forecast is in hand, for half an hour of the incident's clock
+   after that; then the report says it was not recorded here. Kept on this
+   device only: nothing about the weather is written to the cloud. */
+const AIR_TRY_MS = 30 * 60e3;
+const AIR_KEPT = 10;
+const AIR_LATE_MS = 10 * 60e3;
+function noteAir(v) {
+  const inc = v.inc;
+  if (!inc || inc.status !== 'active' || v.replay || I.air.has(inc.id)) return;
+  const on = scentStart(v.trail, inc.lkp);
+  if (!on || v.now - on.t > AIR_TRY_MS) return;
+  const air = cleanAir(ctx.airNear?.(inc.lkp), on.t);
+  if (!air) return;
+  /* A forecast fetched long after the dog got there is not the weather
+     when it started: wait no more than a few minutes past that moment.
+     The pretend clock runs fast, so it is measured on the wall clock. */
+  if (!v.sim && air.fetchedAt != null && air.fetchedAt > on.t + AIR_LATE_MS) return;
+  I.air.set(inc.id, air);
+  if (v.sim) return;
+  try {
+    const kept = (ctx.kv.get('squadIncAir', []) || []).filter(e => Array.isArray(e) && e[0] !== inc.id);
+    ctx.kv.set('squadIncAir', [...kept, [inc.id, air]].slice(-AIR_KEPT));
+  } catch { /* full: the report says it was not recorded */ }
+}
+/* Each unit this device saw go inside the perimeter, kept on this device
+   for the report as the forecast is (the last ten incidents), so a report
+   made after a reload still has it. Null when this device never watched
+   the incident's map: the report then says it cannot tell, rather than
+   leave the section out, which would read as nobody going inside. */
+const INSIDE_KEPT = 10;
+function keepInside(id) {
+  try {
+    const kept = (ctx.kv.get('squadIncInside', []) || []).filter(e => Array.isArray(e) && e[0] !== id);
+    ctx.kv.set('squadIncInside', [...kept, [id, I.inside.seen.slice()]].slice(-INSIDE_KEPT));
+  } catch { /* full: the report says it was not recorded here */ }
+}
+function insideKept(id) {
+  if (I.inside.for === id) return I.inside.seen;
+  try {
+    const hit = (ctx.kv.get('squadIncInside', []) || []).find(e => Array.isArray(e) && e[0] === id);
+    return hit && Array.isArray(hit[1]) ? hit[1].filter(w => w && typeof w === 'object') : null;
+  } catch { return null; }
+}
+function airOf(id) {
+  if (I.air.has(id)) return I.air.get(id);
+  try {
+    const hit = (ctx.kv.get('squadIncAir', []) || []).find(e => Array.isArray(e) && e[0] === id);
+    return hit ? cleanAir(hit[1], hit[1]?.at) : null;
+  } catch { return null; }
+}
+
+/** What the report needs besides the replay: who each uid is, the squad's
+    name, the forecast, who went inside the perimeter, and whether it is pretend. */
+function reportBits(rp, source) {
+  const members = replayAt(rp, rp.end).members;
+  const pretend = source === 'sim';
+  return {
+    rp, pretend,
+    who: (uid) => who(uid, members),
+    squad: pretend ? (sq().simName || '') : (sq().squad?.name || ''),
+    air: airOf(rp.inc.id),
+    inside: insideKept(rp.inc.id),
+    imperial: imperial(),
+  };
+}
+
+async function openReport(source) {
+  if (I.report) return;
+  const rp = await loadReplay(source);
+  if (!rp || rp.inc.status !== 'ended') return;
+  const pretend = source === 'sim';
+  const canVideo = !!clipSupport() && !!map()?.map;
+  const pick = await choose({
+    title: 'Deployment report',
+    /* The pretend incident never went near the cloud: saying it did would
+       tell a chief that demo data sits on a server. */
+    body: pretend ? `A draft record of the pretend incident “${rp.inc.name}”, made on this device only. Nothing was sent anywhere.`
+      : `A draft record of “${rp.inc.name}”, made on this device and saved to it. The squad’s copy in the cloud is deleted after 7 days; these files stay.`,
+    options: [
+      { value: 'pdf', text: 'PDF report', hint: 'Map, log, the dog’s record, weather, timings, who walked the scene, units' },
+      { value: 'gpx', text: 'GPX of the K9 track', hint: 'For a mapping app, with the last known point and the map’s points' },
+      ...(canVideo ? [{ value: 'v30', text: `Replay video · ${CLIP.LENGTHS[1]} s`, hint: 'A tall video of the whole incident, to forward' },
+        { value: 'v60', text: `Replay video · ${CLIP.LENGTHS[2]} s`, hint: 'Slower, for a debrief' }] : []),
+    ],
+    note: `Every page says “${REPORT_STAMP}”${pretend ? ` and “${PRETEND_MARK}”` : ''}.${canVideo ? '' : ` ${CLIP_SAYS.unsupported}`}`,
+  });
+  if (!pick) return;
+  const bits = reportBits(rp, source);
+  I.report = { kind: pick };
+  try {
+    if (pick === 'pdf') await reportPdf(bits);
+    else if (pick === 'gpx') await reportGpxFile(bits);
+    else await reportVideo(source, bits, pick === 'v60' ? CLIP.LENGTHS[2] : CLIP.LENGTHS[1]);
+  } finally { I.report = null; }
+}
+
+async function reportPdf(b) {
+  ctx.toast('Making the report…');
+  try {
+    const doc = reportDoc(b);
+    /* The map is a picture fetched for the report, like a trail report's
+       (app.js); offline or with no map key it is plain paper with the lines. */
+    const pic = await Promise.resolve(ctx.reportMap?.(reportShapes(b.rp))).catch(() => null);
+    const bytes = buildPdf({ ...doc, map: pic || null });
+    await ctx.deliver(bytes, `${reportFileBase(b.rp, b)}.pdf`, 'application/pdf');
+  } catch {
+    ctx.toast('Could not make the report');
+  }
+}
+
+async function reportGpxFile(b) {
+  const gpx = reportGpx(b.rp, b.who, b);
+  if (!gpx) { ctx.toast('No K9 track to save'); return; }
+  try { await ctx.deliver(gpx, `${reportFileBase(b.rp, b)}.gpx`, 'application/gpx+xml'); }
+  catch { ctx.toast('Could not make the file'); }
+}
+
+/* The replay video: the incident's own replay on the command map, played
+   once on the video's clock while clip.js records it. The canvas is the
+   sheet's preview, which a browser needs in the page to record. Afterwards
+   the replay is put back where its slider was. */
+async function reportVideo(source, b, seconds) {
+  const { rp } = b;
+  if (!sq().view) openCommand(source === 'sim' ? { sim: true } : {});
+  const opened = !I.replay || I.replay.rp.inc.id !== rp.inc.id;
+  if (opened) await openReplay(source, rp);
+  const r = I.replay;
+  const m = map()?.map;
+  if (!r || !m) return;
+  playReplay(false);
+  /* The video frames the incident itself (clip.js, north up, fitted to the
+     tall frame); the replay's own fit, which leaves room for the panel,
+     must not move the camera under it once recording starts. */
+  r.fitted = true;
+  /* The command map may hold padding for the panel (an ease with padding
+     keeps it), which would push the video's framing off to one side: the
+     camera goes in without it and comes back exactly as it was. */
+  const pad = m.getPadding?.() ?? null;
+  const cam0 = { center: m.getCenter(), zoom: m.getZoom(), bearing: m.getBearing(), pitch: m.getPitch() };
+  if (pad) { try { m.jumpTo({ ...cam0, padding: { top: 0, bottom: 0, left: 0, right: 0 } }); } catch { /* a map with no padding */ } }
+  const was = r.t;
+  const canvas = document.createElement('canvas');
+  canvas.className = 'app-sheet-clip';
+  canvas.setAttribute('aria-hidden', 'true');
+  const sheet = progress({ title: 'Replay video', body: `A ${seconds} s video of the whole incident. Keep Trailcraft on screen while it records.`, extra: canvas });
+  sheet.say('Getting the map ready…');
+  const words = reportClipWords(rp, b.who, b);
+  const look = ctx.clipLook?.() || { credit: creditLine('', { mapbox: false }), logo: null };
+  const air = b.air;
+  const wind = air && air.windFrom != null ? windLine({ wind_direction: air.windFrom, wind_speed: air.windSpeed }, { imperial: b.imperial }) : null;
+  let said = -1;
+  const job = recordClip({
+    map: m, canvas, seconds,
+    host: {
+      from: rp.start, to: rp.end,
+      points: reportShapes(rp).points,
+      reveal: 'none', revealWords: '', key: null,
+      lines: words.lines, closing: words.closing,
+      credit: look.credit, logo: look.logo,
+      route: () => [], dog: { colour: '#F5D14A', casing: '#0B1630' },
+      answer() {},
+      paint(at) { if (I.replay === r) { r.t = at; paintCommandNow(); } },
+      marks: (at) => reportClipMarks(rp, at, b.who),
+      wind: () => wind,
+      hold: (on) => ctx.keepAwake?.(on),
+    },
+    onProgress: ({ stage, t, total }) => {
+      if (stage === 'finish') { sheet.say('Finishing the video…'); return; }
+      if (stage !== 'record' || Math.floor(t) === said) return;
+      said = Math.floor(t);
+      sheet.say(`Recording… ${said} s of ${total} s`);
+    },
+  });
+  let gone = false;
+  sheet.stopped.then((how) => { if (how === 'stop' || how === 'closed') { gone = true; job.cancel('stopped'); } });
+  const out = await job.done;
+  if (pad) { try { m.jumpTo({ ...cam0, padding: pad }); } catch { /* the map has gone */ } }
+  /* A replay the video opened has not been fitted yet: it is, now. */
+  if (I.replay === r) { r.t = was; if (opened) r.fitted = false; paintCommandNow(); }
+  if (gone) return;
+  if (out.status !== 'done') {
+    sheet.offer({ body: out.status === 'failed' ? out.say : CLIP_SAYS.background, no: 'Close' });
+    await sheet.stopped;
+    return;
+  }
+  const webm = out.ext === 'webm' ? ' It is a .webm file: it plays in a browser, but Photos and some apps won’t take it.' : '';
+  sheet.offer({ body: `Your ${out.seconds} s video is ready.${webm} Tap Save video to keep it.`, yes: 'Save video', no: 'Discard' });
+  if (await sheet.stopped !== 'yes') return;
+  try { await ctx.deliver(out.blob, `${reportFileBase(rp, b)}.${out.ext === 'webm' ? 'webm' : 'mp4'}`, out.type || out.mime || 'video/mp4'); }
+  catch { ctx.toast('Could not save the video'); }
+}
+
 /* ── The command map's incident layer ─────────────────────────────────── */
 /* Lines (the trail, the way ahead, perimeters) are map layers; points (the
    last known point, the team's calls, roadblocks) are markers of their own,
@@ -581,13 +855,13 @@ const LAYERS = [
   { id: 'inc-reach-wide', src: 'inc-reach-wide', type: 'line',
     paint: { 'line-color': RING_C, 'line-width': 2, 'line-opacity': 0.7, 'line-dasharray': [2, 2] } },
   { id: 'inc-lines', src: 'inc-lines', type: 'line',
-    paint: { 'line-color': ['case', ['boolean', ['get', 'warn'], false], WARN_C, '#D93025'], 'line-width': 4, 'line-dasharray': [2, 1.2] } },
-  { id: 'inc-draft', src: 'inc-draft', type: 'line', paint: { 'line-color': '#D93025', 'line-width': 3, 'line-dasharray': [1, 1] } },
+    paint: { 'line-color': ['case', ['boolean', ['get', 'warn'], false], WARN_C, INC_COLOURS.perimeter], 'line-width': 4, 'line-dasharray': [2, 1.2] } },
+  { id: 'inc-draft', src: 'inc-draft', type: 'line', paint: { 'line-color': INC_COLOURS.perimeter, 'line-width': 3, 'line-dasharray': [1, 1] } },
   { id: 'inc-draft-pts', src: 'inc-draft-pts', type: 'circle',
-    paint: { 'circle-radius': 6, 'circle-color': '#ffffff', 'circle-stroke-color': '#D93025', 'circle-stroke-width': 3 } },
+    paint: { 'circle-radius': 6, 'circle-color': '#ffffff', 'circle-stroke-color': INC_COLOURS.perimeter, 'circle-stroke-width': 3 } },
   { id: 'inc-trail-case', src: 'inc-trail', type: 'line', paint: { 'line-color': '#ffffff', 'line-width': 9, 'line-opacity': 0.85 } },
-  { id: 'inc-trail', src: 'inc-trail', type: 'line', paint: { 'line-color': '#D9822B', 'line-width': 5 } },
-  { id: 'inc-ahead', src: 'inc-ahead', type: 'line', paint: { 'line-color': '#D9822B', 'line-width': 3, 'line-dasharray': [1.5, 1.5] } },
+  { id: 'inc-trail', src: 'inc-trail', type: 'line', paint: { 'line-color': INC_COLOURS.trail, 'line-width': 5 } },
+  { id: 'inc-ahead', src: 'inc-ahead', type: 'line', paint: { 'line-color': INC_COLOURS.trail, 'line-width': 3, 'line-dasharray': [1.5, 1.5] } },
 ];
 const SOURCES = ['inc-band', 'inc-reach', 'inc-reach-wide', 'inc-lines', 'inc-draft', 'inc-draft-pts', 'inc-trail', 'inc-ahead'];
 
@@ -602,6 +876,7 @@ function ensureLayers(m) {
   for (const l of LAYERS) {
     if (m.getLayer(l.id)) continue;
     if (l.src === 'inc-band') I.bandLook = null;   // put back with the day look: set again
+    I.hvLayers = null;                               // and shown or hidden for Handler's view again
     const paint = lit ? { ...l.paint, [`${l.type}-emissive-strength`]: 1 } : l.paint;
     /* In order, under any the style already has above them. */
     const above = LAYERS.slice(LAYERS.indexOf(l) + 1).find(x => m.getLayer(x.id));
@@ -648,6 +923,7 @@ function paintLayers(v) {
   const { map: m } = map();
   if (!m || !ensureLayers(m)) return;
   bandLook(m);
+  cmdLayers(m);
   const rn = reachNow(v);
   const band = bandOf(v);
   setData(m, 'inc-band', lines(band ? [polygon(band.pts)] : []));
@@ -957,6 +1233,7 @@ function teardown() {
      with it; an ended one stays in lastSim for its replay. */
   I.sim = null; I.simEnded = null;
   I.foldedFor = null;
+  setHv(false, false);
   setLeadUnit(null);
   setCoverUnit(null);
   I.panelKey = '';
@@ -987,15 +1264,152 @@ function paint(st) {
     I.foldedFor = live.id;
     if (!window.matchMedia('(min-width: 900px)').matches) foldPanel(true);
   }
+  noteAir(v);
   paintLayers(v);
   paintPins(v, st.members);
   paintPanel(st, v);
   setCursor();
   if (I.replay && !I.replay.fitted) { I.replay.fitted = true; fitReplay(); }
-  followTeam(v, st, live);
+  if (!I.hv) followTeam(v, st, live);
   speakCalls(v, st, live);
   paintWall(v, st);
+  paintHv(v, st, live);
   paintBanner();
+}
+
+/* ── Handler's view (pretend mode) ───────────────────────────────────────
+   One laptop, no second phone: "Handler's view" turns the command map into
+   what K9-1's phone shows on its run screen, driven by the same pretend
+   incident (handler-ui.js draws both), and "Command view" turns it back.
+   The command card, the reach ring, the band and the other units step
+   aside; the dog's own line and arrow stay, as the run screen draws them. */
+const HV_KEEP = new Set(['inc-trail-case', 'inc-trail']);
+function cmdLayers(m) {
+  const hide = !!I.hv;
+  if (I.hvLayers === hide) return;
+  try {
+    for (const l of LAYERS) if (!HV_KEEP.has(l.id) && m.getLayer(l.id)) m.setLayoutProperty(l.id, 'visibility', hide ? 'none' : 'visible');
+    I.hvLayers = hide;
+  } catch { I.hvLayers = null; /* style still loading: next paint */ }
+}
+function setHv(on, repaint = true) {
+  const want = !!on && !!sq().sim;
+  if (I.hv === want && repaint) return;
+  I.hv = want;
+  I.follow.at = 0;
+  $('scrCommand')?.classList.toggle('hv-on', want);
+  $('map')?.classList.toggle('hv-on', want);
+  const box = $('cmdHandler');
+  if (box) box.hidden = !want;
+  if (!want) {
+    if (handlerOn() === 'pretend') clearHandler();
+    /* Back to Command: the K9 team, the point and the perimeter in view again. */
+    I.follow.paused = false;
+  }
+  const { map: m } = map();
+  if (m) cmdLayers(m);
+  if (repaint && sq().view) paintCommandNow();
+}
+/* A pretend call waits out its Undo time, then the pretend K9 team makes
+   it where the dog was at the tap, as the real phone's run would. */
+const hvHeld = new Set();
+function pretendCall(key, live, k9) {
+  const kind = RUN_MARKS[key];
+  if (!kind || !k9 || !I.sim) return null;
+  const si = I.sim;
+  const tok = { kind, at: viewNow(), lat: k9.lat, lon: k9.lon, timer: 0 };
+  tok.timer = setTimeout(() => {
+    hvHeld.delete(tok);
+    if (I.sim !== si || si.inc.status !== 'active') return;
+    si.addMark({ kind, by: live.k9Uid, at: tok.at, lat: tok.lat, lon: tok.lon });
+    if (sq().view) paintCommandNow();
+  }, CALL_UNDO_MS);
+  hvHeld.add(tok);
+  ctx.toast(MARKS[kind].label);
+  return tok;
+}
+function pretendUndo(tok) {
+  if (!hvHeld.has(tok)) return false;
+  clearTimeout(tok.timer);
+  hvHeld.delete(tok);
+  return true;
+}
+function paintHv(v, st, live) {
+  const on = I.hv && v.sim && !!live && !!live.k9Uid && !v.replay;
+  if (!on) {
+    if (I.hv) setHv(false, false);
+    return;
+  }
+  const k9 = st.positions?.get(live.k9Uid) ?? null;
+  const info = trailInfo(v.trail.slice(-400), live, v.now);
+  const going = v.trail.length > 1;
+  const team = st.members?.get(live.k9Uid);
+  const hud = $('cmdHandlerHud');
+  if (hud) {
+    const words = `${team?.dog || 'Dog'} · ${elapsedWords(v.now - live.startedAt)} · ${going ? 'trailing' : 'on the way to the last known point'}`;
+    if (hud.textContent !== words) hud.textContent = words;
+  }
+  const kick = $('cmdHandlerKick');
+  if (kick) {
+    const words = `Handler’s view · what ${team?.callSign || 'the K9 team'}’s phone shows · pretend`;
+    if (kick.textContent !== words) kick.textContent = words;
+  }
+  const pic = paintHandler({
+    where: 'pretend', box: $('cmdHandlerBox'), lift: $('cmdHandler'), night: !!st.night, inc: live, marks: v.marks,
+    me: k9 ? { lat: k9.lat, lon: k9.lon } : null, heading: info.heading ?? (finite(k9?.hdg) ? k9.hdg : null),
+    cover: live.coverUid ? st.positions?.get(live.coverUid) ?? null : null,
+    coverName: live.coverUid ? who(live.coverUid, st.members) : '',
+    now: v.now, myUid: live.k9Uid, name: (uid) => who(uid, st.members), voice: I.voice,
+    call: (key) => pretendCall(key, live, k9),
+    undo: (tok) => pretendUndo(tok),
+  });
+  followHandler(k9, pic);
+}
+/* Handler's view follows the dog, framed with the squad's picture round it:
+   the cover officer, the nearest points and the nearest stretch of each
+   perimeter line (incident.js handlerFrame), as close in as they allow
+   (street level at best, never further out than about a kilometre across),
+   until a hand moves the map (Follow K9 brings it back). With the dog
+   alone in reach it stays close in on the dog, and the line of words says
+   where the rest is. */
+const HV_ZOOM = { max: 17, min: 15, alone: 16.3 };
+function followHandler(k9, pic) {
+  const g = map();
+  paintFollowBtn();
+  if (!g.map || !k9 || I.follow.paused || g.map.isMoving?.()) return;
+  const c = g.map.getCanvas?.();
+  const size = { w: c?.clientWidth || window.innerWidth, h: c?.clientHeight || window.innerHeight };
+  /* The box covers the bottom of the map: the dog is kept in the top part. */
+  const box = $('cmdHandler')?.getBoundingClientRect?.();
+  const bottom = box && box.height ? Math.max(0, size.h - box.top) : 0;
+  /* The top clears the weather card and the duty pill. */
+  const pad = { top: 150, left: 40, right: 40, bottom: bottom + 30 };
+  /* What fits at the widest zoom allowed: metres a pixel at that zoom (the
+     map's tiles are 512 px), times half the smaller side left between the
+     paddings, so points on both sides of the dog still fit. */
+  const roomPx = Math.max(80, Math.min(size.w - pad.left - pad.right, size.h - pad.top - pad.bottom));
+  const mpp = 156543.03 * Math.cos(k9.lat * Math.PI / 180) / Math.pow(2, HV_ZOOM.min + 1);
+  const frame = handlerFrame(pic, k9, { maxM: mpp * roomPx / 2 });
+  const others = !!(pic && (pic.items?.length || pic.cover?.pos));
+  /* Squad points out of reach even at the widest zoom: the widest zoom,
+     so whatever is near shows, not street level on the dog and its cover. */
+  const pointsIn = frame.length - 1 - (pic?.cover?.pos && frame.includes(pic.cover.pos) ? 1 : 0);
+  const zMax = pic?.items?.length && !pointsIn ? HV_ZOOM.min : HV_ZOOM.max;
+  const z = g.map.getZoom();
+  const inView = frame.every(q => allInView([g.map.project([q.lon, q.lat])], size, pad));
+  if (z >= HV_ZOOM.min - 0.2 && z <= zMax + 0.2 && inView) return;
+  if (Date.now() - I.follow.at < FOLLOW_GAP_MS) return;
+  I.follow.at = Date.now();
+  /* The app's own motion choice (Reduce Motion, or ?motion=on over it). */
+  const still = document.documentElement.dataset.motion === 'off';
+  const duration = still ? 0 : 700;
+  /* One ease with the padding, as before: the camera is worked out here
+     (incident.js frameCamera) rather than by fitBounds, which would add
+     the map's own padding from the last ease to this one. */
+  const cam = frame.length > 1
+    ? frameCamera(frame, size.w - pad.left - pad.right, size.h - pad.top - pad.bottom, { min: HV_ZOOM.min, max: zMax })
+    : { center: k9, zoom: others ? HV_ZOOM.min : HV_ZOOM.alone };
+  g.map.easeTo({ center: [cam.center.lon, cam.center.lat], zoom: cam.zoom, padding: pad, duration });
 }
 
 /* ── Following the K9 team ───────────────────────────────────────────────
@@ -1031,6 +1445,8 @@ function resumeFollow() {
   I.follow.paused = false;
   I.follow.at = 0;
   paintFollowBtn();
+  /* In Handler's view, back to the dog close in, on the next paint. */
+  if (I.hv) return paintCommandNow();
   followTeam(shown(), commandView(), shown().inc, true);
 }
 function followTeam(v, st, live, force = false) {
@@ -1070,7 +1486,9 @@ function speakCalls(v, st, live) {
   const fresh = v.marks.filter(mk => MARKS[mk.kind]?.k9 && !I.said.ids.has(mk.id)).sort((a, b) => a.at - b.at);
   if (!fresh.length) return;
   for (const mk of fresh) I.said.ids.add(mk.id);
-  if (!I.voice || !ctx.speak) return;
+  /* In Handler's view the screen is the handler's phone, which never says
+     the team's own calls back to them. */
+  if (!I.voice || !ctx.speak || I.hv) return;
   const words = fresh.filter(mk => mk.by !== meUid()).map(mk => callWords(mk.kind, who(mk.by, st.members)));
   if (words.length) { try { ctx.speak(words.join('. ')); } catch { /* no voice here */ } }
 }
@@ -1156,6 +1574,7 @@ function panelHtml(md, { st, v, me, cmd, lastEnded, running, k9s }) {
         <button type="button" class="btn small moss" data-inc-act="play">${r.playing ? 'Pause' : 'Play'}</button>
         <button type="button" class="btn ghost small" data-inc-act="speed">×${r.speed}</button>
         <button type="button" class="btn ghost small" data-inc-act="unreplay">Back to live</button>
+        ${cmd && r.source ? html`<button type="button" class="btn ghost small" data-inc-act="report" data-inc-id="${r.source}">Deployment report</button>` : ''}
       </div>
       ${frozenCardHtml(r.rp.inc, st.members?.get(r.rp.inc.k9Uid)?.dog ?? null)}
       ${logHtml()}
@@ -1231,6 +1650,7 @@ function panelHtml(md, { st, v, me, cmd, lastEnded, running, k9s }) {
       </div>` : ''}
       <div class="inc-tools">
         <button type="button" class="btn ghost small" data-inc-act="fit">Show the incident</button>
+        ${st.sim && inc.k9Uid ? html`<button type="button" class="btn small moss" data-inc-act="hv">Handler’s view</button>` : ''}
         ${cmd ? html`<button type="button" class="btn ghost small" data-inc-act="seen">Last seen &amp; brief</button>
           <button type="button" class="btn ghost small" data-inc-act="cover">Cover officer</button>` : ''}
         <button type="button" class="btn ghost small" data-inc-act="paces">Paces</button>
@@ -1246,7 +1666,8 @@ function panelHtml(md, { st, v, me, cmd, lastEnded, running, k9s }) {
       ${st.sim ? html`<button type="button" class="btn ghost small" data-inc-act="quick">Pretend incident</button>` : ''}
     </div>` : ''}
     ${lastEnded ? html`<p class="inc-last">Last incident: <b>${lastEnded.name}</b>
-      <button type="button" class="btn ghost small" data-inc-act="replay" data-inc-id="${st.sim ? 'sim' : lastEnded.id}">Replay</button></p>` : ''}
+      <button type="button" class="btn ghost small" data-inc-act="replay" data-inc-id="${st.sim ? 'sim' : lastEnded.id}">Replay</button>
+      ${cmd ? html`<button type="button" class="btn ghost small" data-inc-act="report" data-inc-id="${st.sim ? 'sim' : lastEnded.id}">Deployment report</button>` : ''}</p>` : ''}
   </div>`;
 }
 
@@ -1326,7 +1747,13 @@ function insideOf(v, st) {
 const SEEN_IN_MAX = 200;
 const BACK_IN_MS = 2 * 60e3;
 function speakInside(v, list) {
-  if (I.inside.for !== v.inc?.id) I.inside = { for: v.inc?.id ?? null, ids: new Map(), seen: [] };
+  /* Kept on the device for a real incident watched live: never a replay
+     (its clock is the past) and never the pretend one (memory only). */
+  const keep = !!v.inc && !v.replay && !v.sim && v.inc.status === 'active';
+  if (I.inside.for !== v.inc?.id) {
+    I.inside = { for: v.inc?.id ?? null, ids: new Map(), seen: [] };
+    if (keep) keepInside(v.inc.id);
+  }
   /* One already said who now reads as walking out is still inside: keep
      their time fresh, or stopping again a few minutes later would log a
      second "went inside" for someone who never left. One never said is
@@ -1340,8 +1767,9 @@ function speakInside(v, list) {
     if (last != null && v.now - last < BACK_IN_MS) continue;
     if (I.inside.seen.length < SEEN_IN_MAX) {
       I.inside.seen.push({ uid: w.uid, callSign: w.callSign, m: w.m, t: v.now, at: { lat: w.lat, lon: w.lon } });
+      if (keep) keepInside(v.inc.id);
     }
-    if (I.voice && ctx.speak && sq().view) { try { ctx.speak(`${w.callSign} is inside the perimeter`); } catch { /* no voice */ } }
+    if (I.voice && ctx.speak && sq().view && !I.hv) { try { ctx.speak(`${w.callSign} is inside the perimeter`); } catch { /* no voice */ } }
   }
 }
 
@@ -1584,6 +2012,7 @@ function onPanelClick(e) {
   if (act === 'go') return doStart();
   if (act === 'end') return doEnd();
   if (act === 'fit') return fitIncident();
+  if (act === 'hv') return setHv(true);
   if (act === 'unfold') return foldPanel(false);
   if (act === 'voice') return setVoice(!I.voice);
   if (act === 'seen') return editSeen();
@@ -1605,6 +2034,7 @@ function onPanelClick(e) {
     return addMark('perimeter', { pts });
   }
   if (act === 'replay') return openReplay(b.dataset.incId);
+  if (act === 'report') return openReport(b.dataset.incId);
   if (act === 'play') return playReplay(!I.replay?.playing);
   if (act === 'speed' && I.replay) {
     I.replay.speed = REPLAY_SPEEDS[(REPLAY_SPEEDS.indexOf(I.replay.speed) + 1) % REPLAY_SPEEDS.length];
@@ -1699,6 +2129,7 @@ function paintOutside() {
 /* ── Start up ─────────────────────────────────────────────────────────── */
 export function initIncidents(c) {
   ctx = c;
+  initHandler(c);
   loadSeen();
   onCommandPaint(paint);
   onPositionSent(onSent);
@@ -1712,6 +2143,7 @@ export function initIncidents(c) {
   onLook(pauseFollow);
   onWall(() => { I.wallKey = ''; I.follow.at = 0; if (sq().view) paintCommandNow(); });
   $('cmdFollow').addEventListener('click', resumeFollow);
+  $('cmdHandlerBack').addEventListener('click', () => setHv(false));
   $('cmdIncident').addEventListener('click', onPanelClick);
   $('cmdIncident').addEventListener('input', onScrub);
   /* A toggle does not bubble: caught on the way down, so the record card
@@ -1744,4 +2176,4 @@ function replayPretend() {
 }
 
 /** For a screen change: the banner shows everywhere but the map itself. */
-export const incidentScreen = () => { if (ctx) paintOutside(); };
+export const incidentScreen = () => { if (ctx) { paintOutside(); paintRun(); } };
