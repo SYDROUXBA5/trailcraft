@@ -440,16 +440,20 @@ async function applyUser(u, { resume = false } = {}) {
    so that comes first: the password for an email account, Google's own
    check for a Google one (Google sign-in exists only on the web). */
 let deleting = false;
-export async function deleteAccount({ password = '' } = {}) {
+/* beforeDelete runs once the person has proved who they are and before
+   anything is removed: the squad clean-up (squad-ui.js squadForget), which
+   needs the account to still exist, and must not happen for a wrong
+   password. If it fails, nothing is deleted. */
+export async function deleteAccount({ password = '', beforeDelete = null } = {}) {
   if (deleting) return { ok: false, error: null };
   const u = auth?.currentUser;
   if (!u) return { ok: false, error: 'You aren’t signed in.' };
   if (live) return { ok: false, error: 'Finish your live run first.' };
   deleting = true;
-  try { return await removeAccount(u, password); } finally { deleting = false; }
+  try { return await removeAccount(u, password, beforeDelete); } finally { deleting = false; }
 }
 
-async function removeAccount(u, password) {
+async function removeAccount(u, password, beforeDelete) {
   const f = await loadFirebase();
   const via = (u.providerData || []).map(p => p.providerId);
   try {
@@ -467,6 +471,9 @@ async function removeAccount(u, password) {
     }
   } catch (e) {
     return { ok: false, error: plain(e) };        // null when they closed the window: nothing to say
+  }
+  try { await beforeDelete?.(); } catch {
+    return { ok: false, error: 'Could not take you out of your squad first, so nothing was deleted. Try again when you have signal.' };
   }
   await userRun;                                  // a backup still running finishes first
   stopMirror?.(); stopMirror = null;              // nothing may upload again while the backup goes
@@ -914,6 +921,16 @@ export async function endLive({ result = null, track = [], wps = [] } = {}) {
     ended: true, endedAt: Date.now(), ...expiry(Date.now() + LIVE_TTL), at: Date.now(),
     result: result ? toCloud(result) : null,
   }, { merge: true });
+}
+
+/** What squad-cloud.js needs to reach the cloud as this account: the
+    Firebase functions, Firestore and the account. null until signed in, and
+    while the records on this phone are not settled as this account's (the
+    squad would carry its name). */
+export async function squadHandle() {
+  try { await ready; } catch { return null; }
+  if (!fs || !fb || !sync.user || ['other', 'ask', 'verify'].includes(sync.status)) return null;
+  return { f: fb, fs, uid: sync.user.uid };
 }
 
 /** Follow a run. `cb` gets { meta, chunks } on every change, or { error }.
