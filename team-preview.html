@@ -2,6 +2,10 @@
 <html lang="en-GB">
 <head>
 <meta charset="utf-8">
+<!-- What this page may load and run. It shares the app's address and so its saved data: a policy of its own
+     means nothing injected here could run. An inline script is named by its hash: change the script and the
+     hash must change with it (test/vendor.test.mjs says what the new one is). -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'sha256-uKBqIWV6YVPP3gtJ74PA68DMkZnGl78tzAwzPOu9JB8='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
 <title>Team levels sample</title>

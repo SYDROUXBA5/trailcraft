@@ -2,6 +2,10 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<!-- What this page may load and run. It shares the app's address and so its saved data: a policy of its own
+     means nothing injected here could run. An inline script is named by its hash: change the script and the
+     hash must change with it (test/vendor.test.mjs says what the new one is). -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-5PKDuX2Xaqa2NkWyTG8j5W79xn8wd8Yti5iY6tz4Z+w='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; manifest-src 'self'; base-uri 'none'; form-action 'none'">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="theme-color" content="#0A1014">
 <title>Trailcraft Scent Engine</title>

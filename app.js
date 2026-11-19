@@ -69,7 +69,7 @@ import { searchWords, logRows, recentRuns, runAt, midnight, facets, filterRows, 
          cleanFolderName, putMany, toggleFolder, renameIn, dropFrom, mergeFolders, emptyHeld, folderPatch } from './log.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-11-19a';
+const BUILD = '2026-11-19b';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true, plumeLook: 'glow',
@@ -93,9 +93,14 @@ const saveSettings = () => localStorage.setItem('tc.settings', JSON.stringify(se
    because the token cannot ship inside the public repository. */
 {
   const mbt = new URLSearchParams(location.hash.slice(1)).get('mbt');
-  if (mbt && /^pk\./.test(mbt)) {
-    settings.mbToken = mbt;
-    saveSettings();
+  /* A link is something anyone can send. So the key in it must be a well-formed public key, and it is never taken
+     without a yes: taken silently, a stranger's link could swap the key the map runs on, and then switch the map off. */
+  if (mbt != null) {
+    if (/^pk\.[A-Za-z0-9._-]{20,400}$/.test(mbt)
+        && confirm('This link carries a map key. Use it for the map on this device?\n\nOnly say OK if you asked for this link.')) {
+      settings.mbToken = mbt;
+      saveSettings();
+    }
     history.replaceState(null, '', location.pathname + location.search);
   }
 }
@@ -153,7 +158,7 @@ let S = db.snapshot();
 const snap = () => { S = db.snapshot(); return S; };
 
 const $ = (id) => document.getElementById(id);
-const esc = (s) => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 /* One place asks which units, so nothing on screen can disagree with
    anything else on screen. The model never sees these. */
 const imp = () => settings.distUnits === 'imperial';
@@ -1882,7 +1887,7 @@ function groundTile(kind, z, x, y) {
   const key = `${kind}/${z}/${x}/${y}`;
   if (groundTiles.has(key)) return groundTiles.get(key);
   const job = (async () => {
-    const res = await fetch(`https://api.mapbox.com/v4/${TILESETS[kind]}/${z}/${x}/${y}.mvt?access_token=${mapKey()}`);
+    const res = await fetch(`https://api.mapbox.com/v4/${TILESETS[kind]}/${z}/${x}/${y}.mvt?access_token=${encodeURIComponent(mapKey())}`);
     if (!res.ok && res.status !== 404) throw new Error(`ground tile ${res.status}`);
     const t = res.ok ? decodeTile(new Uint8Array(await res.arrayBuffer()), z, x, y, GROUND_LAYERS[kind]) : {};
     t.kind = kind;
@@ -7789,6 +7794,12 @@ async function goLive() {
   if (!run.session || liveStarting) return;
   if (!liveState) {
     if (navigator.onLine === false) return toast('No signal, so the run cannot go live yet');
+    /* A link can be passed on. The first time, say plainly what whoever holds it will see. */
+    let told = false; try { told = !!localStorage.getItem('tc.liveTold'); } catch { /* asked each time */ }
+    if (!told) {
+      if (!confirm('Anyone who gets this link can follow the run on a map: the trail, the hides, the dog’s name and where the dog is, until you stop sharing.\n\nGo live?')) return;
+      try { localStorage.setItem('tc.liveTold', '1'); } catch { /* asked again next time */ }
+    }
     const sid = run.session.id, from = run.startedAt, asked = Date.now();
     /* Still the run this was tapped for, and still being recorded. */
     const same = () => rec.on && rec.kind === 'run' && !run.stopping && run.session?.id === sid && run.startedAt === from;
