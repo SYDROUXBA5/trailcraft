@@ -17,7 +17,7 @@ import { FLAT, buildTerrain, stability, regime, flowAt, normOf, rainRate, RAIN_S
          laidWind, cleanWindFelt, windTrusted, forecastAt, feltMoment, nearestPoint, windFeltFor, forecastSaid,
          windWords, feltPanel, FELT_POINTS, feltPicked, feltSame, sameFelt, feltOf, anchorFelt, feltWeather,
          seriesCovers } from './field.js';
-import { predictedOffsets, ScentSim, driftFrom, stepByFlow } from './sim.js';
+import { predictedOffsets, ScentSim, driftFrom, stepByFlow, flowBearing } from './sim.js';
 import { PARAMS, DIALS, PV, setParam, resetParams, changed, isDefault, tally, dialById, PRESETS, applyPreset } from './params.js';
 import { encodeTrail, decodeTrail, cardUrl, cardFromText, walkedPlanFor, sameCard, encodeContam, isContamCard, TOO_TWISTY } from './card.js';
 import { CONTAM_COLOURS, colourIndex, contamColour, nextColour, contamStatus, contamWay, newContam, contamWalkFor,
@@ -64,14 +64,15 @@ import { MOTIONS, motionChoice, motionOn, COAT_IDS, teamLook, makeTeam, putTeam,
          shownLevel, withShown, momentFor, takenBack, beforeMoment, resultLine, levelsSaid, debriefWouldFix } from './teams.js';
 import { createTeam, COATS, JACKETS, HATS, MOMENTS, drawAmbient, landOfLevel } from './pixel-team.js';
 import { mountBoard } from './board.js';
+import { makeScentGlow } from './glow.js';
 import { searchWords, logRows, recentRuns, runAt, midnight, facets, filterRows, groupRows, foldersOf, inFolder, folderList, folderNamed,
          cleanFolderName, putMany, toggleFolder, renameIn, dropFrom, mergeFolders, emptyHeld, folderPatch } from './log.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-11-05d';
+const BUILD = '2026-11-19a';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
-const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true,
+const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true, plumeLook: 'glow',
   distUnits: 'metric', tempUnits: 'c', coordFormat: 'dd', theme: 'system', mapStyle: 'satellite', plumeColor: '#F5D14A', stepColor: '#0B1630', windColor: '#DCE9FF', dogColor: '#FFFFFF', trailStyle: 'steps', dogStyle: 'line', motion: 'auto', mbToken: (window.MB_TOKEN || '') };
 const loadJson = (k, f) => { try { return JSON.parse(localStorage.getItem(k)) ?? f; } catch { return f; } };
 let settings = { ...DEFAULTS, ...loadJson('tc.settings', {}) };
@@ -708,6 +709,11 @@ function addOverlays() {
                    0, '#C9761E', 0.45, '#F2B03C', 1, '#FFE7A8'],
                  'circle-opacity': ['+', 0.25, ['*', ['get', 's'], 0.7]],
                  'circle-blur': 0.18 } });
+  /* The same parcels drawn as the 3D scent engine draws them: glowing light with height (glow.js). Which of the
+     two shows is the Look setting 'Scent drawn as'; the specks above stay as they were. */
+  scentGlow = scentGlow || makeScentGlow(map);
+  add(scentGlow.layer);
+  applyPlumeLook();
   /* Each contamination person's own scent, in the colour of their line
      (contam.js): same air, same rules, a different person, so it never
      shares the main trail's colour, nor another person's. */
@@ -1137,6 +1143,7 @@ function applyMapColours() {
   if (map.getLayer('flow-fill')) map.setPaintProperty('flow-fill', 'fill-color', mix(p.base, '#FFFFFF', 0.62));
   const wc = windPalette(settings.windColor);
   if (map.getLayer('air-streaks')) map.setPaintProperty('air-streaks', 'line-color', wc.base);
+  scentGlow?.setWindColour(wc.base);
   /* Which drawing of the trail and of the dog's track is showing. */
   const vis = (id, on) => { if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', on ? 'visible' : 'none'); };
   const paint = (id, prop, v) => { if (map.getLayer(id)) map.setPaintProperty(id, prop, v); };
@@ -1202,6 +1209,15 @@ const pointsOf = (pts, kindKey) => ({
     geometry: { type: 'Point', coordinates: [p.lon, p.lat] },
   })),
 });
+/* ── How the plume is drawn: as light with height (the scent engine's look), or as the specks it began as ── */
+let scentGlow = null;
+const glowOn = () => settings.plumeLook !== 'specks' && !!scentGlow && scentGlow.ok;
+function applyPlumeLook() {
+  if (!map || !scentGlow) return;
+  const g = glowOn();
+  for (const id of ['scent-glow', 'scent-dots']) if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', g ? 'none' : 'visible');
+  scentGlow.setShown(g);
+}
 function setSrc(id, data) {
   srcData[id] = data;
   if (mapReady && map.getSource(id)) map.getSource(id).setData(data);
@@ -2177,13 +2193,14 @@ function plumeAdd(pt) {
   // spacing the rest of the line was sampled at.
   plume.sim.append(last ? plumeSamples([last, pt]) : [pt]);
 }
+function paintPlumeLook() { for (const b of $('plumeLook').children) b.setAttribute('aria-pressed', String(b.dataset.look === (settings.plumeLook === 'specks' ? 'specks' : 'glow'))); }
 function plumeStop() {
   tracersStop();
   clearInterval(plume.tick); plume.tick = 0;
   plume.sim = null; plume.trail = null; plume.contam = null;
   plume.walls = null; plume.bandWalls = 0; plume.lastField = null;
   setSrc('bandWall', EMPTY);
-  setSrc('scent', EMPTY);
+  setSrc('scent', EMPTY); scentGlow?.clear(); plume.specks = true;
   setSrc('contamScent', EMPTY);
   setSrc('flow', EMPTY);
   setSrc('flowPulse', EMPTY);
@@ -2210,6 +2227,8 @@ function plumeStop() {
    over the whole map but read as nothing on a satellite photo, so the only
    wind anyone saw was the flow arrows, which start on the trail. */
 const AIR_N = 110, AIR_LIFE = 20, AIR_STEP = 0.35, AIR_TAIL = 18, AIR_FRAME_MS = 32;
+/* With the glow look the wind is drawn as hairlines by glow.js: many more of them, each far fainter, moved every frame. */
+const AIR_GLOW_N = matchMedia('(pointer: coarse)').matches ? 520 : 800, AIR_GLOW_TAIL = 12, AIR_GLOW_MS = 15;
 const AIR_FULL_MS = 8;   // wind speed at which a wisp is at its longest and brightest
 const WISP_FADE = [0.12, 0.32, 0.62, 1];   // tail to head
 const air = { on: false, wx: null, st: null, T: FLAT, pts: [], raf: 0, last: 0 };
@@ -2505,7 +2524,7 @@ function airStop() {
   air.on = false;
   cancelAnimationFrame(air.raf); air.raf = 0;
   air.pts = [];
-  setSrc('air', EMPTY);
+  setSrc('air', EMPTY); scentGlow?.clearWind(); air.wisps = true;
 }
 
 /** Somewhere on SCREEN, at a random point in its life so the field is full
@@ -2527,7 +2546,8 @@ function airSpawn(fresh = false) {
 function airFrame(now) {
   if (!air.on || !map) return;
   // A fixed pace, not every frame: smoother on a phone and kinder to it.
-  if (now - air.last < AIR_FRAME_MS) { air.raf = requestAnimationFrame(airFrame); return; }
+  const hair = glowOn();                                   // hairlines (glow.js), or the wisps this began as
+  if (now - air.last < (hair ? AIR_GLOW_MS : AIR_FRAME_MS)) { air.raf = requestAnimationFrame(airFrame); return; }
   const dt = Math.min(0.1, (now - air.last) / 1000);
   air.last = now;
   const c = map.getCanvas();
@@ -2537,7 +2557,13 @@ function airFrame(now) {
     return q.x > -60 && q.x < W + 60 && q.y > -60 && q.y < H + 60;
   };
 
-  while (air.pts.length < AIR_N) air.pts.push(airSpawn());
+  const want = hair ? AIR_GLOW_N : AIR_N;
+  while (air.pts.length < want) air.pts.push(airSpawn());
+  if (air.pts.length > want) air.pts.length = want;
+  /* Gusts. The forecast gives the mean wind and its gusts; the gap between them is how unsteady the air is. Hairlines run
+     faster and brighter as a gust passes and ease off between. The size is the forecast's; the rhythm is made up. */
+  const windMs = air.wx?.wind_speed ?? 0, gusty = hair ? Math.min(1.2, Math.max(0, ((air.wx?.wind_gusts ?? windMs) - windMs) / Math.max(0.5, windMs))) : 0;
+  const mLat = 111320, mLon = 111320 * Math.cos(map.getCenter().lat * Math.PI / 180);
 
   /* True pace when zoomed in. Zoomed out, a real breeze crosses a pixel or two
      a second and the wisps shrink to specks, so the clock runs faster there:
@@ -2557,7 +2583,9 @@ function airFrame(now) {
        itself is not held back by the ground the way scent at nose height is.
        Doing this arithmetic here by hand is what had the streaks running
        north while the plume ran south. */
-    const next = stepByFlow(p, f, dt * pace, 1);
+    let gust = 0;
+    if (gusty > 0) { const b = flowBearing(f) * Math.PI / 180, along = p.lon * mLon * Math.sin(b) + p.lat * mLat * Math.cos(b); gust = Math.pow(0.5 + 0.5 * Math.sin(now / 1000 * 0.8 - along / 85), 2); }
+    const next = stepByFlow(p, f, dt * pace * (1 + gusty * gust), 1);
     p.lat = next.lat; p.lon = next.lon;
     p.w = Math.min(1, Math.hypot(f.u, f.v) / AIR_FULL_MS);   // how hard it blows here, 0..1
 
@@ -2565,7 +2593,7 @@ function airFrame(now) {
     if (p.since >= AIR_STEP || !p.tail.length) {
       p.since = 0;
       p.tail.push([p.lon, p.lat]);
-      if (p.tail.length > AIR_TAIL) p.tail.shift();
+      while (p.tail.length > (hair ? AIR_GLOW_TAIL : AIR_TAIL)) p.tail.shift();
     }
     if (p.tail.length < 2) continue;
 
@@ -2574,6 +2602,7 @@ function airFrame(now) {
        fade. The head is where the parcel is NOW, not at the last sample. */
     const t = p.age / AIR_LIFE;
     const base = Math.min(1, Math.min(t * 5, (1 - t) * 4)) * (0.55 + 0.45 * (p.w ?? 0.5));
+    if (hair) { p.a = base * (0.62 + 0.5 * gust * Math.min(1, gusty * 2)); continue; }
     const line = [...p.tail, [p.lon, p.lat]];
     const spans = line.length - 1;
     const cuts = [0, Math.floor(spans * 0.4), Math.floor(spans * 0.7), Math.floor(spans * 0.88), spans];
@@ -2586,7 +2615,10 @@ function airFrame(now) {
       });
     }
   }
-  setSrc('air', { type: 'FeatureCollection', features: feats });
+  if (hair) {
+    scentGlow.setWind(air.pts);
+    if (air.wisps !== false) { setSrc('air', EMPTY); air.wisps = false; }
+  } else { setSrc('air', { type: 'FeatureCollection', features: feats }); air.wisps = true; scentGlow?.clearWind(); }
   air.raf = requestAnimationFrame(airFrame);
 }
 
@@ -2767,6 +2799,8 @@ function openBench() {
   paintBench();
   go('scrBench');
   fitTo(bench.trail, []);
+  /* glowing scent has height, and height only shows from the side: tip the map once it has settled */
+  if (glowOn()) setTimeout(() => { if (bench.on) map.easeTo({ pitch: 58, duration: 900 }); }, 900);
   benchPaint();
 }
 function closeBench() {
@@ -4252,7 +4286,10 @@ function plumeFrame() {
   const now = plume.clock ?? Date.now();
   plume.sim.prune(now, plume.wx, plume.st, { max: 9000, since: plume.since });
   plume.sim.advance(plume.T, plume.wx, plume.st, now);
-  setSrc('scent', parcelsGeo(plume.sim));
+  if (glowOn()) {
+    scentGlow.update(plume.sim.drawable(), plume.st, parcelWeight);
+    if (plume.specks !== false) { setSrc('scent', EMPTY); plume.specks = false; }      // the specks are not needed while the glow is showing
+  } else { setSrc('scent', parcelsGeo(plume.sim)); plume.specks = true; scentGlow?.clear(); }
   if (plume.contam) {
     plume.contam.prune(now, plume.wx, plume.st, { max: 5000, since: plume.since });
     plume.contam.advance(plume.T, plume.wx, plume.st, now);
@@ -9896,6 +9933,7 @@ function renderSettings() {
     + `<button class="btn ghost small" id="setAddLayer">Add person</button>`;
 
   $('plumeOn').checked = settings.plume !== false;
+  paintPlumeLook();
   paintCoachControls();
   paintStorageLine();
   paintColourRows();
@@ -11355,6 +11393,11 @@ function wire() {
     saveSettings();
     paintUnitSettings();
     paintCoachControls();
+  });
+  $('plumeLook').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-look]'); if (!b) return;
+    settings.plumeLook = b.dataset.look; saveSettings(); paintPlumeLook(); applyPlumeLook();
+    if (plume.sim) plumeFrame();
   });
   $('plumeOn').addEventListener('change', () => {
     settings.plume = $('plumeOn').checked;
