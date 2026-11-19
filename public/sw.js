@@ -1,6 +1,6 @@
 /* Offline shell. Trails happen where there is no signal, so the app itself must
    survive with none. Map tiles cache opportunistically as you pan an area. */
-const V = 'trailcraft-v134';
+const V = 'trailcraft-v135';
 /* Every module the app cannot start without. app.js is an ES module and its
    imports are separate requests — listing only app.js precaches a shell that
    cannot boot, which shows up as a working app that dies the first time it is
@@ -112,7 +112,9 @@ const cacheable = (url) => pinned(url) || (
      a cache that now outlives updates, it would be answered from the phone
      for good and the opens never counted. */
   !url.pathname.startsWith('/map-sessions/')
-    && /mapbox|openstreetmap|fonts\.(googleapis|gstatic)\.com/.test(url.hostname));
+    /* Named exactly. A loose match on part of the name would also keep answers from any other host that happened to
+       have one of these words in it. */
+    && ['api.mapbox.com', 'tile.openstreetmap.org', 'fonts.googleapis.com', 'fonts.gstatic.com'].includes(url.hostname));
 
 /* Mapbox adds a billing token (sku) to every tile address, and makes a new one
    each time the map opens. Kept in the address, yesterday's tiles never matched

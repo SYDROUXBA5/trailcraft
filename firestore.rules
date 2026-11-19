@@ -394,6 +394,9 @@ service cloud.firestore {
           allow update: if (isMember() && resource.data.by == request.auth.uid
                             && resource.data.get('withdrawnBy', null) == null
                             && markOk(request.resource.data) && request.resource.data.kind == resource.data.kind
+                            // When it happened is fixed once it is made: the debrief reads marks as a record of
+                            // the search, and a maker who could move one in time could rewrite that record.
+                            && request.resource.data.at == resource.data.at
                             && get(incidentPath()).data.status == 'active')
                         || (isMember() && (resource.data.by == request.auth.uid || isCommand()) && withdrawOk()
                             && get(incidentPath()).data.status == 'active');

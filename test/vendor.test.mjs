@@ -127,6 +127,25 @@ t('the policy comes before anything the page loads or runs', () => {
   }
 });
 
+t('the side pages carry a policy too, and every inline script in them is named by its hash', () => {
+  for (const page of ['engine.html', 'team-preview.html', 'privacy.html']) {
+    const src = text(`public/${page}`);
+    const meta = src.match(/<meta http-equiv="Content-Security-Policy" content="([^"]+)">/);
+    assert.ok(meta, `${page} has a Content-Security-Policy`);
+    assert.ok(meta[1].startsWith("default-src 'none'"), `${page}: nothing is allowed unless it is named`);
+    assert.ok(!/unsafe-eval/.test(meta[1]) && !/script-src[^;]*'unsafe-inline'/.test(meta[1]), `${page}: no eval, no unnamed inline script`);
+    for (const tag of ['<script', '<link', '<style']) {
+      const first = src.indexOf(tag);
+      assert.ok(first === -1 || src.indexOf(meta[0]) < first, `${page}: the policy precedes the first ${tag}`);
+    }
+    for (const [, body] of src.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g)) {
+      if (!body.trim()) continue;
+      const hash = `'sha256-${createHash('sha256').update(body).digest('base64')}'`;
+      assert.ok(meta[1].includes(hash), `${page}: an inline script changed: its hash is now ${hash}`);
+    }
+  }
+});
+
 t('script runs only from the app itself, the one theme script by its hash, and Google\'s sign-in helper', () => {
   const inline = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
   assert.equal(inline.length, 1, 'one inline script: the theme, before first paint');

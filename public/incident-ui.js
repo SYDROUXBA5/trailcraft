@@ -437,7 +437,8 @@ function recordCard(rec, now, { frozen = false, dog = null } = {}) {
 function pickCardHtml(k9s, uid, now) {
   const k = k9s.find(x => x.uid === uid);
   if (!k) return '';
-  if (k.record) return recordCard(k.record, now, { dog: k.dog });
+  /* The card comes from the handler's own phone and the rules can only check its shape, so say whose word it is. */
+  if (k.record) return html`${recordCard(k.record, now, { dog: k.dog })}<p class="inc-hint">This record is ${k.callSign}’s own, sent from their phone. Nobody else has checked it.</p>`;
   return html`<p class="inc-hint">${k.callSign} has not shared ${k.dog ? `${k.dog}’s` : 'the dog’s'} record. The handler can share it from the Squad screen.</p>`;
 }
 /** The frozen copy, folded on the live card and in the replay, with what

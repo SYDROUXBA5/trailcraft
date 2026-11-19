@@ -197,7 +197,7 @@ export function allow(op, path, c) {
         && recent(d.withdrawnAt, c.now);
       if (op === 'update') {
         return (isMember && r.by === c.uid && val(r, 'withdrawnBy', null) == null
-                && markOk(d) && d.kind === r.kind && get(incidentPath)?.status === 'active')
+                && markOk(d) && d.kind === r.kind && d.at === r.at && get(incidentPath)?.status === 'active')
           || (isMember && (r.by === c.uid || isCommand) && withdrawOk() && get(incidentPath)?.status === 'active');
       }
       // Never while the incident runs; deleting the squad ends it first.
