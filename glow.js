@@ -14,7 +14,11 @@
    lifting over warm ground, lying low over cold ground. It is drawn at the
    map's own terrain exaggeration so it sits on the hills as they are shown.
 
-   One Mapbox custom layer. No three.js: two small shaders and a buffer.
+   The same layer also draws the SCENT REACH (reach.js): the ground the
+   dog's nose could have smelled from where it walked, as two flat bands on
+   the ground under the wind and the scent.
+
+   One Mapbox custom layer. No three.js: a few small shaders and buffers.
    ───────────────────────────────────────────────────────────────────── */
 
 const CIRC = 40075016.686;                        // metres round the equator
@@ -101,6 +105,62 @@ void main(){
   o = vec4(uCol * a, a);
 }`;
 
+/* Scent reach: the ground a dog's nose could have smelled (reach.js). Each piece is a strip of ground lying flat, from
+   one point to the next, as wide and as strong as the reach is at each end. Pieces are not added together: the strongest
+   one at each spot is kept, because standing in reach twice does not make ground more smelled than standing in it once. */
+const REACH_VS = `#version 300 es
+in vec2 aC;                   // which corner: x 0 at the first end, 1 at the second; y -1 / +1 across
+in vec4 iA;                   // the first end: east, north, up (metres from the origin) and how wide the reach is there
+in vec4 iB;                   // the second end
+in vec2 iW;                   // how strong at each end
+in vec2 iT;                   // how far the nose went (east, north) before the next piece: the strip is swept along it
+uniform mat4 uM;
+out vec2 vP;                  // where this spot is, metres along and across from the first end
+flat out vec3 vK;             // the piece's length, and its width at each end
+flat out vec2 vW;
+flat out vec2 vT;             // that step, along and across the piece
+void main(){
+  vec2 d = iB.xy - iA.xy; float L = length(d);
+  vec2 along = L > 1e-3 ? d / L : vec2(1.0, 0.0), across = vec2(-along.y, along.x);
+  vec2 T = vec2(dot(iT, along), dot(iT, across));
+  float R = max(iA.w, iB.w);
+  float s = mix(min(0.0, T.x) - R, L + max(0.0, T.x) + R, aC.x), c = mix(min(0.0, T.y) - R, max(0.0, T.y) + R, aC.y * 0.5 + 0.5);
+  vP = vec2(s, c); vK = vec3(L, iA.w, iB.w); vW = iW; vT = T;
+  gl_Position = uM * vec4(iA.xy + along * s + across * c, mix(iA.z, iB.z, aC.x), 1.0);
+}`;
+const REACH_FS = `#version 300 es
+precision highp float;
+uniform float uEdge;          // the share of the width at full strength before it fades to the rim
+uniform int uSweep;           // how many places along the nose's step the strip is taken at
+in vec2 vP; flat in vec3 vK; flat in vec2 vW; flat in vec2 vT; out vec4 o;
+float strip(vec2 p){
+  float h = vK.x > 1e-3 ? clamp(p.x / vK.x, 0.0, 1.0) : 0.0;
+  float q = length(p - vec2(h * vK.x, 0.0)) / mix(vK.y, vK.z, h);
+  return mix(vW.x, vW.y, h) * (1.0 - smoothstep(uEdge, 1.0, q));
+}
+void main(){
+  float v = 0.0;
+  for (int k = 0; k < uSweep; k++) v = max(v, strip(vP - vT * (uSweep > 1 ? float(k) / float(uSweep - 1) : 0.0)));
+  if (v <= 0.0) discard;
+  o = vec4(v);
+}`;
+/* Then the two bands: a light wash where it possibly reached, a stronger one where it likely did, a fine line at each edge. */
+const BAND_FS = `#version 300 es
+precision highp float;
+uniform sampler2D uT;
+uniform vec2 uCut;            // possible, likely
+uniform vec3 uCol;
+in vec2 vUv; out vec4 o;
+void main(){
+  float v = texture(uT, vUv).r;
+  if (v < uCut.x * 0.5) discard;
+  float g = max(fwidth(v), 0.004);
+  float poss = smoothstep(uCut.x - g, uCut.x + g, v), likely = smoothstep(uCut.y - g, uCut.y + g, v);
+  float rim = max(0.6 * (1.0 - smoothstep(0.0, 1.5 * g, abs(v - uCut.x))), 0.9 * (1.0 - smoothstep(0.0, 1.5 * g, abs(v - uCut.y))));
+  float a = max(0.17 * poss + 0.19 * likely, rim);
+  o = vec4(uCol * a, a);
+}`;
+
 /* How high above the ground a parcel is drawn, metres. ILLUSTRATIVE: see the top of this file.
    d = how far it has drifted from where it left the ground, r = the parcel's own fixed number 0..1. */
 export function parcelHeight(d, r, st) {
@@ -116,6 +176,10 @@ export function makeScentGlow(map) {
   let wind = null, wvao = null, wbuf = null, wn = 0, wdata = new Float32Array(0), wdirty = false, wcol = [0.86, 0.91, 1.0], wz = 0;
   const ground = new Map();                                 // ground heights already asked for, on an 11 m grid
   let groundEx = null;
+  /* the scent reach: its pieces as given, as packed for the graphics card, and the picture they are gathered into */
+  let reach = null, band = null, rvao = null, rbuf = null, bvao = null, rfbo = null, rtex = null, rw = 0, rh = 0;
+  let rpieces = null, rdata = new Float32Array(0), rn = 0, rshow = 0, rpackedAt = 0, rorigin = null, rdirty = false;
+  let rcut = [0.2, 0.5], redge = 0.55, rsweep = 6, rcol = [0.20, 0.92, 0.86];   // turquoise: cool against the warm scent, and it shows on grass
 
   const program = (vs, fs) => {
     const mk = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s)); return s; };
@@ -148,6 +212,36 @@ export function makeScentGlow(map) {
     return v;
   }
 
+  function reachTarget(w, h) {
+    if (rfbo && w === rw && h === rh) return;
+    rw = w; rh = h;
+    if (!rtex) { rtex = gl.createTexture(); rfbo = gl.createFramebuffer(); }
+    gl.bindTexture(gl.TEXTURE_2D, rtex);
+    if (wide) gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, w, h, 0, gl.RGBA, gl.HALF_FLOAT, null);
+    else gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    for (const [k, v] of [[gl.TEXTURE_MIN_FILTER, gl.LINEAR], [gl.TEXTURE_MAG_FILTER, gl.LINEAR], [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE]]) gl.texParameteri(gl.TEXTURE_2D, k, v);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, rfbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, rtex, 0);
+  }
+  /* The reach's pieces, in metres from the origin and sitting on the ground as the map draws it. Done again every few
+     seconds while it is on screen, because the ground under it sharpens as the map loads (see groundAt). */
+  function packReach(now) {
+    const ex = (map.getTerrain && map.getTerrain() && Number(map.getTerrain().exaggeration)) || 1;
+    if (ex !== groundEx) { ground.clear(); groundEx = ex; }
+    const n = rpieces.length;
+    if (rdata.length < n * 12) rdata = new Float32Array(n * 12);
+    const kk = CIRC * Math.cos(origin.lat * Math.PI / 180), ox = mercX(origin.lon), oy = mercY(origin.lat), lift = 0.3 * ex;
+    for (let i = 0; i < n; i++) {
+      const a = rpieces[i].a, b = rpieces[i].b, step = rpieces[i].step, o = i * 12;
+      rdata[o] = (mercX(a.lon) - ox) * kk; rdata[o + 1] = -(mercY(a.lat) - oy) * kk; rdata[o + 2] = groundAt(a.lat, a.lon, now) + lift; rdata[o + 3] = a.r;
+      rdata[o + 4] = (mercX(b.lon) - ox) * kk; rdata[o + 5] = -(mercY(b.lat) - oy) * kk; rdata[o + 6] = groundAt(b.lat, b.lon, now) + lift; rdata[o + 7] = b.r;
+      rdata[o + 8] = a.w; rdata[o + 9] = b.w;
+      rdata[o + 10] = step ? step.lon / 360 * kk : 0; rdata[o + 11] = step ? -(mercY(a.lat + step.lat) - mercY(a.lat)) * kk : 0;
+    }
+    rn = n; rpackedAt = now; rorigin = origin; rdirty = false;
+    gl.bindBuffer(gl.ARRAY_BUFFER, rbuf); gl.bufferData(gl.ARRAY_BUFFER, rdata.subarray(0, n * 12), gl.DYNAMIC_DRAW);
+  }
+
   function localMatrix(m) {
     const k = 1 / (CIRC * Math.cos(origin.lat * Math.PI / 180)), o = [mercX(origin.lon), mercY(origin.lat)], M = new Float32Array(16);
     for (let r = 0; r < 4; r++) {
@@ -159,7 +253,7 @@ export function makeScentGlow(map) {
   const layer = {
     id: 'scent-engine-glow', type: 'custom', renderingMode: '3d',
     onAdd(_map, context) {
-      gl = context; fbo = null; tex = null; fw = fh = 0;
+      gl = context; fbo = null; tex = null; fw = fh = 0; rfbo = null; rtex = null; rw = rh = 0; rn = 0; rdirty = true;
       try {
         if (typeof WebGL2RenderingContext === 'undefined' || !(gl instanceof WebGL2RenderingContext)) throw new Error('needs WebGL 2');
         wide = !!(gl.getExtension('EXT_color_buffer_float') || gl.getExtension('EXT_color_buffer_half_float'));
@@ -180,6 +274,14 @@ export function makeScentGlow(map) {
         const aC = gl.getAttribLocation(wind, 'aC'); gl.enableVertexAttribArray(aC); gl.vertexAttribPointer(aC, 2, gl.FLOAT, false, 0, 0);
         wbuf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, wbuf);
         [['iA', 0], ['iB', 12], ['iT', 24]].forEach(([name, off]) => { const loc = gl.getAttribLocation(wind, name); gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 3, gl.FLOAT, false, 36, off); gl.vertexAttribDivisor(loc, 1); });
+        /* the scent reach: one strip of four corners for every piece, and a picture-wide sheet to band it */
+        reach = program(REACH_VS, REACH_FS); rvao = gl.createVertexArray(); gl.bindVertexArray(rvao);
+        const rc = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, rc); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, -1, 0, 1, 1, -1, 1, 1]), gl.STATIC_DRAW);
+        const rC = gl.getAttribLocation(reach, 'aC'); gl.enableVertexAttribArray(rC); gl.vertexAttribPointer(rC, 2, gl.FLOAT, false, 0, 0);
+        rbuf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, rbuf);
+        [['iA', 4, 0], ['iB', 4, 16], ['iW', 2, 32], ['iT', 2, 40]].forEach(([name, size, off]) => { const loc = gl.getAttribLocation(reach, name); gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, size, gl.FLOAT, false, 48, off); gl.vertexAttribDivisor(loc, 1); });
+        band = program(QUAD_VS, BAND_FS); bvao = gl.createVertexArray(); gl.bindVertexArray(bvao); gl.bindBuffer(gl.ARRAY_BUFFER, qbuf);
+        const bP = gl.getAttribLocation(band, 'aP'); gl.enableVertexAttribArray(bP); gl.vertexAttribPointer(bP, 2, gl.FLOAT, false, 0, 0);
         gl.bindVertexArray(null);
         ok = true; dirty = true; wdirty = true;
       } catch (err) { ok = false; console.warn('scent glow unavailable, falling back to specks:', err && err.message); }
@@ -187,15 +289,33 @@ export function makeScentGlow(map) {
     onRemove() { gl = null; },
     /* First, every parcel is added into a picture of its own, at half size. */
     prerender(_gl, matrix) {
-      if (!ok || !gl || !shown || !count || !origin) return;
+      if (!ok || !gl || !origin) return;
+      const plumeOn = shown && count > 0, reachOn = rshow > 0 && !!rpieces && rpieces.length > 0;
+      if (!plumeOn && !reachOn) return;
       const w = Math.max(2, gl.drawingBufferWidth >> 1), h = Math.max(2, gl.drawingBufferHeight >> 1);
-      target(w, h);
       /* The map works in numbers too large for the graphics card to hold a parcel's place exactly, so parcels are kept in metres
          from a nearby origin and that shift is folded into the map's own matrix here, at full precision. */
       const M = localMatrix(matrix);
-      gl.bindFramebuffer(gl.FRAMEBUFFER, fbo); gl.viewport(0, 0, w, h);
       gl.disable(gl.DEPTH_TEST); gl.disable(gl.STENCIL_TEST); gl.disable(gl.CULL_FACE); gl.disable(gl.SCISSOR_TEST);
-      gl.colorMask(true, true, true, true); gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT);
+      gl.colorMask(true, true, true, true); gl.clearColor(0, 0, 0, 0);
+      if (reachOn) {                                         // the reach into a picture of its own, the strongest piece winning at each spot
+        const now = performance.now();
+        reachTarget(w, h);
+        gl.bindVertexArray(rvao);
+        if (rdirty || rorigin !== origin || now - rpackedAt > 2500) packReach(now);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, rfbo); gl.viewport(0, 0, w, h); gl.clear(gl.COLOR_BUFFER_BIT);
+        gl.enable(gl.BLEND); gl.blendEquation(gl.MAX); gl.blendFunc(gl.ONE, gl.ONE);
+        gl.useProgram(reach);
+        gl.uniformMatrix4fv(gl.getUniformLocation(reach, 'uM'), false, M);
+        gl.uniform1f(gl.getUniformLocation(reach, 'uEdge'), redge);
+        gl.uniform1i(gl.getUniformLocation(reach, 'uSweep'), rsweep);
+        gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, Math.min(rshow, rn));
+        gl.blendEquation(gl.FUNC_ADD); gl.bindVertexArray(null);
+      }
+      if (!plumeOn) return;
+      target(w, h);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fbo); gl.viewport(0, 0, w, h);
+      gl.clear(gl.COLOR_BUFFER_BIT);
       gl.enable(gl.BLEND); gl.blendEquation(gl.FUNC_ADD); gl.blendFunc(gl.ONE, gl.ONE);
       gl.useProgram(sprite); gl.bindVertexArray(vao);
       if (dirty) { gl.bindBuffer(gl.ARRAY_BUFFER, buf); gl.bufferData(gl.ARRAY_BUFFER, data.subarray(0, count * 7), gl.DYNAMIC_DRAW); dirty = false; }
@@ -207,9 +327,19 @@ export function makeScentGlow(map) {
     },
     /* Then that picture is turned into light and laid over the map. */
     render(_gl, matrix) {
-      if (!ok || !gl || !shown || !origin) return;
+      if (!ok || !gl || !origin) return;
       gl.disable(gl.DEPTH_TEST); gl.disable(gl.STENCIL_TEST); gl.disable(gl.CULL_FACE);
       gl.enable(gl.BLEND); gl.blendEquation(gl.FUNC_ADD); gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+      if (rshow > 0 && rn > 0 && rtex) {                     // the reach lies on the ground, under the wind and the scent
+        gl.useProgram(band); gl.bindVertexArray(bvao);
+        gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, rtex);
+        gl.uniform1i(gl.getUniformLocation(band, 'uT'), 0);
+        gl.uniform2f(gl.getUniformLocation(band, 'uCut'), rcut[0], rcut[1]);
+        gl.uniform3f(gl.getUniformLocation(band, 'uCol'), rcol[0], rcol[1], rcol[2]);
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+        gl.bindVertexArray(null);
+      }
+      if (!shown) return;
       if (wn) {                                              // the wind first, so the scent glows over it
         const M = localMatrix(matrix), c = map.getCenter(), kk = CIRC * Math.cos(origin.lat * Math.PI / 180);
         const cx = (mercX(c.lng) - mercX(origin.lon)) * kk, cy = -(mercY(c.lat) - mercY(origin.lat)) * kk;
@@ -255,7 +385,7 @@ export function makeScentGlow(map) {
     count = n; dirty = true; map.triggerRepaint();
   }
   /* for checking from the console on a development machine only */
-  if (typeof location !== 'undefined' && /^(localhost|127\.0\.0\.1)$/.test(location.hostname)) globalThis.__scentGlow = { map, peek: () => ({ count, origin, sample: Array.from(data.subarray(0, 14)), ground: ground.size, ex: groundEx, wide, cap, terrain: map.getTerrain && map.getTerrain(), q: origin && map.queryTerrainElevation && map.queryTerrainElevation({ lng: origin.lon, lat: origin.lat }), pitch: map.getPitch(), zoom: map.getZoom(), proj: map.getProjection && map.getProjection().name }) };
+  if (typeof location !== 'undefined' && /^(localhost|127\.0\.0\.1)$/.test(location.hostname)) globalThis.__scentGlow = { map, peek: () => ({ count, origin, reach: [rn, rshow, rpieces ? rpieces.length : 0], sample: Array.from(data.subarray(0, 14)), ground: ground.size, ex: groundEx, wide, cap, terrain: map.getTerrain && map.getTerrain(), q: origin && map.queryTerrainElevation && map.queryTerrainElevation({ lng: origin.lon, lat: origin.lat }), pitch: map.getPitch(), zoom: map.getZoom(), proj: map.getProjection && map.getProjection().name }) };
   /* The wind strokes. streaks: each has where it is now (lat, lon), the points it has been through (tail: [lon, lat] pairs,
      oldest first) and a strength a (0..1). */
   function setWind(streaks) {
@@ -285,6 +415,20 @@ export function makeScentGlow(map) {
     clearWind() { if (wn) { wn = 0; map.triggerRepaint(); } },
     setWindColour(hex) { const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex || ''); if (m) { wcol = [parseInt(m[1], 16) / 255, parseInt(m[2], 16) / 255, parseInt(m[3], 16) / 255]; map.triggerRepaint(); } },
     clear() { if (count) { count = 0; map.triggerRepaint(); } },
+    /* The scent reach (reach.js). pieces: strips of ground in the order the dog walked them, each { a, b } with lat, lon, r
+       (metres wide) and w (0..1) at each end. cut: where "possible" and "likely" begin. Nothing is drawn until showReach. */
+    setReach(pieces, cut) {
+      if (!ok) return;
+      rpieces = pieces && pieces.length ? pieces : null; rdirty = true; rn = 0;
+      if (cut) { rcut = [cut.possible, cut.likely]; redge = cut.edge; rsweep = Math.max(1, cut.sweep | 0); }
+      if (rpieces && !origin) origin = { lat: rpieces[0].a.lat, lon: rpieces[0].a.lon };
+      /* asked again a few times as the ground under it loads, in case nothing else redraws the map meanwhile */
+      if (rpieces) for (const ms of [900, 2700, 5600]) setTimeout(() => { if (rpieces && rshow) map.triggerRepaint(); }, ms);
+      map.triggerRepaint();
+    },
+    /** Draw the first n pieces: the reach as far as the dog had got. */
+    showReach(n) { n = Math.max(0, n | 0); if (n !== rshow) { rshow = n; map.triggerRepaint(); } },
+    clearReach() { rpieces = null; rn = 0; if (rshow) { rshow = 0; map.triggerRepaint(); } },
     setShown(v) { shown = !!v; map.triggerRepaint(); },
     get ok() { return ok; },
     get count() { return count; },
