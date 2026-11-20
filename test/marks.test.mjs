@@ -212,6 +212,8 @@ function marking({ session, screen = 'scrReplay' } = {}) {
     placeMark, addMark, removeMark, callOwed, callMovedTo, removable, markingSave, fmtDur,
     /* Save video shares the Edit marks row, and is never offered while marking (clip.test). */
     clipOffered,
+    /* So does Scent reach, which is the map's to offer (reach.test covers what it works out); not offered here. */
+    reachOffered: () => false,
     /* So does Import the dog's GPS track, on a run of this phone's own with no track yet (dogtrack.test). */
     dogTrackOf, dogTrackable: (s) => !!s && !sb.rec.on && ownRun(s) && s.data?.track?.length > 1,
     keepPatch: (s, p) => sb.saveSession(s, p), foldIntoPending: () => null,

@@ -219,6 +219,8 @@ await t('the replay’s clock moves the panel with the plume', () => {
     feltPanel, windWords: () => null, imp: () => false, noLineYet,
     /* A run with no dog's GPS track draws the phone's as the dog's (dogtrack.test). */
     dogTrackOf, dogTrackUntil, lineOf: () => ({}),
+    /* The scent reach is painted from here too, when it is switched on (reach.test covers what it works out). */
+    paintReach() {},
   };
   vm.createContext(sb);
   vm.runInContext([decl('function marksOf('), decl('function paintReplay(')].join('\n'), sb);

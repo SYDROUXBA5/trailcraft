@@ -1384,6 +1384,7 @@ t('the run HUD and the replay caption give a drawn line no age either', () => {
     $: (id) => (id === 'repCaption' ? cap : { textContent: '', value: '', setAttribute() {} }),
     feltPanel: () => null, windWords: () => null, imp: () => false,   // no wind felt on the ground
     noLineYet, dogTrackOf: () => null, dogTrackUntil: () => [], lineOf: () => ({}),   // no dog's GPS track (dogtrack.test)
+    paintReach() {},                                                                // scent reach switched off (reach.test)
   };
   vm.createContext(sb);
   vm.runInContext(js.slice(js.indexOf('\nconst ageUnknown = '), js.indexOf(';\n', js.indexOf('\nconst ageUnknown = ')) + 2), sb);

@@ -1118,6 +1118,20 @@
   <div class="hud-pill" id="repHud"><span id="repHudText">Replay</span></div>
   <div class="glass-bottom">
     <p class="glass-caption" id="repCaption"></p>
+    <!-- Scent reach: the ground the dog's nose could have had scent from (reach.js).
+         Its switch, and while it is on what the two shades mean and how much of the trail fell in each. -->
+    <div class="reach-key" id="repReach" hidden>
+      <div class="rk-row">
+        <button type="button" class="rk-toggle" id="repReachBtn" aria-pressed="false">Scent reach</button>
+        <span class="rk-row" id="repReachKey" hidden>
+          <span class="rk"><i class="rk-sw likely" aria-hidden="true"></i>Likely</span>
+          <span class="rk"><i class="rk-sw possible" aria-hidden="true"></i>Possibly</span>
+          <button type="button" class="rk-why" id="repReachWhy" aria-label="What is scent reach?" aria-expanded="false" aria-controls="repReachNote">?</button>
+        </span>
+      </div>
+      <p class="rk-say" id="repReachSay" role="status"></p>
+      <p class="rk-note" id="repReachNote" hidden></p>
+    </div>
     <div class="rep-row">
       <button class="rep-play" id="repPlay" aria-label="Play">&#9654;</button>
       <input type="range" id="repScrub" min="0" max="1000" value="1000" step="1" aria-label="Run time">

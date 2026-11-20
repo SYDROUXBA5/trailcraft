@@ -376,7 +376,7 @@ await t('every reader of a run’s wind reads the one the handler felt: plume, c
   const rp = { replay: { s: trailRun({ windFelt: wf }), at: RUN + 60e3, from: RUN, to: RUN + 190e3 },
     setDogTrack() {}, setSrc() {}, pointsOf: () => ({}), plume: { sim: null, bandWalls: 0 }, stability, windAt,
     followWeather: (w) => drawn.followed.push(w.wind_direction), scentField: (tr, w) => { drawn.field.push(w.wind_direction); return []; },
-    plumePolygon: () => ({}), paintBandWalls() {}, EMPTY: {}, trailOf: (s) => s.data.trail, signedOffsets: () => [],
+    plumePolygon: () => ({}), paintBandWalls() {}, EMPTY: {}, trailOf: (s) => s.data.trail, signedOffsets: () => [], paintReach() {},
     targetById, fmtM: String, fmtDur, unwalkedPlan, ageUnknown: () => '', bandWallNote: () => '',
     windWords, feltPanel, imp: () => false, noLineYet, dogTrackOf, dogTrackUntil, lineOf: () => ({}),
     $: () => ({ textContent: '', style: {}, classList: { toggle() {} }, setAttribute() {} }), document: { activeElement: null } };

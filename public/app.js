@@ -65,11 +65,12 @@ import { MOTIONS, motionChoice, motionOn, COAT_IDS, teamLook, makeTeam, putTeam,
 import { createTeam, COATS, JACKETS, HATS, MOMENTS, drawAmbient, landOfLevel } from './pixel-team.js';
 import { mountBoard } from './board.js';
 import { makeScentGlow } from './glow.js';
+import { REACH, reachOf, reachTimes, reachCount, strideAlong } from './reach.js';
 import { searchWords, logRows, recentRuns, runAt, midnight, facets, filterRows, groupRows, foldersOf, inFolder, folderList, folderNamed,
          cleanFolderName, putMany, toggleFolder, renameIn, dropFrom, mergeFolders, emptyHeld, folderPatch } from './log.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-11-19b';
+const BUILD = '2026-11-19c';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true, plumeLook: 'glow',
@@ -3390,9 +3391,77 @@ function closeReplay() {
   closeClip();                 // a video being made of it stops with it
   if (replay.mark) endMarking();
   replay.s = null;
+  scentGlow?.clearReach(); reachMap.key = ''; $('repReach').hidden = true;
   plume.clock = null;          // hand the plume back to the real clock
   plumeStop();
   clearMap();
+}
+
+/* ── Scent reach ──────────────────────────────────────────────────────
+   The ground the dog's nose could have had scent from, given where it
+   walked and the wind it walked in (reach.js), drawn under the scent in a
+   replay. Off until asked for, and never while a run is being marked:
+   before its answer is seen, how much of a hidden trail was in reach would
+   give the trail away.
+
+   Called "reach", not "coverage": coverage is already the share of the
+   trail the dog's track ran along (levels.js), which is another measure. */
+const reachMap = { on: false, key: '', T: null, pieces: null, times: null, what: '', dog: false };
+/** It is drawn by the glow layer, so it is offered wherever that layer can run. */
+const reachOffered = (s) => !!s && !!scentGlow?.ok;
+
+function reachBuild(s) {
+  const dog = dogTrackOf(s.data), line = dog || s.data.track;
+  const key = `${s.id}|${dog ? 'dog' : 'phone'}|${line.length}|${line[line.length - 1].t}|${PV.airborne}|${PV.nose}`;
+  if (reachMap.key === key && reachMap.T === plume.T) return;
+  /* The wind as it was when the dog was at each place, looked up once a minute of the run. */
+  const winds = new Map();
+  const windFor = (t) => {
+    const k = Math.round(t / 60000);
+    if (!winds.has(k)) winds.set(k, windAt(s, t).wx || null);
+    return winds.get(k);
+  };
+  const pieces = reachOf(plume.T, line, windFor);
+  const trail = trailOf(s), hides = s.data.hides;
+  const what = trail?.length > 1 ? 'trail' : hides?.length ? 'hides' : '';
+  Object.assign(reachMap, { key, T: plume.T, pieces, what, dog: !!dog,
+    times: what === 'trail' ? reachTimes(pieces, strideAlong(trail)) : what === 'hides' ? reachTimes(pieces, hides) : null });
+  scentGlow.setReach(pieces, REACH);
+  $('repReachNote').textContent = 'An estimate, not a measurement. From each place the dog was, the app works back against the wind '
+    + 'to the ground whose scent could still have been in the air when it got to the nose. It uses the same wind and scent model '
+    + 'as the plume. It knows nothing of walls, hedges or trees, and where “likely” and “possibly” begin are chosen cut-offs, not measured ones. '
+    + (dog ? 'Worked out from the dog’s own GPS track.'
+           : 'Worked out from the phone’s track, so the handler’s position stands in for the dog’s nose.');
+}
+
+/** How much of what was laid had come within reach by `at`, in words. */
+function reachWords(at) {
+  if (!reachMap.times?.length) return '';
+  const c = reachCount(reachMap.times, at), maybe = c.possible - c.likely, out = c.of - c.possible;
+  if (reachMap.what === 'hides') return `Hides: ${c.likely} likely in reach · ${maybe} possibly · ${out} out of reach`;
+  const pc = (n) => Math.round(100 * n / c.of), a = pc(c.likely), b = Math.min(100 - a, pc(maybe));
+  return `Trail: ${a}% likely in reach · ${b}% possibly · ${100 - a - b}% out of reach`;
+}
+
+function paintReach(s, at) {
+  const able = !!scentGlow?.ok, show = reachMap.on && able && !replay.mark;
+  $('repReachBtn').setAttribute('aria-pressed', String(reachMap.on && able));
+  $('repReachKey').hidden = !show;
+  if (!show) { $('repReachSay').textContent = ''; scentGlow?.showReach(0); return; }
+  reachBuild(s);
+  /* Only the pieces the dog had walked by then: they are kept in the order it walked them. */
+  const P = reachMap.pieces;
+  let lo = 0, hi = P.length;
+  while (lo < hi) { const mid = (lo + hi) >> 1; if (P[mid].t <= at) lo = mid + 1; else hi = mid; }
+  scentGlow.showReach(lo);
+  $('repReachSay').textContent = reachWords(at);
+}
+
+function toggleReach() {
+  if (!scentGlow?.ok) return toast('Scent reach needs a newer browser on this device');
+  reachMap.on = !reachMap.on;
+  if (!reachMap.on) { $('repReachNote').hidden = true; $('repReachWhy').setAttribute('aria-expanded', 'false'); }
+  paintReplay();
 }
 
 /** Everything as it stood at `replay.at`. */
@@ -3451,6 +3520,7 @@ function paintReplay() {
     + (plume.bandWalls ? '.' + bandWallNote() : '');
   /* Marking before the answer is seen: nothing about the trail to say yet. */
   if (replay.mark?.hidden) $('repCaption').textContent = `Pause where it happened, then tap what the dog did${felt ? ` · ${felt}` : ''}`;
+  paintReach(s, at);
   const f = replay.to > replay.from ? (at - replay.from) / (replay.to - replay.from) : 1;
   const sc = $('repScrub');
   if (document.activeElement !== sc) sc.value = String(Math.round(f * 1000));
@@ -3922,6 +3992,8 @@ function paintMarkTools() {
   $('repEdit').hidden = !s || !marksEditable(sessionById(s.id) ?? s);
   $('repClip').hidden = !clipOffered({ run: s?.data?.track?.length > 1, marking: !!m });
   $('repEditRow').hidden = !!m || !s || ($('repEdit').hidden && $('repClip').hidden);
+  /* Scent reach has a line of its own under the caption: its switch, and what its shades mean. Never while marking. */
+  $('repReach').hidden = !!m || !reachOffered(s);
   /* The dog's own GPS track, from the replay too: where the handler sees
      how far the estimate of the dog was from where it really went. Taken
      off from the result card, where it says what the run is graded on. */
@@ -11158,6 +11230,11 @@ function wire() {
     if (b) removeMarkAt(Number(b.dataset.mark));
   });
   $('repWind').addEventListener('click', openMarkWind);
+  $('repReachBtn').addEventListener('click', toggleReach);
+  $('repReachWhy').addEventListener('click', () => {
+    const note = $('repReachNote'); note.hidden = !note.hidden;
+    $('repReachWhy').setAttribute('aria-expanded', String(!note.hidden));
+  });
   $('repSee').addEventListener('click', seeResult);
   $('repCancel').addEventListener('click', cancelMarking);
   $('repPlay').addEventListener('click', () => (replay.playing ? replayPause() : replayPlay()));
