@@ -803,3 +803,21 @@ export function stepPoints(pts, strideM = 3) {
   }
   return out;
 }
+
+/* ── Framing a box of ground from above (app.js, frameBounds) ── */
+/** Metres from the camera to the middle of the screen, as Mapbox counts them:
+    one and a half screens of ground through the map's stock lens (36.87°), on
+    a world that is one 512-pixel tile at zoom 0. */
+export const cameraReach = (zoom, lat, viewH) => 1.5 * viewH * 78271.517 * Math.cos(rad(lat)) / 2 ** zoom;
+/** The zoom that stands the camera as far from the GROUND as `zoom` stands it
+    from the SEA. Mapbox 3.14 frames a box by the camera's height above the
+    sea, and the map then applies that zoom from the ground, so a box `alt`
+    metres up (as drawn, exaggeration included) comes out too small by its own
+    height. This takes the height back off. `lat` is where the map was centred
+    when the framing was worked out, which is the latitude Mapbox measured the
+    height at. */
+export function zoomOverGround(zoom, alt, lat, viewH) {
+  const far = cameraReach(zoom, lat, viewH);
+  if (!Number.isFinite(alt) || !Number.isFinite(far) || far - alt < 1) return zoom;
+  return zoom + Math.log2(far / (far - alt));
+}
