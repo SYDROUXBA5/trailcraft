@@ -9,7 +9,7 @@
 import {
   pathLen, cardinal, dist, dwellFold, bearing, project, fmtDist, fmtShort, fmtDur, fmtSpeed, fmtTemp, unitShort, fmtWeight, kgToShown, shownToKg, fmtCoord, scentField, plumePolygon, densify, timestamps, signedOffsets, meanSigned, sideOfDrift, sideAgreement, lineCorrect, departure, progressAlong, splitLine, smoothBearing, medianAbs, sideShares, approachToWind,
 } from './geo.js';
-import { stepPoints, contamTimed, trailFrom, walkedOfTrail, gpsTrouble, forecastNote } from './geo.js';
+import { stepPoints, contamTimed, trailFrom, walkedOfTrail, gpsTrouble, forecastNote, cameraReach, zoomOverGround } from './geo.js';
 import { packDraft, unpackDraft, draftAlive, draftStats, DRAFT_MAX_AGE } from './draft.js';
 import { handlerStats, teachesDrift, runAgeMin } from './store.js';
 import { plumePalette, stepPalette, windPalette, trackPalette, COLOUR_PRESETS, isHex, mix, hexToRgb } from './colours.js';
@@ -70,7 +70,7 @@ import { searchWords, logRows, recentRuns, runAt, midnight, facets, filterRows, 
          cleanFolderName, putMany, toggleFolder, renameIn, dropFrom, mergeFolders, emptyHeld, folderPatch } from './log.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-11-19c';
+const BUILD = '2026-11-19d';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true, plumeLook: 'glow',
@@ -1260,7 +1260,80 @@ function fitTo(...groups) {
   if (pts.length === 1) return map.easeTo({ center: [pts[0].lon, pts[0].lat], zoom: 16 });
   const b = new GL.LngLatBounds();
   pts.forEach(p => b.extend([p.lon, p.lat]));
-  map.fitBounds(b, { padding: 80, pitch: 45, duration: 700 });
+  frameBounds(b, { padding: 80, pitch: 45, duration: 700 });
+}
+/* Framing a box of ground, in place of the map's own fitBounds. Over hills
+   that gets two things wrong (Mapbox GL 3.14, the ground drawn at 2.4 times
+   its height):
+   · It reads the ground's height as the camera sets off. A place the map has
+     not shown yet has only a rough height then, the real one arrives a moment
+     later, and the map does not look again. A replay opened from the list
+     250 m up sat against the top of the screen; 1,000 m up it was off it.
+   · It works the zoom out from the camera's height above the sea, and the
+     map applies it from the ground: the higher the place, the smaller it was
+     drawn, a third smaller at 250 m.
+   So the ground's height comes back off the zoom (zoomOverGround), and for a
+   few seconds afterwards this looks again: if the camera is not standing
+   where its zoom says, over the ground that has arrived since, the box is
+   framed once more. Moving the map, by hand or from the app, ends the watch,
+   and so does the next framing. */
+let framing = 0;
+function frameBounds(b, { padding, pitch, duration }) {
+  const ticket = ++framing, began = performance.now();
+  const relief = GL === mapboxgl && !!map.getSource('dem');
+  const corners = [b.getNorthWest(), b.getNorthEast(), b.getSouthEast(), b.getSouthWest()];
+  const viewH = () => map.getContainer().clientHeight;
+  const groundAt = (at) => (relief && map.queryTerrainElevation(at)) || 0;
+  const wanted = (angle) => {
+    const cam = map.cameraForBounds(b, { padding, ...angle });
+    if (!cam || !relief) return cam;
+    const hs = corners.map(groundAt);
+    const zoom = zoomOverGround(cam.zoom, (Math.min(...hs) + Math.max(...hs)) / 2, map.getCenter().lat, viewH());
+    return { ...cam, zoom: Math.min(zoom, map.getMaxZoom()) };
+  };
+  const first = wanted({ pitch });
+  if (!first) return;
+  /* Whose move is it? The ones made here are marked as they are made. Any
+     other is a finger or the app sending the camera somewhere: if it ends
+     anywhere else, or closer or further, the map is theirs and the watch is
+     over. A tilt or a turn alone is still this box, seen from another side.
+     (The map lifting its own camera clear of a hill that has just arrived is
+     no move at all: it sends no word, and it is one of the things put right.) */
+  let mine = false, away = null, again = 0;
+  const move = (how) => { mine = true; try { how(); } finally { mine = false; } };
+  move(() => map.flyTo({ ...first, padding, duration }));
+  if (!relief) return;
+  const apart = (a, c) => dist({ lat: a.lat, lon: a.lng }, { lat: c.lat, lon: c.lng });
+  const onStart = () => { if (!mine && !away) away = { at: map.getCenter(), zoom: map.getZoom() }; };
+  const onEnd = () => {
+    if (!away) return;
+    if (apart(map.getCenter(), away.at) > 1 || Math.abs(map.getZoom() - away.zoom) > 0.01) return done();
+    away = null;
+  };
+  const done = () => { clearInterval(watch); map.off('movestart', onStart); map.off('moveend', onEnd); };
+  map.on('movestart', onStart);
+  map.on('moveend', onEnd);
+  const watch = setInterval(() => {
+    if (ticket !== framing || performance.now() - began > 20000) return done();
+    if (map.isMoving() || !map.isSourceLoaded('dem')) return;
+    const now = wanted({ pitch: map.getPitch(), bearing: map.getBearing() });
+    if (!now) return done();
+    const c = map.getCenter(), reach = cameraReach(map.getZoom(), c.lat, viewH());
+    const should = groundAt(c) + reach * Math.cos(map.getPitch() * Math.PI / 180);
+    const adrift = Math.abs(map.getFreeCameraOptions().position.toAltitude() - should);
+    /* Near enough is ten pixels on the screen: on a steep slope the map's own
+       reading of the ground under its centre wanders by a metre or two, and
+       it shifts its centre a few metres to match. */
+    const near = 10 * reach / (1.5 * viewH());             // ten pixels, in metres of ground
+    if (adrift < near && apart(c, now.center) < near && Math.abs(now.zoom - map.getZoom()) < 0.03) return;
+    if (++again > 6) return done();
+    /* A hair off the same centre first: the map reads the ground's height
+       again only when its centre moves. */
+    move(() => {
+      map.jumpTo({ center: [now.center.lng + 1e-7, now.center.lat] });
+      map.easeTo({ ...now, padding, duration: 350 });
+    });
+  }, 300);
 }
 /** The same, into the part of the map a tall sheet at the bottom leaves
     showing, flat, so every corner can be seen before anything is decided. */
@@ -1269,7 +1342,7 @@ function fitAboveSheet(pts, sheet) {
   const b = new GL.LngLatBounds();
   pts.forEach(p => b.extend([p.lon, p.lat]));
   const h = sheet?.offsetHeight || 320;
-  map.fitBounds(b, { padding: { top: 90, left: 40, right: 40, bottom: h + 30 }, pitch: 0, duration: 600 });
+  frameBounds(b, { padding: { top: 90, left: 40, right: 40, bottom: h + 30 }, pitch: 0, duration: 600 });
 }
 
 /* ── Weather (Open-Meteo, 15-minute series incl. soil temperature) ── */

@@ -831,4 +831,31 @@ t('stepPoints: a print every stride along the track, the bearing of travel on ea
   });
 }
 
+/* Framing a box of ground. The figures are the ones measured in the app on a
+   390 x 844 screen at 51.25 N: Mapbox answered zoom 14.83 for a box 609 m up
+   as drawn, and zoom 15.30 for the same box framed properly. */
+{
+  const { cameraReach, zoomOverGround } = await import('../public/geo.js');
+  t('cameraReach: halves with each zoom, shrinks towards the poles', () => {
+    near(cameraReach(15, 51.25, 844) / cameraReach(16, 51.25, 844), 2, 1e-9, 'one zoom');
+    near(cameraReach(15, 60, 844) / cameraReach(15, 0, 844), 0.5, 1e-9, 'cos 60');
+    near(cameraReach(14.83, 51.25, 844), 2130, 15, 'metres, as measured');
+  });
+  t('zoomOverGround: nothing to take off at sea level', () => {
+    assert.equal(zoomOverGround(15.3, 0, 51.25, 844), 15.3);
+  });
+  t('zoomOverGround: a box on a hill is framed as large as one by the sea', () => {
+    near(zoomOverGround(14.83, 609, 51.25, 844), 15.30, 0.03, 'Mendip, 254 m drawn at 2.4');
+    const z = zoomOverGround(14.83, 609, 51.25, 844);
+    near(cameraReach(z, 51.25, 844), cameraReach(14.83, 51.25, 844) - 609, 1e-6, 'its own height comes off the distance');
+  });
+  t('zoomOverGround: below the sea it backs off instead', () => {
+    assert.ok(zoomOverGround(15, -200, 36, 844) < 15);
+  });
+  t('zoomOverGround: heights that make no sense leave the zoom alone', () => {
+    assert.equal(zoomOverGround(15, NaN, 51, 844), 15);
+    assert.equal(zoomOverGround(15, 1e6, 51, 844), 15, 'ground above the camera');
+  });
+}
+
 console.log(`\n${pass} passed total\n`);

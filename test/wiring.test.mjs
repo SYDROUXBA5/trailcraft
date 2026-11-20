@@ -776,6 +776,12 @@ t('a replay shows the air as it was, and a search can be replayed', () => {
   assert.ok(hide > 0 && hide < ground.indexOf('s.data.trail[0]'), 'a search never reads a trail it does not have');
   assert.match(ground.slice(hide), /^[^}]*setSrc\('hides', pointsOf\(s\.data\.hides \|\| \[\]\)\);/, 'it shows the hides');
   assert.match(open, /fitTo\(s\.data\.trail \|\| s\.data\.hides \|\| \[\], track,/);
+  /* Over hills the map's own fitBounds leaves a run up the screen or off it
+     (frameBounds says why), so nothing in the app frames with it. */
+  assert.doesNotMatch(js.replace(/\/\*[\s\S]*?\*\//g, ''), /\.fitBounds\(/, 'frameBounds, not fitBounds');
+  assert.match(bodyOf('fitTo'), /frameBounds\(b, \{ padding: 80, pitch: 45, duration: 700 \}\)/);
+  assert.match(bodyOf('frameBounds'), /zoomOverGround\(/, 'the ground’s height comes off the zoom');
+  assert.match(bodyOf('frameBounds'), /isSourceLoaded\('dem'\)/, 'and it looks again once the heights have arrived');
   assert.ok(open.indexOf('replay.s = s;') > open.indexOf('drawReplayGround(s);'), 'nothing is left half open');
   assert.match(bodyOf('paintReplay'), /const laid = targetById\(s\.targetId\)\.kind === 'hide' \? 'Hides' : 'Trail';/);
   assert.match(bodyOf('showOnMap'),
