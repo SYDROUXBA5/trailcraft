@@ -835,7 +835,7 @@ t('stepPoints: a print every stride along the track, the bearing of travel on ea
    390 x 844 screen at 51.25 N: Mapbox answered zoom 14.83 for a box 609 m up
    as drawn, and zoom 15.30 for the same box framed properly. */
 {
-  const { cameraReach, zoomOverGround } = await import('../public/geo.js');
+  const { cameraReach, zoomOverGround, backForLift } = await import('../public/geo.js');
   t('cameraReach: halves with each zoom, shrinks towards the poles', () => {
     near(cameraReach(15, 51.25, 844) / cameraReach(16, 51.25, 844), 2, 1e-9, 'one zoom');
     near(cameraReach(15, 60, 844) / cameraReach(15, 0, 844), 0.5, 1e-9, 'cos 60');
@@ -851,6 +851,18 @@ t('stepPoints: a print every stride along the track, the bearing of travel on ea
   });
   t('zoomOverGround: below the sea it backs off instead', () => {
     assert.ok(zoomOverGround(15, -200, 36, 844) < 15);
+  });
+  t('backForLift: straight down, a pixel up is a pixel of ground back', () => {
+    const perPixel = cameraReach(15, 51.25, 844) / (1.5 * 844);
+    near(backForLift(100, 15, 51.25, 844, 0), 100 * perPixel, 1e-9, 'flat');
+    assert.equal(backForLift(0, 15, 51.25, 844, 45), 0);
+  });
+  t('backForLift: tilted, the ground ahead is foreshortened and further off', () => {
+    const perPixel = cameraReach(15, 51.25, 844) / (1.5 * 844);
+    /* 120 px up at 45 degrees on an 844 px screen: 120 * 1266 / (1266 cos 45 - 120 sin 45) = 187 px of ground. */
+    near(backForLift(120, 15, 51.25, 844, 45) / perPixel, 187.4, 0.5, 'more ground than pixels');
+    assert.ok(backForLift(-120, 15, 51.25, 844, 45) < 0, 'and forward to show it lower');
+    assert.equal(backForLift(120, 15, 51.25, 844, 86), null, 'nothing in front of a camera tilted to the horizon');
   });
   t('zoomOverGround: heights that make no sense leave the zoom alone', () => {
     assert.equal(zoomOverGround(15, NaN, 51, 844), 15);

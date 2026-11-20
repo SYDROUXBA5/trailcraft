@@ -775,7 +775,13 @@ t('a replay shows the air as it was, and a search can be replayed', () => {
   const hide = ground.indexOf("if (targetById(s.targetId).kind === 'hide') {");
   assert.ok(hide > 0 && hide < ground.indexOf('s.data.trail[0]'), 'a search never reads a trail it does not have');
   assert.match(ground.slice(hide), /^[^}]*setSrc\('hides', pointsOf\(s\.data\.hides \|\| \[\]\)\);/, 'it shows the hides');
-  assert.match(open, /fitTo\(s\.data\.trail \|\| s\.data\.hides \|\| \[\], track,/);
+  /* Framed into the map the replay's own sheet leaves showing, and only once
+     that sheet has been painted and has the height it keeps. */
+  assert.match(open, /fitOver\(\$\('scrReplay'\)\.querySelector\('\.glass-bottom'\), s\.data\.trail \|\| s\.data\.hides \|\| \[\], track,/);
+  assert.ok(open.indexOf('paintReplay();') > 0 && open.indexOf('paintReplay();') < open.indexOf('fitOver('), 'painted, then framed');
+  assert.match(bodyOf('fitOver'), /padding: \{ top: both, bottom: both, left: 44, right: 44 \}, lift: \(bottom - top\) \/ 2,/,
+    'room on one side is a lift: one-sided padding would stay on the map');
+  assert.match(bodyOf('frameBounds'), /backForLift\(lift, cam\.zoom, cam\.center\.lat, viewH\(\), cam\.pitch\)/);
   /* Over hills the map's own fitBounds leaves a run up the screen or off it
      (frameBounds says why), so nothing in the app frames with it. */
   assert.doesNotMatch(js.replace(/\/\*[\s\S]*?\*\//g, ''), /\.fitBounds\(/, 'frameBounds, not fitBounds');

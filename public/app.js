@@ -9,7 +9,7 @@
 import {
   pathLen, cardinal, dist, dwellFold, bearing, project, fmtDist, fmtShort, fmtDur, fmtSpeed, fmtTemp, unitShort, fmtWeight, kgToShown, shownToKg, fmtCoord, scentField, plumePolygon, densify, timestamps, signedOffsets, meanSigned, sideOfDrift, sideAgreement, lineCorrect, departure, progressAlong, splitLine, smoothBearing, medianAbs, sideShares, approachToWind,
 } from './geo.js';
-import { stepPoints, contamTimed, trailFrom, walkedOfTrail, gpsTrouble, forecastNote, cameraReach, zoomOverGround } from './geo.js';
+import { stepPoints, contamTimed, trailFrom, walkedOfTrail, gpsTrouble, forecastNote, cameraReach, zoomOverGround, backForLift } from './geo.js';
 import { packDraft, unpackDraft, draftAlive, draftStats, DRAFT_MAX_AGE } from './draft.js';
 import { handlerStats, teachesDrift, runAgeMin } from './store.js';
 import { plumePalette, stepPalette, windPalette, trackPalette, COLOUR_PRESETS, isHex, mix, hexToRgb } from './colours.js';
@@ -70,7 +70,7 @@ import { searchWords, logRows, recentRuns, runAt, midnight, facets, filterRows, 
          cleanFolderName, putMany, toggleFolder, renameIn, dropFrom, mergeFolders, emptyHeld, folderPatch } from './log.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-11-19d';
+const BUILD = '2026-11-20a';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true, plumeLook: 'glow',
@@ -1278,7 +1278,7 @@ function fitTo(...groups) {
    framed once more. Moving the map, by hand or from the app, ends the watch,
    and so does the next framing. */
 let framing = 0;
-function frameBounds(b, { padding, pitch, duration }) {
+function frameBounds(b, { padding, pitch, duration, lift = 0 }) {
   const ticket = ++framing, began = performance.now();
   const relief = GL === mapboxgl && !!map.getSource('dem');
   const corners = [b.getNorthWest(), b.getNorthEast(), b.getSouthEast(), b.getSouthWest()];
@@ -1286,10 +1286,19 @@ function frameBounds(b, { padding, pitch, duration }) {
   const groundAt = (at) => (relief && map.queryTerrainElevation(at)) || 0;
   const wanted = (angle) => {
     const cam = map.cameraForBounds(b, { padding, ...angle });
-    if (!cam || !relief) return cam;
-    const hs = corners.map(groundAt);
-    const zoom = zoomOverGround(cam.zoom, (Math.min(...hs) + Math.max(...hs)) / 2, map.getCenter().lat, viewH());
-    return { ...cam, zoom: Math.min(zoom, map.getMaxZoom()) };
+    if (!cam) return cam;
+    if (relief) {
+      const hs = corners.map(groundAt);
+      const zoom = zoomOverGround(cam.zoom, (Math.min(...hs) + Math.max(...hs)) / 2, map.getCenter().lat, viewH());
+      cam.zoom = Math.min(zoom, map.getMaxZoom());
+    }
+    /* `lift`: the box that many pixels above the middle of the screen. */
+    const back = lift ? backForLift(lift, cam.zoom, cam.center.lat, viewH(), cam.pitch) : null;
+    if (back) {
+      const c = project({ lat: cam.center.lat, lon: cam.center.lng }, cam.bearing + 180, back);
+      cam.center = new GL.LngLat(c.lon, c.lat);
+    }
+    return cam;
   };
   const first = wanted({ pitch });
   if (!first) return;
@@ -1334,6 +1343,28 @@ function frameBounds(b, { padding, pitch, duration }) {
       map.easeTo({ ...now, padding, duration: 350 });
     });
   }, 300);
+}
+/** The same, on a screen whose own things lie over the map: the wind card,
+    the compass and the screen's pill along the top, and `sheet`, its
+    controls, over the bottom. Framed into what is left showing between them;
+    fitTo centres on the whole screen, which on the replay left the lower end
+    of a run under the caption and the buttons. The room is asked for as a
+    lift above the middle, not as padding on one side: the map keeps an
+    ease's padding, and every later ease would be centred off the middle
+    (runPadding has the same care). */
+function fitOver(sheet, ...groups) {
+  const pts = groups.flat().filter(Boolean);
+  if (pts.length < 2 || !mapReady || !sheet) return fitTo(pts);
+  const box = map.getContainer().getBoundingClientRect();
+  const under = (el) => (el && el.getClientRects().length ? el.getBoundingClientRect().bottom - box.top : 0);
+  const top = Math.max(0, under($('wxPanel')), under($('wxRose')), under(sheet.closest('.screen')?.querySelector('.hud-pill')));
+  const bottom = Math.max(0, box.bottom - sheet.getBoundingClientRect().top);
+  const edge = 30, both = (top + bottom) / 2 + edge;
+  /* A sheet grown over most of the map leaves no room worth framing into. */
+  if (box.height - 2 * both < box.height / 4) return fitTo(pts);
+  const b = new GL.LngLatBounds();
+  pts.forEach(p => b.extend([p.lon, p.lat]));
+  frameBounds(b, { padding: { top: both, bottom: both, left: 44, right: 44 }, lift: (bottom - top) / 2, pitch: 45, duration: 700 });
 }
 /** The same, into the part of the map a tall sheet at the bottom leaves
     showing, flat, so every corner can be seen before anything is decided. */
@@ -3412,8 +3443,9 @@ function openReplay(s) {
   paintMarkTools();
 
   go('scrReplay');
-  fitTo(s.data.trail || s.data.hides || [], track, dogTrackOf(s.data) || [], s.data.planTrail || []);
   paintReplay();
+  /* After the paint: the sheet has its caption by now, and the height it keeps. */
+  fitOver($('scrReplay').querySelector('.glass-bottom'), s.data.trail || s.data.hides || [], track, dogTrackOf(s.data) || [], s.data.planTrail || []);
 }
 
 /** What a replay stands on: the laid trail, its start, its plan and its

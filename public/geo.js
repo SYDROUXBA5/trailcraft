@@ -821,3 +821,15 @@ export function zoomOverGround(zoom, alt, lat, viewH) {
   if (!Number.isFinite(alt) || !Number.isFinite(far) || far - alt < 1) return zoom;
   return zoom + Math.log2(far / (far - alt));
 }
+/** Metres to draw the camera's centre back along the ground, towards the
+    camera, so that what was in the middle of the screen is shown `lift` pixels
+    higher. Not `lift` pixels of ground: a tilted camera sees the ground ahead
+    foreshortened, and further off. (Mapbox's own `offset` moves a tilted
+    picture by less than half of what it is asked.) Null when the camera is
+    tilted too far for any such place to be in front of it. */
+export function backForLift(lift, zoom, lat, viewH, pitchDeg) {
+  const lens = 1.5 * viewH, tilt = rad(pitchDeg);
+  const room = lens * Math.cos(tilt) - lift * Math.sin(tilt);
+  if (!(room > lens * 0.1)) return null;
+  return lift * cameraReach(zoom, lat, viewH) / room;
+}
