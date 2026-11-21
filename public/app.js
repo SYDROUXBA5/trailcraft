@@ -9,6 +9,7 @@
 import {
   pathLen, cardinal, dist, dwellFold, bearing, project, fmtDist, fmtShort, fmtDur, fmtSpeed, fmtTemp, unitShort, fmtWeight, kgToShown, shownToKg, fmtCoord, scentField, plumePolygon, densify, timestamps, signedOffsets, meanSigned, sideOfDrift, sideAgreement, lineCorrect, departure, progressAlong, splitLine, smoothBearing, medianAbs, sideShares, approachToWind,
 } from './geo.js';
+import { ask, askQ, tell } from './sheet.js';
 import { stepPoints, contamTimed, trailFrom, walkedOfTrail, gpsTrouble, forecastNote, cameraReach, zoomOverGround, backForLift } from './geo.js';
 import { packDraft, unpackDraft, draftAlive, draftStats, DRAFT_MAX_AGE } from './draft.js';
 import { handlerStats, teachesDrift, runAgeMin } from './store.js';
@@ -97,10 +98,11 @@ const saveSettings = () => localStorage.setItem('tc.settings', JSON.stringify(se
   /* A link is something anyone can send. So the key in it must be a well-formed public key, and it is never taken
      without a yes: taken silently, a stranger's link could swap the key the map runs on, and then switch the map off. */
   if (mbt != null) {
-    if (/^pk\.[A-Za-z0-9._-]{20,400}$/.test(mbt)
-        && confirm('This link carries a map key. Use it for the map on this device?\n\nOnly say OK if you asked for this link.')) {
-      settings.mbToken = mbt;
-      saveSettings();
+    if (/^pk\.[A-Za-z0-9._-]{20,400}$/.test(mbt)) {
+      /* Asked with the app's own sheet, so the answer comes later than a
+         confirm() box gave it: the key is only ever put in on a yes. */
+      ask({ title: 'Use the map key in this link?', body: 'This link carries a map key for the map on this device. Only say yes if you asked for this link.', yes: 'Use it', no: 'No' })
+        .then((ok) => { if (ok) { settings.mbToken = mbt; saveSettings(); location.reload(); } });   // the map was built while the question was up: start again with the key
     }
     history.replaceState(null, '', location.pathname + location.search);
   }
@@ -640,7 +642,30 @@ function buildMap() {
   window.addEventListener('orientationchange', () => setTimeout(() => map.resize(), 250));
 }
 
+/* Every layer the app itself puts on the map, by name: the ones a dusk light
+   must not dim (replayDusk). */
+const appLayers = new Set();
+/* A replay is watched, not worked from. In the dark look the satellite map is
+   lit as dusk for it, and back to day when it closes: the field goes quiet and
+   the trail, the dog and the scent, which are told to keep their own light,
+   stand out of it. Only the satellite style has light to change. */
+let duskOn = false;
+function replayDusk(on) {
+  const want = !!on && document.documentElement.dataset.theme === 'dark' && settings.mapStyle === 'satellite';
+  if (!map || !mapKey() || want === duskOn) return;
+  try { map.setConfigProperty('basemap', 'lightPreset', want ? 'dusk' : 'day'); } catch { return; }   // not this style, or not loaded yet
+  duskOn = want;
+  const lit = { line: ['line-emissive-strength'], circle: ['circle-emissive-strength'], fill: ['fill-emissive-strength'],
+    symbol: ['icon-emissive-strength', 'text-emissive-strength'] };
+  for (const id of appLayers) {
+    for (const prop of lit[map.getLayer(id)?.type] || []) { try { map.setPaintProperty(id, prop, want ? 1 : 0); } catch { /* an older map */ } }
+  }
+}
+
 function addOverlays() {
+  /* A style that has just loaded is in daylight, whatever the last one was. */
+  duskOn = false;
+  queueMicrotask(() => { if (currentScreen === 'scrReplay') replayDusk(true); });
   if (mapKey()) {
     if (!map.getSource('dem')) {
       map.addSource('dem', { type: 'raster-dem', url: 'mapbox://mapbox.mapbox-terrain-dem-v1', tileSize: 512, maxzoom: 14 });
@@ -656,7 +681,7 @@ function addOverlays() {
   for (const id of Object.keys(srcData)) {
     if (!map.getSource(id)) map.addSource(id, { type: 'geojson', data: srcData[id] });
   }
-  const add = (spec) => { if (!map.getLayer(spec.id)) map.addLayer(spec); };
+  const add = (spec) => { appLayers.add(spec.id); if (!map.getLayer(spec.id)) map.addLayer(spec); };
 
   // The uncertainty band — filled soft, edged dashed, and only ever shown on
   // the result map. Its width is uncertainty; nothing here narrows it.
@@ -1738,6 +1763,40 @@ function paintOdours() {
   if (document.activeElement !== field) field.value = typed;
 }
 
+/* Home's one line: who is working, with which dog, on what, and who lays it.
+   Said back from the same state the rows are painted from, so the line and
+   the rows cannot disagree. The whole line is one button: it folds the rows
+   out under itself and back. Folded is the usual state. It starts unfolded
+   only when something the main button needs has not been chosen yet (no dog,
+   or nobody to lay a person's trail), because that is found in the rows. */
+const HOME_ROWS = ['rowHandlers', 'rowDogs', 'rowTargets', 'rowOdours', 'rowLevels', 'rowLayers'];
+let homeSetupOpen = null;                         // null until the first paint has looked
+function paintHomeSum() {
+  const { handler, dog, layer, target, odour, level } = S;
+  const isPerson = target.kind === 'person';
+  const solo = S.layerOnly && !dog;
+  const chip = (html, cls = '') => `<span class="sum-chip${cls ? ' ' + cls : ''}">${html}</span>`;
+  const bits = [chip(avaHtml(handler) + esc(handler.name))];
+  if (dog) bits.push(chip(avaHtml(dog) + esc(dog.name)));
+  else if (!solo) bits.push(chip('No dog yet', 'need'));
+  bits.push(chip(esc(odour ? `${target.label} · ${odour}` : target.label)));
+  if (isPerson) bits.push(chip(`<span class="lvl-mark">${LEVEL_ICON[level.id]}</span>${esc(level.label)}`, `lvl-${level.id}`));
+  if (!solo) {
+    bits.push(layer ? chip(`${esc(layer.name)} ${isPerson ? 'lays it' : 'places it'}`)
+      : isPerson ? chip('Who lays it?', 'need') : chip('Just me'));
+  }
+  if (homeSetupOpen === null) homeSetupOpen = !solo && (!dog || (isPerson && !layer));
+  const btn = $('homeSum');
+  btn.innerHTML = `<span class="sum-chips">${bits.join('')}</span><span class="sum-go">${homeSetupOpen ? 'Done' : 'Change'}</span>`;
+  btn.setAttribute('aria-expanded', String(homeSetupOpen));
+  $('homeSetup').hidden = !homeSetupOpen;
+}
+function toggleHomeSetup() {
+  homeSetupOpen = !homeSetupOpen;
+  paintHomeSum();
+  if (homeSetupOpen) for (const id of HOME_ROWS) showSelectedChip($(id));   // a hidden row could not be measured
+}
+
 function renderHome() {
   snap();
   const { handler, handlers, team, dog, layers, layer, target } = S;
@@ -1798,9 +1857,8 @@ function renderHome() {
   $('btnRun').hidden = solo;
   $('lblSetter').hidden = solo;
   $('rowLayers').hidden = solo;
-  for (const id of ['rowHandlers', 'rowDogs', 'rowTargets', 'rowOdours', 'rowLevels', 'rowLayers']) {
-    showSelectedChip($(id));
-  }
+  paintHomeSum();
+  for (const id of HOME_ROWS) showSelectedChip($(id));
 
   $('btnRunLabel').textContent = v.run;
   $('btnRunSub').textContent = v.runSub;
@@ -3441,8 +3499,11 @@ function openReplay(s) {
   $('repDebrief').hidden = !s.data.result && !noLineYet(s.data);
   $('repSpeed').textContent = `${replay.speed}×`;
   paintMarkTools();
+  repUi.tools = repUi.layers = false;
+  paintRepDock();
 
   go('scrReplay');
+  replayDusk(true);
   paintReplay();
   /* After the paint: the sheet has its caption by now, and the height it keeps. */
   fitOver($('scrReplay').querySelector('.glass-bottom'), s.data.trail || s.data.hides || [], track, dogTrackOf(s.data) || [], s.data.planTrail || []);
@@ -3495,6 +3556,8 @@ function closeReplay() {
   replayPause();
   closeClip();                 // a video being made of it stops with it
   if (replay.mark) endMarking();
+  replayDusk(false);                 // daylight back for the screens that are worked from
+  repUi.wind = repUi.plume = true; applyRepLayers();
   replay.s = null;
   scentGlow?.clearReach(); reachMap.key = ''; $('repReach').hidden = true;
   plume.clock = null;          // hand the plume back to the real clock
@@ -3540,17 +3603,67 @@ function reachBuild(s) {
 }
 
 /** How much of what was laid had come within reach by `at`, in words. */
-function reachWords(at) {
-  if (!reachMap.times?.length) return '';
+/* The three parts of the reach at a moment: likely, possibly, out. Shares of
+   the laid trail in whole per cent (they always add to 100), or for a search
+   the hides themselves, counted. */
+function reachShares(at) {
+  if (!reachMap.times?.length) return null;
   const c = reachCount(reachMap.times, at), maybe = c.possible - c.likely, out = c.of - c.possible;
-  if (reachMap.what === 'hides') return `Hides: ${c.likely} likely in reach · ${maybe} possibly · ${out} out of reach`;
+  if (reachMap.what === 'hides') return { hides: true, a: c.likely, b: maybe, out, of: c.of };
   const pc = (n) => Math.round(100 * n / c.of), a = pc(c.likely), b = Math.min(100 - a, pc(maybe));
-  return `Trail: ${a}% likely in reach · ${b}% possibly · ${100 - a - b}% out of reach`;
+  return { hides: false, a, b, out: 100 - a - b, of: 100 };
+}
+function reachWords(at) {
+  const r = reachShares(at);
+  if (!r) return '';
+  return r.hides ? `Hides: ${r.a} likely in reach · ${r.b} possibly · ${r.out} out of reach`
+    : `Trail: ${r.a}% likely in reach · ${r.b}% possibly · ${r.out}% out of reach`;
+}
+/* The same three parts as a figure, a bar and a key. With nothing to count
+   (no laid trail to measure against) only the key is left, saying what the
+   two shades on the map mean. */
+function paintReachBar(r) {
+  $('repReachBig').hidden = $('repReachBar').hidden = $('repReachK3wrap').hidden = !r;
+  const u = r && !r.hides ? '%' : '';
+  $('repReachK1').textContent = r ? `${r.a}${u} likely` : 'Likely';
+  $('repReachK2').textContent = r ? `${r.b}${u} possibly` : 'Possibly';
+  if (!r) return;
+  $('repReachK3').textContent = `${r.out}${u} out of reach`;
+  const big = $('repReachBig');
+  big.firstElementChild.textContent = r.hides ? `${r.a} of ${r.of}` : `${r.a}%`;
+  big.lastElementChild.textContent = r.hides ? 'hides likely in reach' : 'of the trail likely in reach';
+  const [l, p, o] = $('repReachBar').children;
+  l.style.flexGrow = r.a; p.style.flexGrow = r.b; o.style.flexGrow = r.out;
+}
+
+/* The foot of a replay. Layers says what is drawn: the reach, the wind, the
+   scent. Tools holds what can be done with the run. Only one of the two is
+   open at a time, and Tools is not offered when it would be empty. */
+const repUi = { tools: false, layers: false, wind: true, plume: true };
+function paintRepDock() {
+  $('repDebriefRow').hidden = $('repDebrief').hidden;
+  const any = !$('repEditRow').hidden || !$('repDogRow').hidden || !$('repDebrief').hidden;
+  if (!any) repUi.tools = false;
+  $('repToolsBtn').hidden = !any;
+  $('repTools').hidden = !repUi.tools;
+  $('repLayers').hidden = !repUi.layers;
+  $('repToolsBtn').setAttribute('aria-expanded', String(repUi.tools));
+  $('repLayersBtn').setAttribute('aria-expanded', String(repUi.layers));
+  $('repReachBtn').hidden = !reachOffered(replay.s);
+  $('repLayWind').setAttribute('aria-pressed', String(repUi.wind));
+  $('repLayPlume').setAttribute('aria-pressed', String(repUi.plume));
+}
+function applyRepLayers() {
+  scentGlow?.setHidden?.({ wind: !repUi.wind, plume: !repUi.plume });
+  if (map && !glowOn()) {
+    for (const id of ['scent-glow', 'scent-dots']) if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', repUi.plume ? 'visible' : 'none');
+  }
 }
 
 function paintReach(s, at) {
   const able = !!scentGlow?.ok, show = reachMap.on && able && !replay.mark;
   $('repReachBtn').setAttribute('aria-pressed', String(reachMap.on && able));
+  $('repReach').classList.toggle('off', !show);
   $('repReachKey').hidden = !show;
   if (!show) { $('repReachSay').textContent = ''; scentGlow?.showReach(0); return; }
   reachBuild(s);
@@ -3560,6 +3673,7 @@ function paintReach(s, at) {
   while (lo < hi) { const mid = (lo + hi) >> 1; if (P[mid].t <= at) lo = mid + 1; else hi = mid; }
   scentGlow.showReach(lo);
   $('repReachSay').textContent = reachWords(at);
+  paintReachBar(reachShares(at));
 }
 
 function toggleReach() {
@@ -5308,11 +5422,11 @@ async function takeContamWalk(card, { fromLink = false } = {}) {
   const first = sessionById(pick.ids[0]);
   const who = pick.entry?.who || card.who || 'them';
   if (pick.ask === 'replace'
-      && !confirm(`${who} already has a walk on this trail. Replace it with this one, walked ${fmtWhen(card.started)}?`)) return false;
+      && !await ask({ title: 'Replace the walk?', body: `${who} already has a walk on this trail. This one was walked ${fmtWhen(card.started)}.`, yes: 'Replace it' })) return false;
   /* From a link, ids prove nothing: anyone who saw the code can make a card
      with them. So the handler says yes to it, by name, first. */
   if (fromLink && pick.ask !== 'replace'
-      && !confirm(`Add ${who}’s walk to the trail from ${fmtWhen(first?.startedAt)}?`)) return false;
+      && !await ask({ title: `Add ${who}’s walk?`, body: `It goes on the trail from ${fmtWhen(first?.startedAt)}.`, yes: 'Add it' })) return false;
   return applyContamWalk(pick.ids, card);
 }
 
@@ -5453,9 +5567,9 @@ async function finishContamWalk() {
   const last = rec.pts[rec.pts.length - 1];
   if (walk.card.kind === 3) {
     const B = walk.card.points[walk.card.points.length - 1];
-    if (last && dist(last, B) > 60 && !confirm(`You are ${fmtM(dist(last, B))} from the end of the route. Finish here anyway?`)) return;
+    if (last && dist(last, B) > 60 && !await ask({ title: 'Finish here anyway?', body: `You are ${fmtM(dist(last, B))} from the end of the route.`, yes: 'Finish here', no: 'Keep walking' })) return;
   }
-  if (rec.pts.length < 2 && !confirm('Your phone has no track of the walk yet. Finish anyway? The handler gets nothing back.')) return;
+  if (rec.pts.length < 2 && !await ask({ title: 'Finish anyway?', body: 'Your phone has no track of the walk yet. The handler gets nothing back.', yes: 'Finish', no: 'Keep walking' })) return;
   await stopWatch();
   stopFollowing();
   return keepContamWalk();
@@ -5917,7 +6031,7 @@ async function finishWalk() {
   const B = walk.card.points[walk.card.points.length - 1];
   const last = rec.pts[rec.pts.length - 1];
   if (last && dist(last, B) > 60 &&
-      !confirm(`You are ${fmtM(dist(last, B))} from the drawn end. Finish here anyway?`)) return;
+      !await ask({ title: 'Finish here anyway?', body: `You are ${fmtM(dist(last, B))} from the drawn end.`, yes: 'Finish here', no: 'Keep walking' })) return;
   await stopWatch();
   stopFollowing();
   return keepWalk();
@@ -5992,9 +6106,9 @@ function waitingPlans() {
 }
 
 /** A walked card, to the plan it belongs to (walkedPlanFor, card.js). */
-function takeWalked(card, asked, { fromLink = false } = {}) {
+async function takeWalked(card, asked, { fromLink = false } = {}) {
   const pick = walkedPlanFor(card, waitingPlans(), asked, { askAlways: fromLink });
-  const waiting = pick.ask ? askWhichPlan(pick.ask) : pick.id;
+  const waiting = pick.ask ? await askWhichPlan(pick.ask) : pick.id;
   if (!waiting) {
     toast(pick.ask ? 'No plan picked, so the walk was not used'
       : pick.why === 'other' ? 'That walk is for a plan that is not waiting on this phone'
@@ -6007,13 +6121,13 @@ function takeWalked(card, asked, { fromLink = false } = {}) {
 /* A walked card from an older app does not say which plan it walked. With
    more than one waiting, a guess would grade one dog against another dog's
    trail and bank it, so the handler is asked, the likeliest plan first. */
-function askWhichPlan(ids) {
+async function askWhichPlan(ids) {
   for (const id of ids) {
     const s = sessionById(id);
     if (!s) continue;
     const dog = S.dogs.find(d => d.id === s.dogId)?.name;
     const plan = s.data?.fromSession ? 'the route laid again' : 'the plan drawn';
-    if (confirm(`Is this the walk for ${plan} ${fmtWhen(s.startedAt)}${dog ? `, run by ${dog}` : ''}?`)) return id;
+    if (await ask({ title: 'Is this the walk?', body: `For ${plan} ${fmtWhen(s.startedAt)}${dog ? `, run by ${dog}` : ''}.`, yes: 'Yes', no: 'No' })) return id;
   }
   return null;
 }
@@ -6027,7 +6141,7 @@ async function applyWalked(sessionId, card) {
   if (!s) return false;
   const plan = s.data.trail;
   if (dist(card.points[0], plan[0]) > 300 &&
-      !confirm('That walk starts a long way from this plan. Use it anyway?')) return false;
+      !await ask({ title: 'Use it anyway?', body: 'That walk starts a long way from this plan.', yes: 'Use it' })) return false;
 
   const walkedPatch = {
     startedAt: card.started,
@@ -6089,7 +6203,7 @@ async function applyLine(sessionId, line) {
   if (!(s.data.track?.length > 1)) { toast('That blind trail has no run recorded, so there is nothing to grade.'); return false; }
   const check = lineCheck(s.data, line);
   if (check.refuse) { toast(check.refuse); return false; }
-  for (const q of check.ask) if (!confirm(q)) return false;
+  for (const q of check.ask) if (!await askQ(q)) return false;
 
   const patch = linePatch(s, line, Date.now());
   /* Contamination walks added before the line, measured against it now,
@@ -6241,7 +6355,7 @@ async function applyDogTrack(sessionId, picked, fileName = '') {
   } catch (e) {
     return toast(e?.plain ? e.message : 'Could not use that track.');
   }
-  for (const q of check.ask) if (!confirm(q)) return;
+  for (const q of check.ask) if (!await askQ(q)) return;
   const points = fitDogTrack(s, check.points, { lineToCome: noLineYet(s.data) });
   if (!points) return toast('This run is too big to sync with the dog’s track on it as well, so it was not added.');
   const graded = !!s.data.result && !noLineYet(s.data);
@@ -6260,7 +6374,7 @@ async function applyDogTrack(sessionId, picked, fileName = '') {
 async function removeDogTrack(sessionId) {
   const s = db.sessions().find(x => x.id === sessionId);
   if (!dogTrackable(s) || !s.data.dogTrack) return;
-  if (!confirm('Remove the dog’s track? The run is graded again on the phone’s track.')) return;
+  if (!await ask({ title: 'Remove the dog’s track?', body: 'The run is graded again on the phone’s track.', yes: 'Remove', danger: true })) return;
   const now = await regradeDogTrack(s.id, { ...DOG_TRACK_GONE }).catch(() => null);
   if (!now) return toast('Couldn’t remove the dog’s track. Try again.');
   toast('Dog’s track removed');
@@ -7974,7 +8088,7 @@ async function goLive() {
     /* A link can be passed on. The first time, say plainly what whoever holds it will see. */
     let told = false; try { told = !!localStorage.getItem('tc.liveTold'); } catch { /* asked each time */ }
     if (!told) {
-      if (!confirm('Anyone who gets this link can follow the run on a map: the trail, the hides, the dog’s name and where the dog is, until you stop sharing.\n\nGo live?')) return;
+      if (!await ask({ title: 'Go live?', body: 'Anyone who gets this link can follow the run on a map: the trail, the hides, the dog’s name and where the dog is, until you stop sharing.', yes: 'Go live' })) return;
       try { localStorage.setItem('tc.liveTold', '1'); } catch { /* asked again next time */ }
     }
     const sid = run.session.id, from = run.startedAt, asked = Date.now();
@@ -8812,7 +8926,7 @@ function closeFolderForm() {
   for (const f of Object.values(FOLDER_FORM)) $(f.form).hidden = true;
 }
 
-function saveFolderForm(where) {
+async function saveFolderForm(where) {
   const ed = folderEdit;
   if (!ed || ed.where !== where) return;
   const input = $(FOLDER_FORM[where].input);
@@ -8829,8 +8943,7 @@ function saveFolderForm(where) {
        be put together, so the handler is asked to make them one. */
     if (other) {
       const from = known.find(x => x.id === ed.id);
-      if (!from || !confirm(`There is already a folder called ${other.name}. Make ${from.name} part of it?`
-        + (from.n ? ` The ${sessionsWord(from.n)} in ${from.name} go into ${other.name}.` : ''))) { input.focus(); return; }
+      if (!from || !await ask({ title: `Make ${from.name} part of ${other.name}?`, body: `There is already a folder called ${other.name}.` + (from.n ? ` The ${sessionsWord(from.n)} in ${from.name} go into ${other.name}.` : ''), yes: 'Merge them' })) { input.focus(); return; }
       if (!saveFolders(mergeFolders(S.sessions, from.id, other), known.filter(x => x.id !== from.id))) return;
       if (logView.folder === from.id) logView.folder = other.id;
       toast(`${from.name} is now part of ${other.name}`);
@@ -8861,13 +8974,12 @@ function saveFolderForm(where) {
   else renderSessions();
 }
 
-function deleteFolder(id) {
+async function deleteFolder(id) {
   snap();
   const known = allFolders();
   const f = known.find(x => x.id === id);
   if (!f) return;
-  if (!confirm(f.n ? `Delete the folder ${f.name}? The ${sessionsWord(f.n)} in it stay in your log; only the folder goes.`
-    : `Delete the folder ${f.name}?`)) return;
+  if (!await ask({ title: `Delete the folder ${f.name}?`, body: f.n ? `The ${sessionsWord(f.n)} in it stay in your log; only the folder goes.` : '', yes: 'Delete folder', danger: true })) return;
   if (!saveFolders(dropFrom(S.sessions, id), known.filter(x => x.id !== id))) return;
   if (logView.folder === id) logView.folder = null;
   closeFolderForm();
@@ -8941,13 +9053,13 @@ function tryDelete(fn) {
 /** Delete one session, after asking. It can be one on screen that never
     saved because the phone was full: then nothing is stored, and letting go
     of it is all there is to do. True if it went. */
-function confirmDeleteSession(id) {
+async function confirmDeleteSession(id) {
   const s = sessionById(id);
   if (!s) return false;
   const stored = db.sessions().some(x => x.id === id);
   const q = askDelete('session', { row: s, dog: S.dogs.find(d => d.id === s.dogId) ?? null,
     when: fmtWhen(s.startedAt), backedUp: stored && !!sync.user });
-  if (!confirm(q)) return false;
+  if (!await askQ(q, { first: true, yes: 'Delete', danger: true })) return false;
   const folders = allFolders();
   if (stored && !tryDelete(() => db.deleteSession(id))) return false;
   /* A session the phone refused to keep still has its crash copy, and that
@@ -8970,8 +9082,8 @@ function confirmDeleteSession(id) {
    the pages about that one session are skipped over on the way. */
 const SESSION_PAGES = new Set(['scrShare', 'scrResult', 'scrShareOut', 'scrShowMap', 'scrReplay', 'scrDebrief', 'scrFix']);
 const SESSION_LISTS = new Set(['scrSessions', 'scrDog', 'scrHandler']);
-function deleteShownSession(s) {
-  if (!s || !confirmDeleteSession(s.id)) return;
+async function deleteShownSession(s) {
+  if (!s || !await confirmDeleteSession(s.id)) return;
   clearMap();
   let prev = navStack.pop();
   while (prev && (TRANSIENT.has(prev) || SESSION_PAGES.has(prev))) prev = navStack.pop();
@@ -8991,12 +9103,12 @@ function leaveDeletedProfile() {
   go(back ? prev : 'scrHome', { back: true });
 }
 
-function confirmDeleteDog(id) {
+async function confirmDeleteDog(id) {
   const d = db.dogs.byId(id);
   if (!d) return;
   snap();
   const q = askDelete('dog', { row: d, sessions: S.sessions, learned: db.calibration(id).length > 0, backedUp: !!sync.user });
-  if (!confirm(q) || !tryDelete(() => db.dogs.remove(id))) return;
+  if (!await askQ(q, { first: true, yes: 'Delete', danger: true }) || !tryDelete(() => db.dogs.remove(id))) return;
   if (dogCardId === id) dogCardId = null;
   toast(`${d.name} deleted`);
   leaveDeletedProfile();
@@ -9004,12 +9116,12 @@ function confirmDeleteDog(id) {
 
 /* The handler's dogs go with them (store.deleteHandler), and the question
    names each one, so nobody loses a dog they did not know was attached. */
-function confirmDeleteHandler(id) {
+async function confirmDeleteHandler(id) {
   const h = db.handlers.byId(id);
   if (!h) return;
   snap();
   const q = askDelete('handler', { row: h, dogs: S.dogs, sessions: S.sessions, backedUp: !!sync.user });
-  if (!confirm(q) || !tryDelete(() => db.deleteHandler(id))) return;
+  if (!await askQ(q, { first: true, yes: 'Delete', danger: true }) || !tryDelete(() => db.deleteHandler(id))) return;
   if (handlerCardId === id) handlerCardId = null;
   toast(`${h.name} deleted`);
   leaveDeletedProfile();
@@ -10070,7 +10182,7 @@ function teamFormTap(e) {
   return repaintFrom(chip, paintTeamForm);
 }
 
-function saveTeamForm() {
+async function saveTeamForm() {
   const f = teamForm;
   const dog = db.dogs.byId(f.dogId);
   if (!dog || !db.handlers.byId(f.handlerId)) return;
@@ -10084,7 +10196,7 @@ function saveTeamForm() {
     team = { ...had, look: { ...had.look, ...look } };
     if (moved) {
       const pair = pairName(db.handlers.byId(f.handlerId).name, dog.name);
-      if (!confirm(`${pair} will start at level ${presetById(f.preset).startLevel}. Levels already passed are kept.`)) return;
+      if (!await ask({ title: `Start ${pair} at level ${presetById(f.preset).startLevel}?`, body: 'Levels already passed are kept.', yes: 'Start there' })) return;
       team = restartTeam(team, { preset: f.preset, now: Date.now(), lv: levelOf(dog, f.handlerId), day: dayKey(Date.now(), tzNow()) });
     }
   } else {
@@ -10198,7 +10310,7 @@ const resolvedTheme = () => settings.theme === 'dark' ? 'dark'
 function applyTheme() {
   const t = resolvedTheme();
   document.documentElement.dataset.theme = t;
-  $('themeColor')?.setAttribute('content', t === 'dark' ? '#0B1630' : '#F6F7FA');
+  $('themeColor')?.setAttribute('content', t === 'dark' ? '#07090C' : '#F6F7FA');
   paintAppearance();
 }
 darkQuery.addEventListener?.('change', () => { if (settings.theme === 'system') applyTheme(); });
@@ -10256,9 +10368,12 @@ function paintUnitSettings() {
    Signing in is optional and stays optional: the app is whole without it.
    What it adds is that the records survive the phone. */
 let signInFirstLaunch = false;
+let signInEmailOpen = false;                    // a first launch: has "Use my email instead" been tapped
+const SIGNIN_LEDE = 'Sign in and your dogs, every trail they have run, and what the model has learned from watching them are backed up — and follow you to a new phone.';
 
 function openSignIn({ firstLaunch = false } = {}) {
   signInFirstLaunch = firstLaunch;
+  signInEmailOpen = false;
   $('btnApple').hidden = !sync.apple;
   /* Google refuses to sign anyone in from inside an app's built-in browser,
      which is what the iPhone app is. Offering the button there would only
@@ -10283,8 +10398,23 @@ function paintSignInVerify() {
   $('signInVerify').hidden = !v;
   $('signInMain').hidden = v;
   $('signInVerifyTo').textContent = sync.user?.email || 'your address';
-  $('btnSkipSignIn').textContent = v ? 'Use without an account for now'
-    : signInFirstLaunch ? 'Use without an account' : 'Not now';
+  /* A first launch leads with the way in: start now, add an account later.
+     The same button that has always skipped signing in is moved to the top
+     and made the main one, the providers follow it, and the email form waits
+     behind one line. Opened from Settings, signing in is what was asked for,
+     so the form is there and the button is "Not now" at the foot. */
+  const first = signInFirstLaunch && !v;
+  const skip = $('btnSkipSignIn');
+  skip.textContent = v ? 'Use without an account for now'
+    : signInFirstLaunch ? 'Start without an account' : 'Not now';
+  skip.className = first ? 'btn moss' : 'btn ghost';
+  const place = $(first ? 'signInStart' : 'signInBottom');
+  if (skip.parentNode !== place) place.appendChild(skip);
+  $('scrSignIn').classList.toggle('first', first);
+  $('signInLede').textContent = first ? 'Start right away. Add an account later to back up your dogs and trails.' : SIGNIN_LEDE;
+  const email = !first || signInEmailOpen || ($('btnGoogle').hidden && $('btnApple').hidden);
+  $('signInEmail').hidden = !email;
+  $('btnUseEmail').hidden = email;
 }
 
 /* Backup paused because the address is unconfirmed. Said on Home for as long
@@ -10857,8 +10987,7 @@ function wire() {
   // The layer's walk
   $('btnInPlace').addEventListener('click', finishWalk);
   $('walkCancel').addEventListener('click', async () => {
-    if (rec.pts.length > 1 && !confirm(walk.contam ? 'Cancel this walk? The handler gets nothing back.'
-      : 'Cancel this walk? The handler gets no walked card.')) return;
+    if (rec.pts.length > 1 && !await ask({ title: 'Cancel this walk?', body: walk.contam ? 'The handler gets nothing back.' : 'The handler gets no walked card.', yes: 'Cancel the walk', no: 'Keep walking', danger: true })) return;
     await stopWatch();
     dropDraft();            // thrown away on purpose: never offered back
     stopFollowing();
@@ -10868,11 +10997,11 @@ function wire() {
     homeOrBoot();
   });
   $('waitLink').addEventListener('click', sendContamLink);
-  $('waitDone').addEventListener('click', () => {
+  $('waitDone').addEventListener('click', async () => {
     /* With nobody set up on this phone, the code is kept for a day only so
        that a reloaded page does not lose it: once the handler has it, it goes. */
     if (walk.contam && !S.handler) {
-      if (!confirm('Has the handler got your walk? Once you say yes, it is gone from this phone.')) return;
+      if (!await ask({ title: 'Has the handler got your walk?', body: 'Once you say yes, it is gone from this phone.', yes: 'Yes, they have it', no: 'Not yet' })) return;
       dropContamReturn();
     }
     contamReturnStr = null;
@@ -10913,6 +11042,7 @@ function wire() {
     if (run.session && noLineYet(run.session.data)) takeGpxFile(run.session.id, file);
   });
   $('btnScanHome').addEventListener('click', () => openScan('scrHome'));
+  $('homeSum').addEventListener('click', toggleHomeSetup);
   $('btnScanBack').addEventListener('click', () => {
     stopScan();
     if (scanCameFrom === 'scrHome') return go('scrHome');
@@ -11189,12 +11319,12 @@ function wire() {
     paintLog();
   });
   $('btnSessPick').addEventListener('click', () => setPicking(!logView.picking));
-  $('sessionList').addEventListener('click', (e) => {
+  $('sessionList').addEventListener('click', async (e) => {
     /* The Delete button sits inside the card, so it is looked for first:
        a tap on it deletes (after asking) and never also opens the session. */
     const del = e.target.closest('[data-del-session]');
     if (del) {
-      if (confirmDeleteSession(del.dataset.delSession)) renderSessions();
+      if (await confirmDeleteSession(del.dataset.delSession)) renderSessions();
       return;
     }
     // Replay too: it opens the run's replay, not the card.
@@ -11265,6 +11395,7 @@ function wire() {
   // Settings
   $('btnSetDone').addEventListener('click', () => go('scrHome'));
   $('btnAllSessions').addEventListener('click', () => openSessionList());
+  $('homeAll').addEventListener('click', () => openSessionList());
   $('btnTutorial').addEventListener('click', () => openTutorial(true));
   $('btnMapTut').addEventListener('click', openMapTut);
 
@@ -11336,6 +11467,10 @@ function wire() {
   });
   $('repWind').addEventListener('click', openMarkWind);
   $('repReachBtn').addEventListener('click', toggleReach);
+  $('repLayersBtn').addEventListener('click', () => { repUi.layers = !repUi.layers; if (repUi.layers) repUi.tools = false; paintRepDock(); });
+  $('repToolsBtn').addEventListener('click', () => { repUi.tools = !repUi.tools; if (repUi.tools) repUi.layers = false; paintRepDock(); });
+  $('repLayWind').addEventListener('click', () => { repUi.wind = !repUi.wind; applyRepLayers(); paintRepDock(); });
+  $('repLayPlume').addEventListener('click', () => { repUi.plume = !repUi.plume; applyRepLayers(); paintRepDock(); });
   $('repReachWhy').addEventListener('click', () => {
     const note = $('repReachNote'); note.hidden = !note.hidden;
     $('repReachWhy').setAttribute('aria-expanded', String(!note.hidden));
@@ -11479,6 +11614,11 @@ function wire() {
     applyTheme();
   });
   $('btnGoogle').addEventListener('click', () => signInWithGoogle());
+  $('btnUseEmail').addEventListener('click', () => {
+    signInEmailOpen = true;
+    paintSignInVerify();
+    $(authMode === 'up' ? 'authName' : 'authEmail').focus();
+  });
   $('btnRecoverKeep').addEventListener('click', recoverKeep);
   $('btnRecoverFinish').addEventListener('click', recoverFinish);
   $('btnCardInGo').addEventListener('click', cardLinkGo);
@@ -11556,7 +11696,7 @@ function wire() {
     }
     if (b.dataset.account === 'adopt') {
       const who = sync.user?.email || 'your account';
-      if (!confirm(`Back up the ${S.sessions.length} sessions and ${S.dogs.length} dogs on this phone to ${who}? Do this only if they are yours.`)) return;
+      if (!await ask({ title: 'Back up this phone to your account?', body: `The ${S.sessions.length} sessions and ${S.dogs.length} dogs on this phone go to ${who}. Do this only if they are yours.`, yes: 'Back up' })) return;
       const ok = await adoptRecords().catch(() => false);
       snap();
       renderSettings();
@@ -11564,7 +11704,7 @@ function wire() {
     }
     if (b.dataset.account === 'fresh') {
       const who = sync.user?.email || 'this account';
-      if (!confirm(`Clear this phone and use ${who}? The ${S.sessions.length} sessions and ${S.dogs.length} dogs on it are not this account's, so they are not uploaded. They go. Save a backup file first if you want to keep them.`)) return;
+      if (!await ask({ title: `Clear this phone and use ${who}?`, body: `The ${S.sessions.length} sessions and ${S.dogs.length} dogs on it are not this account's, so they are not uploaded. They go. Save a backup file first if you want to keep them.`, yes: 'Clear this phone', danger: true })) return;
       const ok = await useThisAccount().catch(() => false);
       if (!ok) { snap(); renderSettings(); return toast('That did not work — nothing was changed'); }
       /* The old account's copy in the database's own cache went with it, which
@@ -11572,7 +11712,7 @@ function wire() {
       return location.reload();
     }
     if (b.dataset.account === 'signout') {
-      if (!confirm('Sign out? Your trails stay on this phone; they just stop backing up.')) return;
+      if (!await ask({ title: 'Sign out?', body: 'Your trails stay on this phone; they just stop backing up.', yes: 'Sign out' })) return;
       await squadSignOut();   // off duty first: once signed out the position can no longer be taken down
       await signOut();
       toast('Signed out — everything is still on this phone');
@@ -11633,7 +11773,7 @@ function wire() {
     const backup = signedIn
       ? ` This also signs you out. Your account backup is kept: signing in again brings it back. To delete the backup too, use Delete my account first.${behind}`
       : '';
-    if (!confirm(`Wipe everything? ${S.sessions.length} sessions, ${S.dogs.length} dogs and all profiles. Save a backup file first if you want them back later.${backup}`)) return;
+    if (!await ask({ title: 'Wipe everything?', body: `${S.sessions.length} sessions, ${S.dogs.length} dogs and all profiles. Save a backup file first if you want them back later.${backup}`, yes: 'Wipe everything', danger: true })) return;
     /* Off duty first: once signed out the position can no longer be taken down. */
     if (signedIn) await squadSignOut();
     if (signedIn) {
@@ -11670,10 +11810,10 @@ async function restoreBackup(file) {
   const plan = db.previewRestore(backup);
   /* A reason, not a flash: someone looking for a session they deleted by
      mistake needs to read why it is not coming back. */
-  if (!restoreChanges(plan)) return alert(restoreNothing(plan));
+  if (!restoreChanges(plan)) return tell({ title: 'Nothing to restore', body: restoreNothing(plan) });
   const when = backup.exportedAt
     ? new Date(backup.exportedAt).toLocaleDateString([], { day: 'numeric', month: 'long', year: 'numeric' }) : '';
-  if (!confirm(restoreQuestion(plan, when))) return;
+  if (!await askQ(restoreQuestion(plan, when), { first: true, yes: 'Restore' })) return;
   try {
     db.restore(backup);
   } catch (e) {
@@ -11879,11 +12019,11 @@ function recoverFinish() {
 /** A contamination walk brought back after a crash, finished as its Done
     button would: its code shown for the handler. A free one has no end to
     have stopped short of; a guided one asks, as the button does. */
-function recoverContamWalk() {
+async function recoverContamWalk() {
   const end = walk.card.kind === 3 ? walk.card.points[walk.card.points.length - 1] : null;
   const lastPt = rec.pts[rec.pts.length - 1];
   const short = end && lastPt ? dist(lastPt, end) : 0;
-  if (short > 60 && !confirm(`The recording stopped ${fmtM(short)} before the end of the route. Send what was walked anyway?`)) {
+  if (short > 60 && !await ask({ title: 'Send what was walked anyway?', body: `The recording stopped ${fmtM(short)} before the end of the route.`, yes: 'Send it', no: 'Not now' })) {
     recoveryLater = true;
     toast('Kept on this phone. It is offered again next time you open Trailcraft');
     return boot();
@@ -11957,7 +12097,7 @@ async function recoverKeep() {
     const end = walk.card?.points?.[walk.card.points.length - 1];
     const lastPt = rec.pts[rec.pts.length - 1];
     const short = end && lastPt ? dist(lastPt, end) : 0;
-    if (short > 60 && !confirm(`The recording stopped ${fmtM(short)} before the drawn end. Send what was walked anyway?`)) {
+    if (short > 60 && !await ask({ title: 'Send what was walked anyway?', body: `The recording stopped ${fmtM(short)} before the drawn end.`, yes: 'Send it', no: 'Not now' })) {
       /* Not now is an answer too. The copy stays on the phone and is offered
          again next time the app opens; until then the app is hers to use. */
       recoveryLater = true;
@@ -11979,10 +12119,10 @@ async function recoverKeep() {
   go('scrConfirm');
 }
 
-function recoverDrop() {
+async function recoverDrop() {
   const st = draftStats(recovering);
   const what = recovering?.kind === 'hide' ? `${st.hides} hides` : fmtKm(st?.metres ?? 0);
-  if (!confirm(`Throw away ${what}? It cannot be got back.`)) return;
+  if (!await ask({ title: `Throw away ${what}?`, body: 'It cannot be got back.', yes: 'Throw away', danger: true })) return;
   const thrown = recovering?.kind === 'run' ? recovering.sessionId : null;
   recovering = null;
   dropDraft();

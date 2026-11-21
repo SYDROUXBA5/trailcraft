@@ -539,7 +539,7 @@ t('a phone pulls when it comes back, and the cloud refuses a save made from an o
 t('a wipe waits until the phone knows whether it is signed in', () => {
   const wipe = js.slice(js.indexOf("$('btnWipe').addEventListener"), js.indexOf('async function importFromLink'));
   const guard = wipe.indexOf("if (sync.configured && !sync.user && sync.status === 'loading') return toast(");
-  assert.ok(guard > 0 && guard < wipe.indexOf('confirm('), 'asked to wait before anything is asked or wiped');
+  assert.ok(guard > 0 && guard < wipe.indexOf('await ask('), 'asked to wait before anything is asked or wiped');
 });
 
 t('only a live run’s owner can list or delete it; strangers still only read an unexpired link', () => {
@@ -594,7 +594,8 @@ t('Settings and the sign-in screen link to the privacy page, opening outside the
 
 /* A function's body in app.js, from its name to the brace that closes it. */
 const bodyOf = (name) => {
-  const i = js.indexOf(`\nfunction ${name}(`);
+  /* Some of these wait for the answer to a sheet now, so they are async. */
+  const i = js.search(new RegExp(`\\n(?:async )?function ${name}\\(`));
   assert.ok(i > 0, `app.js still has ${name}()`);
   return js.slice(i, js.indexOf('\n}\n', i) + 2);
 };
@@ -612,7 +613,7 @@ t('a session, a dog and a handler can each be deleted, and only after a question
     const body = bodyOf(fn);
     assert.ok(body.includes(ask), `${fn} asks in askDelete's words`);
     assert.ok(body.includes(del), `${fn} deletes through the store`);
-    assert.ok(body.indexOf('confirm(q)') > 0 && body.indexOf('confirm(q)') < body.indexOf(del),
+    assert.ok(body.indexOf('await askQ(q,') > 0 && body.indexOf('await askQ(q,') < body.indexOf(del),
       `${fn} asks before it deletes`);
   }
   const controls = [
@@ -637,7 +638,7 @@ t('the session list deletes from a card without opening it, only once Delete ses
   const handler = js.slice(i, js.indexOf('\n  });', i));
   assert.ok(handler.indexOf('[data-del-session]') > 0 && handler.indexOf('[data-del-session]') < handler.indexOf('[data-open-session]'),
     'the Delete inside a card is looked for before the card itself');
-  assert.match(handler, /if \(confirmDeleteSession\(del\.dataset\.delSession\)\) renderSessions\(\);\s*return;/);
+  assert.match(handler, /if \(await confirmDeleteSession\(del\.dataset\.delSession\)\) renderSessions\(\);\s*return;/);
   /* Replay, too, is a button inside the card: it opens the replay, not the card. */
   assert.ok(handler.indexOf('[data-replay-session]') > 0 && handler.indexOf('[data-replay-session]') < handler.indexOf('[data-open-session]'));
   assert.match(bodyOf('sessionCard'), /const rep = replay && s\.data\?\.track\?\.length > 1/, 'only a run with a track has one');
@@ -686,7 +687,7 @@ t('batch 1 follow-ups the checkers asked for', () => {
   /* A fix arriving proves location is allowed again; the warning must go. */
   assert.match(bodyOf('onFix'), /rec\.blocked = false;/);
   /* A walk the phone lost part-way is not sent as a finished one unasked. */
-  assert.match(js, /if \(short > 60 && !confirm\(`The recording stopped \$\{fmtM\(short\)\} before the drawn end/);
+  assert.match(js, /if \(short > 60 && !await ask\(\{ title: 'Send what was walked anyway\?', body: `The recording stopped \$\{fmtM\(short\)\} before the drawn end/);
   /* A first backup goes up in batches bounded by size as well as count: one
      request may not exceed 10 MiB, and a refused record is left behind alone. */
   const sync = readFileSync(new URL('../public/sync.js', import.meta.url), 'utf8');
@@ -871,7 +872,7 @@ t('a walked card names its plan, and one that does not is asked about', () => {
   assert.match(fnSrc('async function keepWalk()'), /kind: 2,\s*\n\s*drawn: trail\.length < 2, planId: walk\.card\.planId \?\? null/, 'the walked card says it back');
   const take = fnSrc('function takeWalked(card, asked, { fromLink = false } = {})');
   assert.match(take, /walkedPlanFor\(card, waitingPlans\(\), asked, \{ askAlways: fromLink \}\)/, 'from a link, even one plan is asked about');
-  assert.match(take, /pick\.ask \? askWhichPlan\(pick\.ask\) : pick\.id/, 'with several plans and no name, the handler picks');
+  assert.match(take, /pick\.ask \? await askWhichPlan\(pick\.ask\) : pick\.id/, 'with several plans and no name, the handler picks');
   assert.match(fnSrc('async function handleCard(data, { fromLink = false } = {})'), /return takeWalked\(card, asked, \{ fromLink \}\);/);
 });
 
@@ -926,7 +927,7 @@ t('a walk on a phone with nobody set up outlives the tab, and one on the handler
   assert.match(fnSrc('function keptContamReturn(now = Date.now())'), /now - r\.at < RETURN_FOR_MS/);
   assert.match(js, /const RETURN_FOR_MS = 24 \* 3600e3;/);
   /* Gone once the handler has it. */
-  assert.match(js, /if \(!confirm\('Has the handler got your walk\? Once you say yes, it is gone from this phone\.'\)\) return;\s*\n\s*dropContamReturn\(\);/);
+  assert.match(js, /if \(!await ask\(\{ title: 'Has the handler got your walk\?', body: 'Once you say yes, it is gone from this phone\.', yes: 'Yes, they have it', no: 'Not yet' \}\)\) return;\s*\n\s*dropContamReturn\(\);/);
   /* A walk too long for one code goes back as a link. */
   assert.match(fnSrc('async function paintContamReturn(of, trail, el)'), /if \(e\?\.message !== TOO_TWISTY\) throw e;\s*\n\s*str = await encodeContam\(c, \{\}, \{ forLink: true \}\);/);
   assert.ok(htmlIds.has('waitLink') && htmlIds.has('waitLinkOut') && htmlIds.has('contamQrWho') && htmlIds.has('contamKey'));
@@ -1283,7 +1284,7 @@ t('the backup leaves through the share sheet, and Restore reads it back only aft
 
   const restore = fnSrc('async function restoreBackup(');
   const steps = ['file.size > BACKUP_MAX_BYTES', 'readBackup(await file.text())', 'db.previewRestore(backup)',
-    'restoreChanges(plan)', 'confirm(restoreQuestion(plan, when))', 'db.restore(backup)'];
+    'restoreChanges(plan)', 'askQ(restoreQuestion(plan, when)', 'db.restore(backup)'];
   let last = -1;
   for (const step of steps) {
     const i = restore.indexOf(step);

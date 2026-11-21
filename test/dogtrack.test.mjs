@@ -375,7 +375,10 @@ function app() {
     terrainFor: () => Promise.resolve(FLAT),
     fetchWeather: () => Promise.reject(new Error('offline')), WX_WAIT: 10,
     guardSave: (s, fn) => fn(), snap() {}, saveTrouble: null,
-    toast: (m) => said.push(m), confirm: (q) => { asked.push(q); return sb.answer ?? true; }, answer: true,
+    toast: (m) => said.push(m), answer: true,
+    /* The app's own sheet, standing in for it: what was asked, and the answer the test wants given. */
+    askQ: async (q) => { asked.push(q); return sb.answer ?? true; },
+    ask: async (o) => { asked.push([o.title, o.body].filter(Boolean).join(' ')); return sb.answer ?? true; },
     renderResult: (s) => shown.push(s), runLevelled: (s) => shown.push(['level', s.id]),
     Promise, Number, Math, Object, JSON, Error,
   };

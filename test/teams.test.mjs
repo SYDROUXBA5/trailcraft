@@ -590,14 +590,14 @@ t('a team is only ever made on purpose', () => {
     'opening the board writes nothing');
   const made = [...js.matchAll(/makeTeam\(/g)].length;
   assert.equal(made, 1, 'one place makes a team');
-  assert.match(fnSrc('function saveTeamForm() {'), /if \(had && !f\.edit\) return toast\(/, 'and never a second one for the same pair');
+  assert.match(fnSrc('async function saveTeamForm() {'), /if \(had && !f\.edit\) return toast\(/, 'and never a second one for the same pair');
   assert.match(fnSrc('function moveTeam(handlerId, dogId, to) {'), /restartTeam\(team, \{ \.\.\.to, now: Date\.now\(\), lv: levelOf\(dog, handlerId\), day: dayKey\(Date\.now\(\), tzNow\(\)\) \}\)/,
     'the lower start is taken with placedAt now, and the day’s counted runs handed on');
   /* An existing team is only moved on purpose: behind its own button, to a
      start above what it has passed, and after a yes. */
-  const save = fnSrc('function saveTeamForm() {');
+  const save = fnSrc('async function saveTeamForm() {');
   assert.match(save, /const moved = !!had && f\.preset != null && teamMoves\(levelOf\(dog, f\.handlerId\)\)\.some\(p => p\.id === f\.preset\);/);
-  assert.match(save, /if \(!confirm\(`\$\{pair\} will start at level \$\{presetById\(f\.preset\)\.startLevel\}\. Levels already passed are kept\.`\)\) return;/);
+  assert.match(save, /if \(!await ask\(\{ title: `Start \$\{pair\} at level \$\{presetById\(f\.preset\)\.startLevel\}\?`, body: 'Levels already passed are kept\.', yes: 'Start there' \}\)\) return;/);
   assert.match(fnSrc('function teamMoves(lv) {'), /TEAM_PRESETS\.filter\(p => p\.startLevel > lv\.earned && p\.startLevel !== lv\.level\)/);
   assert.match(fnSrc('function openTeamForm('), /preset: edit && team \? null : team\?\.preset \?\? 'new'/, 'opened to edit, no start is picked');
 });

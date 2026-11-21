@@ -93,6 +93,38 @@ export function ask({ title, body = '', yes = 'OK', no = 'Cancel', danger = fals
   }, false);
 }
 
+/** Something to be told, with one button. Resolves when it is closed. */
+export function tell({ title, body = '', close = 'OK' }) {
+  return sheet(title, (card, finish) => {
+    if (body) card.append(el('p', 'app-sheet-body', body));
+    buttons(card, [{ text: close, cls: 'moss', safe: true, on: () => finish(true) }]);
+  }, true);
+}
+
+/** A question written as one run of words, the way a confirm() box took it,
+    as a sheet's title and body. The sentence that asks is the title. Usually
+    that is the first one ("Delete Juno? Juno’s profile goes…"); where a line
+    of explanation leads up to it ("That starts a long way off. Use it
+    anyway?") the question is the last. `first` says the question is known to
+    come first, for words with a typed name in them: a full stop in a name
+    ("J. Smith") must not be taken for the end of a sentence. */
+export function splitQuestion(q, first = false) {
+  const text = String(q ?? '').replace(/\s*\n+\s*/g, ' ').trim();
+  const i = text.indexOf('? ');
+  if (i >= 0) {
+    const head = text.slice(0, i + 1), tail = text.slice(i + 2).trim();
+    const j = first ? -1 : head.lastIndexOf('. ');
+    return j < 0 ? { title: head, body: tail } : { title: head.slice(j + 2), body: `${head.slice(0, j + 1)} ${tail}` };
+  }
+  const j = !first && text.endsWith('?') ? text.lastIndexOf('. ') : -1;
+  return j < 0 ? { title: text, body: '' } : { title: text.slice(j + 2), body: text.slice(0, j + 1) };
+}
+
+/** ask(), for a question that is still written as one run of words. */
+export function askQ(q, { first = false, ...opts } = {}) {
+  return ask({ ...splitQuestion(q, first), ...opts });
+}
+
 /** Plain reading: a heading and a paragraph for each item, and Close. */
 export function info({ title, items, close = 'Close' }) {
   return sheet(title, (card, finish) => {

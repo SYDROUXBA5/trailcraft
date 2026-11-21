@@ -290,7 +290,7 @@ await t('a blind trail’s session is its one run: a copy keeps its flag, never 
    with no line, where there is no trail end to show it. */
 const js = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8');
 const bodyOf = (name) => {
-  const i = js.indexOf(`\nfunction ${name}(`);
+  const i = js.search(new RegExp(`\\n(?:async )?function ${name}\\(`));   // some wait for a sheet's answer now
   assert.ok(i > 0, `app.js still has ${name}()`);
   return js.slice(i, js.indexOf('\n}\n', i) + 2);
 };
@@ -326,7 +326,7 @@ await t('every screen that drew the laid trail steps round a blind trail with no
   /* The line goes on and the run is graded as a walked card grades a plan. */
   const apply = js.slice(js.indexOf('\nasync function applyLine('), js.indexOf('\n}\n', js.indexOf('\nasync function applyLine(')));
   assert.match(apply, /const check = lineCheck\(s\.data, line\);/);
-  assert.match(apply, /for \(const q of check\.ask\) if \(!confirm\(q\)\) return false;/);
+  assert.match(apply, /for \(const q of check\.ask\) if \(!await askQ\(q\)\) return false;/);
   assert.match(apply, /lined\.data\.trackStarted, \{ bank: teachesDrift\(lined\.data\) \}\);/);
   /* Graded before anything is saved, and saved with its grade in one go: a
      grade that fails leaves the run waiting for its line, not stuck with a

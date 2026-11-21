@@ -172,7 +172,7 @@ export function parcelHeight(d, r, st) {
 
 export function makeScentGlow(map) {
   let gl = null, ok = true, sprite = null, quad = null, vao = null, buf = null, qvao = null, qbuf = null, fbo = null, tex = null, fw = 0, fh = 0, wide = true, cap = 64;
-  let count = 0, data = new Float32Array(0), origin = null, shown = true, dirty = false;
+  let count = 0, data = new Float32Array(0), origin = null, shown = true, hideWind = false, hidePlume = false, dirty = false;
   let wind = null, wvao = null, wbuf = null, wn = 0, wdata = new Float32Array(0), wdirty = false, wcol = [0.86, 0.91, 1.0], wz = 0;
   const ground = new Map();                                 // ground heights already asked for, on an 11 m grid
   let groundEx = null;
@@ -290,7 +290,7 @@ export function makeScentGlow(map) {
     /* First, every parcel is added into a picture of its own, at half size. */
     prerender(_gl, matrix) {
       if (!ok || !gl || !origin) return;
-      const plumeOn = shown && count > 0, reachOn = rshow > 0 && !!rpieces && rpieces.length > 0;
+      const plumeOn = shown && !hidePlume && count > 0, reachOn = rshow > 0 && !!rpieces && rpieces.length > 0;
       if (!plumeOn && !reachOn) return;
       const w = Math.max(2, gl.drawingBufferWidth >> 1), h = Math.max(2, gl.drawingBufferHeight >> 1);
       /* The map works in numbers too large for the graphics card to hold a parcel's place exactly, so parcels are kept in metres
@@ -340,7 +340,7 @@ export function makeScentGlow(map) {
         gl.bindVertexArray(null);
       }
       if (!shown) return;
-      if (wn) {                                              // the wind first, so the scent glows over it
+      if (wn && !hideWind) {                                 // the wind first, so the scent glows over it
         const M = localMatrix(matrix), c = map.getCenter(), kk = CIRC * Math.cos(origin.lat * Math.PI / 180);
         const cx = (mercX(c.lng) - mercX(origin.lon)) * kk, cy = -(mercY(c.lat) - mercY(origin.lat)) * kk;
         gl.useProgram(wind); gl.bindVertexArray(wvao);
@@ -353,7 +353,7 @@ export function makeScentGlow(map) {
         gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, wn);
         gl.bindVertexArray(null);
       }
-      if (!count || !tex) return;
+      if (hidePlume || !count || !tex) return;
       gl.useProgram(quad); gl.bindVertexArray(qvao);
       gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, tex);
       gl.uniform1i(gl.getUniformLocation(quad, 'uT'), 0);
@@ -430,6 +430,8 @@ export function makeScentGlow(map) {
     showReach(n) { n = Math.max(0, n | 0); if (n !== rshow) { rshow = n; map.triggerRepaint(); } },
     clearReach() { rpieces = null; rn = 0; if (rshow) { rshow = 0; map.triggerRepaint(); } },
     setShown(v) { shown = !!v; map.triggerRepaint(); },
+    /* The replay can leave the wind or the scent off the map for a while, each on its own (its Layers). */
+    setHidden(h) { hideWind = !!h?.wind; hidePlume = !!h?.plume; map.triggerRepaint(); },
     get ok() { return ok; },
     get count() { return count; },
   };
