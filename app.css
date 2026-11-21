@@ -14,6 +14,12 @@
   --ember: #B8861B;
   --muted: #5B6A85;
 
+  /* The smoked glass the map's controls are made of, and the one colour that
+     lights up on it. Written as tokens so the dark glass look (end of this
+     file) can change them in one place; these are the values they always had. */
+  --smoke: 11, 22, 48; --smoke-b: 11, 23, 48; --smoke-c: 20, 40, 75; --smoke-d: 6, 12, 30;
+  --lit: #F1D27A; --lit-rgb: 241, 210, 122;
+
   --r: 20px;
   --safe-b: env(safe-area-inset-bottom, 0px);
   --safe-t: env(safe-area-inset-top, 0px);
@@ -278,6 +284,45 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.75; cursor: p
 .home-head > :last-child { margin-left: auto; }
 .home .btn.big { margin-top: 6px; }
 
+/* Home, top to bottom: the greeting, the team and the job on one line (the
+   rows that set them folded under it), then what to do. */
+.home-head > div { display: flex; flex-direction: column-reverse; gap: 4px; min-width: 0; }
+.home-head .display.big { font-size: calc(15 * var(--px)); font-weight: 600; letter-spacing: 0.02em; color: var(--muted); }
+.home-head .greet { font-family: var(--display); font-size: calc(30 * var(--px)); font-weight: 700; line-height: 1.12; letter-spacing: -0.5px; color: var(--ink); overflow-wrap: anywhere; }
+.home-sum {
+  display: flex; align-items: center; gap: 10px; width: 100%; min-height: 56px; margin-top: 6px;
+  padding: 8px 14px 8px 8px; border-radius: 20px; text-align: left; cursor: pointer;
+  background: var(--card); border: 1.5px solid var(--rim); color: var(--ink); font: inherit;
+}
+.home-sum:active { filter: brightness(0.97); }
+.home-sum:focus-visible { outline: 2px solid var(--ember); outline-offset: 2px; }
+.sum-chips { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; gap: 5px; }
+.sum-chip {
+  display: inline-flex; align-items: center; gap: 5px; min-height: 34px; padding: 4px 10px; border-radius: 12px;
+  background: var(--paper); border: 1px solid var(--border);
+  font: 600 calc(14 * var(--px)) var(--body); overflow-wrap: anywhere;
+}
+.sum-chip .ava { width: 24px; height: 24px; margin-left: -5px; font-size: calc(11 * var(--px)); }
+.sum-chip .lvl-mark { display: inline-grid; place-items: center; width: 18px; height: 18px; margin-left: -4px; }
+.sum-chip .lvl-mark svg { width: 16px; height: 16px; }
+.sum-chip.lvl-hot { background: var(--hot-fill); border-color: transparent; color: #fff; }
+.sum-chip.lvl-warm { background: var(--warm-fill); border-color: transparent; color: #fff; }
+.sum-chip.lvl-cold { background: var(--cold-fill); border-color: transparent; color: #fff; }
+.sum-chip.need { border-style: dashed; color: var(--gold-ink); }
+.sum-go { flex: none; font: 700 calc(14 * var(--px)) var(--body); color: var(--moss); text-decoration: underline; text-underline-offset: 3px; }
+.home-setup { display: flex; flex-direction: column; gap: 12px; padding-bottom: 6px; }
+/* The two main actions: the words on the left, an arrow on the right. */
+.btn.big.go { flex-direction: row; justify-content: space-between; align-items: center; gap: 14px; text-align: left; min-height: 92px; padding: 14px 16px 14px 22px; }
+.go-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.btn.big.go b { font-size: calc(27 * var(--px)); line-height: 1.12; }
+.go-arrow { flex: none; display: grid; place-items: center; width: 52px; height: 52px; border-radius: 50%; background: rgba(255, 255, 255, 0.18); }
+/* The two lesser ones share a row; alone (no card to scan for a hide), one fills it. */
+.home-pair { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 10px; margin-top: 6px; }
+.home .home-pair .btn.big { margin-top: 0; padding: 12px 10px; justify-content: flex-start; }
+.home-pair .btn.big b { font-size: calc(18 * var(--px)); }
+.home-pair .btn.big i { font-size: calc(12 * var(--px)); line-height: 1.3; }
+.home-all { align-self: center; margin-top: 4px; }
+
 /* ── Glass screens (over the map) ────────────────────────────────── */
 .hud-pill {
   /* The top row, centred on the screen: the same inset both sides, wide
@@ -309,12 +354,10 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.75; cursor: p
 .reach-key { display: flex; flex-direction: column; gap: 4px; align-items: center; font: 600 calc(12 * var(--px)) var(--body); color: #fff; text-shadow: 0 1px 4px rgba(0, 0, 0, 0.6); }
 .rk-row { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; justify-content: center; }
 .rk-row[hidden] { display: none; }
-.rk-toggle { appearance: none; min-height: 36px; padding: 6px 14px; border-radius: 999px; border: 1.5px solid rgba(255, 255, 255, 0.6); background: rgba(11, 22, 48, 0.72); color: #fff; font: inherit; text-shadow: none; cursor: pointer; }
-.rk-toggle[aria-pressed="true"] { background: #33EBDB; border-color: #33EBDB; color: #06262B; }
 .rk { display: inline-flex; align-items: center; gap: 6px; }
 .rk-sw { width: 16px; height: 11px; border-radius: 3px; border: 1.5px solid #33EBDB; background: rgba(51, 235, 219, 0.6); }
 .rk-sw.possible { background: rgba(51, 235, 219, 0.22); border-color: rgba(51, 235, 219, 0.75); }
-.rk-why { appearance: none; width: 30px; height: 30px; border-radius: 50%; border: 1.5px solid rgba(255, 255, 255, 0.6); background: rgba(11, 22, 48, 0.72); color: #fff; font: inherit; text-shadow: none; cursor: pointer; }
+.rk-why { appearance: none; width: 30px; height: 30px; border-radius: 50%; border: 1.5px solid rgba(255, 255, 255, 0.6); background: rgba(var(--smoke), 0.72); color: #fff; font: inherit; text-shadow: none; cursor: pointer; }
 .rk-say { margin: 0; text-align: center; font-variant-numeric: tabular-nums; }
 .rk-say:empty { display: none; }
 .rk-note { margin: 4px 0 0; padding: 10px 12px; border-radius: 12px; background: var(--card); color: var(--ink); border: 1px solid var(--border); font: 400 calc(12.5 * var(--px))/1.45 var(--body); text-shadow: none; text-align: left; }
@@ -340,7 +383,7 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.75; cursor: p
 .contam-list { display: flex; flex-direction: column; gap: 10px; }
 .contam-rows { display: flex; flex-direction: column; gap: 10px; }
 .contam-row { display: grid; grid-template-columns: 18px 1fr; gap: 4px 10px; align-items: start; }
-.contam-dot { width: 14px; height: 14px; margin-top: 3px; border-radius: 50%; background: var(--cc); box-shadow: 0 0 0 2px rgba(11, 22, 48, 0.55); }
+.contam-dot { width: 14px; height: 14px; margin-top: 3px; border-radius: 50%; background: var(--cc); box-shadow: 0 0 0 2px rgba(var(--smoke), 0.55); }
 .cc-0 { --cc: #7A52E0; } .cc-1 { --cc: #86D0FF; } .cc-2 { --cc: #FF8F6B; } .cc-3 { --cc: #0B7F74; }
 .contam-say { display: flex; flex-direction: column; gap: 2px; min-width: 0; font: 400 calc(14 * var(--px))/1.35 var(--body); }
 .contam-say b { font-weight: 650; }
@@ -356,7 +399,7 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.75; cursor: p
    map screen keeps at its top; under the screens' own chrome (z 10). */
 .contam-key { position: fixed; z-index: 5; left: 10px; top: calc(var(--safe-t, 0px) + 215px); max-width: min(62vw, 260px);
   display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border-radius: 12px; pointer-events: none;
-  background: rgba(11, 22, 48, 0.82); color: #fff; font: 400 calc(13 * var(--px))/1.3 var(--body); }
+  background: rgba(var(--smoke), 0.82); color: #fff; font: 400 calc(13 * var(--px))/1.3 var(--body); }
 .contam-key.off { display: none; }
 .contam-key-row { display: grid; grid-template-columns: 12px 1fr; gap: 6px; align-items: start; }
 .contam-key-row .contam-dot { width: 10px; height: 10px; margin-top: 3px; box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.85); }
@@ -423,7 +466,7 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.75; cursor: p
 .rep-row input[type="range"] { flex: 1; height: 40px; }
 .rep-play, .rep-speed {
   flex: none; min-width: 52px; height: 44px; border-radius: 14px;
-  background: rgba(11, 22, 48, 0.82); border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(var(--smoke), 0.82); border: 1px solid rgba(255, 255, 255, 0.18);
   color: #F4F6FA; font: 600 15px var(--body); cursor: pointer;
   box-shadow: 0 4px 14px -4px rgba(0, 0, 0, 0.6);
 }
@@ -434,6 +477,50 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.75; cursor: p
 .rep-row input[type="range"] { accent-color: #F5D14A; }
 .rep-play { font-size: 17px; }
 .rep-play:active, .rep-speed:active { transform: scale(0.96); }
+
+/* Scent reach, said three ways: the figure, a bar of its parts, a key. It has
+   a ground of its own because a thin figure over a photograph of a field is
+   not readable; in the dark look the whole foot is one panel and this sits
+   in it bare (end of file). */
+.reach-key {
+  position: relative; align-items: stretch; gap: 8px; padding: 12px 14px; border-radius: 18px;
+  background: rgba(var(--smoke), 0.84); border: 1.5px solid var(--rim); text-shadow: none;
+}
+.reach-key.off { display: none; }
+.rk-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.rk-title { font-size: calc(11.5 * var(--px)); font-weight: 600; letter-spacing: 0.18em; text-transform: uppercase; }
+.rk-big { margin: 0; display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; }
+.rk-big[hidden], .rk-bar[hidden] { display: none; }
+.rk-big b { font: 300 calc(44 * var(--px))/1 var(--display); letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.rk-big span { font-size: calc(14 * var(--px)); font-weight: 500; opacity: 0.85; }
+.rk-bar { display: flex; height: 12px; border-radius: 6px; overflow: hidden; background: rgba(255, 255, 255, 0.16); }
+.rk-bar i { flex: 0 1 0; min-width: 0; transition: flex-grow 240ms var(--ease-out); }
+.rk-bar .likely { background: #33EBDB; }
+.rk-bar .possible { background: rgba(51, 235, 219, 0.42); }
+.reach-key .rk-row { justify-content: space-between; gap: 4px 10px; font-variant-numeric: tabular-nums; }
+.rk { display: inline-flex; align-items: center; gap: 6px; }
+.rk[hidden] { display: none; }
+.rk-sw.out { background: rgba(255, 255, 255, 0.16); border-color: rgba(255, 255, 255, 0.45); }
+/* The sentence is for a screen reader now; the bar says it to the eye. */
+.rk-say { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+/* The foot of a replay: Layers and Tools each fold a panel out above the row. */
+.rep-foot, .rep-tools { display: flex; flex-direction: column; gap: 10px; }
+.rep-foot[hidden], .rep-tools[hidden], .rep-layers[hidden] { display: none; }
+.rep-layers { display: flex; flex-direction: column; border-radius: 18px; overflow: hidden; background: rgba(var(--smoke), 0.86); border: 1.5px solid var(--rim); }
+.lay-row {
+  appearance: none; display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  min-height: 52px; padding: 8px 16px; border: 0; background: transparent; color: #F4F6FA;
+  font: 600 calc(15 * var(--px)) var(--body); text-align: left; cursor: pointer;
+}
+.lay-row[hidden] { display: none; }
+.lay-row + .lay-row { border-top: 1px solid rgba(255, 255, 255, 0.12); }
+.lay-row:focus-visible { outline: 2px solid var(--lit); outline-offset: -3px; }
+.lay-sw { flex: none; position: relative; width: 46px; height: 28px; border-radius: 14px; background: rgba(255, 255, 255, 0.22); transition: background 160ms ease; }
+.lay-sw::after { content: ""; position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 50%; background: #F4F6FA; transition: transform 180ms var(--ease-out); }
+.lay-row[aria-pressed="true"] .lay-sw { background: var(--lit); }
+.lay-row[aria-pressed="true"] .lay-sw::after { transform: translateX(18px); background: #0B1630; }
+#repReachBtn[aria-pressed="true"] .lay-sw { background: #33EBDB; }
 
 /* ── Debrief ──────────────────────────────────────────────────────────
    One tap per row, every option visible at once. A form that needs
@@ -460,7 +547,7 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.75; cursor: p
   position: fixed; left: 8px; right: 8px; bottom: 0; z-index: 12;
   max-width: 560px; margin: 0 auto;
   max-height: 46vh; display: flex; flex-direction: column;
-  background: rgba(11, 22, 48, 0.92); color: #F4F6FA;
+  background: rgba(var(--smoke), 0.92); color: #F4F6FA;
   border: 1px solid rgba(255, 255, 255, 0.14); border-bottom: 0;
   border-radius: 20px 20px 0 0;
   box-shadow: 0 -12px 40px -14px rgba(0, 0, 0, 0.7);
@@ -502,7 +589,7 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.75; cursor: p
    satellite image are unreadable wherever the ground is bright. */
 .fix-sheet {
   gap: 8px; left: 8px; right: 8px;
-  background: rgba(11, 22, 48, 0.92); color: #F4F6FA;
+  background: rgba(var(--smoke), 0.92); color: #F4F6FA;
   border: 1px solid rgba(255, 255, 255, 0.14); border-bottom: 0;
   border-radius: 20px 20px 0 0;
   box-shadow: 0 -12px 40px -14px rgba(0, 0, 0, 0.7);
@@ -518,7 +605,7 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.75; cursor: p
 .fix-range input[type=range] { width: 100%; min-height: 44px; accent-color: #F1C77A; touch-action: pan-y; }
 .fix-nudge {
   width: 44px; height: 44px; border-radius: 12px; cursor: pointer;
-  background: rgba(11, 22, 48, 0.72); border: 1px solid rgba(255, 255, 255, 0.28); color: #fff;
+  background: rgba(var(--smoke), 0.72); border: 1px solid rgba(255, 255, 255, 0.28); color: #fff;
   font: 700 20px/1 var(--body); transition: transform 120ms var(--ease-out);
 }
 .fix-nudge:active { transform: scale(0.94); }
@@ -683,7 +770,7 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.75; cursor: p
 
 /* Which track is the dog's: one big button per track, its name first, then
    what tells two collars apart (how many points, when it began, how far). */
-.dog-pick { position: fixed; inset: 0; z-index: 65; display: grid; place-items: end center; padding: 12px 12px calc(var(--safe-b) + 12px); background: rgba(11, 22, 48, 0.55); }
+.dog-pick { position: fixed; inset: 0; z-index: 65; display: grid; place-items: end center; padding: 12px 12px calc(var(--safe-b) + 12px); background: rgba(var(--smoke), 0.55); }
 .dog-pick[hidden] { display: none; }
 .dog-pick-card {
   width: 100%; max-width: 536px; max-height: 80vh; overflow-y: auto; box-sizing: border-box;
@@ -866,7 +953,7 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.75; cursor: p
   pointer-events: none;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.03) 46%, rgba(0, 0, 0, 0.12)),
-    rgba(11, 22, 48, 0.62);
+    rgba(var(--smoke), 0.62);
   backdrop-filter: blur(16px) saturate(150%);
   -webkit-backdrop-filter: blur(16px) saturate(150%);
   box-shadow:
@@ -909,8 +996,8 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.75; cursor: p
   border: 0; border-radius: inherit; background: transparent;
   pointer-events: auto; cursor: pointer;
 }
-.wx-hit:focus-visible { outline: 2px solid #F1D27A; outline-offset: 2px; }
-.wx-hint i { font-style: normal; font-size: 12px; font-weight: 600; white-space: nowrap; color: #F1D27A; }
+.wx-hit:focus-visible { outline: 2px solid var(--lit); outline-offset: 2px; }
+.wx-hint i { font-style: normal; font-size: 12px; font-weight: 600; white-space: nowrap; color: var(--lit); }
 
 /* ── The handler card: the ring of trail ages, and the dog rows ───────── */
 .ring-wrap { display: flex; align-items: center; gap: 16px; }
@@ -948,7 +1035,7 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.75; cursor: p
 .look-seg .btn[aria-pressed="true"] { background: var(--moss); border-color: var(--moss); color: #fff; }
 .colour-card p + .look-row { border-top: 0; padding-top: 6px; }
 .look-name { flex: 1; font-size: calc(15 * var(--px)); font-weight: 600; color: var(--ink); }
-.look-dot { flex: none; width: 26px; height: 26px; border-radius: 50%; border: 2px solid var(--border); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 1px 4px rgba(11, 23, 48, 0.2); }
+.look-dot { flex: none; width: 26px; height: 26px; border-radius: 50%; border: 2px solid var(--border); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 1px 4px rgba(var(--smoke-b), 0.2); }
 .look-seg { display: flex; align-self: stretch; margin: 0 0 10px; }
 .look-seg button { flex: 1; padding: 9px 8px; }
 .swatch-row[hidden] { display: none; }
@@ -957,7 +1044,7 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.75; cursor: p
 .swatch {
   width: 38px; height: 38px; border-radius: 50%; padding: 0; cursor: pointer;
   background: var(--c); border: 2px solid var(--border);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 2px 6px rgba(11, 23, 48, 0.18);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 2px 6px rgba(var(--smoke-b), 0.18);
   transition: transform 120ms var(--ease-out);
 }
 .swatch:active { transform: scale(0.94); }
@@ -969,7 +1056,7 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.75; cursor: p
 /* ── The map gestures tutorial ─────────────────────────────────────────
    A card over the map with a small stage: a grid of ground and one or two
    fingertips acting out the gesture. Each stage is a CSS animation. */
-.map-tut { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; padding: 20px; background: rgba(11, 22, 48, 0.55); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+.map-tut { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; padding: 20px; background: rgba(var(--smoke), 0.55); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
 .map-tut[hidden] { display: none; }
 .map-tut-card { width: min(100%, 360px); background: var(--card); color: var(--ink); border-radius: 24px; padding: 16px 16px 14px; box-shadow: 0 24px 60px -20px rgba(0, 0, 0, 0.6); text-align: center; }
 .map-tut-card > b { display: block; font-family: var(--display); font-size: 20px; font-weight: 700; margin-top: 12px; }
@@ -983,10 +1070,10 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.75; cursor: p
 .ground {
   position: absolute; left: 50%; top: 50%; width: 128px; height: 92px; margin: -46px 0 0 -64px; border-radius: 10px;
   background:
-    repeating-linear-gradient(0deg, rgba(241, 210, 122, 0.3) 0 1px, transparent 1px 16px),
-    repeating-linear-gradient(90deg, rgba(241, 210, 122, 0.3) 0 1px, transparent 1px 16px),
+    repeating-linear-gradient(0deg, rgba(var(--lit-rgb), 0.3) 0 1px, transparent 1px 16px),
+    repeating-linear-gradient(90deg, rgba(var(--lit-rgb), 0.3) 0 1px, transparent 1px 16px),
     rgba(53, 97, 168, 0.35);
-  border: 1px solid rgba(241, 210, 122, 0.55);
+  border: 1px solid rgba(var(--lit-rgb), 0.55);
 }
 .finger {
   position: absolute; left: 50%; top: 50%; width: 22px; height: 22px; margin: -11px 0 0 -11px; border-radius: 50%;
@@ -1028,7 +1115,7 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.75; cursor: p
   border: 1px solid rgba(255, 255, 255, 0.22);
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.03) 46%, rgba(0, 0, 0, 0.12)),
-    rgba(11, 22, 48, 0.62);
+    rgba(var(--smoke), 0.62);
   backdrop-filter: blur(16px) saturate(150%);
   -webkit-backdrop-filter: blur(16px) saturate(150%);
   box-shadow:
@@ -1042,7 +1129,7 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.75; cursor: p
   width: 50px; height: 50px; display: grid; place-items: center; border-radius: 50%;
 }
 .map-style:active { transform: scale(0.94); }
-.map-style[aria-expanded="true"] { color: #F1D27A; border-color: rgba(241, 210, 122, 0.6); }
+.map-style[aria-expanded="true"] { color: var(--lit); border-color: rgba(var(--lit-rgb), 0.6); }
 .style-pick {
   position: fixed; right: 12px; bottom: calc(max(var(--bar-gap, 0px), var(--safe-b)) + 132px); z-index: 8;
   display: flex; flex-direction: column; align-items: flex-end; gap: 8px;
@@ -1051,15 +1138,15 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.75; cursor: p
 .style-pick button { min-height: 44px; padding: 8px 18px; border-radius: 999px; font: 600 14px var(--body); }
 .style-pick button:active { transform: scale(0.96); }
 .style-pick button.selected {
-  color: #0B1630; background: #F1D27A; border-color: #F1D27A;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5), 0 6px 18px rgba(241, 210, 122, 0.35);
+  color: #0B1630; background: var(--lit); border-color: var(--lit);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5), 0 6px 18px rgba(var(--lit-rgb), 0.35);
 }
 
 
 
 @media (prefers-reduced-transparency: reduce) {
   .wx-panel, .map-style, .style-pick button { background: #0B1630; backdrop-filter: none; -webkit-backdrop-filter: none; }
-  .style-pick button.selected { background: #F1D27A; }
+  .style-pick button.selected { background: var(--lit); }
 }
 @media (prefers-reduced-motion: reduce) {
   .wx-arrow { transition: none; }
@@ -1180,7 +1267,7 @@ body:has(#scrWalk:not([hidden])) { --top-row: calc(var(--safe-t) + 104px); }
   transition: background 140ms ease;
 }
 .check-row + .check-row { border-top: 1px solid var(--border); }
-.check-row:active { background: rgba(20, 40, 75, 0.06); }
+.check-row:active { background: rgba(var(--smoke-c), 0.06); }
 .check-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .check-text b { font-size: calc(16 * var(--px)); font-weight: 700; }
 .check-text i {
@@ -1192,7 +1279,7 @@ body:has(#scrWalk:not([hidden])) { --top-row: calc(var(--safe-t) + 104px); }
   flex: 0 0 auto; display: grid; place-items: center;
   width: 30px; height: 30px; border-radius: 50%;
   color: #fff; background: var(--moss);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 4px 10px -4px rgba(20, 40, 75, 0.55);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 4px 10px -4px rgba(var(--smoke-c), 0.55);
   opacity: 0; transform: scale(0.6);
   transition: opacity 160ms ease, transform 220ms cubic-bezier(0.23, 1, 0.32, 1);
 }
@@ -1232,7 +1319,7 @@ body:has(#scrWalk:not([hidden])) { --top-row: calc(var(--safe-t) + 104px); }
 :root[data-theme="dark"] {
   --paper: #0B1630;
   --card: #13223F;
-  --rim: rgba(241, 210, 122, 0.7);
+  --rim: rgba(var(--lit-rgb), 0.7);
   --border: #25395E;
   --ink: #F1F4F9;
   --moss: #3561A8;
@@ -1245,7 +1332,7 @@ body:has(#scrWalk:not([hidden])) { --top-row: calc(var(--safe-t) + 104px); }
   :root:not([data-theme="light"]) {
     --paper: #0B1630;
     --card: #13223F;
-    --rim: rgba(241, 210, 122, 0.7);
+    --rim: rgba(var(--lit-rgb), 0.7);
     --border: #25395E;
     --ink: #F1F4F9;
     --moss: #3561A8;
@@ -1482,12 +1569,12 @@ h2.log-day { margin: 14px 0 0; }
   position: fixed; inset: 0; z-index: 9;
   display: flex; align-items: flex-end; justify-content: center;
   padding: calc(var(--safe-t) + 12px) 12px calc(var(--safe-b) + 12px);
-  background: rgba(6, 12, 30, 0.62);
+  background: rgba(var(--smoke-d), 0.62);
 }
 .clip[hidden] { display: none; }
 .clip-card {
   width: 100%; max-width: 536px; max-height: 100%; overflow-y: auto;
-  background: rgba(11, 22, 48, 0.95); color: #F4F6FA;
+  background: rgba(var(--smoke), 0.95); color: #F4F6FA;
   border: 1px solid rgba(255, 255, 255, 0.24); border-radius: var(--r);
   padding: 14px 16px 16px; box-shadow: 0 18px 44px -10px rgba(0, 0, 0, 0.7);
 }
@@ -1555,7 +1642,7 @@ h2.log-day { margin: 14px 0 0; }
    cards, then what only an assisted run needs, dimmed when the run is blind.
    The long explanation folds away under a disclosure. */
 .coach-head { display: flex; align-items: center; gap: 12px; padding: 12px 0 6px; }
-.coach-mark { flex: none; width: 42px; height: 42px; border-radius: 50%; display: grid; place-items: center; background: var(--moss); color: #F1D27A; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), 0 4px 10px rgba(11, 23, 48, 0.25); }
+.coach-mark { flex: none; width: 42px; height: 42px; border-radius: 50%; display: grid; place-items: center; background: var(--moss); color: var(--lit); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), 0 4px 10px rgba(var(--smoke-b), 0.25); }
 .coach-head b { display: block; font-family: var(--display); font-size: calc(17 * var(--px)); font-weight: 700; }
 .coach-head i { display: block; font-style: normal; font-size: calc(13 * var(--px)); color: var(--muted); margin-top: 2px; line-height: 1.35; }
 /* Side by side while both fit, one above the other at a large text size. */
@@ -1573,8 +1660,8 @@ h2.log-day { margin: 14px 0 0; }
 .tile svg { width: 24px; height: 24px; color: var(--muted); }
 .tile b { font-size: calc(13.5 * var(--px)); font-weight: 700; }
 .tile i { font-style: normal; font-size: calc(11.5 * var(--px)); color: var(--muted); line-height: 1.3; }
-.tile:has(input:checked) { background: var(--moss); border-color: var(--moss); color: #FFFFFF; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22), inset 0 -2px 8px rgba(0, 0, 0, 0.18), 0 8px 20px -10px rgba(11, 23, 48, 0.6); }
-.tile:has(input:checked) svg { color: #F1D27A; }
+.tile:has(input:checked) { background: var(--moss); border-color: var(--moss); color: #FFFFFF; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22), inset 0 -2px 8px rgba(0, 0, 0, 0.18), 0 8px 20px -10px rgba(var(--smoke-b), 0.6); }
+.tile:has(input:checked) svg { color: var(--lit); }
 .tile:has(input:checked) i { color: rgba(255, 255, 255, 0.78); }
 .switch-row .tag { font-style: normal; font-size: calc(10.5 * var(--px)); font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ember); margin-left: 6px; vertical-align: 1px; }
 .coach-more { margin-top: 6px; border-top: 1px solid var(--border); }
@@ -1629,7 +1716,7 @@ body:has(#saveTrouble:not([hidden])) .screen.paper .page { padding-bottom: calc(
   color: #F4F6FA;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0.04) 46%, rgba(0, 0, 0, 0.10)),
-    rgba(11, 22, 48, 0.42);
+    rgba(var(--smoke), 0.42);
   border: 1px solid rgba(255, 255, 255, 0.28);
   backdrop-filter: blur(18px) saturate(160%);
   -webkit-backdrop-filter: blur(18px) saturate(160%);
@@ -1644,12 +1731,12 @@ body:has(#saveTrouble:not([hidden])) .screen.paper .page { padding-bottom: calc(
 .screen.glass .btn.ghost {
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.03) 46%, rgba(0, 0, 0, 0.08)),
-    rgba(11, 22, 48, 0.30);
+    rgba(var(--smoke), 0.30);
 }
 .screen.glass .btn.moss, .screen.glass .btn.moss-on-dark {
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.20), rgba(255, 255, 255, 0.05) 46%, rgba(0, 0, 0, 0.10)),
-    rgba(20, 40, 75, 0.62);
+    rgba(var(--smoke-c), 0.62);
 }
 .screen.glass .btn.ember, .screen.glass .btn.live-btn.alert, .hud-pill.off, .map-fab.nudge {
   background:
@@ -1698,8 +1785,8 @@ body:has(#saveTrouble:not([hidden])) .screen.paper .page { padding-bottom: calc(
 
 /* With transparency reduced, the glass turns near-solid rather than vanishing. */
 @media (prefers-reduced-transparency: reduce) {
-  .screen.glass .btn, .screen.glass .btn.ghost, .wp-row, .map-fab, .hud-pill { background: rgba(11, 22, 48, 0.88); backdrop-filter: none; -webkit-backdrop-filter: none; }
-  .screen.glass .btn.moss, .screen.glass .btn.moss-on-dark { background: rgba(20, 40, 75, 0.95); }
+  .screen.glass .btn, .screen.glass .btn.ghost, .wp-row, .map-fab, .hud-pill { background: rgba(var(--smoke), 0.88); backdrop-filter: none; -webkit-backdrop-filter: none; }
+  .screen.glass .btn.moss, .screen.glass .btn.moss-on-dark { background: rgba(var(--smoke-c), 0.95); }
   .screen.glass .btn.ember, .screen.glass .btn.live-btn.alert, .hud-pill.off, .map-fab.nudge { background: rgba(184, 134, 27, 0.95); }
 }
 
@@ -1713,7 +1800,7 @@ body:has(#saveTrouble:not([hidden])) .screen.paper .page { padding-bottom: calc(
 :root[data-theme="dark"] .radio-card.selected, :root[data-theme="dark"] .btn.moss {
   box-shadow:
     inset 0 1.5px 0 rgba(255, 255, 255, 0.4), inset 0 -3px 9px rgba(0, 0, 0, 0.22),
-    0 2px 4px rgba(11, 23, 48, 0.24), 0 12px 26px -8px rgba(20, 40, 75, 0.62);
+    0 2px 4px rgba(var(--smoke-b), 0.24), 0 12px 26px -8px rgba(var(--smoke-c), 0.62);
 }
 .btn.ember, :root[data-theme="dark"] .btn.ember {
   box-shadow:
@@ -1735,7 +1822,7 @@ body:has(#saveTrouble:not([hidden])) .screen.paper .page { padding-bottom: calc(
   display: grid; place-items: center; margin: -4px 0 2px -4px;
   border-radius: 50%; cursor: pointer;
   background: var(--card); color: var(--ink); border: 1px solid var(--border);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6), 0 2px 6px rgba(11, 23, 48, 0.12);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6), 0 2px 6px rgba(var(--smoke-b), 0.12);
   transition: transform 120ms var(--ease-out);
 }
 .back-btn:active { transform: scale(0.92); }
@@ -2053,7 +2140,7 @@ html[data-motion="on"] .tb-stone[aria-pressed="true"] .tb-pointer { animation: t
    into the frame in a dither. */
 .lu-stage { position: relative; margin: 0 0 14px; border-bottom: 2px solid var(--pxf-rim); clip-path: var(--px-c8-top); }
 .lu-stage::before, .lu-stage::after {
-  content: ""; position: absolute; inset: 0; z-index: 12; pointer-events: none; --v: rgba(6, 12, 30, 0.55);
+  content: ""; position: absolute; inset: 0; z-index: 12; pointer-events: none; --v: rgba(var(--smoke-d), 0.55);
   /* Only the rim of each is kept: the middle is cut out of the mask. */
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude;
 }
@@ -2300,7 +2387,7 @@ html[data-motion="on"] .lu-title:not([hidden]) { animation: lu-plate 300ms steps
    undoing the heavier borders that setting asks for. */
 @media (prefers-contrast: more) {
   :root { --rim: #8A6A12; }
-  :root[data-theme="dark"] { --rim: #F1D27A; }
+  :root[data-theme="dark"] { --rim: var(--lit); }
 }
 /* An empty "add one" chip stays dashed: that shape is how it says "new". */
 .chip.ghost { border-style: dashed; }
@@ -2402,7 +2489,7 @@ html[data-motion="on"] .lu-title:not([hidden]) { animation: lu-plate 300ms steps
 .sq-arrow.still::after { display: none; }
 .sq-tag {
   position: absolute; left: 50%; top: 34px; transform: translateX(-50%); white-space: nowrap;
-  padding: 3px 8px; border-radius: 8px; background: rgba(11, 22, 48, 0.86); color: #fff;
+  padding: 3px 8px; border-radius: 8px; background: rgba(var(--smoke), 0.86); color: #fff;
   font: 700 calc(12 * var(--px)) var(--body); letter-spacing: 0.02em;
 }
 .sq-unit.sq-role-k9 { --sq-c: #D9822B; }
@@ -2474,7 +2561,7 @@ html[data-motion="on"] .lu-title:not([hidden]) { animation: lu-plate 300ms steps
   background: var(--inc-c, #333); border: 2px solid #fff; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
 }
 .inc-mark-tag {
-  white-space: nowrap; padding: 2px 7px; border-radius: 7px; background: rgba(11, 22, 48, 0.86); color: #fff;
+  white-space: nowrap; padding: 2px 7px; border-radius: 7px; background: rgba(var(--smoke), 0.86); color: #fff;
   font: 600 calc(11 * var(--px)) var(--body);
 }
 .inc-k-indication { --inc-c: #1F8A4C; }
@@ -2499,11 +2586,11 @@ html[data-motion="on"] .lu-title:not([hidden]) { animation: lu-plate 300ms steps
 /* ── The squad screens' sheets (sheet.js), in place of confirm() ───────
    The app's own colours and big type; the dangerous answer in red. */
 .app-sheet { position: fixed; inset: 0; z-index: 70; display: grid; place-items: end center;
-  padding: 12px 12px calc(var(--safe-b) + 12px); background: rgba(11, 22, 48, 0.55); }
+  padding: 12px 12px calc(var(--safe-b) + 12px); background: rgba(var(--smoke), 0.55); }
 .app-sheet[hidden] { display: none; }
 .app-sheet-card { width: min(520px, 100%); max-height: calc(100vh - 40px); overflow-y: auto;
   display: flex; flex-direction: column; gap: 12px; padding: 18px 18px 16px; border-radius: 20px;
-  background: var(--card); color: var(--ink); border: 1px solid var(--border); box-shadow: 0 16px 40px rgba(11, 22, 48, 0.35); }
+  background: var(--card); color: var(--ink); border: 1px solid var(--border); box-shadow: 0 16px 40px rgba(var(--smoke), 0.35); }
 @media (min-width: 700px) { .app-sheet { place-items: center; } }
 .app-sheet-title { margin: 0; font: 700 calc(19 * var(--px)) var(--display); overflow-wrap: anywhere; }
 .app-sheet-title:focus { outline: none; }
@@ -2537,7 +2624,7 @@ html[data-motion="on"] .lu-title:not([hidden]) { animation: lu-plate 300ms steps
 /* ── The command map during an incident: following, the phone strip ──── */
 /* Under the status pill, centred on the map the panel leaves. */
 .cmd-follow { position: fixed; z-index: 8; top: calc(var(--top-row, 14px) + 56px); left: 50%; translate: -50% 0;
-  white-space: nowrap; box-shadow: 0 8px 22px rgba(11, 22, 48, 0.35); }
+  white-space: nowrap; box-shadow: 0 8px 22px rgba(var(--smoke), 0.35); }
 .cmd-follow[hidden] { display: none; }
 @media (min-width: 900px) { .cmd-follow { left: calc(50% - 187px); } }
 /* On a phone the weather panel reaches across most of the top: under it
@@ -2580,7 +2667,7 @@ html[data-motion="on"] .lu-title:not([hidden]) { animation: lu-plate 300ms steps
 @media (max-width: 899px) { .cmd-wall-btn { display: none; } }
 .cmd-wall-box { position: fixed; z-index: 6; left: 14px; bottom: 14px; width: min(460px, 34vw);
   display: flex; flex-direction: column; gap: 8px; padding: 16px 20px; border-radius: 20px;
-  background: rgba(11, 22, 48, 0.84); color: #fff; box-shadow: 0 12px 34px rgba(0, 0, 0, 0.4); }
+  background: rgba(var(--smoke), 0.84); color: #fff; box-shadow: 0 12px 34px rgba(0, 0, 0, 0.4); }
 .cmd-wall-box[hidden] { display: none; }
 .cmd-wall-top { display: flex; align-items: center; gap: 12px; }
 .cmd-wall-clock { flex: 1; font: 800 clamp(calc(40 * var(--px)), 4.6vw, calc(76 * var(--px)))/1 var(--display); font-variant-numeric: tabular-nums; letter-spacing: 0.01em; }
@@ -2711,7 +2798,7 @@ body.wall-on .toast { top: auto; bottom: 24px; left: auto; right: 474px;
    view. A dark glass card so the words read on the satellite picture in
    either theme; big call buttons, answered one-handed with a dog on the line. */
 .hv-box { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border-radius: 16px;
-  background: rgba(11, 22, 48, 0.86); color: #F4F6FA; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35); }
+  background: rgba(var(--smoke), 0.86); color: #F4F6FA; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35); }
 .hv-box[hidden] { display: none; }
 .hv-line { margin: 0; font: 700 calc(16 * var(--px))/1.3 var(--body); overflow-wrap: anywhere; }
 .hv-note-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
@@ -2745,7 +2832,7 @@ html[data-motion="off"] .hv-call:active { transform: none; }
 .hv-pin { min-width: 30px; padding: 4px 7px; border-radius: 9px; text-align: center; color: #fff;
   font: 800 calc(12 * var(--px)) var(--body); letter-spacing: 0.04em;
   background: var(--inc-c, #333); border: 2px solid #fff; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45); }
-.hv-tag { white-space: nowrap; padding: 2px 7px; border-radius: 7px; background: rgba(11, 22, 48, 0.86); color: #fff;
+.hv-tag { white-space: nowrap; padding: 2px 7px; border-radius: 7px; background: rgba(var(--smoke), 0.86); color: #fff;
   font: 600 calc(11 * var(--px)) var(--body); }
 .hv-tag:empty { display: none; }
 .hv-k-sighting { --inc-c: #B07800; }
@@ -2765,7 +2852,7 @@ html[data-motion="off"] .hv-call:active { transform: none; }
    on (Reduce Motion keeps it still; ?motion=on shows it). */
 .cmd-cap { position: fixed; z-index: 6; left: 16px; right: 16px; top: calc(var(--top-row, 14px) + 56px);
   display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border-radius: 16px;
-  background: rgba(11, 22, 48, 0.9); color: #F4F6FA; box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35); }
+  background: rgba(var(--smoke), 0.9); color: #F4F6FA; box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35); }
 .cmd-cap[hidden] { display: none; }
 .cmd-cap-top { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
 .cmd-cap-clock { flex: none; font: 800 calc(22 * var(--px))/1 var(--display); font-variant-numeric: tabular-nums; }
@@ -2809,9 +2896,9 @@ html[data-motion="on"] .cmd-cap-text.cap-new { animation: cap-in 420ms cubic-bez
   display: flex; flex-direction: column; gap: 8px; padding: 12px 16px calc(var(--safe-b) + 14px); }
 .hv-pretend[hidden] { display: none; }
 .hv-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.hv-kick { padding: 6px 10px; border-radius: 10px; background: rgba(11, 22, 48, 0.86); color: #F4F6FA;
+.hv-kick { padding: 6px 10px; border-radius: 10px; background: rgba(var(--smoke), 0.86); color: #F4F6FA;
   font: 700 calc(13 * var(--px)) var(--body); }
-.hv-hud { margin: 0; align-self: flex-start; padding: 8px 14px; border-radius: 999px; background: rgba(11, 22, 48, 0.86); color: #F4F6FA;
+.hv-hud { margin: 0; align-self: flex-start; padding: 8px 14px; border-radius: 999px; background: rgba(var(--smoke), 0.86); color: #F4F6FA;
   font: 700 calc(15 * var(--px)) var(--body); }
 .hv-hud:empty { display: none; }
 .hv-pretend .hv-demo { margin: 0; }
@@ -2823,3 +2910,297 @@ html[data-motion="on"] .cmd-cap-text.cap-new { animation: cap-in 420ms cubic-bez
 html.hv-lift .map-fab { bottom: calc(var(--hv-gap, 0px) + 12px); }
 html.hv-lift .map-style { bottom: calc(var(--hv-gap, 0px) + 72px); }
 html.hv-lift .style-pick { bottom: calc(var(--hv-gap, 0px) + 132px); }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   Dark glass — what the dark theme looks like (Rémi's pick, 20 Nov 2026).
+
+   Near-black where the dark theme was navy, smoked glass where it had
+   gold-rimmed pills, and one lit colour, aqua, where it had blue and gold.
+   Amber stays for heat and for the laid trail, red for what cannot be
+   undone. Type is the phone's own face, lighter, with the big words thin.
+
+   Everything here sits under [data-theme="dark"] (the attribute is always
+   the resolved theme, see applyTheme), so the light theme is not touched,
+   and it comes last in the file so it wins over the older dark rules above
+   without each of them having to be found and changed.
+   ═══════════════════════════════════════════════════════════════════════ */
+:root[data-theme="dark"] {
+  --paper: #07090C;
+  --card: #14171C;
+  --border: #2B3038;
+  --ink: #F5F7FA;
+  --muted: #A6AEBA;
+  --moss: #0D5650;            /* lit glass under white words: a chosen chip, a switch that is on */
+  --moss-deep: #050608;
+  --ember: #FFB86B;
+  --rim: rgba(255, 255, 255, 0.17);
+  --aqua: #5FF2E0; --aqua-rgb: 95, 242, 224;
+  --on-aqua: #03110F;         /* words on a lit aqua button */
+  --lit: #5FF2E0; --lit-rgb: 95, 242, 224;
+  --smoke: 12, 14, 18; --smoke-b: 12, 14, 18; --smoke-c: 0, 0, 0; --smoke-d: 4, 5, 7;
+  --r: 26px;
+  --display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Roboto", "Segoe UI", system-ui, sans-serif;
+  --body: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Roboto", "Segoe UI", system-ui, sans-serif;
+  color-scheme: dark;
+}
+
+/* The ground: black, with a little light behind the glass for it to catch. */
+:root[data-theme="dark"] .screen.paper {
+  background:
+    radial-gradient(120% 55% at 105% -5%, rgba(var(--aqua-rgb), 0.13), transparent 62%),
+    radial-gradient(90% 45% at -10% 105%, rgba(255, 184, 107, 0.07), transparent 60%),
+    var(--paper);
+}
+
+/* Type */
+:root[data-theme="dark"] .display { font-weight: 300; letter-spacing: -0.02em; }
+:root[data-theme="dark"] .display.big { font-size: calc(44 * var(--px)); }
+:root[data-theme="dark"] .label { font-weight: 500; letter-spacing: 0.18em; }
+:root[data-theme="dark"] .field-label { font-weight: 500; }
+
+/* Glass: buttons, chips, cards, lists, fields */
+:root[data-theme="dark"] .btn { border-radius: 20px; font-weight: 500; }
+/* :where keeps this as weak as a plain .btn rule, so a button's own colour
+   (lit, amber, chosen) still wins, and it stops at the paper screens: over
+   the map a button is smoked glass, set further up. */
+:root[data-theme="dark"] :where(.screen.paper, .screen.tutorial) .btn { background-color: rgba(255, 255, 255, 0.075); }
+:root[data-theme="dark"] .btn.moss-on-dark { background-color: rgba(255, 255, 255, 0.14); }
+:root[data-theme="dark"] .look-seg .btn[aria-pressed="true"] { background-color: var(--moss); }
+:root[data-theme="dark"] .btn.moss::before { opacity: 0.35; }
+:root[data-theme="dark"] .btn.small { border-radius: 16px; }
+:root[data-theme="dark"] .screen.paper .btn.ghost { background-color: rgba(255, 255, 255, 0.04); background-image: none; }
+:root[data-theme="dark"] .btn.moss {
+  background: var(--aqua); color: var(--on-aqua); font-weight: 600; text-shadow: none;
+  border-color: rgba(255, 255, 255, 0.55);
+  box-shadow: 0 0 0 1px rgba(var(--aqua-rgb), 0.3), 0 12px 34px -10px rgba(var(--aqua-rgb), 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.55);
+}
+:root[data-theme="dark"] .btn.ember { background: var(--ember); color: #1F1200; text-shadow: none; border-color: rgba(255, 255, 255, 0.45); }
+:root[data-theme="dark"] .btn.danger { background-color: rgba(255, 90, 82, 0.1); color: #FF9A92; border-color: rgba(255, 90, 82, 0.5); }
+:root[data-theme="dark"] .del-link { color: #FF9A92; }
+
+:root[data-theme="dark"] .btn.big { border-radius: 28px; min-height: 84px; }
+:root[data-theme="dark"] .screen.paper .btn.big b { font-weight: 300; font-size: calc(27 * var(--px)); letter-spacing: -0.01em; }
+:root[data-theme="dark"] .screen.paper .btn.big i { opacity: 1; color: var(--muted); }
+/* The one big action: glass with the light on, not a block of colour. On
+   paper only: over the map it stays a solid lit button, words dark, because
+   see-through glass over a photograph of a field cannot be read. */
+:root[data-theme="dark"] .screen.paper .btn.moss.big {
+  color: var(--ink); font-weight: 500;
+  background: linear-gradient(180deg, rgba(var(--aqua-rgb), 0.2), rgba(var(--aqua-rgb), 0.05)), rgba(255, 255, 255, 0.04);
+  border-color: rgba(var(--aqua-rgb), 0.7);
+  box-shadow: 0 0 0 1px rgba(var(--aqua-rgb), 0.16), 0 0 46px -8px rgba(var(--aqua-rgb), 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.24);
+}
+
+:root[data-theme="dark"] .chip { border-radius: 18px; font-weight: 500; }
+:root[data-theme="dark"] .chip:not(.selected):not([aria-pressed="true"]):not(.ghost),
+:root[data-theme="dark"] .age-chip:not(.selected) { background-color: rgba(255, 255, 255, 0.065); }
+:root[data-theme="dark"] .chip.plain b { font-weight: 500; }
+:root[data-theme="dark"] .age-chip { font-weight: 600; }
+:root[data-theme="dark"] .chip.selected,
+:root[data-theme="dark"] .radio-card.selected,
+:root[data-theme="dark"] .db-opt.on,
+:root[data-theme="dark"] .call-opt.on,
+:root[data-theme="dark"] .unit-toggle button.on,
+:root[data-theme="dark"] .look-seg .btn[aria-pressed="true"],
+:root[data-theme="dark"] .chip[aria-pressed="true"],
+:root[data-theme="dark"] .tile:has(input:checked) {
+  border-color: rgba(var(--aqua-rgb), 0.75);
+  box-shadow: 0 0 24px -8px rgba(var(--aqua-rgb), 0.65), inset 0 1px 0 rgba(255, 255, 255, 0.18);
+}
+
+:root[data-theme="dark"] .card,
+:root[data-theme="dark"] .check-list,
+:root[data-theme="dark"] .radio-card:not(.selected),
+:root[data-theme="dark"] .tile:not(:has(input:checked)) {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.03));
+  border-color: rgba(255, 255, 255, 0.11);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 20px 40px -24px rgba(0, 0, 0, 0.95);
+}
+:root[data-theme="dark"] .recent .card { border: 1px solid rgba(255, 255, 255, 0.14); }
+:root[data-theme="dark"] .recent .card.picked { outline-color: var(--aqua); }
+
+:root[data-theme="dark"] input[type="text"], :root[data-theme="dark"] input[type="email"],
+:root[data-theme="dark"] input[type="password"], :root[data-theme="dark"] input[type="number"],
+:root[data-theme="dark"] input[type="datetime-local"], :root[data-theme="dark"] input[type="date"],
+:root[data-theme="dark"] select {
+  background: rgba(255, 255, 255, 0.055); border-color: rgba(255, 255, 255, 0.16); border-radius: 16px; font-weight: 400;
+}
+:root[data-theme="dark"] input:focus-visible, :root[data-theme="dark"] select:focus-visible { outline-color: var(--aqua); }
+:root[data-theme="dark"] input[type="range"] { accent-color: var(--aqua); }
+
+:root[data-theme="dark"] .ava,
+:root[data-theme="dark"] .photo-pick .ava { background-color: rgba(255, 255, 255, 0.11); color: #D8DDE5; }
+
+/* Switches and ticks: aqua is "on". */
+:root[data-theme="dark"] .switch-row input[type="checkbox"] { background: rgba(255, 255, 255, 0.17); }
+:root[data-theme="dark"] .switch-row input[type="checkbox"]::after { background: #F5F7FA; }
+:root[data-theme="dark"] .switch-row input[type="checkbox"]:checked { background: var(--aqua); }
+:root[data-theme="dark"] .switch-row input[type="checkbox"]:checked::after { background: var(--on-aqua); }
+:root[data-theme="dark"] .check-mark { background: var(--aqua); color: var(--on-aqua); box-shadow: 0 0 16px -4px rgba(var(--aqua-rgb), 0.8); }
+:root[data-theme="dark"] .check-row.on .check-text b,
+:root[data-theme="dark"] .grid2 b .ok,
+:root[data-theme="dark"] .gps-good,
+:root[data-theme="dark"] .pw-show { color: var(--aqua); }
+:root[data-theme="dark"] .signin-facts li::before,
+:root[data-theme="dark"] .map-tut .tut-dot.on { background: var(--aqua); }
+
+/* What floats over the map: the same smoked glass, amber only where it warns. */
+:root[data-theme="dark"] .hud-pill.off,
+:root[data-theme="dark"] .map-fab.nudge { color: #1F1200; text-shadow: none; }
+:root[data-theme="dark"] .hud-pill.off .rec-dot { background: #1F1200; }
+:root[data-theme="dark"] .toast {
+  background: rgba(30, 34, 40, 0.9); color: var(--ink); border: 1px solid var(--rim);
+  -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px);
+  box-shadow: 0 18px 40px -14px rgba(0, 0, 0, 0.9);
+}
+
+/* With Reduce Transparency on, the map's panels go solid: near-black here, as
+   they go navy in the light theme. */
+@media (prefers-reduced-transparency: reduce) {
+  :root[data-theme="dark"] .wx-panel, :root[data-theme="dark"] .map-style,
+  :root[data-theme="dark"] .style-pick button:not(.selected), :root[data-theme="dark"] .fix-sheet { background: #101318; }
+}
+/* The compass dial is drawn with a gradient of its own (index.html, #wxDial). */
+:root[data-theme="dark"] #wxDial stop:first-child { stop-color: #262B33; }
+:root[data-theme="dark"] #wxDial stop:last-child { stop-color: #090B0E; }
+:root[data-theme="dark"] .band-rail { background: #1D2128; }
+
+/* Home in dark glass. */
+:root[data-theme="dark"] .home-head .greet { font-weight: 300; font-size: calc(34 * var(--px)); letter-spacing: -0.02em; }
+:root[data-theme="dark"] .home-head .display.big { font-size: calc(15 * var(--px)); font-weight: 500; letter-spacing: 0.02em; }
+:root[data-theme="dark"] .home-sum {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.03));
+  border-color: rgba(255, 255, 255, 0.12);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 20px 40px -24px rgba(0, 0, 0, 0.95);
+}
+:root[data-theme="dark"] .sum-chip { font-weight: 500; }
+:root[data-theme="dark"] .sum-chip:not([class*="lvl-"]) { background: rgba(255, 255, 255, 0.075); border-color: rgba(255, 255, 255, 0.13); }
+:root[data-theme="dark"] .sum-chip.need { color: var(--ember); border-color: rgba(255, 184, 107, 0.6); }
+:root[data-theme="dark"] .sum-go { color: var(--aqua); text-decoration: none; font-weight: 600; }
+:root[data-theme="dark"] .home-sum:focus-visible { outline-color: var(--aqua); }
+:root[data-theme="dark"] .screen.paper .btn.big.go b { font-size: calc(31 * var(--px)); }
+:root[data-theme="dark"] .screen.paper .btn.moss.big .go-arrow { background: var(--aqua); color: var(--on-aqua); box-shadow: 0 0 24px -4px rgba(var(--aqua-rgb), 0.85); }
+/* Run, beside Lay: the same glass with the amber light on. */
+:root[data-theme="dark"] .screen.paper .btn.ember.big {
+  color: var(--ink);
+  background: linear-gradient(180deg, rgba(255, 184, 107, 0.2), rgba(255, 184, 107, 0.05)), rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 184, 107, 0.7);
+  box-shadow: 0 0 0 1px rgba(255, 184, 107, 0.14), 0 0 42px -10px rgba(255, 184, 107, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.22);
+}
+:root[data-theme="dark"] .screen.paper .btn.ember.big .go-arrow { background: var(--ember); color: #1F1200; }
+:root[data-theme="dark"] .screen.paper .home-pair .btn.big b { font-size: calc(19 * var(--px)); font-weight: 400; }
+
+/* The replay in dark glass: its foot is one floating panel of smoked glass,
+   the play button the one lit thing in it. */
+:root[data-theme="dark"] .rep-dock {
+  left: 10px; right: 10px; bottom: calc(var(--safe-b) + 10px); max-width: 540px;
+  padding: 14px; border-radius: 28px;
+  background: rgba(var(--smoke), 0.74); border: 1px solid var(--rim);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 24px 50px -20px rgba(0, 0, 0, 0.9);
+  -webkit-backdrop-filter: blur(22px) saturate(150%); backdrop-filter: blur(22px) saturate(150%);
+}
+@media (prefers-reduced-transparency: reduce) {
+  :root[data-theme="dark"] .rep-dock { background: #101318; -webkit-backdrop-filter: none; backdrop-filter: none; }
+}
+:root[data-theme="dark"] .rep-dock .glass-caption { color: var(--muted); font-weight: 500; text-shadow: none; }
+:root[data-theme="dark"] .rep-dock .rep-play {
+  width: 48px; min-width: 48px; height: 48px; border-radius: 50%;
+  background: var(--aqua); color: var(--on-aqua); border-color: rgba(255, 255, 255, 0.5);
+  box-shadow: 0 0 22px -4px rgba(var(--aqua-rgb), 0.85);
+}
+:root[data-theme="dark"] .rep-dock .rep-speed { background: rgba(255, 255, 255, 0.08); box-shadow: none; }
+:root[data-theme="dark"] .rep-row input[type="range"] { accent-color: var(--aqua); }
+:root[data-theme="dark"] .rep-dock .reach-key { padding: 2px 2px 4px; background: none; border: 0; }
+:root[data-theme="dark"] .rep-dock .rk-big b { text-shadow: 0 0 26px rgba(var(--aqua-rgb), 0.45); }
+:root[data-theme="dark"] .rep-dock .rk-bar .likely { background: var(--aqua); box-shadow: 0 0 14px rgba(var(--aqua-rgb), 0.7); }
+:root[data-theme="dark"] .rep-dock .rep-layers { background: rgba(255, 255, 255, 0.06); border: 1px solid var(--rim); }
+:root[data-theme="dark"] .lay-row { font-weight: 500; }
+:root[data-theme="dark"] .lay-row[aria-pressed="true"] .lay-sw::after { background: var(--on-aqua); }
+:root[data-theme="dark"] .rep-dock .rep-foot .btn { min-height: 46px; background: rgba(255, 255, 255, 0.07); box-shadow: none; }
+
+/* Sign-in on a first launch: the way in first, the account for later. */
+.signin-start { display: flex; flex-direction: column; gap: 10px; margin: 0 0 12px; }
+.signin-start:empty { display: none; }
+.signin-start .btn { width: 100%; min-height: 60px; font-size: calc(18 * var(--px)); }
+.screen.first .signin-card { padding: 0; background: none; border: 0; box-shadow: none; }
+.signin-email { display: flex; flex-direction: column; gap: 10px; }
+.signin-email[hidden] { display: none; }
+.btn.signin-email-link { align-self: center; background: transparent; border-color: transparent; box-shadow: none; text-decoration: underline; text-underline-offset: 3px; }
+.btn.signin-email-link::before { display: none; }
+.screen.first .signin-facts { margin-top: 28px; }
+:root[data-theme="dark"] .screen.paper .btn.signin-email-link { background: transparent; border-color: transparent; box-shadow: none; color: var(--aqua); text-decoration: none; }
+
+/* The first-launch screen in dark glass: one frosted panel holding the way in,
+   over a trail drawn in light. Without something behind it a glass panel is
+   only a grey box, and this screen has no photograph (Rémi, 20 Nov 2026:
+   "this one doesn't look as glassy as the others"). Everywhere else the
+   wrapper and the drawing are not there at all. */
+.signin-hero { display: none; }
+.signin-panel { display: contents; }
+.sh-scent { fill: none; stroke: #5FF2E0; stroke-width: 64; stroke-linecap: round; opacity: 0.62; }
+.sh-warm { fill: none; stroke: #FFB86B; stroke-width: 70; stroke-linecap: round; opacity: 0.3; }
+.sh-trail { fill: none; stroke: #FFB86B; stroke-width: 3.2; stroke-linecap: round; stroke-dasharray: 0.1 9.5; }
+.sh-trail.sh-lit { stroke-width: 7; opacity: 0.75; }
+.sh-track { fill: none; stroke: #F5F7FA; stroke-width: 2.2; stroke-linecap: round; opacity: 0.92; }
+.sh-dog { fill: #FFFFFF; }
+.sh-dog.sh-lit { opacity: 0.75; }
+:root[data-theme="dark"] .screen.first {
+  background:
+    radial-gradient(90% 38% at 78% 6%, rgba(var(--aqua-rgb), 0.22), transparent 70%),
+    radial-gradient(70% 30% at 8% 30%, rgba(255, 184, 107, 0.12), transparent 70%),
+    var(--paper);
+}
+:root[data-theme="dark"] .screen.first .signin { position: relative; }
+:root[data-theme="dark"] .screen.first .signin-hero {
+  display: block; position: absolute; top: 0; left: 0; width: 100%; height: 560px; pointer-events: none;
+  -webkit-mask-image: linear-gradient(180deg, #000 78%, transparent); mask-image: linear-gradient(180deg, #000 78%, transparent);
+}
+:root[data-theme="dark"] .screen.first .signin-panel {
+  display: flex; flex-direction: column; position: relative; margin-top: 168px;
+  padding: 22px 18px 16px; border-radius: 30px;
+  /* Dark enough that the words keep their contrast, clear enough that the
+     light behind comes through as colour. */
+  background: linear-gradient(180deg, rgba(22, 26, 31, 0.5), rgba(12, 14, 18, 0.66));
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3), 0 30px 60px -24px rgba(0, 0, 0, 0.9);
+  -webkit-backdrop-filter: blur(28px) saturate(180%); backdrop-filter: blur(28px) saturate(180%);
+}
+@media (prefers-reduced-transparency: reduce) {
+  /* Reduce Transparency: nothing see-through, so the light is painted onto
+     the panel itself: solid, and still not a flat grey box. */
+  :root[data-theme="dark"] .screen.first .signin-panel {
+    background: radial-gradient(120% 70% at 92% 0%, #21524E, transparent 62%), radial-gradient(90% 55% at 0% 100%, #3A2E20, transparent 60%), #171A1F;
+    -webkit-backdrop-filter: none; backdrop-filter: none;
+  }
+}
+/* The name goes up over the drawing, the way a title sits over a picture. */
+:root[data-theme="dark"] .screen.first .signin-head .label { position: absolute; top: -150px; left: 0; right: 0; margin: 0; text-align: center; color: var(--ink); }
+:root[data-theme="dark"] .screen.first .signin-head { margin: 0 0 18px; }
+:root[data-theme="dark"] .screen.first .signin-head .display { margin-top: 0; }
+:root[data-theme="dark"] .screen.first .signin-start { margin-bottom: 10px; }
+
+/* Sheets (sheet.js). Both answers fill the width between them, so each is an
+   easy target for a thumb, in either theme. */
+.app-sheet-btns .btn { flex: 1 1 130px; }
+/* In dark glass a sheet is a pane of it: the question large and thin, the
+   answer that cannot be undone the one solid red thing on the screen. */
+:root[data-theme="dark"] .app-sheet { background: rgba(0, 0, 0, 0.55); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); }
+:root[data-theme="dark"] .app-sheet-card {
+  gap: 14px; padding: 22px 18px 18px; border-radius: 28px;
+  background: linear-gradient(180deg, rgba(34, 38, 45, 0.82), rgba(18, 21, 26, 0.9));
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22), 0 30px 70px -20px rgba(0, 0, 0, 0.95);
+  -webkit-backdrop-filter: blur(26px) saturate(160%); backdrop-filter: blur(26px) saturate(160%);
+}
+@media (prefers-reduced-transparency: reduce) {
+  :root[data-theme="dark"] .app-sheet { background: rgba(0, 0, 0, 0.72); -webkit-backdrop-filter: none; backdrop-filter: none; }
+  :root[data-theme="dark"] .app-sheet-card { background: linear-gradient(180deg, #23272E, #15181D); -webkit-backdrop-filter: none; backdrop-filter: none; }
+}
+:root[data-theme="dark"] .app-sheet-title { font-weight: 300; font-size: calc(27 * var(--px)); line-height: 1.15; letter-spacing: -0.01em; }
+:root[data-theme="dark"] .app-sheet-body { color: var(--muted); }
+:root[data-theme="dark"] .app-sheet-btns .btn { min-height: 54px; }
+:root[data-theme="dark"] .app-sheet-btns .btn.ghost { background-color: rgba(255, 255, 255, 0.07); }
+:root[data-theme="dark"] .app-sheet-btns .btn.danger {
+  background: #D93025; color: #FFFFFF; font-weight: 600; border-color: rgba(255, 255, 255, 0.3);
+  box-shadow: 0 0 0 1px rgba(217, 48, 37, 0.35), 0 12px 32px -10px rgba(217, 48, 37, 0.75), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}

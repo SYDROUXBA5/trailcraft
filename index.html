@@ -285,6 +285,11 @@
       <b>Backup paused: confirm your email</b><span>Settings → Account</span>
     </button>
 
+    <!-- The team and the job, said back in one line. The rows that set each
+         of them are folded under it until it is tapped, so the buttons below
+         are on the screen without scrolling (Rémi, 20 Nov 2026). -->
+    <button type="button" class="home-sum" id="homeSum" aria-expanded="false" aria-controls="homeSetup"></button>
+    <div class="home-setup" id="homeSetup" hidden>
     <span class="label">Handler</span>
     <div class="chip-row" id="rowHandlers"></div>
 
@@ -294,9 +299,6 @@
          not say: read by a screen reader after its name, never shown. -->
     <span id="handlerOpensHint" hidden>Tap again to open this handler’s card.</span>
     <span id="dogOpensHint" hidden>Tap again to open this dog’s record.</span>
-    <!-- The picked handler and the picked dog are the team in play: its level,
-         the name it has earned, and the way to its board. -->
-    <button type="button" class="team-row" id="homeTeam" hidden></button>
 
     <span class="label">Looking for</span>
     <div class="chip-row" id="rowTargets"></div>
@@ -312,14 +314,22 @@
 
     <span class="label" id="lblSetter">Who lays the trail</span>
     <div class="chip-row" id="rowLayers"></div>
+    </div>
+    <!-- The picked handler and the picked dog are the team in play: its level,
+         the name it has earned, and the way to its board. -->
+    <button type="button" class="team-row" id="homeTeam" hidden></button>
 
-    <button class="btn big moss" id="btnLay"><b id="btnLayLabel">Lay a trail</b><i id="btnLaySub"></i></button>
-    <button class="btn big ember" id="btnRun"><b id="btnRunLabel">Run a trail</b><i id="btnRunSub"></i></button>
+    <button class="btn big moss go" id="btnLay"><span class="go-text"><b id="btnLayLabel">Lay a trail</b><i id="btnLaySub"></i></span><span class="go-arrow" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span></button>
+    <button class="btn big ember go" id="btnRun"><span class="go-text"><b id="btnRunLabel">Run a trail</b><i id="btnRunSub"></i></span><span class="go-arrow" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span></button>
+    <div class="home-pair">
     <button class="btn big ghost" id="btnScanHome" hidden><b>Scan a trail card</b><i>Take a trail, or a plan to walk, from another phone</i></button>
     <button class="btn big ghost" id="btnSquadHome"><b>Squad</b><i>Demo: your team on one map</i></button>
+    </div>
 
     <span class="label">Recent</span>
     <div id="recentList" class="recent"></div>
+    <!-- The whole list lives one tap away, not only behind Settings. -->
+    <button type="button" class="btn ghost small home-all" id="homeAll">All sessions</button>
   </div>
 </section>
 
@@ -1116,19 +1126,26 @@
 
 <section id="scrReplay" class="screen glass" hidden>
   <div class="hud-pill" id="repHud"><span id="repHudText">Replay</span></div>
-  <div class="glass-bottom">
+  <div class="glass-bottom rep-dock">
     <p class="glass-caption" id="repCaption"></p>
     <!-- Scent reach: the ground the dog's nose could have had scent from (reach.js).
          Its switch, and while it is on what the two shades mean and how much of the trail fell in each. -->
-    <div class="reach-key" id="repReach" hidden>
-      <div class="rk-row">
-        <button type="button" class="rk-toggle" id="repReachBtn" aria-pressed="false">Scent reach</button>
-        <span class="rk-row" id="repReachKey" hidden>
-          <span class="rk"><i class="rk-sw likely" aria-hidden="true"></i>Likely</span>
-          <span class="rk"><i class="rk-sw possible" aria-hidden="true"></i>Possibly</span>
-          <button type="button" class="rk-why" id="repReachWhy" aria-label="What is scent reach?" aria-expanded="false" aria-controls="repReachNote">?</button>
-        </span>
+    <div class="reach-key off" id="repReach" hidden>
+      <!-- The ground the dog's nose could have reached, as a share of the laid
+           trail: the figure, a bar of its three parts, and what each part is.
+           Shown only while Scent reach is on (Layers, below). The sentence the
+           bar stands for is still written, for a screen reader. -->
+      <div class="rk-head">
+        <span class="rk-title">Scent reach</span>
+        <button type="button" class="rk-why" id="repReachWhy" aria-label="What is scent reach?" aria-expanded="false" aria-controls="repReachNote">?</button>
       </div>
+      <p class="rk-big" id="repReachBig" aria-hidden="true" hidden><b></b><span></span></p>
+      <div class="rk-bar" id="repReachBar" aria-hidden="true" hidden><i class="likely"></i><i class="possible"></i><i class="out"></i></div>
+      <span class="rk-row" id="repReachKey" hidden>
+        <span class="rk"><i class="rk-sw likely" aria-hidden="true"></i><span id="repReachK1">Likely</span></span>
+        <span class="rk"><i class="rk-sw possible" aria-hidden="true"></i><span id="repReachK2">Possibly</span></span>
+        <span class="rk" id="repReachK3wrap" hidden><i class="rk-sw out" aria-hidden="true"></i><span id="repReachK3">Out of reach</span></span>
+      </span>
       <p class="rk-say" id="repReachSay" role="status"></p>
       <p class="rk-note" id="repReachNote" hidden></p>
     </div>
@@ -1153,6 +1170,17 @@
       <button class="btn ghost" id="repWind">Wind</button>
       <button class="btn big ember grow" id="repSee">See the result</button>
     </div>
+    <!-- The foot of a replay: what is drawn (Layers), what can be done with the
+         run (Tools), and the way out. Each of the first two folds a small panel
+         out above the row, so the map keeps the screen until one is asked for.
+         It is all inside repRow, which marking a run already hides. -->
+    <div class="rep-foot" id="repRow">
+    <div class="rep-layers" id="repLayers" role="group" aria-label="Layers" hidden>
+      <button type="button" class="lay-row" id="repReachBtn" aria-pressed="false"><span>Scent reach</span><i class="lay-sw" aria-hidden="true"></i></button>
+      <button type="button" class="lay-row" id="repLayWind" aria-pressed="true"><span>Wind</span><i class="lay-sw" aria-hidden="true"></i></button>
+      <button type="button" class="lay-row" id="repLayPlume" aria-pressed="true"><span>Scent plume</span><i class="lay-sw" aria-hidden="true"></i></button>
+    </div>
+    <div class="rep-tools" id="repTools" hidden>
     <div class="row-gap" id="repEditRow" hidden>
       <button class="btn ghost" id="repEdit">Edit marks</button>
       <button class="btn ghost" id="repClip">Save video</button>
@@ -1160,9 +1188,15 @@
     <div class="row-gap" id="repDogRow" hidden>
       <button class="btn ghost" id="repDogTrack">Import the dog’s GPS track</button>
     </div>
-    <div class="row-gap" id="repRow">
+    <div class="row-gap" id="repDebriefRow">
       <button class="btn ghost" id="repDebrief">Write the debrief</button>
+    </div>
+    </div>
+    <div class="row-gap">
+      <button class="btn ghost" id="repLayersBtn" aria-expanded="false" aria-controls="repLayers">Layers</button>
+      <button class="btn ghost" id="repToolsBtn" aria-expanded="false" aria-controls="repTools">Tools</button>
       <button class="btn ghost" id="repBack">Done</button>
+    </div>
     </div>
   </div>
   <!-- ── The replay as a video ────────────────────────────────────────
@@ -1271,12 +1305,36 @@
 <!-- ── Sign in ─────────────────────────────────────────────────────── -->
 <section id="scrSignIn" class="screen paper" hidden>
   <div class="page signin">
+    <!-- First launch in the dark look: a laid trail, a dog's track and the
+         scent between them, drawn in light, for the glass panel below to sit
+         over. Glass needs something behind it to be seen as glass. It is
+         decoration only: hidden everywhere else, and from a screen reader. -->
+    <svg class="signin-hero" viewBox="0 0 390 560" preserveAspectRatio="xMidYMin slice" aria-hidden="true" focusable="false">
+      <defs>
+        <filter id="shGlow" filterUnits="userSpaceOnUse" x="-120" y="-120" width="630" height="800"><feGaussianBlur stdDeviation="20"/></filter>
+        <filter id="shSoft" x="-20%" y="-40%" width="140%" height="180%"><feGaussianBlur stdDeviation="3.5"/></filter>
+      </defs>
+      <path class="sh-scent" d="M-40 120 C 70 60, 150 215, 245 195 S 365 260, 440 400" filter="url(#shGlow)"/>
+      <path class="sh-warm" d="M-50 430 C 50 385, 120 480, 215 450" filter="url(#shGlow)"/>
+      <path class="sh-trail sh-lit" d="M-30 176 C 70 132, 135 196, 218 130 S 345 72, 430 120" filter="url(#shSoft)"/>
+      <path class="sh-trail" d="M-30 176 C 70 132, 135 196, 218 130 S 345 72, 430 120"/>
+      <path class="sh-track" d="M-30 162 C 50 154, 100 130, 152 166 S 242 98, 292 114 S 372 132, 430 98"/>
+      <circle class="sh-dog sh-lit" cx="292" cy="114" r="11" filter="url(#shSoft)"/>
+      <circle class="sh-dog" cx="292" cy="114" r="5"/>
+    </svg>
+    <div class="signin-panel">
     <div class="signin-head">
       <span class="label">Trailcraft</span>
       <h1 class="display big">Keep every trail.</h1>
-      <p class="body muted">Sign in and your dogs, every trail they have run, and what the
+      <p class="body muted" id="signInLede">Sign in and your dogs, every trail they have run, and what the
         model has learned from watching them are backed up — and follow you to a new phone.</p>
     </div>
+
+    <!-- On a first launch the way in comes first: the button that starts the
+         app without an account is put here (app.js paintSignInVerify), and the
+         account is something to add later. Opened from Settings, where signing
+         in is what was asked for, this stays empty. -->
+    <div class="signin-start" id="signInStart"></div>
 
     <!-- Signed in with an address nobody has confirmed yet: nothing is backed
          up until it is, so this asks for that instead of starting onboarding
@@ -1292,7 +1350,10 @@
     <div class="signin-card" id="signInMain">
       <button type="button" class="auth-btn auth-google" id="btnGoogle"><svg viewBox="0 0 48 48" width="20" height="20" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.1H42V20H24v8h11.3c-1.6 4.7-6.1 8-11.3 8-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 8 3l5.7-5.7C34 6.1 29.3 4 24 4 13 4 4 13 4 24s9 20 20 20 20-9 20-20c0-1.3-.1-2.7-.4-3.9z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 8 3l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2A11.9 11.9 0 0 1 24 36c-5.2 0-9.6-3.3-11.3-7.9l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.1H42V20H24v8h11.3a12 12 0 0 1-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.7-.4-3.9z"/></svg><span>Continue with Google</span></button>
       <button type="button" class="auth-btn auth-apple" id="btnApple" hidden><svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true"><path fill="currentColor" d="M16.37 1.43c0 1.14-.46 2.23-1.21 3.03-.8.86-2.1 1.52-3.19 1.43-.13-1.1.42-2.25 1.18-3.03.84-.87 2.28-1.5 3.22-1.43zM20.5 17.3c-.55 1.27-.82 1.84-1.53 2.96-.99 1.56-2.39 3.5-4.12 3.52-1.54.01-1.94-1-4.03-.99-2.09.01-2.53 1.01-4.07 1-1.73-.02-3.05-1.77-4.04-3.33C-.07 16.03-.36 11 1.4 8.3c1.25-1.92 3.23-3.04 5.09-3.04 1.9 0 3.09 1.04 4.66 1.04 1.52 0 2.45-1.04 4.64-1.04 1.66 0 3.42.9 4.67 2.46-4.1 2.25-3.44 8.11.04 9.58z"/></svg><span>Continue with Apple</span></button>
-      <!-- Email: works on the web and inside the iPhone app alike. -->
+      <!-- Email: works on the web and inside the iPhone app alike. On a first
+           launch its form waits behind one line until it is asked for. -->
+      <button type="button" class="btn ghost small signin-email-link" id="btnUseEmail" hidden>Use my email instead</button>
+      <div class="signin-email" id="signInEmail">
       <div class="signin-or" id="signInOr"><span>or with your email</span></div>
       <div class="signin-tabs" role="tablist" aria-label="Account">
         <button type="button" role="tab" class="signin-tab on" id="tabSignUp" aria-selected="true">Create an account</button>
@@ -1322,6 +1383,8 @@
         <button type="submit" class="btn moss" id="authSubmit">Create account</button>
         <button type="button" class="btn ghost small" id="authForgot" hidden>Forgot your password?</button>
       </form>
+      </div>
+    </div>
     </div>
 
     <ul class="signin-facts">
@@ -1331,7 +1394,7 @@
     </ul>
     <a class="privacy-link" href="https://sydrouxba5.github.io/trailcraft/privacy.html" target="_blank" rel="noopener">How your data is handled</a>
 
-    <div class="page-bottom">
+    <div class="page-bottom" id="signInBottom">
       <button type="button" class="btn ghost" id="btnSkipSignIn">Use without an account</button>
     </div>
   </div>
