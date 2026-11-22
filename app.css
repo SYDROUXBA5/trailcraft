@@ -3468,3 +3468,39 @@ html.hv-lift .style-pick { bottom: calc(var(--hv-gap, 0px) + 132px); }
   }
   :root[data-theme="dark"] #wxDial stop:first-child, :root[data-theme="dark"] #wxDial stop:last-child { stop-opacity: 0; }
 }
+
+/* ── Rémi's colours in proportion (22 Nov 2026): 60 % black, 30 % blue, 10 % red ──
+   Black is the ground. Blue is what things are made of: cards, chips,
+   buttons at rest, the glass panes and their edges. Red is the one thing to
+   press, and the odour itself: the main action buttons, play, Stop and Done,
+   the odour's dot. Dark theme only; the light theme keeps its own. */
+:root[data-theme="dark"] {
+  --card: #0A1E3B;
+  --border: #1F4B87;
+  --smoke: 3, 22, 50; --smoke-b: 3, 22, 50; --smoke-d: 2, 12, 28;
+  --lg-tint: rgba(0, 70, 160, 0.30);
+  --cta: #FF073A; --cta-rgb: 255, 7, 58; --on-cta: #FFFFFF;
+}
+:root[data-theme="dark"] .chip:not(.selected),
+:root[data-theme="dark"] .sum-chip:not([class*="lvl-"]),
+:root[data-theme="dark"] :where(.screen.paper, .screen.tutorial) .btn:not(.moss):not(.ember):not(.danger) {
+  background-color: rgba(0, 123, 255, 0.16); border-color: rgba(0, 123, 255, 0.42);
+}
+:root[data-theme="dark"] .btn.moss, :root[data-theme="dark"] .btn.ember {
+  background: var(--cta); color: var(--on-cta); border-color: rgba(255, 255, 255, 0.5); text-shadow: none;
+}
+:root[data-theme="dark"] .screen.paper .btn.moss, :root[data-theme="dark"] .screen.paper .btn.ember {
+  box-shadow: 0 0 0 1px rgba(var(--cta-rgb), 0.3), 0 12px 34px -10px rgba(var(--cta-rgb), 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.45);
+}
+:root[data-theme="dark"] .screen.paper .btn.moss.big .go-arrow { background: #FFFFFF; color: var(--cta); box-shadow: none; }
+:root[data-theme="dark"] .rep-dock .rep-play, :root[data-theme="dark"] .veh-play { background: var(--cta); color: var(--on-cta); }
+/* The home screen's own rules are more particular, so they are matched here. */
+:root[data-theme="dark"] .screen.paper .btn.moss.big {
+  color: #FFFFFF;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0) 60%), var(--cta);
+  border-color: rgba(255, 255, 255, 0.5);
+  box-shadow: 0 0 0 1px rgba(var(--cta-rgb), 0.3), 0 0 46px -8px rgba(var(--cta-rgb), 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+:root[data-theme="dark"] .screen.paper .btn.moss.big i { color: rgba(255, 255, 255, 0.85); }
+:root[data-theme="dark"] .chip:not(.selected):not([aria-pressed="true"]):not(.ghost),
+:root[data-theme="dark"] .age-chip:not(.selected) { background-color: rgba(0, 123, 255, 0.16); border-color: rgba(0, 123, 255, 0.42); }
