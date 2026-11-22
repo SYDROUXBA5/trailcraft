@@ -7362,6 +7362,8 @@ async function startRun(s) {
      line in one hand, Found and Done are all there is to touch. A search
      keeps its marks, because they are what its hides are scored on. */
   $('wpRow').hidden = onTrail;
+  /* A vehicle search has no use for them (Rémi on his phone, 2026-11-22): the run is Stop. */
+  if (s.data.vehicle) $('wpRow').hidden = true;
   go('scrRun');
   /* The coach went on above, for this run. A run that never started must not
      leave it on: the next lay or walk would keep the screen awake and say

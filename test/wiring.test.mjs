@@ -770,6 +770,7 @@ t('a vehicle search places a vehicle, keeps its odour on it, and saves both', ()
 t('a vehicle search runs with its vehicle and start on the map, and replays with the dog’s time in scent', () => {
   assert.match(js, /startFollowing\(null\);\s*if \(s\.data\.vehicle\) startVehicleRun\(s\);/);
   assert.match(bodyOf('startVehicleRun'), /if \(s\.data\.showScent && !run\.revealed\) toggleReveal\(\);/, 'trainer view shows the scent from the start, recorded as shown');
+  assert.match(js, /\$\('wpRow'\)\.hidden = onTrail;\s*\/\*[^*]*\*\/\s*if \(s\.data\.vehicle\) \$\('wpRow'\)\.hidden = true;/, 'no marks row on a vehicle search');
   assert.match(js, /vehRun = null;\s*if \(hudText === vehRunHud\) hudText = gpsHudText;/, 'the next run is not given this run’s line');
   assert.match(bodyOf('vehRunHud'), /if \(!vehRun \|\| !run\.revealed \|\| run\.session\?\.id !== vehRun\.s\.id\) return base;/, 'a blind handler is told nothing');
   assert.match(bodyOf('drawReplayGround'), /if \(s\.data\.vehicle\) drawVehicleScene\(s\.data\);/);
