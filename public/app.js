@@ -10183,10 +10183,15 @@ const teamRowHtml = (h, d, lv) =>
 const teamRowLabel = (h, d, lv) => `${pairName(h.name, d.name)}, ${earnedName(lv)}, ${levelChip(lv)}. Open the team board`;
 
 /** Home: the picked handler and dog as a team, or the offer to make them one. */
+/* The team, its board and its levels are trailing's (Rémi, 22 Nov 2026):
+   they show only while the home screen is set to a person trail, never for
+   a hide or a vehicle search. A level-up only ever follows a person trail
+   (runLevelled). */
+const gamifyOn = () => S.target?.kind === 'person';
 function paintHomeTeam() {
   const row = $('homeTeam');
   const { handler, dog } = S;
-  row.hidden = !handler || !dog;
+  row.hidden = !handler || !dog || !gamifyOn();
   if (row.hidden) return;
   const lv = levelOf(dog, handler.id);
   row.classList.toggle('none', !lv);
@@ -10197,6 +10202,9 @@ function paintHomeTeam() {
 
 /** The dog's page: each team it is in, one per handler who runs it. */
 function paintDogTeams(d) {
+  const on = gamifyOn();
+  for (const id of ['dogTeamsLabel', 'dogTeams', 'dogNewTeam']) $(id).hidden = !on;
+  if (!on) return;
   const rows = teamsOf(d).map(t => {
     const h = S.handlers.find(x => x.id === t.handlerId);
     const lv = h ? levelOf(d, h.id) : null;

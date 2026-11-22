@@ -752,6 +752,13 @@ t('grading reads the approach, the trail ends, the rain and the handler the righ
   assert.match(bodyOf('openDebrief'), /const last = stickyDebrief\(db\.sessions\(\), s\);/);
 });
 
+t('the team, its board and its levels show only for trailing', () => {
+  assert.match(js, /const gamifyOn = \(\) => S\.target\?\.kind === 'person';/);
+  assert.match(bodyOf('paintHomeTeam'), /row\.hidden = !handler \|\| !dog \|\| !gamifyOn\(\);/, 'no team row on the home screen for a hide or a vehicle');
+  assert.match(bodyOf('paintDogTeams'), /for \(const id of \['dogTeamsLabel', 'dogTeams', 'dogNewTeam'\]\) \$\(id\)\.hidden = !on;\s*if \(!on\) return;/, 'nor on the dog’s page');
+  assert.match(bodyOf('runLevelled'), /if \(!s\?\.id \|\| targetById\(s\.targetId\)\.kind !== 'person'\) return null;/, 'and a level-up only ever follows a person trail');
+});
+
 t('a vehicle search places a vehicle, keeps its odour on it, and saves both', () => {
   const start = bodyOf('startLay');
   assert.match(start, /if \(t\.id === 'vehicle'\) startVehicleLay\(\);\s*else map\.on\('click', onHideTap\);/, 'a tap places the vehicle, not a loose hide');
