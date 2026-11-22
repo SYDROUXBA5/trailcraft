@@ -2940,7 +2940,7 @@ html.hv-lift .style-pick { bottom: calc(var(--hv-gap, 0px) + 132px); }
 .veh-pick img { width: 100%; height: 100%; display: block; }
 .veh-pick-tap { position: absolute; inset: 0; cursor: crosshair; touch-action: manipulation; }
 .veh-mark { position: absolute; width: 18px; height: 18px; margin: -9px 0 0 -9px; border-radius: 50%; pointer-events: none;
-  background: #FF2E63; border: 3px solid #FFFFFF; box-shadow: 0 0 12px rgba(255, 46, 99, 0.9); }
+  background: #FF073A; border: 3px solid #FFFFFF; box-shadow: 0 0 12px rgba(255, 7, 58, 0.9); }
 .veh-rotate { display: grid; grid-template-columns: 52px minmax(0, 1fr) 52px auto; gap: 6px; align-items: center; }
 .veh-rotate .btn { min-height: 46px; font-size: calc(22 * var(--px)); touch-action: none; user-select: none; -webkit-user-select: none; }
 .veh-rotate #btnVehTurn { font-size: calc(14 * var(--px)); }
@@ -2993,19 +2993,20 @@ html.hv-lift .style-pick { bottom: calc(var(--hv-gap, 0px) + 132px); }
    without each of them having to be found and changed.
    ═══════════════════════════════════════════════════════════════════════ */
 :root[data-theme="dark"] {
-  --paper: #07090C;
+  --paper: #000000;           /* Rémi's colours, 22 Nov 2026: black #000000, blue #007BFF, red #FF073A */
   --card: #14171C;
   --border: #2B3038;
   --ink: #F5F7FA;
   --muted: #A6AEBA;
-  --moss: #0D5650;            /* lit glass under white words: a chosen chip, a switch that is on */
+  --moss: #0A3F80;            /* lit glass under white words: a chosen chip, a switch that is on (the blue, deep) */
   --moss-deep: #050608;
   --ember: #FFB86B;
   --rim: rgba(255, 255, 255, 0.17);
-  --aqua: #5FF2E0; --aqua-rgb: 95, 242, 224;
-  --on-aqua: #03110F;         /* words on a lit aqua button */
-  --lit: #5FF2E0; --lit-rgb: 95, 242, 224;
-  --smoke: 12, 14, 18; --smoke-b: 12, 14, 18; --smoke-c: 0, 0, 0; --smoke-d: 4, 5, 7;
+  --aqua: #007BFF; --aqua-rgb: 0, 123, 255;   /* the lit colour: blue (the token keeps its old name) */
+  --on-aqua: #FFFFFF;         /* words on a lit blue button */
+  --lit: #007BFF; --lit-rgb: 0, 123, 255;
+  --alarm: #FF073A; --alarm-rgb: 255, 7, 58;   /* red: what cannot be undone, and the odour itself */
+  --smoke: 0, 0, 0; --smoke-b: 0, 0, 0; --smoke-c: 0, 0, 0; --smoke-d: 0, 0, 0;
   --r: 26px;
   --display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Roboto", "Segoe UI", system-ui, sans-serif;
   --body: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Roboto", "Segoe UI", system-ui, sans-serif;
@@ -3043,8 +3044,8 @@ html.hv-lift .style-pick { bottom: calc(var(--hv-gap, 0px) + 132px); }
   box-shadow: 0 0 0 1px rgba(var(--aqua-rgb), 0.3), 0 12px 34px -10px rgba(var(--aqua-rgb), 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.55);
 }
 :root[data-theme="dark"] .btn.ember { background: var(--ember); color: #1F1200; text-shadow: none; border-color: rgba(255, 255, 255, 0.45); }
-:root[data-theme="dark"] .btn.danger { background-color: rgba(255, 90, 82, 0.1); color: #FF9A92; border-color: rgba(255, 90, 82, 0.5); }
-:root[data-theme="dark"] .del-link { color: #FF9A92; }
+:root[data-theme="dark"] .btn.danger { background-color: rgba(var(--alarm-rgb), 0.12); color: var(--alarm); border-color: rgba(var(--alarm-rgb), 0.6); }
+:root[data-theme="dark"] .del-link { color: var(--alarm); }
 
 :root[data-theme="dark"] .btn.big { border-radius: 28px; min-height: 84px; }
 :root[data-theme="dark"] .screen.paper .btn.big b { font-weight: 300; font-size: calc(27 * var(--px)); letter-spacing: -0.01em; }
@@ -3205,7 +3206,7 @@ html.hv-lift .style-pick { bottom: calc(var(--hv-gap, 0px) + 132px); }
    wrapper and the drawing are not there at all. */
 .signin-hero { display: none; }
 .signin-panel { display: contents; }
-.sh-scent { fill: none; stroke: #5FF2E0; stroke-width: 64; stroke-linecap: round; opacity: 0.62; }
+.sh-scent { fill: none; stroke: #007BFF; stroke-width: 64; stroke-linecap: round; opacity: 0.62; }
 .sh-warm { fill: none; stroke: #FFB86B; stroke-width: 70; stroke-linecap: round; opacity: 0.3; }
 .sh-trail { fill: none; stroke: #FFB86B; stroke-width: 3.2; stroke-linecap: round; stroke-dasharray: 0.1 9.5; }
 .sh-trail.sh-lit { stroke-width: 7; opacity: 0.75; }

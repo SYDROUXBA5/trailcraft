@@ -893,14 +893,14 @@ function addOverlays() {
   /* A vehicle search: the verges and car parks a vehicle can stand on, lit
      while it is being placed, and the vehicle itself. On the Mapbox map it is
      a 3D model (models/, made for this), on the plain map its outline. */
-  add({ id: 'veh-park', type: 'fill', source: 'vehPark', paint: { 'fill-color': '#5FF2E0', 'fill-opacity': 0.18 } });
-  add({ id: 'veh-park-edge', type: 'line', source: 'vehPark', paint: { 'line-color': '#5FF2E0', 'line-width': 1.6, 'line-opacity': 0.9 } });
+  add({ id: 'veh-park', type: 'fill', source: 'vehPark', paint: { 'fill-color': '#007BFF', 'fill-opacity': 0.18 } });
+  add({ id: 'veh-park-edge', type: 'line', source: 'vehPark', paint: { 'line-color': '#007BFF', 'line-width': 1.6, 'line-opacity': 0.9 } });
   add({ id: 'veh-verge', type: 'line', source: 'vehVerge', layout: { 'line-cap': 'round' },
-        paint: { 'line-color': '#5FF2E0', 'line-width': 2.4, 'line-opacity': 0.9, 'line-dasharray': [1.6, 1.2] } });
+        paint: { 'line-color': '#007BFF', 'line-width': 2.4, 'line-opacity': 0.9, 'line-dasharray': [1.6, 1.2] } });
   add({ id: 'veh-approach', type: 'line', source: 'vehApproach', layout: { 'line-cap': 'round' },
-        paint: { 'line-color': '#5FF2E0', 'line-width': 3, 'line-dasharray': [1.4, 1.4] } });
+        paint: { 'line-color': '#007BFF', 'line-width': 3, 'line-dasharray': [1.4, 1.4] } });
   add({ id: 'veh-ring', type: 'line', source: 'vehRing', layout: { 'line-join': 'round' },
-        paint: { 'line-color': '#5FF2E0', 'line-width': 2.2 } });
+        paint: { 'line-color': '#007BFF', 'line-width': 2.2 } });
   add({ id: 'veh-body', type: 'fill', source: 'vehBody', paint: { 'fill-color': '#F2F4F7', 'fill-outline-color': '#0B1630' } });
   if (typeof map.addModel === 'function') {
     add({ id: 'veh-model', type: 'model', source: 'vehicle',
@@ -913,7 +913,7 @@ function addOverlays() {
   /* The odour itself, in its own colour, so the source can be told from its
      cloud and pinpointed on a vehicle. */
   add({ id: 'hide-source', type: 'circle', source: 'hides',
-        paint: { 'circle-radius': 4, 'circle-color': '#FF2E63', 'circle-stroke-width': 1.5, 'circle-stroke-color': '#FFFFFF' } });
+        paint: { 'circle-radius': 4, 'circle-color': '#FF073A', 'circle-stroke-width': 1.5, 'circle-stroke-color': '#FFFFFF' } });
   add({ id: 'nose-halo', type: 'circle', source: 'nose',
         paint: { 'circle-radius': 15, 'circle-color': '#FFFFFF', 'circle-opacity': 0.22, 'circle-blur': 0.6 } });
   add({ id: 'nose-dot', type: 'circle', source: 'nose',
@@ -2299,11 +2299,11 @@ function buildWheel() {
   if ($('vehWheel').firstChild) return;
   const ticks = Array.from({ length: 16 }, (_, i) => `<line x1="100" y1="12" x2="100" y2="${i % 2 ? 20 : 26}" stroke="rgba(255,255,255,${i % 2 ? 0.35 : 0.8})" stroke-width="${i % 2 ? 1.5 : 2.5}" transform="rotate(${i * 22.5} 100 100)"/>`).join('');
   const letters = [['N', 100, 44], ['E', 158, 106], ['S', 100, 166], ['W', 42, 106]]
-    .map(([t, x, y]) => `<text x="${x}" y="${y}" text-anchor="middle" font-size="16" font-weight="700" fill="${t === 'N' ? '#FF5A52' : 'rgba(255,255,255,0.9)'}" font-family="system-ui, sans-serif">${t}</text>`).join('');
+    .map(([t, x, y]) => `<text x="${x}" y="${y}" text-anchor="middle" font-size="16" font-weight="700" fill="${t === 'N' ? '#FF073A' : 'rgba(255,255,255,0.9)'}" font-family="system-ui, sans-serif">${t}</text>`).join('');
   $('vehWheel').innerHTML = `<svg width="118" height="118" viewBox="0 0 200 200" aria-hidden="true" style="display:block; flex: none">
     <circle cx="100" cy="100" r="94" fill="rgba(255,255,255,0.06)" stroke="rgba(255,255,255,0.28)" stroke-width="2"/>${ticks}${letters}
-    <g id="vehWheelArrow"><path d="M100 14 L100 70" stroke="#5FF2E0" stroke-width="7" stroke-linecap="round"/>
-      <path d="M86 64 L100 86 L114 64 Z" fill="#5FF2E0"/><circle cx="100" cy="14" r="9" fill="#5FF2E0" stroke="#fff" stroke-width="2.5"/></g>
+    <g id="vehWheelArrow"><path d="M100 14 L100 70" stroke="#007BFF" stroke-width="7" stroke-linecap="round"/>
+      <path d="M86 64 L100 86 L114 64 Z" fill="#007BFF"/><circle cx="100" cy="14" r="9" fill="#007BFF" stroke="#fff" stroke-width="2.5"/></g>
     </svg>
     <span style="display: flex; flex-direction: column; gap: 2px; min-width: 0">
       <b id="vehWheelText" style="font-size: calc(26 * var(--px)); font-weight: 400"></b>
@@ -10853,7 +10853,7 @@ const resolvedTheme = () => settings.theme === 'dark' ? 'dark'
 function applyTheme() {
   const t = resolvedTheme();
   document.documentElement.dataset.theme = t;
-  $('themeColor')?.setAttribute('content', t === 'dark' ? '#07090C' : '#F6F7FA');
+  $('themeColor')?.setAttribute('content', t === 'dark' ? '#000000' : '#F6F7FA');
   paintAppearance();
 }
 darkQuery.addEventListener?.('change', () => { if (settings.theme === 'system') applyTheme(); });
