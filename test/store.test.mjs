@@ -22,9 +22,9 @@ const fakeBackend = () => {
 };
 
 t('targets: person is a trail, everything else is a hide, verbs follow', () => {
-  assert.equal(TARGETS.length, 8);
+  assert.equal(TARGETS.length, 9);
   assert.equal(targetById('person').kind, 'person');
-  assert.ok(TARGETS.filter(x => x.kind === 'hide').length === 7);
+  assert.ok(TARGETS.filter(x => x.kind === 'hide').length === 8);
   assert.equal(targetById('nonsense').id, 'person', 'unknown id falls back to person');
   assert.equal(verbs(targetById('person')).lay, 'Lay a trail');
   assert.equal(verbs(targetById('narcotics')).lay, 'Set a hide');

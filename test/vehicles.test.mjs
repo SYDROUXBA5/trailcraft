@@ -1,0 +1,106 @@
+/* Vehicles for a vehicle search: snapping to a verge or a car park, which
+   way they face, and where an odour spot lands. Synthetic roads, exact. */
+import assert from 'node:assert/strict';
+import { VEHICLES, vehicleById, spotsOf, spotWorld, footprint, keepsLeft, driverSide, roadsOf, parksOf,
+  snapToVerge, parkAt, vergeLines, parkAreas, toLocal, fromLocal, VERGE_GAP, SNAP_MAX, modelOf, cardOf } from '../public/vehicles.js';
+
+let pass = 0;
+const t = (name, fn) => { fn(); pass++; console.log(`  ok  ${name}`); };
+const near = (a, b, tol, msg) => assert.ok(Math.abs(a - b) <= tol, `${msg}: ${a} vs ${b}`);
+const angle = (a, b) => Math.abs(((a - b + 540) % 360) - 180);
+
+const TX = { lat: 31.6629, lon: -97.4852 };          // Valley Mills, Texas: keeps right
+const UK = { lat: 51.2094, lon: -2.6449 };            // Wells, Somerset: keeps left
+/* A street running east-west through the origin, as decoded tiles give it. */
+const ewRoad = (o, cls = 'street') => {
+  const a = fromLocal(o, [-200, 0]), b = fromLocal(o, [200, 0]);
+  return [{ road: [{ type: 2, props: { class: cls }, geom: [[[a.lon, a.lat], [b.lon, b.lat]]] }] }];
+};
+
+t('five kinds, each with its model, its picture and real proportions', () => {
+  assert.deepEqual(VEHICLES.map(v => v.id), ['car', 'suv', 'pickup', 'van', 'box']);
+  for (const v of VEHICLES) {
+    assert.ok(v.L > v.W && v.W > 1.5 && v.H > 1, v.id);
+    assert.ok(v.front > 0 && v.rear < 0 && v.front < v.L / 2 && -v.rear < v.L / 2, `${v.id} axles under the body`);
+  }
+  assert.equal(modelOf('pickup'), 'models/pickup.glb');
+  assert.equal(cardOf('van'), 'img/vehicles/van.webp');
+  assert.equal(vehicleById('nonsense').id, 'car');
+});
+
+t('which side traffic keeps to', () => {
+  assert.equal(keepsLeft(TX.lat, TX.lon), false);
+  assert.equal(keepsLeft(UK.lat, UK.lon), true);
+  assert.equal(keepsLeft(-33.87, 151.21), true, 'Sydney');
+  assert.equal(keepsLeft(48.85, 2.35), false, 'Paris');
+  assert.equal(driverSide(TX.lat, TX.lon), 'l');
+  assert.equal(driverSide(UK.lat, UK.lon), 'r');
+});
+
+t('roadside: a tap north of an east-west street stands the vehicle on the north verge, facing the traffic', () => {
+  const roads = roadsOf(ewRoad(TX));
+  const tap = fromLocal(TX, [12, 9]);
+  const v = snapToVerge(roads, tap, 'pickup');
+  const [x, y] = toLocal(TX, v);
+  near(y, 3.6 + VERGE_GAP + 1.0, 0.05, 'just off the edge line');
+  near(x, 12, 0.05, 'level with the tap');
+  assert.equal(v.place, 'verge'); assert.equal(v.road, 'street');
+  near(angle(v.heading, 270), 0, 0.5, 'keeping right, the north side goes west');
+  const south = snapToVerge(roads, fromLocal(TX, [0, -6]), 'pickup');
+  near(toLocal(TX, south)[1], -(3.6 + VERGE_GAP + 1.0), 0.05, 'the south verge');
+  near(angle(south.heading, 90), 0, 0.5, 'and its traffic goes east');
+});
+
+t('roadside where traffic keeps left: the same tap faces the other way', () => {
+  const v = snapToVerge(roadsOf(ewRoad(UK)), fromLocal(UK, [0, 9]), 'car');
+  near(angle(v.heading, 90), 0, 0.5, 'keeping left, the north side goes east');
+});
+
+t('roadside: a wider road puts the vehicle further out, and no road means no snap', () => {
+  const a = snapToVerge(roadsOf(ewRoad(TX, 'primary')), fromLocal(TX, [0, 9]), 'car');
+  near(toLocal(TX, a)[1], 5.5 + VERGE_GAP + 1.85 / 2, 0.05, 'a primary road');
+  assert.equal(snapToVerge(roadsOf(ewRoad(TX)), fromLocal(TX, [0, SNAP_MAX + 5]), 'car'), null);
+  assert.equal(snapToVerge([], TX, 'car'), null);
+  const tunnel = [{ road: [{ type: 2, props: { class: 'street', structure: 'tunnel' }, geom: ewRoad(TX)[0].road[0].geom }] }];
+  assert.equal(roadsOf(tunnel).length, 0, 'a road in a tunnel has no verge to park on');
+});
+
+t('car park: a tap inside parks there, nose in to the nearest edge; outside, nothing', () => {
+  const ring = [[-20, -10], [20, -10], [20, 10], [-20, 10], [-20, -10]].map(p => { const q = fromLocal(TX, p); return [q.lon, q.lat]; });
+  const parks = parksOf([{ landuse: [{ type: 3, props: { class: 'parking' }, geom: [ring] }, { type: 3, props: { class: 'grass' }, geom: [ring] }] }]);
+  assert.equal(parks.length, 1, 'only what the map calls parking');
+  const p = parkAt(parks, fromLocal(TX, [5, 7]));
+  assert.equal(p.place, 'park');
+  near(angle(p.heading, 0), 0, 0.5, 'the north edge is nearest');
+  assert.equal(parkAt(parks, fromLocal(TX, [30, 0])), null);
+  assert.equal(parkAreas(parks).features[0].geometry.type, 'Polygon');
+});
+
+t('odour spots land on the body: front wheel well on the left, at arch height', () => {
+  const veh = { type: 'pickup', ...TX, heading: 0 };                      // facing north
+  const s = spotWorld(veh, 'fwl');
+  const [x, y] = toLocal(TX, s);
+  near(y, 1.95, 0.01, 'at the front axle');
+  near(x, -(1.0 + 0.05), 0.01, 'on the left side, which faces west');
+  assert.equal(s.h, 0.6); assert.equal(s.spot, 'fwl');
+  const turned = toLocal(TX, spotWorld({ ...veh, heading: 90 }, 'fwl'));
+  near(turned[0], 1.95, 0.01, 'turned to face east, the front is east');
+  near(turned[1], 1.05, 0.01, 'and its left is north');
+  assert.equal(spotsOf('van').length, 11);
+  assert.ok(spotsOf('pickup').some(x => x.name === 'Tailgate'));
+});
+
+t('footprint and verge lines are well-formed', () => {
+  const ring = footprint({ type: 'car', ...TX, heading: 30 });
+  assert.equal(ring.length, 5);
+  assert.deepEqual(ring[0], ring[4], 'closed');
+  const corners = ring.slice(0, 4).map(([lon, lat]) => toLocal(TX, { lon, lat }));
+  near(Math.hypot(corners[0][0] - corners[1][0], corners[0][1] - corners[1][1]), 1.85, 0.01, 'width');
+  near(Math.hypot(corners[1][0] - corners[2][0], corners[1][1] - corners[2][1]), 4.85, 0.01, 'length');
+  const lines = vergeLines(roadsOf(ewRoad(TX)));
+  assert.equal(lines.features.length, 2, 'one edge each side');
+  const ys = lines.features.map(f => toLocal(TX, { lon: f.geometry.coordinates[0][0], lat: f.geometry.coordinates[0][1] })[1]).sort((a, b) => a - b);
+  near(ys[0], -(3.6 + VERGE_GAP / 2), 0.05, 'south edge'); near(ys[1], 3.6 + VERGE_GAP / 2, 0.05, 'north edge');
+});
+
+console.log(`\n${pass} vehicle tests passed`);

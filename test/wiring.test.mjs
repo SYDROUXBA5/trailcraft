@@ -752,6 +752,17 @@ t('grading reads the approach, the trail ends, the rain and the handler the righ
   assert.match(bodyOf('openDebrief'), /const last = stickyDebrief\(db\.sessions\(\), s\);/);
 });
 
+t('a vehicle search places a vehicle, keeps its odour on it, and saves both', () => {
+  const start = bodyOf('startLay');
+  assert.match(start, /if \(t\.id === 'vehicle'\) startVehicleLay\(\);\s*else map\.on\('click', onHideTap\);/, 'a tap places the vehicle, not a loose hide');
+  assert.match(bodyOf('placeVehicleHide'), /rec\.hides = \[\{ lat: s\.lat, lon: s\.lon, t: rec\.hides\[0\]\?\.t \?\? Date\.now\(\), spot: s\.spot, h: s\.h \}\];/,
+    'one hide, on the vehicle, keeping the time it first went in');
+  assert.match(js, /\{ hides: rec\.hides, weather: null, \.\.\.\(rec\.vehicle \? \{ vehicle: \{ \.\.\.rec\.vehicle \} \} : \{\}\) \}/, 'saved with the search');
+  assert.match(js, /placeVehicleAt\(veh\.tap, b\.dataset\.vehType, rec\.vehicle\.place\)/, 'a new kind stands where the old one stood, not where the buttons now point');
+  for (const fn of ['layStop']) assert.match(bodyOf(fn), /stopVehicleLay\(\);/, `${fn} lets go of the map`);
+  assert.match(js, /map\.off\('click', onHideTap\); stopVehicleLay\(\);/, 'and so does Cancel');
+});
+
 t('a search’s hides draw their own scent cloud while set, on Show hides, and in the replay', () => {
   /* sim.js could always model a placed hide (seedHides), but nothing asked it
      to, so no search ever showed any scent. The vehicle search stands on it. */

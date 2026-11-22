@@ -303,6 +303,9 @@
     <span class="label">Looking for</span>
     <div class="chip-row" id="rowTargets"></div>
 
+    <span class="label" id="lblCarries" hidden>What is hidden in it</span>
+    <div class="chip-row" id="rowCarries" hidden></div>
+
     <span class="label" id="lblOdour" hidden>Which narcotic</span>
     <div class="chip-row" id="rowOdours" hidden></div>
     <input id="otherTarget" class="target-name" type="text" hidden maxlength="40"
@@ -337,6 +340,15 @@
 <section id="scrLay" class="screen glass" hidden>
   <div class="hud-pill" id="layHud"><span class="rec-dot" id="layDot" hidden></span><span id="layHudText">Ready</span></div>
   <div class="glass-bottom">
+    <div class="veh-tools" id="vehTools" hidden>
+      <div class="veh-place" id="vehPlace" role="group" aria-label="Where the vehicle is">
+        <button class="btn small" data-veh-place="verge" aria-pressed="true">Roadside</button>
+        <button class="btn small" data-veh-place="park" aria-pressed="false">Car park</button>
+        <button class="btn small" data-veh-place="free" aria-pressed="false">Anywhere</button>
+      </div>
+      <div class="veh-types" id="vehTypes" role="group" aria-label="Which vehicle"></div>
+      <button class="btn ghost small" id="btnVehTurn" hidden>Turn it round</button>
+    </div>
     <div class="row-gap" id="hideTools" hidden>
       <button class="btn card-btn" id="btnDropHide">Drop hide at my feet</button>
       <p class="glass-caption">…or tap the map where each hide sits</p>
