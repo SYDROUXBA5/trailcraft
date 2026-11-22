@@ -2923,6 +2923,28 @@ html.hv-lift .style-pick { bottom: calc(var(--hv-gap, 0px) + 132px); }
 .veh-card img { width: 100%; height: calc(34 * var(--px)); object-fit: contain; }
 .veh-card span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .veh-card[aria-pressed="true"] { background: var(--moss); border-color: var(--moss); color: #fff; }
+.veh-stage { display: flex; flex-direction: column; gap: 10px; }
+.veh-stage .label { margin: 0; }
+.veh-when { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.veh-when .btn { font-size: calc(13 * var(--px)); padding-inline: 4px; }
+.veh-say { margin: 0; font-size: calc(14 * var(--px)); line-height: 1.4; color: var(--ink); }
+.veh-pick { position: relative; width: 100%; aspect-ratio: 880 / 400; }
+.veh-pick img { width: 100%; height: 100%; display: block; }
+.veh-spot { position: absolute; width: 30px; height: 30px; margin: -15px 0 0 -15px; border-radius: 50%; padding: 0; cursor: pointer;
+  border: 3px solid #5FF2E0; background: rgba(7, 9, 12, 0.55); }
+.veh-spot[aria-pressed="true"] { border-color: #FFF3E4; background: #FFB86B; box-shadow: 0 0 16px rgba(255, 184, 107, 0.9); }
+.veh-age { display: flex; align-items: center; justify-content: space-between; }
+.veh-age span { font-size: calc(18 * var(--px)); }
+.veh-age b { font-size: calc(44 * var(--px)); font-weight: 300; letter-spacing: -0.02em; }
+.veh-play { width: 52px; height: 52px; border-radius: 50%; border: 0; background: var(--moss); cursor: pointer; position: relative; }
+.veh-play::after { content: ""; position: absolute; left: 20px; top: 16px; border-style: solid; border-width: 10px 0 10px 16px; border-color: transparent transparent transparent #fff; }
+.veh-play[aria-pressed="true"]::after { left: 18px; top: 17px; width: 16px; height: 18px; border: 0; border-left: 5px solid #fff; border-right: 5px solid #fff; box-sizing: border-box; }
+.veh-range { width: 100%; accent-color: var(--moss); }
+.veh-toggle { display: flex; align-items: center; gap: 10px; font-size: calc(14 * var(--px)); }
+.veh-toggle input { width: 22px; height: 22px; accent-color: var(--moss); }
+.veh-nav { display: grid; grid-template-columns: 1fr 2fr; gap: 8px; }
+.veh-nav .btn { min-height: 46px; }
+.veh-nav #vehNext:only-child, .veh-nav #vehBack[hidden] + #vehNext { grid-column: 1 / -1; }
 
 /* ═══════════════════════════════════════════════════════════════════════
    Dark glass — what the dark theme looks like (Rémi's pick, 20 Nov 2026).

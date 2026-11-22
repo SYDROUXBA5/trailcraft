@@ -18,13 +18,13 @@ import { FLAT, buildTerrain, stability, regime, flowAt, normOf, rainRate, RAIN_S
          laidWind, cleanWindFelt, windTrusted, forecastAt, feltMoment, nearestPoint, windFeltFor, forecastSaid,
          windWords, feltPanel, FELT_POINTS, feltPicked, feltSame, sameFelt, feltOf, anchorFelt, feltWeather,
          seriesCovers } from './field.js';
-import { predictedOffsets, ScentSim, driftFrom, stepByFlow, flowBearing } from './sim.js';
+import { predictedOffsets, ScentSim, driftFrom, stepByFlow, flowBearing, poolRadius, NOSE, AIRBORNE } from './sim.js';
 import { PARAMS, DIALS, PV, setParam, resetParams, changed, isDefault, tally, dialById, PRESETS, applyPreset } from './params.js';
 import { encodeTrail, decodeTrail, cardUrl, cardFromText, walkedPlanFor, sameCard, encodeContam, isContamCard, TOO_TWISTY } from './card.js';
 import { CONTAM_COLOURS, colourIndex, contamColour, nextColour, contamStatus, contamWay, newContam, contamWalkFor,
   attachWalk, withIds, contamWords, trailClock, reorderContam, contamKey } from './contam.js';
 import { decodeTile, tileOf, tileBox } from './mvt.js';
-import { VEHICLES, vehicleById, modelOf as vehicleModel, cardOf, spotWorld, footprint, driverSide, roadsOf, parksOf,
+import { VEHICLES, vehicleById, modelOf as vehicleModel, cardOf, spotsOf, spotWorld, footprint, driverSide, roadsOf, parksOf,
          snapToVerge, parkAt, vergeLines, parkAreas } from './vehicles.js';
 import { wallIndex, bandInWalls } from './walls.js';
 import { GROUND_LAYERS, buildGround, surfaceAt, surfaceAlong, surfaceRows, withSurface,
@@ -588,7 +588,7 @@ const srcData = { runner: EMPTY, steps: EMPTY, dog: EMPTY, handler: EMPTY, paws:
                   fix: EMPTY, fixEnds: EMPTY, bandWall: EMPTY,
                   routeDone: EMPTY, routeAhead: EMPTY, puck: EMPTY, scent: EMPTY, contamScent: EMPTY, wind: EMPTY,
                   flow: EMPTY, flowPulse: EMPTY, air: EMPTY, acc: EMPTY,
-                  vehicle: EMPTY, vehBody: EMPTY, vehRing: EMPTY, vehVerge: EMPTY, vehPark: EMPTY };
+                  vehicle: EMPTY, vehBody: EMPTY, vehRing: EMPTY, vehVerge: EMPTY, vehPark: EMPTY, vehApproach: EMPTY };
 
 /** Where the map opens before any fix: the contiguous United States. */
 const USA_BOUNDS = [[-124.8, 24.4], [-66.9, 49.4]];
@@ -891,6 +891,8 @@ function addOverlays() {
   add({ id: 'veh-park-edge', type: 'line', source: 'vehPark', paint: { 'line-color': '#5FF2E0', 'line-width': 1.6, 'line-opacity': 0.9 } });
   add({ id: 'veh-verge', type: 'line', source: 'vehVerge', layout: { 'line-cap': 'round' },
         paint: { 'line-color': '#5FF2E0', 'line-width': 2.4, 'line-opacity': 0.9, 'line-dasharray': [1.6, 1.2] } });
+  add({ id: 'veh-approach', type: 'line', source: 'vehApproach', layout: { 'line-cap': 'round' },
+        paint: { 'line-color': '#5FF2E0', 'line-width': 3, 'line-dasharray': [1.4, 1.4] } });
   add({ id: 'veh-ring', type: 'line', source: 'vehRing', layout: { 'line-join': 'round' },
         paint: { 'line-color': '#5FF2E0', 'line-width': 2.2 } });
   add({ id: 'veh-body', type: 'fill', source: 'vehBody', paint: { 'fill-color': '#F2F4F7', 'fill-outline-color': '#0B1630' } });
@@ -2036,8 +2038,8 @@ function paintHides() {
   keepDraft(true);          // a hide is placed by tapping, not by a GPS fix
   setSrc('hides', pointsOf(rec.hides));
   const n = rec.hides.length;
-  $('layHudText').textContent = n ? `${n} hide${n === 1 ? '' : 's'} placed` : 'Place each hide';
-  $('btnLayStop').hidden = n === 0;
+  if (!vehicleLay()) $('layHudText').textContent = n ? `${n} hide${n === 1 ? '' : 's'} placed` : 'Place each hide';
+  $('btnLayStop').hidden = n === 0 || (vehicleLay() && veh.stage !== 'start');
   layHidePlume();
 }
 /* The hides' cloud while they are being set: each feeds the air from the
@@ -2059,22 +2061,31 @@ function layHidePlume() {
       if (rec.wxAsk !== ask || rec.kind !== 'hide') return;      // a later lay, or no longer setting hides
       rec.wx = wx;
       plumeStart(null, wx, undefined, null, { hides: rec.hides });
+      if (vehicleLay()) { vehPreview(); paintVehTools(); }
     })
     .catch(() => toast('No weather — the scent cloud needs it, so it stays off'));
 }
 
-/* ── A vehicle search: where the vehicle stands ───────────────────────
-   A vehicle is a hide with a vehicle round it (vehicles.js). It is placed by
-   a tap: on the verge of a road the map has drawn, just off the carriageway
-   and facing the traffic on that side; inside a car park the map has drawn,
-   nose in to its nearest edge; or anywhere, facing up the screen. Its hide
-   sits on it and moves with it, keeping the time it first went in. Until the
-   setter picks the spot, that is the front wheel well on the driver's side. */
-const veh = { place: 'verge', roads: [], parks: [], at: null, tap: null, timer: 0 };
+/* ── A vehicle search: setting it up ──────────────────────────────────
+   A vehicle is a hide with a vehicle round it (vehicles.js). Four stages on
+   the lay screen, Back and Next between them, Done on the last:
+   1. place: a tap stands it on the verge of a road the map has drawn (just
+      off the carriageway, facing the traffic on that side), inside a car
+      park the map has drawn (nose in to its nearest edge), or anywhere
+      (facing up the screen). Its hide sits on it and moves with it.
+   2. odour: which spot on the vehicle, and how long ago it went in.
+   3. time: a look ahead at the cloud the odour builds as it sits. The run
+      itself always uses the real time since the odour went in.
+   4. start: where the dog starts and from which side, and where on that
+      line the cloud begins, at the time looked ahead to. */
+const VEH_STAGES = ['place', 'odour', 'time', 'start'];
+const veh = { stage: 'place', place: 'verge', roads: [], parks: [], at: null, tap: null, timer: 0,
+  age: 15, play: 0, approach: null, showScent: false };
 const vehicleLay = () => rec.kind === 'hide' && S.target.id === 'vehicle';
 
 function startVehicleLay() {
-  veh.place = 'verge'; veh.at = null; veh.tap = null;
+  Object.assign(veh, { stage: 'place', place: 'verge', at: null, tap: null, age: 15, approach: null, showScent: false });
+  $('vehShowScent').checked = false;
   paintVehTools();
   map.on('click', onVehicleTap);
   map.on('moveend', vehGroundSoon);
@@ -2084,8 +2095,11 @@ function stopVehicleLay() {
   map.off('click', onVehicleTap);
   map.off('moveend', vehGroundSoon);
   clearTimeout(veh.timer);
+  vehPlay(false);
   $('vehTools').hidden = true;
   setSrc('vehVerge', EMPTY); setSrc('vehPark', EMPTY);
+  /* The look ahead ends with the set-up: the cloud goes back to the real clock. */
+  if (plume.sim && plume.clock != null) { plume.clock = null; plumeFrame(); }
 }
 function vehGroundSoon() { clearTimeout(veh.timer); veh.timer = setTimeout(vehGround, 300); }
 /** The roads and car parks round the middle of the map, from the same street
@@ -2104,13 +2118,14 @@ async function vehGround() {
   paintVehLights();
 }
 function paintVehLights() {
-  const on = vehicleLay();
+  const on = vehicleLay() && veh.stage === 'place';
   setSrc('vehVerge', on && veh.place === 'verge' ? vergeLines(veh.roads) : EMPTY);
   setSrc('vehPark', on && veh.place === 'park' ? parkAreas(veh.parks) : EMPTY);
 }
 function onVehicleTap(e) {
   const tap = { lat: e.lngLat.lat, lon: e.lngLat.lng };
-  if (placeVehicleAt(tap)) navigator.vibrate?.(20);
+  if (veh.stage === 'place') { if (placeVehicleAt(tap)) navigator.vibrate?.(20); }
+  else if (veh.stage === 'start') { setApproach(tap); navigator.vibrate?.(20); }
 }
 function placeVehicleAt(tap, type = rec.vehicle?.type ?? vehicleById(db.kv.get('vehicleType')).id, place = veh.place) {
   let at;
@@ -2132,13 +2147,14 @@ function placeVehicleAt(tap, type = rec.vehicle?.type ?? vehicleById(db.kv.get('
   return true;
 }
 /** The vehicle in the map the lay screen's tools leave showing, close enough to see what it is. */
-function frameVehicle(v) {
+function frameVehicle(v, zoom = 19.2) {
   /* Halfway between the cards along the top (about 100 px) and the top of the tools. */
   const H = map.getContainer().clientHeight, tools = $('vehTools').getBoundingClientRect().top || H;
   const y = (100 + Math.min(tools, H)) / 2;
-  try { map.easeTo({ center: [v.lon, v.lat], zoom: Math.max(map.getZoom(), 19.2), offset: [0, Math.round(y - H / 2)], duration: 600 }); } catch { /* the map is busy */ }
+  try { map.easeTo({ center: [v.lon, v.lat], zoom: Math.max(map.getZoom(), zoom), offset: [0, Math.round(y - H / 2)], duration: 600 }); } catch { /* the map is busy */ }
 }
-/** The odour on the vehicle, as the search's one hide. */
+/** The odour on the vehicle, as the search's one hide. It keeps the time it
+    went in when the vehicle moves or the spot changes. */
 function placeVehicleHide() {
   const v = rec.vehicle;
   if (!v) return;
@@ -2146,10 +2162,11 @@ function placeVehicleHide() {
   const s = spotWorld(v, v.spot);
   rec.hides = [{ lat: s.lat, lon: s.lon, t: rec.hides[0]?.t ?? Date.now(), spot: s.spot, h: s.h }];
   paintHides();
+  if (veh.approach) setApproach(veh.approach, veh.approach.side);
 }
 function paintVehicle(v = rec.vehicle) {
   if (!v) { for (const id of ['vehicle', 'vehBody', 'vehRing']) setSrc(id, EMPTY); return; }
-  setSrc('vehRing', vehicleLay() ? { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: footprint(v, 0.45) } } : EMPTY);
+  setSrc('vehRing', vehicleLay() && veh.stage === 'place' ? { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: footprint(v, 0.45) } } : EMPTY);
   drawVehicle(v);
   paintVehLights();
 }
@@ -2167,20 +2184,164 @@ function drawVehicle(v) {
     setSrc('vehBody', { type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [footprint(v)] } });
   }
 }
-function paintVehTools() {
+
+/* Odour: the spots, drawn over the top-down picture of this vehicle. The
+   picture spans 1.08 vehicle lengths across and 400/880 of that down, front
+   to the right, the vehicle's left side up (Blender, vehicles/prep.py). */
+const sideWord = (v, side) => (side ? (side === driverSide(v.lat, v.lon) ? 'driver side' : 'passenger side') : '');
+const spotSay = (v, s) => [s.name, sideWord(v, s.side)].filter(Boolean).join(', ');
+function paintVehOdour() {
   const v = rec.vehicle;
-  for (const b of $('vehPlace').children) b.setAttribute('aria-pressed', String(b.dataset.vehPlace === veh.place));
-  const cur = v?.type ?? vehicleById(db.kv.get('vehicleType')).id;
-  $('vehTypes').innerHTML = VEHICLES.map(x =>
-    `<button class="veh-card" data-veh-type="${x.id}" aria-pressed="${x.id === cur}"><img src="${cardOf(x.id)}" alt=""><span>${esc(x.label)}</span></button>`).join('');
-  $('btnVehTurn').hidden = !v;
+  if (!v) return;
+  const spec = vehicleById(v.type), across = spec.L * 1.08, down = across * 400 / 880;
+  $('vehPickImg').src = `img/vehicles/${spec.id}-top.webp`;
+  $('vehPickSpots').innerHTML = spotsOf(v.type).map(s =>
+    `<button class="veh-spot" data-veh-spot="${s.id}" aria-pressed="${s.id === v.spot}" aria-label="${esc(spotSay(v, s))}"
+      style="left:${(50 + (s.u / across) * 100).toFixed(1)}%;top:${(50 - (s.v / down) * 100).toFixed(1)}%"></button>`).join('');
+  const s = spotsOf(v.type).find(x => x.id === v.spot);
+  $('vehSpotName').innerHTML = s ? `<b>${esc(spotSay(v, s))}</b> · about ${esc(fmtM(s.h, 1))} up` : '';
+  const ago = Math.round((Date.now() - (rec.hides[0]?.t ?? Date.now())) / 60000);
+  for (const b of $('vehWhen').children) b.setAttribute('aria-pressed', String(Math.abs(Number(b.dataset.vehWhen) - ago) <= 1 || (b.dataset.vehWhen === '0' && ago < 1)));
+}
+
+/* Time: the look ahead. The cloud is put on the clock of that moment (a
+   frame of the same simulation, sim.js), and said in numbers from the same
+   rules: the pool round a placed source (poolRadius) and the airborne
+   reach at nose height (AIRBORNE seconds at NOSE of the wind). */
+function vehAgeMin() {
+  const t = rec.hides[0]?.t;
+  return t ? Math.max(veh.age, Math.round((Date.now() - t) / 60000)) : veh.age;
+}
+function vehPreview() {
+  const t = rec.hides[0]?.t;
+  if (!plume.sim || !t || !['time', 'start'].includes(veh.stage)) return;
+  plume.clock = t + vehAgeMin() * 60000;
+  plumeFrame();
+}
+function paintVehTime() {
+  const min = vehAgeMin(), wx = rec.wx;
+  $('vehAge').value = String(min);
+  $('vehAgeBig').textContent = String(min);
+  $('vehWind').innerHTML = wx
+    ? `<b>${esc(fmtWind(wx.wind_speed))}</b> from ${esc(cardinal(wx.wind_direction))} · forecast`
+    : 'Waiting for the forecast';
+  const across = 2 * poolRadius(min * 60), reach = wx ? wx.wind_speed * NOSE * AIRBORNE : null;
+  $('vehAgeSay').innerHTML = `Cloud round the vehicle about <b>${esc(fmtM(across))} across</b>`
+    + (reach != null ? ` · carried about <b>${esc(fmtM(reach))}</b> downwind` : '')
+    + '. A look ahead: the run uses the real time since the odour went in.';
+  $('vehPlay').setAttribute('aria-pressed', String(!!veh.play));
+}
+function vehPlay(on = !veh.play) {
+  clearInterval(veh.play); veh.play = 0;
+  if (on) {
+    if (vehAgeMin() >= 60) veh.age = 0;
+    veh.play = setInterval(() => {
+      veh.age = Math.min(60, vehAgeMin() + 1);
+      paintVehTime(); vehPreview();
+      if (veh.age >= 60) vehPlay(false);
+    }, 160);
+  }
+  if ($('vehPlay')) $('vehPlay').setAttribute('aria-pressed', String(!!veh.play));
+}
+
+/* Start: where the dog starts, about 50 m out on the chosen side of the
+   wind, or wherever the map is tapped. The line runs to the odour, and the
+   first point on it the simulated cloud reaches is where scent begins. */
+const APPROACH_M = 50;
+function approachBearing(side) {
+  const v = rec.vehicle, wx = rec.wx;
+  const away = v ? (keepsLeftAt(v) ? v.heading - 90 : v.heading + 90) : 0;          // the side of the vehicle off the road
+  if (!wx) return (away + 360) % 360;
+  const to = (wx.wind_direction + 180) % 360;                                           // where the wind blows to
+  if (side === 'downwind') return to;
+  if (side === 'upwind') return wx.wind_direction;
+  const a = (to + 90) % 360, b = (to + 270) % 360;
+  const off = (x) => Math.abs(((x - away + 540) % 360) - 180);
+  return off(a) <= off(b) ? a : b;
+}
+const keepsLeftAt = (v) => driverSide(v.lat, v.lon) === 'r';
+function sideOf(start) {
+  const h = rec.hides[0], wx = rec.wx;
+  if (!h || !wx) return 'custom';
+  const off = Math.abs(((bearing(h, start) - (wx.wind_direction + 180) + 540) % 360) - 180);
+  return off < 45 ? 'downwind' : off > 135 ? 'upwind' : 'crosswind';
+}
+function setApproach(at, side = null) {
+  const h = rec.hides[0];
+  if (!h) return;
+  const start = side && !at?.lat ? project(h, approachBearing(side), APPROACH_M) : { lat: at.lat, lon: at.lon };
+  veh.approach = { lat: start.lat, lon: start.lon, side: side ?? sideOf(start) };
+  setSrc('start', pointsOf([start]));
+  const end = project(h, bearing(h, start), 2.5);
+  setSrc('vehApproach', { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: [[start.lon, start.lat], [end.lon, end.lat]] } });
+  paintVehStart();
+}
+/** Metres out from the odour where the line first enters the cloud, or null. */
+function meetsScent(start, h) {
+  const parts = (plume.sim?.drawable() || []).filter(p => (p.str ?? 0) > 0.06);
+  if (!parts.length) return null;
+  const L = dist(start, h), brg = bearing(start, h);
+  for (let d = 0; d <= L; d += 1) {
+    const p = project(start, brg, d);
+    if (parts.some(q => Math.abs(q.lat - p.lat) < 3e-5 && dist(p, q) < 2.5)) return Math.max(0, L - d);
+  }
+  return 0;
+}
+function paintVehStart() {
+  for (const b of $('vehApproach').children) b.setAttribute('aria-pressed', String(b.dataset.vehApproach === veh.approach?.side));
+  const a = veh.approach, h = rec.hides[0];
+  if (!a || !h) { $('vehStartSay').textContent = 'Tap the map where the dog starts, or pick a side of the wind.'; return; }
+  const who = S.dog?.name ?? 'The dog', m = dist(a, h), meet = meetsScent(a, h);
+  const sideSay = { downwind: 'downwind', crosswind: 'across the wind', upwind: 'upwind', custom: '' }[a.side];
+  $('vehStartSay').innerHTML = `${esc(who)} starts <b>${esc(fmtM(m))} ${esc(cardinal(bearing(h, a)))}</b> of the odour${sideSay ? ', ' + sideSay : ''}. `
+    + (meet == null ? 'The cloud shows once the forecast is in.'
+      : meet > 0 ? `On this line the scent starts about <b>${esc(fmtM(meet))} out</b>, at ${vehAgeMin()} min.`
+      : `On this line the dog reaches the vehicle before the scent, at ${vehAgeMin()} min.`);
+}
+
+/** One panel, four stages. */
+function paintVehTools() {
+  const v = rec.vehicle, st = veh.stage;
+  for (const el of $('vehTools').querySelectorAll('[data-veh-stage]')) el.hidden = el.dataset.vehStage !== st;
+  if (st === 'place') {
+    for (const b of $('vehPlace').children) b.setAttribute('aria-pressed', String(b.dataset.vehPlace === veh.place));
+    const cur = v?.type ?? vehicleById(db.kv.get('vehicleType')).id;
+    $('vehTypes').innerHTML = VEHICLES.map(x =>
+      `<button class="veh-card" data-veh-type="${x.id}" aria-pressed="${x.id === cur}"><img src="${cardOf(x.id)}" alt=""><span>${esc(x.label)}</span></button>`).join('');
+    $('btnVehTurn').hidden = !v;
+  } else if (st === 'odour') paintVehOdour();
+  else if (st === 'time') paintVehTime();
+  else paintVehStart();
+  const i = VEH_STAGES.indexOf(st);
+  $('vehBack').hidden = i === 0;
+  $('vehNext').hidden = i === VEH_STAGES.length - 1;
+  $('vehNext').disabled = !v;
+  $('btnLayStop').hidden = st !== 'start' || !rec.hides.length;
   const where = { verge: 'on the verge', park: 'in the car park', free: 'placed' };
-  $('layHudText').textContent = v ? `${vehicleById(v.type).label} ${where[v.place]}`
-    : veh.place === 'verge' ? 'Tap beside a road' : veh.place === 'park' ? 'Tap inside a car park' : 'Tap where the vehicle is';
-  $('layCaption').textContent = v
-    ? `Tap again to move it. The odour is on the front wheel well, ${v.spot?.endsWith('l') === (driverSide(v.lat, v.lon) === 'l') ? 'driver' : 'passenger'} side.`
-    : veh.place === 'verge' ? 'The lit lines are the verges the map knows. The vehicle lines up with the road by itself.'
-    : veh.place === 'park' ? 'The lit areas are the car parks the map knows.' : 'It faces up the screen. Turn it round once placed.';
+  $('layHudText').textContent = st === 'place'
+    ? (v ? `${vehicleById(v.type).label} ${where[v.place]}`
+      : veh.place === 'verge' ? 'Tap beside a road' : veh.place === 'park' ? 'Tap inside a car park' : 'Tap where the vehicle is')
+    : { odour: 'Odour spot', time: 'Set-up time', start: 'Start point' }[st];
+  $('layCaption').textContent = st === 'place'
+    ? (v ? 'Tap again to move it.'
+      : veh.place === 'verge' ? 'The lit lines are the verges the map knows. The vehicle lines up with the road by itself.'
+      : veh.place === 'park' ? 'The lit areas are the car parks the map knows.' : 'It faces up the screen. Turn it round once placed.')
+    : st === 'start' ? 'Tap the map to move the start.' : '';
+}
+function vehGo(step) {
+  const i = Math.max(0, Math.min(VEH_STAGES.length - 1, VEH_STAGES.indexOf(veh.stage) + step));
+  vehPlay(false);
+  veh.stage = VEH_STAGES[i];
+  if (veh.stage === 'start' && !veh.approach) setApproach(null, 'downwind');
+  if (['time', 'start'].includes(veh.stage)) vehPreview();
+  else if (plume.sim && plume.clock != null) { plume.clock = null; plumeFrame(); }
+  paintVehicle();
+  paintVehTools();
+  const v = rec.vehicle;
+  if (!v) return;
+  if (veh.stage === 'odour') frameVehicle(v, 20.4);
+  else if (veh.stage === 'start' && veh.approach) fitOver($('vehTools'), [rec.hides[0], veh.approach]);
+  else frameVehicle(v, 19.2);
 }
 /* A hide dropped here is where a fix put it, not a finger, and says so: a
    first call plainly far from it is scored wrong (call.js, firstCallWasFind),
@@ -5126,6 +5287,13 @@ async function layStop() {
   go('scrConfirm');
 }
 
+/** What a vehicle search keeps beside its hide: the vehicle, where the dog
+    starts and from which side, whether the handler sees the scent, and the
+    set-up time it was planned for. */
+function vehicleData() {
+  return { vehicle: { ...rec.vehicle }, approach: veh.approach ? { ...veh.approach } : null,
+    showScent: !!veh.showScent, plannedMin: vehAgeMin() };
+}
 async function confirmLay() {
   const t = S.target;
   const isHide = rec.kind === 'hide';
@@ -5140,7 +5308,7 @@ async function confirmLay() {
       ? `${rec.hides.length} hide${rec.hides.length === 1 ? '' : 's'} set, not searched yet.`
       : `${fmtKm(pathLen(rec.pts))} trail laid, not run yet.`,
     data: isHide
-      ? { hides: rec.hides, weather: null, ...(rec.vehicle ? { vehicle: { ...rec.vehicle } } : {}) }
+      ? { hides: rec.hides, weather: null, ...(rec.vehicle ? vehicleData() : {}) }
       : { trail: rec.pts, waypoints: rec.wps, weather: null, contamination: [] },
   };
   /* Only once the phone has really taken it. If the save was refused — a full
@@ -11042,6 +11210,31 @@ function wire() {
     if (rec.vehicle && veh.tap) placeVehicleAt(veh.tap, b.dataset.vehType, rec.vehicle.place);
     else paintVehTools();
   });
+  $('vehPickSpots').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-veh-spot]');
+    if (!b || !rec.vehicle) return;
+    rec.vehicle.spot = b.dataset.vehSpot;
+    placeVehicleHide(); paintVehTools();
+  });
+  $('vehWhen').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-veh-when]');
+    if (!b || !rec.hides[0]) return;
+    const m = Number(b.dataset.vehWhen);
+    rec.hides[0].t = Date.now() - m * 60000;          // set back: an odour put out before the app was opened
+    veh.age = Math.max(veh.age, m);
+    paintHides(); paintVehTools();
+  });
+  $('vehAge').addEventListener('input', (e) => { vehPlay(false); veh.age = Number(e.target.value); paintVehTime(); vehPreview(); });
+  $('vehPlay').addEventListener('click', () => vehPlay());
+  $('vehApproach').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-veh-approach]');
+    if (!b) return;
+    setApproach(null, b.dataset.vehApproach);
+    fitOver($('vehTools'), [rec.hides[0], veh.approach]);
+  });
+  $('vehShowScent').addEventListener('change', (e) => { veh.showScent = e.target.checked; });
+  $('vehBack').addEventListener('click', () => vehGo(-1));
+  $('vehNext').addEventListener('click', () => vehGo(1));
   $('btnVehTurn').addEventListener('click', () => {
     const v = rec.vehicle;
     if (!v) return;
