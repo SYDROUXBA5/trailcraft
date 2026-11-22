@@ -1978,6 +1978,7 @@ function startLay() {
   rec.kind = t.kind === 'person' ? 'lay' : 'hide';
   rec.pts = []; rec.wps = []; rec.hides = []; rec.dropped = 0;
   rec.wx = null;                // this lay's own forecast arrives with its first fix
+  rec.wxAsk = null;             // (or, for hides, with the first hide: layHidePlume)
   $('hideTools').hidden = t.kind !== 'hide';
   $('btnLayStart').hidden = t.kind === 'hide';
   $('btnLayStop').hidden = true;
@@ -2009,6 +2010,29 @@ function paintHides() {
   const n = rec.hides.length;
   $('layHudText').textContent = n ? `${n} hide${n === 1 ? '' : 's'} placed` : 'Place each hide';
   $('btnLayStop').hidden = n === 0;
+  layHidePlume();
+}
+/* The hides' cloud while they are being set: each feeds the air from the
+   moment it was placed. The forecast is asked for at the first hide, as a
+   trail asks at its first fix, and each later hide joins the same cloud. */
+function layHidePlume() {
+  if (rec.kind !== 'hide' || !rec.hides.length) return;
+  if (plume.sim && rec.wx) {
+    plume.sim.seedHides(rec.hides);
+    plume.trail = hideGround(rec.hides);
+    plumeTerrain(true); plumeWalls(true);
+    return;
+  }
+  if (rec.wxAsk) return;
+  const ask = rec.wxAsk = {};
+  const h = rec.hides[0];
+  fetchWeather(h.lat, h.lon, h.t)
+    .then(wx => {
+      if (rec.wxAsk !== ask || rec.kind !== 'hide') return;      // a later lay, or no longer setting hides
+      rec.wx = wx;
+      plumeStart(null, wx, undefined, null, { hides: rec.hides });
+    })
+    .catch(() => toast('No weather — the scent cloud needs it, so it stays off'));
 }
 /* A hide dropped here is where a fix put it, not a finger, and says so: a
    first call plainly far from it is scored wrong (call.js, firstCallWasFind),
@@ -2272,7 +2296,10 @@ const bandWallNote = () => (plume.bandWalls
   ? ` The band runs through ${plume.bandWalls} building${plume.bandWalls === 1 ? '' : 's'}: it’s drawn straight and can’t bend round them.`
   : '');
 
-function plumeStart(trail, wx, T, contamination = null, { at = null, since = at } = {}) {
+/* `hides`: a search's placed sources instead of a laid line. Each feeds the
+   air from the moment it was stamped (sim.js seedHides), so its cloud grows
+   with the time it has been out, as a person standing at a trail's end does. */
+function plumeStart(trail, wx, T, contamination = null, { at = null, since = at, hides = null } = {}) {
   plumeStop();
   /* A plume showing a past moment is on that clock from its very first
      frame, which is drawn below. That frame prunes, and a prune cannot be
@@ -2289,11 +2316,14 @@ function plumeStart(trail, wx, T, contamination = null, { at = null, since = at 
      separate puffs. Sampling the SAME line more finely does not change the
      physics — each parcel drifts by the same rules — it just stops the
      picture showing the sampling instead of the scent. */
-  plume.sim.seed(plumeSamples(trail));
+  if (hides?.length) plume.sim.seedHides(hides);
+  else plume.sim.seed(plumeSamples(trail));
   plume.wx = wx;
   plume.T = T || FLAT;
   plume.st = stability(wx.soil_temp, wx.temp);
-  plume.trail = trail ? [...trail] : [];
+  /* The ground the terrain, the walls and the wind tracers are fetched round:
+     the line, or for a search the hides themselves. */
+  plume.trail = hides?.length ? hideGround(hides) : trail ? [...trail] : [];
   plume.T = T || FLAT;
   plume.tAt = 0; plume.tLen = 0;
   plumeTerrain(true);
@@ -2308,6 +2338,9 @@ function plumeStart(trail, wx, T, contamination = null, { at = null, since = at 
   plumeFrame();
   tracersStart();
 }
+/** A search's hides as the points the plume's ground is fetched round. */
+const hideGround = (hides) => hides.map(h => ({ lat: h.lat, lon: h.lon, t: h.t }));
+
 /** How finely the line is sampled for emission: a point every 3 m, and the
     whole thing re-walked a few times so the parcels at any one spot span the
     full range of ages rather than a handful of them. Capped, because a long
@@ -3520,8 +3553,11 @@ function openReplay(s) {
 function drawReplayGround(s, { keep = false } = {}) {
   if (!keep) clearMap();
   if (targetById(s.targetId).kind === 'hide') {
-    // A search has hides and no trail: no start, no plan, no plume to draw.
+    // A search has hides and no trail: no start and no plan. Its plume is the hides' own cloud.
     setSrc('hides', pointsOf(s.data.hides || []));
+    const w0 = windAt(s, replay.at).wx;
+    if (w0 && s.data.hides?.length) plumeStart(null, w0, plume.T, null,
+      { at: replay.at, since: replay.from, hides: s.data.hides });
   } else if (noLineYet(s.data) || !(s.data.trail?.length > 1)) {
     /* A blind trail with no line yet: the dog alone, and the find. So is a
        run whose trail the video is holding back until the end. */
@@ -6928,6 +6964,10 @@ function toggleReveal() {
     drawContam(run.revealed ? s.data.contamination : null, trailClock(s.data));
   } else {
     setSrc('hides', run.revealed ? pointsOf(s.data.hides) : EMPTY);
+    /* The hides' cloud is the answer drawn in air, so it waits for the same
+       button, in the air the dog set off in. */
+    if (run.revealed) plumeStart(null, windAt(s, run.startedAt).wx, undefined, null, { hides: s.data.hides });
+    else plumeStop();
   }
   paintReveal();
 }
