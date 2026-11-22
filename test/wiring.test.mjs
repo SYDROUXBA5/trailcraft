@@ -761,6 +761,9 @@ t('a vehicle search places a vehicle, keeps its odour on it, and saves both', ()
   assert.match(bodyOf('vehicleData'), /approach: veh\.approach \? \{ \.\.\.veh\.approach \} : null,\s*showScent: !!veh\.showScent, plannedMin: vehAgeMin\(\)/,
     'with where the dog starts, whether the handler sees the scent, and the time it was planned for');
   assert.match(bodyOf('vehPreview'), /plume\.clock = t \+ vehAgeMin\(\) \* 60000;/, 'the look ahead is a frame of the same simulation');
+  assert.match(bodyOf('vehicleData'), /windFelt: veh\.felt \? \{ \.\.\.veh\.felt \} : null/, 'the wind turned on the wheel is the search’s felt wind');
+  assert.match(bodyOf('setVehWind'), /veh\.felt = makeWindFelt\(veh\.wheelFrom, ref\);/, 'kept as the app’s own felt wind, eight points');
+  assert.match(bodyOf('setVehWind'), /plumeStart\(null, vehWind\(\), undefined, null, \{ hides: rec\.hides \}\); vehPreview\(\);/, 'and the cloud is drawn in it');
   assert.match(bodyOf('stopVehicleLay'), /if \(plume\.sim && plume\.clock != null\) \{ plume\.clock = null; plumeFrame\(\); \}/, 'and ends with the set-up');
   assert.match(js, /placeVehicleAt\(veh\.tap, b\.dataset\.vehType, rec\.vehicle\.place\)/, 'a new kind stands where the old one stood, not where the buttons now point');
   for (const fn of ['layStop']) assert.match(bodyOf(fn), /stopVehicleLay\(\);/, `${fn} lets go of the map`);
