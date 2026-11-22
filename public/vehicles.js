@@ -11,6 +11,10 @@
    Pure: no map, no network. Everything works in metres on a local flat earth
    round the point it is given, and hands back plain {lat, lon}. */
 
+import { ScentSim } from './sim.js';
+import { stability, FLAT } from './field.js';
+import { dist } from './geo.js';
+
 const KY = 111320;                                  // metres per degree of latitude
 const kx = (lat) => KY * Math.cos((lat * Math.PI) / 180);
 const rad = (d) => (d * Math.PI) / 180;
@@ -209,3 +213,46 @@ export function vergeLines(roads) {
 /** The car parks as areas to light up. */
 export const parkAreas = (parks) => ({ type: 'FeatureCollection',
   features: parks.map(k => ({ type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: k.rings } })) });
+
+/**
+ * Where along a run the dog's nose was in the hides' cloud: the same
+ * simulation the map draws (sim.js seedHides), put on the run's clock every
+ * `every` ms, and a track point counts as in scent when a parcel still
+ * carrying scent (str above `min`) is within `near` metres of it. Returns
+ * a flag per point, the first point in scent (its time into the run and its
+ * distance from the odour) and the time spent in scent.
+ */
+export function scentAlong(track, hides, wxAt, { T = FLAT, every = 4000, near = 2.5, min = 0.06 } = {}) {
+  const n = track?.length || 0, inScent = new Uint8Array(n);
+  const out = { inScent, first: -1, firstT: null, firstDist: null, ms: 0 };
+  if (!n || !hides?.length) return out;
+  const sim = new ScentSim().seedHides(hides);
+  let i = 0;
+  for (let t = track[0].t; i < n; t += every) {
+    const wx = wxAt(t);
+    let parts = [];
+    if (wx) {
+      sim.advance(T, wx, stability(wx.soil_temp, wx.temp), t);
+      parts = sim.drawable().filter(q => (q.str ?? 0) > min);
+    }
+    for (; i < n && track[i].t < t + every; i++) {
+      const p = track[i];
+      if (parts.some(q => Math.abs(q.lat - p.lat) < 3e-5 && dist(p, q) < near)) inScent[i] = 1;
+    }
+  }
+  for (let k = 0; k < n; k++) {
+    if (!inScent[k]) continue;
+    if (out.first < 0) { out.first = k; out.firstT = track[k].t - track[0].t; out.firstDist = dist(track[k], hides[0]); }
+    if (k > 0 && inScent[k - 1]) out.ms += track[k].t - track[k - 1].t;
+  }
+  return out;
+}
+
+/** The run's first Indication against the vehicle: at it when within half its
+    length plus `margin` metres of GPS, else how far off. Null with none. */
+export function indicationOn(marks, veh, { margin = 5 } = {}) {
+  const m = (marks || []).find(w => w?.kind === 'Indication' && Number.isFinite(w.lat) && Number.isFinite(w.lon));
+  if (!m || !veh) return null;
+  const d = dist(m, veh);
+  return { t: m.t ?? null, d, at: d <= vehicleById(veh.type).L / 2 + margin };
+}

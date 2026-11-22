@@ -12,6 +12,7 @@ const V = 'trailcraft-v139';
 const SHELL = [
   './', 'index.html', 'app.css',
   'app.js', 'geo.js', 'colours.js', 'draft.js', 'mvt.js', 'ground.js', 'params.js', 'debrief.js', 'call.js', 'marks.js', 'clip.js', 'field.js', 'walls.js', 'sim.js', 'glow.js', 'reach.js', 'vehicles.js', 'card.js', 'contam.js', 'store.js', 'log.js',
+  'img/vehicles/car.webp', 'img/vehicles/car-top.webp', 'img/vehicles/suv.webp', 'img/vehicles/suv-top.webp', 'img/vehicles/pickup.webp', 'img/vehicles/pickup-top.webp', 'img/vehicles/van.webp', 'img/vehicles/van-top.webp', 'img/vehicles/box.webp', 'img/vehicles/box-top.webp',
   'sync-core.js', 'dogtrack.js', 'sync.js', 'firebase-config.js', 'share.js', 'pdf.js', 'coach.js', 'native.js', 'backup.js',
   'levels.js', 'teams.js', 'pixel-team.js', 'board.js',
   'squad.js', 'squad-cloud.js', 'squad-ui.js', 'incident.js', 'incident-cloud.js', 'incident-report.js', 'handler-ui.js', 'incident-ui.js', 'sheet.js',
@@ -105,7 +106,11 @@ self.addEventListener('activate', (e) => {
    from the cache updates leave alone. Firebase is among them, so signing in
    never stands between a handler and a trail offline. */
 const pinned = (url) =>
-  url.origin === location.origin && /\/vendor\/[a-z-]+-\d+\.\d+\.\d+\//.test(url.pathname);
+  url.origin === location.origin && (/\/vendor\/[a-z-]+-\d+\.\d+\.\d+\//.test(url.pathname)
+    /* The vehicle models: large, so fetched the first time a vehicle search
+       is set up rather than at install, then kept like the vendored files.
+       A changed model needs a new file name. */
+    || /\/models\/[a-z]+\.glb$/.test(url.pathname));
 
 const cacheable = (url) => pinned(url) || (
   /* Mapbox's count of the map being opened is a question, not a file. Kept in

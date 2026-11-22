@@ -221,6 +221,7 @@ await t('the replay’s clock moves the panel with the plume', () => {
     dogTrackOf, dogTrackUntil, lineOf: () => ({}),
     /* The scent reach is painted from here too, when it is switched on (reach.test covers what it works out). */
     paintReach() {},
+    paintVehReplay() {},
   };
   vm.createContext(sb);
   vm.runInContext([decl('function marksOf('), decl('function paintReplay(')].join('\n'), sb);

@@ -767,6 +767,17 @@ t('a vehicle search places a vehicle, keeps its odour on it, and saves both', ()
   assert.match(js, /map\.off\('click', onHideTap\); stopVehicleLay\(\);/, 'and so does Cancel');
 });
 
+t('a vehicle search runs with its vehicle and start on the map, and replays with the dog’s time in scent', () => {
+  assert.match(js, /startFollowing\(null\);\s*if \(s\.data\.vehicle\) startVehicleRun\(s\);/);
+  assert.match(bodyOf('startVehicleRun'), /if \(s\.data\.showScent && !run\.revealed\) toggleReveal\(\);/, 'trainer view shows the scent from the start, recorded as shown');
+  assert.match(js, /vehRun = null;\s*if \(hudText === vehRunHud\) hudText = gpsHudText;/, 'the next run is not given this run’s line');
+  assert.match(bodyOf('vehRunHud'), /if \(!vehRun \|\| !run\.revealed \|\| run\.session\?\.id !== vehRun\.s\.id\) return base;/, 'a blind handler is told nothing');
+  assert.match(bodyOf('drawReplayGround'), /if \(s\.data\.vehicle\) drawVehicleScene\(s\.data\);/);
+  assert.match(bodyOf('paintReplay'), /paintReach\(s, at\);\s*paintVehReplay\(s, at\);/);
+  assert.match(bodyOf('paintVehReplay'), /scentAlong\(track, s\.data\.hides \|\| \[\], \(t\) => windAt\(s, t\)\.wx,/, 'in the wind of each moment');
+  assert.match(bodyOf('paintVehReplay'), /if \(!v \|\| replay\.mark\?\.hidden\)/, 'and says nothing while marking blind');
+});
+
 t('a search’s hides draw their own scent cloud while set, on Show hides, and in the replay', () => {
   /* sim.js could always model a placed hide (seedHides), but nothing asked it
      to, so no search ever showed any scent. The vehicle search stands on it. */
@@ -825,7 +836,7 @@ t('a replay shows the air as it was, and a search can be replayed', () => {
   assert.match(bodyOf('frameBounds'), /zoomOverGround\(/, 'the ground’s height comes off the zoom');
   assert.match(bodyOf('frameBounds'), /isSourceLoaded\('dem'\)/, 'and it looks again once the heights have arrived');
   assert.ok(open.indexOf('replay.s = s;') > open.indexOf('drawReplayGround(s);'), 'nothing is left half open');
-  assert.match(bodyOf('paintReplay'), /const laid = targetById\(s\.targetId\)\.kind === 'hide' \? 'Hides' : 'Trail';/);
+  assert.match(bodyOf('paintReplay'), /const laid = s\.data\.vehicle \? 'Odour' : targetById\(s\.targetId\)\.kind === 'hide' \? 'Hides' : 'Trail';/);
   assert.match(bodyOf('showOnMap'),
     /plumeStart\(trailOf\(s\), wx, undefined, s\.data\.contamination, \{ at: s\.data\.trackStarted \?\? null \}\)/,
     'a saved run’s map shows the air when the dog set off, not now');
@@ -1433,6 +1444,7 @@ t('the run HUD and the replay caption give a drawn line no age either', () => {
     feltPanel: () => null, windWords: () => null, imp: () => false,   // no wind felt on the ground
     noLineYet, dogTrackOf: () => null, dogTrackUntil: () => [], lineOf: () => ({}),   // no dog's GPS track (dogtrack.test)
     paintReach() {},                                                                // scent reach switched off (reach.test)
+    paintVehReplay() {},                                                            // no vehicle in these runs
   };
   vm.createContext(sb);
   vm.runInContext(js.slice(js.indexOf('\nconst ageUnknown = '), js.indexOf(';\n', js.indexOf('\nconst ageUnknown = ')) + 2), sb);

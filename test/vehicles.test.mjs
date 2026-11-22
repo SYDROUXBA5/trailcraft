@@ -2,7 +2,7 @@
    way they face, and where an odour spot lands. Synthetic roads, exact. */
 import assert from 'node:assert/strict';
 import { VEHICLES, vehicleById, spotsOf, spotWorld, footprint, keepsLeft, driverSide, roadsOf, parksOf,
-  snapToVerge, parkAt, vergeLines, parkAreas, toLocal, fromLocal, VERGE_GAP, SNAP_MAX, modelOf, cardOf } from '../public/vehicles.js';
+  snapToVerge, parkAt, vergeLines, parkAreas, toLocal, fromLocal, VERGE_GAP, SNAP_MAX, modelOf, cardOf, scentAlong, indicationOn } from '../public/vehicles.js';
 
 let pass = 0;
 const t = (name, fn) => { fn(); pass++; console.log(`  ok  ${name}`); };
@@ -101,6 +101,37 @@ t('footprint and verge lines are well-formed', () => {
   assert.equal(lines.features.length, 2, 'one edge each side');
   const ys = lines.features.map(f => toLocal(TX, { lon: f.geometry.coordinates[0][0], lat: f.geometry.coordinates[0][1] })[1]).sort((a, b) => a - b);
   near(ys[0], -(3.6 + VERGE_GAP / 2), 0.05, 'south edge'); near(ys[1], 3.6 + VERGE_GAP / 2, 0.05, 'north edge');
+});
+
+t('a run walked up into the cloud is in scent near the odour; one kept upwind never is', () => {
+  /* A westerly at 3 m/s carries the odour east. Half an hour after it went in,
+     a dog walking west along the wind line towards it enters the cloud on
+     the way; a dog walking a line 60 m upwind of it never does. */
+  const t0 = Date.parse('2026-08-24T07:00:00Z'), run0 = t0 + 30 * 60000;
+  const hides = [{ ...TX, t: t0 }];
+  const wx = { wind_speed: 3, wind_direction: 270, temp: 18, soil_temp: 17, humidity: 60 };
+  const walk = (from, to, secs) => Array.from({ length: secs + 1 }, (_, k) => ({ ...fromLocal(TX, [from[0] + (to[0] - from[0]) * k / secs, from[1] + (to[1] - from[1]) * k / secs]), t: run0 + k * 1000 }));
+  const down = walk([70, 0], [1, 0], 70);
+  const a = scentAlong(down, hides, () => wx);
+  assert.ok(a.first >= 0, 'it meets the scent');
+  assert.ok(a.firstDist > 5 && a.firstDist < 70, `before it reaches the odour: ${a.firstDist.toFixed(1)} m out`);
+  assert.equal(a.inScent[a.inScent.length - 1], 1, 'and is in scent at the odour');
+  assert.ok(a.ms > 10000, `working scent for a while: ${a.ms} ms`);
+  const up = walk([-60, -40], [-60, 40], 80);
+  const b = scentAlong(up, hides, () => wx);
+  assert.equal(b.first, -1, 'upwind there is nothing to smell');
+  assert.equal(b.ms, 0);
+  assert.equal(scentAlong(down, hides, () => null).first, -1, 'no forecast, no cloud, no claim');
+});
+
+t('an indication counts at the vehicle within half its length plus the GPS margin', () => {
+  const veh = { type: 'pickup', ...TX, heading: 0 };
+  const at = (m) => indicationOn([{ kind: 'Lost it', ...fromLocal(TX, [0, 1]), t: 1 }, { kind: 'Indication', ...fromLocal(TX, [m, 0]), t: 2 }], veh);
+  assert.equal(at(3).at, true);
+  assert.equal(at(7.9).at, true, '2.95 + 5');
+  assert.equal(at(12).at, false);
+  near(at(12).d, 12, 0.05, 'and says how far');
+  assert.equal(indicationOn([], veh), null);
 });
 
 console.log(`\n${pass} vehicle tests passed`);
