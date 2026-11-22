@@ -2,7 +2,8 @@
    way they face, and where an odour spot lands. Synthetic roads, exact. */
 import assert from 'node:assert/strict';
 import { VEHICLES, vehicleById, spotsOf, spotWorld, footprint, keepsLeft, driverSide, roadsOf, parksOf,
-  snapToVerge, parkAt, vergeLines, parkAreas, toLocal, fromLocal, VERGE_GAP, SNAP_MAX, modelOf, cardOf, scentAlong, indicationOn } from '../public/vehicles.js';
+  snapToVerge, parkAt, vergeLines, parkAreas, toLocal, fromLocal, VERGE_GAP, SNAP_MAX, modelOf, cardOf, scentAlong, indicationOn, describeSpot } from '../public/vehicles.js';
+import { ScentSim, poolRadius, hidePoolRadius, HIDE_POOL } from '../public/sim.js';
 
 let pass = 0;
 const t = (name, fn) => { fn(); pass++; console.log(`  ok  ${name}`); };
@@ -132,6 +133,31 @@ t('an indication counts at the vehicle within half its length plus the GPS margi
   assert.equal(at(12).at, false);
   near(at(12).d, 12, 0.05, 'and says how far');
   assert.equal(indicationOn([], veh), null);
+});
+
+t('a tap on the top-down picture is a point on the vehicle, named and given a height', () => {
+  const veh = { type: 'pickup', ...TX, heading: 0 };
+  const w = describeSpot(veh, 1.9, 0.95);
+  assert.equal(w.name, 'Front wheel well, driver side', 'near a named spot it takes that name');
+  assert.equal(w.h, 0.6);
+  const side = describeSpot(veh, -2.5, -1.2);
+  assert.equal(side.v, -1.0, 'off the body is brought onto its edge');
+  assert.match(side.name, /^Body, rear, passenger side$|^Rear wheel well/);
+  const top = describeSpot(veh, 0.2, 0);
+  assert.match(top.name, /^Top or inside|^Door seam/);
+  const s = spotWorld({ ...veh, spot: 'tap', spotU: 1.0, spotV: 1.0, spotH: 0.8 }, 'tap');
+  const [x, y] = toLocal(TX, s);
+  near(y, 1.0, 0.01, 'forward'); near(x, -1.05, 0.01, 'on the left skin');
+  assert.equal(s.h, 0.8); assert.equal(s.spot, 'tap');
+});
+
+t('a placed odour has a smaller pool than a person standing, and its parcels say so', () => {
+  assert.ok(HIDE_POOL > 0 && HIDE_POOL < 1);
+  near(hidePoolRadius(900), poolRadius(900) * HIDE_POOL, 1e-9, 'the share');
+  const sim = new ScentSim().seedHides([{ ...TX, t: 0 }]);
+  assert.ok(sim.pool.length > 0 && sim.pool.every(p => p.hide === true), 'every hide parcel is marked');
+  const trail = new ScentSim().seed([{ ...TX, t: 0 }, { ...fromLocal(TX, [5, 0]), t: 4000 }]);
+  assert.ok(trail.pool.every(p => p.hide === false), 'a person at a trail end is not');
 });
 
 console.log(`\n${pass} vehicle tests passed`);

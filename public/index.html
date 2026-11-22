@@ -348,10 +348,15 @@
           <button class="btn small" data-veh-place="free" aria-pressed="false">Anywhere</button>
         </div>
         <div class="veh-types" id="vehTypes" role="group" aria-label="Which vehicle"></div>
-        <button class="btn ghost small" id="btnVehTurn" hidden>Turn it round</button>
+        <div class="veh-rotate" id="vehRotate" hidden>
+          <button class="btn small" id="btnVehLeft" aria-label="Turn left (hold to keep turning)">&#10226;</button>
+          <span id="vehFacing" aria-live="polite"></span>
+          <button class="btn small" id="btnVehRight" aria-label="Turn right (hold to keep turning)">&#10227;</button>
+          <button class="btn ghost small" id="btnVehTurn">Turn round</button>
+        </div>
       </div>
       <div class="veh-stage" data-veh-stage="odour" hidden>
-        <div class="veh-pick"><img id="vehPickImg" alt="The vehicle from above, front to the right"><div id="vehPickSpots" role="group" aria-label="Where the odour is"></div></div>
+        <div class="veh-pick"><img id="vehPickImg" alt="The vehicle from above, front to the right"><div id="vehPickSpots" class="veh-pick-tap" aria-label="Tap the vehicle where the odour is"></div></div>
         <p class="veh-say" id="vehSpotName"></p>
         <span class="label">The odour went in</span>
         <div class="veh-place veh-when" id="vehWhen" role="group" aria-label="When the odour went in">
@@ -370,10 +375,9 @@
         <p class="veh-say" id="vehAgeSay"></p>
       </div>
       <div class="veh-stage" data-veh-stage="start" hidden>
-        <div class="veh-place" id="vehApproach" role="group" aria-label="Which side the dog comes from">
-          <button class="btn small" data-veh-approach="downwind" aria-pressed="false">Downwind</button>
-          <button class="btn small" data-veh-approach="crosswind" aria-pressed="false">Crosswind</button>
-          <button class="btn small" data-veh-approach="upwind" aria-pressed="false">Upwind</button>
+        <div class="veh-place veh-two" role="group" aria-label="Where the dog starts">
+          <button class="btn small" id="btnStartHere" aria-pressed="false">Where I am</button>
+          <button class="btn small" id="btnStartPlace" aria-pressed="false">Place on the map</button>
         </div>
         <p class="veh-say" id="vehStartSay"></p>
         <label class="veh-toggle"><input type="checkbox" id="vehShowScent"> Show the scent to the handler</label>

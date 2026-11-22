@@ -70,13 +70,39 @@ export function onVehicle(veh, u, v) {
   const f = unit(veh.heading), l = unit(veh.heading - 90);
   return fromLocal(veh, [f[0] * u + l[0] * v, f[1] * u + l[1] * v]);
 }
-/** Where an odour spot is: the side of the body it is on, and its height. */
+/** Where an odour spot is: the side of the body it is on, and its height.
+    'tap' is a point tapped on the top-down picture (veh.spotU, spotV, spotH). */
 export function spotWorld(veh, spotId) {
+  if (spotId === 'tap' && Number.isFinite(veh.spotU) && Number.isFinite(veh.spotV)) {
+    const spec = vehicleById(veh.type), u = clampTo(veh.spotU, spec.L / 2), w = clampTo(veh.spotV, spec.W / 2);
+    const out = Math.abs(w) >= spec.W / 2 - 0.05 ? Math.sign(w) * 0.05 : 0;
+    return { ...onVehicle(veh, u, w + out), h: veh.spotH ?? 0.8, spot: 'tap' };
+  }
   const s = spotById(veh.type, spotId);
   /* A hide on the outside of the body sits on its skin, not in the air
      beside it: a few centimetres out from the side for a side spot. */
   const out = s.v ? Math.sign(s.v) * 0.05 : 0;
   return { ...onVehicle(veh, s.u, s.v + out), h: s.h, spot: s.id };
+}
+const clampTo = (x, m) => Math.max(-m, Math.min(m, x));
+/**
+ * What a point tapped on the top-down picture is, in words, and how high an
+ * odour there is likely to sit. Near one of the named spots it takes that
+ * spot's name and height; on a side of the body it is that side at door
+ * height; in the middle it is the top or the inside. A tap off the body is
+ * brought onto its edge.
+ */
+export function describeSpot(veh, u, v) {
+  const spec = vehicleById(veh.type), L2 = spec.L / 2, W2 = spec.W / 2;
+  u = clampTo(u, L2); v = clampTo(v, W2);
+  const drv = driverSide(veh.lat, veh.lon), sideName = (s) => (s ? (s === drv ? 'driver side' : 'passenger side') : '');
+  const near = spotsOf(veh.type).filter(s => s.id !== 'under' && s.id !== 'cab')
+    .map(s => ({ s, d: Math.hypot(s.u - u, s.v - v) })).sort((a, b) => a.d - b.d)[0];
+  if (near && near.d < 0.7) return { u, v, h: near.s.h, name: [near.s.name, sideName(near.s.side)].filter(Boolean).join(', ') };
+  const part = u > L2 / 3 ? 'front' : u < -L2 / 3 ? 'rear' : 'middle';
+  const side = Math.abs(v) > W2 - 0.3 ? (v > 0 ? 'l' : 'r') : null;
+  if (side) return { u, v, h: 0.8, name: `Body, ${part}, ${sideName(side)}` };
+  return { u, v, h: 1.2, name: `Top or inside, ${part}` };
 }
 /** The vehicle's outline on the ground, as a closed ring of [lon, lat]. */
 export function footprint(veh, pad = 0) {
