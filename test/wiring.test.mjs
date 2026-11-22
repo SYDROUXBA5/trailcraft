@@ -752,12 +752,30 @@ t('grading reads the approach, the trail ends, the rain and the handler the righ
   assert.match(bodyOf('openDebrief'), /const last = stickyDebrief\(db\.sessions\(\), s\);/);
 });
 
+t('a search’s hides draw their own scent cloud while set, on Show hides, and in the replay', () => {
+  /* sim.js could always model a placed hide (seedHides), but nothing asked it
+     to, so no search ever showed any scent. The vehicle search stands on it. */
+  const start = bodyOf('plumeStart');
+  assert.match(start, /if \(hides\?\.length\) plume\.sim\.seedHides\(hides\);\s*else plume\.sim\.seed\(plumeSamples\(trail\)\);/);
+  assert.match(start, /plume\.trail = hides\?\.length \? hideGround\(hides\) : trail \? \[\.\.\.trail\] : \[\];/,
+    'terrain, walls and tracers are fetched round the hides');
+  assert.match(bodyOf('paintHides'), /layHidePlume\(\);/, 'each hide placed joins the cloud');
+  const lay = bodyOf('layHidePlume');
+  assert.match(lay, /plume\.sim\.seedHides\(rec\.hides\);/);
+  assert.match(lay, /fetchWeather\(h\.lat, h\.lon, h\.t\)/, 'the forecast for where and when the first hide went in');
+  assert.match(lay, /if \(rec\.wxAsk !== ask \|\| rec\.kind !== 'hide'\) return;/, 'an answer for an earlier lay draws nothing');
+  assert.match(bodyOf('startLay'), /rec\.wxAsk = null;/);
+  const reveal = bodyOf('toggleReveal');
+  assert.match(reveal, /if \(run\.revealed\) plumeStart\(null, windAt\(s, run\.startedAt\)\.wx, undefined, null, \{ hides: s\.data\.hides \}\);\s*else plumeStop\(\);/,
+    'a blind handler sees no cloud until Show hides, as with a trail');
+});
+
 t('a replay shows the air as it was, and a search can be replayed', () => {
   /* The plume's first frame prunes, and it was drawn on the real clock
      before the replay set its own: a run from yesterday lost every parcel.
      A search has no trail, and reading its first point threw. */
   const start = bodyOf('plumeStart');
-  assert.match(start, /function plumeStart\(trail, wx, T, contamination = null, \{ at = null, since = at \} = \{\}\)/);
+  assert.match(start, /function plumeStart\(trail, wx, T, contamination = null, \{ at = null, since = at, hides = null \} = \{\}\)/);
   assert.ok(start.indexOf('plume.clock = at;') > 0 && start.indexOf('plume.clock = at;') < start.indexOf('plumeFrame();'),
     'the clock is set before the first frame prunes');
   assert.ok(start.indexOf('plume.clock = at;') < start.indexOf('if (!settings.plume'), 'and on every start, so none leaks');
@@ -776,6 +794,8 @@ t('a replay shows the air as it was, and a search can be replayed', () => {
   const hide = ground.indexOf("if (targetById(s.targetId).kind === 'hide') {");
   assert.ok(hide > 0 && hide < ground.indexOf('s.data.trail[0]'), 'a search never reads a trail it does not have');
   assert.match(ground.slice(hide), /^[^}]*setSrc\('hides', pointsOf\(s\.data\.hides \|\| \[\]\)\);/, 'it shows the hides');
+  assert.match(ground.slice(hide), /^[^}]*const w0 = windAt\(s, replay\.at\)\.wx;\s*if \(w0 && s\.data\.hides\?\.length\) plumeStart\(null, w0, plume\.T, null,\s*\{ at: replay\.at, since: replay\.from, hides: s\.data\.hides \}\)/,
+    'and their cloud, on the replay’s clock, in the wind of that moment');
   /* Framed into the map the replay's own sheet leaves showing, and only once
      that sheet has been painted and has the height it keeps. */
   assert.match(open, /fitOver\(\$\('scrReplay'\)\.querySelector\('\.glass-bottom'\), s\.data\.trail \|\| s\.data\.hides \|\| \[\], track,/);

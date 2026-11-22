@@ -502,6 +502,31 @@ t('ScentSim: a contamination cloud has no one standing at its end', () => {
   assert.ok(hides.pool.length > 0, 'a placed hide still emits');
 });
 
+t('a hide grows its cloud with the time it has been out', () => {
+  /* What a search's set-up time means on the map: the pool round a placed
+     source widens with the wait (poolRadius) and thickens as more of it joins. */
+  const t0 = Date.parse('2026-08-24T07:00:00Z');
+  const wx = { wind_speed: 3, wind_direction: 270, temp: 12, soil_temp: 11, humidity: 70 };
+  const st = stability(11, 12);
+  const hide = { lat: WELLS.lat, lon: WELLS.lon, t: t0 };
+  const at = (min) => {
+    const sim = new ScentSim().seedHides([hide]);
+    sim.advance(FLAT, wx, st, t0 + min * 60000);
+    const live = sim.pool.filter(p => p.str > 0.02);
+    /* Across the wind (a westerly blows it east): downwind the parcels are
+       also carried off, which is the plume, not the pool. */
+    const side = live.map(p => Math.abs(p.lat - hide.lat) * 111320).sort((a, b) => a - b);
+    return { n: live.length, p90: side.length ? side[Math.floor(side.length * 0.9)] : 0 };
+  };
+  const early = new ScentSim().seedHides([hide]);
+  early.advance(FLAT, wx, st, t0 - 60000);
+  assert.ok(early.pool.every(p => p.str === 0), 'nothing in the air before it was placed');
+  const a = at(2), b = at(15), c = at(45);
+  assert.ok(a.n > 0, 'two minutes in, there is already scent');
+  assert.ok(a.n <= b.n && b.n <= c.n, `more of the cloud joins as the wait goes on: ${a.n}, ${b.n}, ${c.n}`);
+  assert.ok(a.p90 < b.p90 && b.p90 < c.p90, `and it spreads wider: ${a.p90.toFixed(1)}, ${b.p90.toFixed(1)}, ${c.p90.toFixed(1)} m`);
+});
+
 t('ScentSim.prune: an hour of laying does not grow without bound', () => {
   /* A live lay appends the whole way. Scent stays workable for hours, so age
      alone retires particles far slower than walking creates them — the budget
