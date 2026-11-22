@@ -34,9 +34,7 @@ import { GROUND_LAYERS, buildGround, surfaceAt, surfaceAlong, surfaceRows, withS
 import { sync, onSync, initSync, signInWithGoogle, signInWithApple, signOut, deleteAccount, useThisAccount, forgetSkipped,
          adoptRecords, wipeAndSignOut, resync,
          signUpWithEmail, signInWithEmail, resetPassword, resendConfirmation, checkConfirmed,
-         startLive, pushLive, endLive, watchLive, resumeLive, dropLive, squadHandle } from './sync.js';
-import { initSquad, paintSquad, openJoin, closeCommand, squadSignOut, squadForget, squadCodeIn, squadCentre } from './squad-ui.js';
-import { initIncidents, incidentScreen, incidentAirPoint, incidentRunOn } from './incident-ui.js';
+         startLive, pushLive, endLive, watchLive, resumeLive, dropLive } from './sync.js';
 import { trailModel, encodeShared, decodeShared, sharedUrl, toGpx, fileBase,
          detailSections, headline, notes, liveMeta, liveModel, cleanResult,
          resultSentence, sessionFromModel, keptSession, peopleOf, parseGpx, gpxTracks, blindSummary, GPX_MAX_BYTES } from './share.js';
@@ -262,10 +260,10 @@ const SCREENS = ['scrOnboardHandler', 'scrOnboardDog', 'scrTutorial', 'scrHome',
   'scrConfirm', 'scrShare', 'scrContam', 'scrPick', 'scrScan', 'scrRun', 'scrResult',
   'scrShowMap', 'scrSessions', 'scrSettings', 'scrDraw', 'scrCountdown', 'scrWalk', 'scrWait', 'scrDog',
   'scrSignIn', 'scrShareOut', 'scrShared', 'scrLive', 'scrBench', 'scrReplay', 'scrDebrief', 'scrFix',
-  'scrDelete', 'scrRecover', 'scrTeam', 'scrTeamNew', 'scrCardIn', 'scrSquad', 'scrSquadNew', 'scrSquadJoin', 'scrCommand'];
+  'scrDelete', 'scrRecover', 'scrTeam', 'scrTeamNew', 'scrCardIn'];
 
 /* The screens that are transparent chrome over the live map. */
-const MAP_SCREENS = ['scrLay', 'scrConfirm', 'scrContam', 'scrRun', 'scrShowMap', 'scrDraw', 'scrWalk', 'scrLive', 'scrBench', 'scrReplay', 'scrFix', 'scrCommand'];
+const MAP_SCREENS = ['scrLay', 'scrConfirm', 'scrContam', 'scrRun', 'scrShowMap', 'scrDraw', 'scrWalk', 'scrLive', 'scrBench', 'scrReplay', 'scrFix'];
 
 /* ── Going back ───────────────────────────────────────────────────────
    Every page except home carries the same arrow, top-left, and it always
@@ -282,8 +280,7 @@ const MAP_SCREENS = ['scrLay', 'scrConfirm', 'scrContam', 'scrRun', 'scrShowMap'
 const TRANSIENT = new Set(['scrLay', 'scrConfirm', 'scrContam', 'scrRun', 'scrWalk', 'scrDraw', 'scrScan',
   'scrLive', 'scrShowMap', 'scrOnboardHandler', 'scrOnboardDog', 'scrTutorial', 'scrSignIn', 'scrReplay', 'scrCommand']);
 const BACKABLE = ['scrShare', 'scrPick', 'scrScan', 'scrResult', 'scrSessions', 'scrSettings', 'scrDog',
-  'scrShareOut', 'scrShared', 'scrCountdown', 'scrWait', 'scrOnboardHandler', 'scrOnboardDog', 'scrHandler', 'scrTeamNew',
-  'scrSquad', 'scrSquadNew', 'scrSquadJoin'];
+  'scrShareOut', 'scrShared', 'scrCountdown', 'scrWait', 'scrOnboardHandler', 'scrOnboardDog', 'scrHandler', 'scrTeamNew'];
 let currentScreen = null;
 const navStack = [];
 
@@ -300,8 +297,6 @@ const LEAVE = {
   scrCountdown: () => stopCountdownUi(),
   scrLay: () => { map.off('click', onHideTap); map.getCanvas().style.cursor = ''; },
   scrTeamNew: () => closeTeamForm(),
-  /* The squad map's markers, its clock, and the pretend officers if they ran. */
-  scrCommand: () => closeCommand(),
 };
 
 /** The screen something is being recorded on right now, or null. A hide
@@ -312,9 +307,7 @@ function liveScreen() {
 }
 
 function goBackNow() {
-  /* A join screen opened from a squad link has nothing behind it: the app
-     starts as it would have. */
-  const special = { scrShared: closeShared, scrLive: closeLive, scrSquadJoin: navStack.length ? null : boot }[currentScreen];
+  const special = { scrShared: closeShared, scrLive: closeLive }[currentScreen];
   if (special) return special();
   LEAVE[currentScreen]?.();
   let prev = navStack.pop();
@@ -374,14 +367,6 @@ function airSessionFor(id) {
     case 'scrReplay': return replay.s;
     case 'scrFix': return fixer.s;
     case 'scrLive': return pendingSession;
-    /* The squad's ground: the incident's last known point, else the middle
-       of the squad. Never this device's own position, which a laptop
-       running the command view may not have, and asking for it would put a
-       location prompt up mid-demo. */
-    case 'scrCommand': {
-      const p = incidentAirPoint() ?? squadCentre();
-      return p ? { data: { trail: [p] } } : null;
-    }
     // The forecast this lay fetched at its first fix, which its plume is drawn in.
     case 'scrConfirm': return rec.kind === 'lay' && rec.wx ? { data: { weather: rec.wx } } : null;
     default: return null;
@@ -457,7 +442,6 @@ function go(id, { back = false } = {}) {
     try { history.pushState({ tc: id }, ''); } catch { /* file:// and the like */ }
   }
   currentScreen = id;
-  incidentScreen();   // the incident banner shows on every screen but the squad map
   for (const s of SCREENS) $(s).hidden = s !== id;
   viewportFor(id);
   if (id === 'scrHome') renderHome();
@@ -468,7 +452,6 @@ function go(id, { back = false } = {}) {
      screen, and again on the way back from the form that edits its team. */
   if (id === 'scrTeam') paintTeam();
   if (id === 'scrSessions') renderSessions();
-  if (id === 'scrSquad') paintSquad();
   // The map only needs to be right when something transparent sits over it.
   if (MAP_SCREENS.includes(id)) {
     map?.resize();
@@ -2966,12 +2949,7 @@ const wxKey = (wx) => (wx?.wind_speed == null ? ''
    short words (field.js feltPanel), for a screen about a run that has one:
    the direction and the speed above it are already the felt ones (windAt),
    and the note says so in place of the forecast's time. */
-/* A scenario on the squad map runs on its story's clock (02:16), but the
-   forecast is today's: the corner says so, rather than "09:15" beside a
-   02:16 clock (incident-ui.js marks the screen cap-on while a story plays). */
-const STORY_WX = 'Today’s forecast (demo)';
-const storyOn = () => currentScreen === 'scrCommand' && !!$('scrCommand')?.classList.contains('cap-on');
-const wxNoteWords = (wx) => (storyOn() ? STORY_WX : forecastNote(wx.t ?? wx.time));
+const wxNoteWords = (wx) => forecastNote(wx.t ?? wx.time);
 function showWeather(wx, felt = null) {
   wxShown.gen++;
   wxShown.key = '';
@@ -3011,7 +2989,6 @@ function showWeather(wx, felt = null) {
      moment keeps the laid forecast's own time beside it, which labelled the
      run's wind with the hour the trail was laid. */
   $('wxNote').textContent = felt?.note ?? forecastNote(wx.t ?? wx.time);
-  if (!felt?.note && storyOn()) $('wxNote').textContent = STORY_WX;
   wxShown.key = wxKey(wx);
   wxGap();
   /* The wind moves on every map screen once it is known, not only when a
@@ -7507,7 +7484,7 @@ function addWaypoint(kind) {
     && rec.wps.filter(w => w.kind === 'Indication').length === 1;
   /* Asking after they have looked means nothing; during an incident it is
      not asked at all (call.js asksHowSure). */
-  if (asksHowSure({ firstInd: isFirstInd, revealed: !!run.revealedAt, coach: coach.on, incident: incidentRunOn() })) openCall(wp);
+  if (asksHowSure({ firstInd: isFirstInd, revealed: !!run.revealedAt, coach: coach.on, incident: false })) openCall(wp);
   return wp;
 }
 
@@ -8589,14 +8566,12 @@ function openFromHash() {
     openLive(h.slice(6).replace(/[^A-Za-z0-9_-]/g, ''));
     return true;
   }
-  /* A squad's invitation: the join screen, with the code in it. Nothing is
-     joined until they have seen which squad it is and said yes. */
+  /* A squad link from the old demo: squads are no longer part of this app
+     (kept on the squad-demo branch, 2026-11-22). */
   if (h.startsWith('#squad=')) {
     clear();
-    const code = squadCodeIn(h);
-    if (!code) { toast('That squad link is not complete'); return false; }
-    openJoin(code);
-    return true;
+    toast('Squads are not part of Trailcraft any more');
+    return false;
   }
   return false;
 }
@@ -11092,7 +11067,7 @@ async function submitDelete() {
   try {
     /* Out of the squad once the password is proved, before the account goes:
        off duty, and the member record (or the squad, for its creator) with it. */
-    const r = await deleteAccount({ password, beforeDelete: squadForget });
+    const r = await deleteAccount({ password });
     if (!r.ok) return err(r.error);
     $('delPassword').value = '';
     renderSettings();
@@ -12327,7 +12302,6 @@ function wire() {
     }
     if (b.dataset.account === 'signout') {
       if (!await ask({ title: 'Sign out?', body: 'Your trails stay on this phone; they just stop backing up.', yes: 'Sign out' })) return;
-      await squadSignOut();   // off duty first: once signed out the position can no longer be taken down
       await signOut();
       toast('Signed out — everything is still on this phone');
     }
@@ -12388,8 +12362,6 @@ function wire() {
       ? ` This also signs you out. Your account backup is kept: signing in again brings it back. To delete the backup too, use Delete my account first.${behind}`
       : '';
     if (!await ask({ title: 'Wipe everything?', body: `${S.sessions.length} sessions, ${S.dogs.length} dogs and all profiles. Save a backup file first if you want them back later.${backup}`, yes: 'Wipe everything', danger: true })) return;
-    /* Off duty first: once signed out the position can no longer be taken down. */
-    if (signedIn) await squadSignOut();
     if (signedIn) {
       const ok = await wipeAndSignOut().catch(() => false);
       if (!ok) return toast('That did not work. Nothing was changed.');
@@ -12844,95 +12816,6 @@ function start() {
   buildMap();
   wire();
   initSync(db);            // does nothing until a Firebase config exists; before boot so a live link can wait on it
-  const squadCtx = {
-    $, toast, go, goBack,
-    /* A screen opened from a link has nothing behind it to go back to. */
-    leave: () => (navStack.length ? goBack() : boot()),
-    getMap: () => ({ map, GL, ready: mapReady }),
-    user: () => sync.user, configured: () => sync.configured, onSync,
-    handle: squadHandle, openSignIn: () => openSignIn(),
-    kv: db.kv, dogs: () => S.dogs,
-    /* The dogs a K9 member could mean, for the record card the handler may
-       share (squad.js dogRecord): each with this phone's own sessions of
-       it, and the handler using the phone, whose "Certain" calls the card
-       counts. A phone shared by two handlers can hold two dogs of one
-       name: the current handler's own come first, and if more than one is
-       left the screen asks which, rather than share the wrong dog's runs. */
-    dogRuns: (name) => {
-      const hid = S.handler?.id ?? null;
-      const named = S.dogs.filter(x => x.name === name);
-      const mine = named.filter(d => hid && (d.handlerId === hid || (d.teams || []).some(t => t.handlerId === hid)));
-      return (mine.length ? mine : named).map(d => {
-        const runs = S.sessions.filter(s => s.dogId === d.id);
-        const last = runs.reduce((m, s) => Math.max(m, s.startedAt || 0), 0);
-        return { id: d.id, name: d.name, runs, last: last || null, handlerId: hid };
-      });
-    },
-    shareBase: () => SHARE_BASE,
-    here: () => (lastFix && Date.now() - lastFix.t < 30 * 60e3 ? { lat: lastFix.lat, lon: lastFix.lon } : null),
-    demoPlace: () => ({ lat: 51.2094, lon: -2.6476 }),   // Wells, where the demo trail is
-    /* The buildings round the pretend squad, so its walkers keep out of them. */
-    wallsAround: (pts) => wallsFor(pts).catch(() => null),
-    isNative, watchBackground,
-  };
-  initSquad(squadCtx);
-  /* An incident rides on the squad: it needs to know what screen is up (a
-     run must not be swept away by the incident map), the run being
-     recorded (the trailing team's run streams into the incident), and how
-     to start one. */
-  initIncidents({
-    ...squadCtx,
-    screen: () => currentScreen,
-    busy: () => rec.on,
-    runState: () => ({ on: rec.on, kind: rec.kind, pts: rec.pts, wps: rec.wps, startedAt: run.startedAt }),
-    startTrail: () => startBlind(),
-    /* The command screen says the K9 team's calls in the coach's voice, and
-       gives distances in the units Settings is set to. */
-    speak: (text) => coachSpeak(text),
-    imperial: imp,
-    /* The wind the command screen already fetched (the corner panel), for
-       the downwind band at the last known point: only when it was fetched
-       within a few kilometres of it, about one forecast cell, and is under
-       an hour old. Nothing new is asked for. */
-    windNear: (p) => {
-      const wx = wxNow.wx;
-      if (!wx || !wxNow.near || Date.now() - wxNow.at > 3600e3 || dist(wxNow.near, p) > 5000) return null;
-      return Number.isFinite(wx.wind_speed) && Number.isFinite(wx.wind_direction)
-        ? { speed: wx.wind_speed, from: wx.wind_direction } : null;
-    },
-    /* The deployment report (incident-report.js). The forecast as fetched,
-       on the same terms as the wind above, kept when the dog reaches the
-       point; the files go out as every other file of the app does; its map
-       is a trail report's picture with the incident's own lines; the video
-       carries the live map's credit, as a run's video does. */
-    airNear: (p) => {
-      const wx = wxNow.wx;
-      if (!wx || !wxNow.near || Date.now() - wxNow.at > 3600e3 || dist(wxNow.near, p) > 5000) return null;
-      /* With when it was fetched: the report prints that time, not the
-         dog's, which can be up to an hour away from it. */
-      return { ...wx, fetchedAt: wxNow.at };
-    },
-    deliver: (bytes, name, type) => deliverFile(bytes, name, type),
-    reportMap: (shapes) => incidentReportMap(shapes),
-    clipLook: () => mapCredit(),
-    keepAwake: (on) => keepAwake(on),
-    /* The handler's call buttons on the run screen during an incident: a
-       call is the run's own mark, stamped where the dog is, and Undo takes
-       it off again in its first few seconds. */
-    addCall: (kind) => (rec.on && rec.kind === 'run' ? addWaypoint(kind) : null),
-    undoCall: (wp) => dropWaypoint(wp),
-    /* The squad box covers the bottom of the run screen's map: the camera
-       keeps the handler above it. Asked only while the box is up (0 when
-       it goes), so a training run's camera is never touched. */
-    runPadding: (px) => runPadding(px),
-    /* The squad's spoken lines wait for the coach to finish a cue. */
-    speakSoon: (text) => speakSoon(text),
-    /* A scenario came on or went: the forecast's line says whose time it is. */
-    storyWeather: () => {
-      const wx = wxNow.wx, n = $('wxNote');
-      if (n && wx?.wind_speed != null && !$('wxPanel')?.hidden) n.textContent = wxNoteWords(wx);
-    },
-  });
   /* Back in the app, or back in signal: take what another phone changed since,
      before anything here is edited over it (sync.js resync). */
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') resync(); });
