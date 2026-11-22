@@ -1,6 +1,6 @@
 /* Offline shell. Trails happen where there is no signal, so the app itself must
    survive with none. Map tiles cache opportunistically as you pan an area. */
-const V = 'trailcraft-v138';
+const V = 'trailcraft-v139';
 /* Every module the app cannot start without. app.js is an ES module and its
    imports are separate requests — listing only app.js precaches a shell that
    cannot boot, which shows up as a working app that dies the first time it is
@@ -11,7 +11,7 @@ const V = 'trailcraft-v138';
    without either deployment breaking the other. */
 const SHELL = [
   './', 'index.html', 'app.css',
-  'app.js', 'geo.js', 'colours.js', 'draft.js', 'mvt.js', 'ground.js', 'params.js', 'debrief.js', 'call.js', 'marks.js', 'clip.js', 'field.js', 'walls.js', 'sim.js', 'glow.js', 'reach.js', 'card.js', 'contam.js', 'store.js', 'log.js',
+  'app.js', 'geo.js', 'colours.js', 'draft.js', 'mvt.js', 'ground.js', 'params.js', 'debrief.js', 'call.js', 'marks.js', 'clip.js', 'field.js', 'walls.js', 'sim.js', 'glow.js', 'reach.js', 'vehicles.js', 'card.js', 'contam.js', 'store.js', 'log.js',
   'sync-core.js', 'dogtrack.js', 'sync.js', 'firebase-config.js', 'share.js', 'pdf.js', 'coach.js', 'native.js', 'backup.js',
   'levels.js', 'teams.js', 'pixel-team.js', 'board.js',
   'squad.js', 'squad-cloud.js', 'squad-ui.js', 'incident.js', 'incident-cloud.js', 'incident-report.js', 'handler-ui.js', 'incident-ui.js', 'sheet.js',

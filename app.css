@@ -2911,6 +2911,19 @@ html.hv-lift .map-fab { bottom: calc(var(--hv-gap, 0px) + 12px); }
 html.hv-lift .map-style { bottom: calc(var(--hv-gap, 0px) + 72px); }
 html.hv-lift .style-pick { bottom: calc(var(--hv-gap, 0px) + 132px); }
 
+/* ── Vehicle search: where the vehicle stands, and which one ───────── */
+.veh-tools { display: flex; flex-direction: column; gap: 10px; }
+.veh-place { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.veh-place .btn { min-height: 44px; font-size: calc(15 * var(--px)); }
+.veh-place .btn[aria-pressed="true"] { background: var(--moss); border-color: var(--moss); color: #fff; }
+.veh-types { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
+.veh-card { display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 0; min-height: 44px;
+  padding: 6px 2px 7px; border-radius: 14px; border: 1px solid var(--border); background: var(--card); color: var(--ink);
+  font: inherit; font-size: calc(12.5 * var(--px)); font-weight: 600; cursor: pointer; }
+.veh-card img { width: 100%; height: calc(34 * var(--px)); object-fit: contain; }
+.veh-card span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.veh-card[aria-pressed="true"] { background: var(--moss); border-color: var(--moss); color: #fff; }
+
 /* ═══════════════════════════════════════════════════════════════════════
    Dark glass — what the dark theme looks like (Rémi's pick, 20 Nov 2026).
 

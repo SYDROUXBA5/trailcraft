@@ -20,6 +20,9 @@ export const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().to
    a label for the handler's records. */
 export const TARGETS = [
   { id: 'person',     kind: 'person', label: 'A person',   sub: 'trail, mantrailing or tracking' },
+  /* A vehicle is a hide with a vehicle round it (vehicles.js): placed, stamped,
+     searched and scored as every hide is. What is hidden in it is CARRIES. */
+  { id: 'vehicle',    kind: 'hide',   label: 'A vehicle',  sub: 'roadside or car park' },
   { id: 'article',    kind: 'hide',   label: 'Article',    sub: 'human-scented object' },
   { id: 'cadaver',    kind: 'hide',   label: 'Cadaver',    sub: 'HRD source' },
   { id: 'narcotics',  kind: 'hide',   label: 'Narcotics',  sub: 'detection hide' },
@@ -30,6 +33,11 @@ export const TARGETS = [
 ];
 
 export const targetById = (id) => TARGETS.find(t => t.id === id) ?? TARGETS[0];
+/** What a vehicle can have hidden in it: the hide targets that name an odour. */
+export const CARRIES = ['narcotics', 'explosives', 'firearms', 'cadaver', 'sport', 'other'];
+export const carriesOf = (id) => (CARRIES.includes(id) ? id : 'narcotics');
+/** The odour list a target asks from: a vehicle asks the one for what it carries. */
+export const odourSetOf = (target, carries) => ODOURS[target?.id === 'vehicle' ? carriesOf(carries) : target?.id];
 
 /* The odours a detection dog is imprinted on, as the certifying bodies name
    them. Labels for the handler's records and nothing more: the engine treats
@@ -62,6 +70,9 @@ export const targetText = (s) => {
 export const verbs = (t) => t.kind === 'person'
   ? { lay: 'Lay a trail', laySub: 'walks it', run: 'Run a trail',
       runSub: 'Pick one laid on this phone', setter: 'Who lays the trail' }
+  : t.id === 'vehicle'
+  ? { lay: 'Set up a vehicle search', laySub: 'places it', run: 'Search',
+      runSub: 'Scan a hide card, or pick one set on this phone', setter: 'Who sets it' }
   : { lay: 'Set a hide', laySub: 'places it', run: 'Search',
       runSub: 'Scan a hide card, or pick one set on this phone', setter: 'Who sets the hide' };
 
@@ -646,6 +657,7 @@ export function createStore(backend) {
         /* Remembered per target, so going back to Explosives finds TNT still
            chosen and Other still says what it said. */
         odour: String(kv.get(`odour.${targetById(kv.get('lastTargetId')).id}`) ?? '').trim(),
+        carries: carriesOf(kv.get('vehicleCarries')),
         /* Seeded from the dog's usual standard, then it is the handler's to
            change for the day — a hot dog can be given a cold trail. */
         level: levelById(kv.get('lastLevel') ?? dog?.level),

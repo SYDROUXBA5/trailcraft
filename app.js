@@ -24,6 +24,8 @@ import { encodeTrail, decodeTrail, cardUrl, cardFromText, walkedPlanFor, sameCar
 import { CONTAM_COLOURS, colourIndex, contamColour, nextColour, contamStatus, contamWay, newContam, contamWalkFor,
   attachWalk, withIds, contamWords, trailClock, reorderContam, contamKey } from './contam.js';
 import { decodeTile, tileOf, tileBox } from './mvt.js';
+import { VEHICLES, vehicleById, modelOf as vehicleModel, cardOf, spotWorld, footprint, driverSide, roadsOf, parksOf,
+         snapToVerge, parkAt, vergeLines, parkAreas } from './vehicles.js';
 import { wallIndex, bandInWalls } from './walls.js';
 import { GROUND_LAYERS, buildGround, surfaceAt, surfaceAlong, surfaceRows, withSurface,
          tilesCovering, isHard, GROUND_V, GROUND_RULES, readingSig, readingFits, readingVersion,
@@ -54,7 +56,7 @@ import { isNative, watchBackground, canHaptic, haptic, watchHeading, shareFile, 
 import { readBackup, restoreChanges, restoreQuestion, restoreNothing, BACKUP_MAX_BYTES } from './backup.js';
 import { firebaseConfig } from './firebase-config.js';
 import { checkAuthFields, AUTH_MIN_PASSWORD, profilePhoto } from './sync-core.js';
-import { createStore, migrateV1, TARGETS, ODOURS, targetById, targetText, verbs, uid,
+import { createStore, migrateV1, TARGETS, ODOURS, CARRIES, odourSetOf, targetById, targetText, verbs, uid,
          dogStats, ageBand, AGE_BANDS, LEVELS, levelById, dogAge, patchSession, runAgain,
          planSession, canLayAgain, routeOf, planLine, askDelete, storageWords, APPROACH_V,
          blindSession, lineCheck, linePatch } from './store.js';
@@ -585,7 +587,8 @@ let GL = mapboxgl;   // every control/bounds must come from the SAME library
 const srcData = { runner: EMPTY, steps: EMPTY, dog: EMPTY, handler: EMPTY, paws: EMPTY, wps: EMPTY, drift: EMPTY, start: EMPTY, hides: EMPTY, contam: EMPTY, plan: EMPTY, nose: EMPTY,
                   fix: EMPTY, fixEnds: EMPTY, bandWall: EMPTY,
                   routeDone: EMPTY, routeAhead: EMPTY, puck: EMPTY, scent: EMPTY, contamScent: EMPTY, wind: EMPTY,
-                  flow: EMPTY, flowPulse: EMPTY, air: EMPTY, acc: EMPTY };
+                  flow: EMPTY, flowPulse: EMPTY, air: EMPTY, acc: EMPTY,
+                  vehicle: EMPTY, vehBody: EMPTY, vehRing: EMPTY, vehVerge: EMPTY, vehPark: EMPTY };
 
 /** Where the map opens before any fix: the contiguous United States. */
 const USA_BOUNDS = [[-124.8, 24.4], [-66.9, 49.4]];
@@ -881,6 +884,21 @@ function addOverlays() {
         layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: { 'line-color': '#57C766', 'line-width': wide(8, 14, 24), 'line-opacity': 1 } });
 
+  /* A vehicle search: the verges and car parks a vehicle can stand on, lit
+     while it is being placed, and the vehicle itself. On the Mapbox map it is
+     a 3D model (models/, made for this), on the plain map its outline. */
+  add({ id: 'veh-park', type: 'fill', source: 'vehPark', paint: { 'fill-color': '#5FF2E0', 'fill-opacity': 0.18 } });
+  add({ id: 'veh-park-edge', type: 'line', source: 'vehPark', paint: { 'line-color': '#5FF2E0', 'line-width': 1.6, 'line-opacity': 0.9 } });
+  add({ id: 'veh-verge', type: 'line', source: 'vehVerge', layout: { 'line-cap': 'round' },
+        paint: { 'line-color': '#5FF2E0', 'line-width': 2.4, 'line-opacity': 0.9, 'line-dasharray': [1.6, 1.2] } });
+  add({ id: 'veh-ring', type: 'line', source: 'vehRing', layout: { 'line-join': 'round' },
+        paint: { 'line-color': '#5FF2E0', 'line-width': 2.2 } });
+  add({ id: 'veh-body', type: 'fill', source: 'vehBody', paint: { 'fill-color': '#F2F4F7', 'fill-outline-color': '#0B1630' } });
+  if (typeof map.addModel === 'function') {
+    add({ id: 'veh-model', type: 'model', source: 'vehicle',
+          paint: { 'model-scale': [1, 1, 1], 'model-type': 'common-3d', 'model-cast-shadows': true, 'model-receive-shadows': true } });
+  }
+  if (rec.vehicle) paintVehicle();          // a new map style drops the model's settings
   add({ id: 'hide-dots', type: 'circle', source: 'hides',
         paint: { 'circle-radius': 9, 'circle-color': '#C99A2E',
                  'circle-stroke-width': 2.5, 'circle-stroke-color': '#FFFFFF' } });
@@ -1740,7 +1758,8 @@ let odourTyping = false;
 let odoursFor = null;
 function paintOdours() {
   const { target, odour } = S;
-  const set = ODOURS[target.id];
+  const set = odourSetOf(target, S.carries);
+  const listKey = target.id === 'vehicle' ? `vehicle.${S.carries}` : target.id;
   const custom = !!set && (odourTyping || (!!odour && !set.list.includes(odour)));
   $('lblOdour').hidden = !set;
   $('rowOdours').hidden = !set;
@@ -1751,11 +1770,11 @@ function paintOdours() {
       + `<button class="chip odour${custom ? ' selected' : ' ghost'}" data-odour-other aria-pressed="${custom}">${custom ? 'Other' : '+ Other'}</button>`;
     /* One row, two lists: coming from the far end of the other list, a list
        with nothing chosen yet should open at its beginning. */
-    if (odoursFor !== target.id) $('rowOdours').scrollLeft = 0;
+    if (odoursFor !== listKey) $('rowOdours').scrollLeft = 0;
   }
-  odoursFor = target.id;
+  odoursFor = listKey;
   const field = $('otherTarget');
-  const typing = target.id === 'other' || custom;
+  const typing = target.id === 'other' || (target.id === 'vehicle' && !set) || custom;
   field.hidden = !typing;
   if (!typing) return;
   field.placeholder = set ? set.name : 'What is the dog looking for?';
@@ -1769,7 +1788,7 @@ function paintOdours() {
    out under itself and back. Folded is the usual state. It starts unfolded
    only when something the main button needs has not been chosen yet (no dog,
    or nobody to lay a person's trail), because that is found in the rows. */
-const HOME_ROWS = ['rowHandlers', 'rowDogs', 'rowTargets', 'rowOdours', 'rowLevels', 'rowLayers'];
+const HOME_ROWS = ['rowHandlers', 'rowDogs', 'rowTargets', 'rowCarries', 'rowOdours', 'rowLevels', 'rowLayers'];
 let homeSetupOpen = null;                         // null until the first paint has looked
 function paintHomeSum() {
   const { handler, dog, layer, target, odour, level } = S;
@@ -1818,6 +1837,12 @@ function renderHome() {
 
   $('rowTargets').innerHTML = TARGETS.map(t =>
     `<button class="chip plain${t.id === target.id ? ' selected' : ''}" data-target="${t.id}" aria-pressed="${t.id === target.id}" aria-label="${esc(t.label)}: ${esc(t.sub)}"><b>${esc(t.label)}</b></button>`).join('');
+  /* A vehicle: what is hidden in it, then which one (the same lists as a hide). */
+  const isVehicle = target.id === 'vehicle';
+  $('lblCarries').hidden = !isVehicle;
+  $('rowCarries').hidden = !isVehicle;
+  if (isVehicle) $('rowCarries').innerHTML = CARRIES.map(id =>
+    `<button class="chip plain${id === S.carries ? ' selected' : ''}" data-carries="${id}" aria-pressed="${id === S.carries}"><b>${esc(targetById(id).label)}</b></button>`).join('');
   paintOdours();
 
   /* Trail age belongs to a person and only to a person: a hide has no walk
@@ -1979,7 +2004,9 @@ function startLay() {
   rec.pts = []; rec.wps = []; rec.hides = []; rec.dropped = 0;
   rec.wx = null;                // this lay's own forecast arrives with its first fix
   rec.wxAsk = null;             // (or, for hides, with the first hide: layHidePlume)
-  $('hideTools').hidden = t.kind !== 'hide';
+  $('hideTools').hidden = t.kind !== 'hide' || t.id === 'vehicle';
+  $('vehTools').hidden = t.id !== 'vehicle';
+  rec.vehicle = null;
   $('btnLayStart').hidden = t.kind === 'hide';
   $('btnLayStop').hidden = true;
   $('layDot').hidden = true;
@@ -1990,7 +2017,8 @@ function startLay() {
   go('scrLay');
   if (t.kind === 'hide') {
     map.getCanvas().style.cursor = 'crosshair';
-    map.on('click', onHideTap);
+    if (t.id === 'vehicle') startVehicleLay();
+    else map.on('click', onHideTap);
     $('btnLayStop').textContent = 'Done';
   } else {
     $('btnLayStop').textContent = 'Stop';
@@ -2033,6 +2061,126 @@ function layHidePlume() {
       plumeStart(null, wx, undefined, null, { hides: rec.hides });
     })
     .catch(() => toast('No weather — the scent cloud needs it, so it stays off'));
+}
+
+/* ── A vehicle search: where the vehicle stands ───────────────────────
+   A vehicle is a hide with a vehicle round it (vehicles.js). It is placed by
+   a tap: on the verge of a road the map has drawn, just off the carriageway
+   and facing the traffic on that side; inside a car park the map has drawn,
+   nose in to its nearest edge; or anywhere, facing up the screen. Its hide
+   sits on it and moves with it, keeping the time it first went in. Until the
+   setter picks the spot, that is the front wheel well on the driver's side. */
+const veh = { place: 'verge', roads: [], parks: [], at: null, tap: null, timer: 0 };
+const vehicleLay = () => rec.kind === 'hide' && S.target.id === 'vehicle';
+
+function startVehicleLay() {
+  veh.place = 'verge'; veh.at = null; veh.tap = null;
+  paintVehTools();
+  map.on('click', onVehicleTap);
+  map.on('moveend', vehGroundSoon);
+  vehGround();
+}
+function stopVehicleLay() {
+  map.off('click', onVehicleTap);
+  map.off('moveend', vehGroundSoon);
+  clearTimeout(veh.timer);
+  $('vehTools').hidden = true;
+  setSrc('vehVerge', EMPTY); setSrc('vehPark', EMPTY);
+}
+function vehGroundSoon() { clearTimeout(veh.timer); veh.timer = setTimeout(vehGround, 300); }
+/** The roads and car parks round the middle of the map, from the same street
+    tiles the ground reading uses. Asked again once the map has moved on. */
+async function vehGround() {
+  if (!vehicleLay() || !mapKey() || !map) return paintVehLights();
+  const c = map.getCenter(), at = { lat: c.lat, lon: c.lng };
+  if (veh.at && dist(veh.at, at) < 150) return paintVehLights();
+  veh.at = at;
+  try {
+    const tiles = await Promise.all(tilesCovering([at], tileOf, { zooms: [15, 14], max: 9, padDeg: 0.003 })
+      .map(t => groundTile('streets', t.z, t.x, t.y)));
+    if (!vehicleLay()) return;
+    veh.roads = roadsOf(tiles); veh.parks = parksOf(tiles);
+  } catch { veh.at = null; }
+  paintVehLights();
+}
+function paintVehLights() {
+  const on = vehicleLay();
+  setSrc('vehVerge', on && veh.place === 'verge' ? vergeLines(veh.roads) : EMPTY);
+  setSrc('vehPark', on && veh.place === 'park' ? parkAreas(veh.parks) : EMPTY);
+}
+function onVehicleTap(e) {
+  const tap = { lat: e.lngLat.lat, lon: e.lngLat.lng };
+  if (placeVehicleAt(tap)) navigator.vibrate?.(20);
+}
+function placeVehicleAt(tap, type = rec.vehicle?.type ?? vehicleById(db.kv.get('vehicleType')).id, place = veh.place) {
+  let at;
+  if (place === 'verge') {
+    at = snapToVerge(veh.roads, tap, type);
+    if (!at) { toast(mapKey() ? 'No road on the map there. Tap beside one, or choose Anywhere.' : 'This map has no roads to line up with. Choose Anywhere.'); return false; }
+  } else if (place === 'park') {
+    at = parkAt(veh.parks, tap);
+    if (!at) { toast(mapKey() ? 'No car park on the map there. Tap inside a lit one, or choose Anywhere.' : 'This map has no car parks to find. Choose Anywhere.'); return false; }
+  } else at = { ...tap, heading: (map.getBearing() + 360) % 360, place: 'free' };
+  veh.tap = tap;
+  const turned = rec.vehicle?.turned ?? false;
+  rec.vehicle = { type, lat: at.lat, lon: at.lon, heading: Math.round((((at.heading + (turned ? 180 : 0)) % 360) + 360) % 360 * 10) / 10,
+    turned, place: at.place, road: at.road ?? null, carries: S.carries, spot: rec.vehicle?.spot ?? null };
+  placeVehicleHide();
+  paintVehicle();
+  paintVehTools();
+  frameVehicle(rec.vehicle);
+  return true;
+}
+/** The vehicle in the map the lay screen's tools leave showing, close enough to see what it is. */
+function frameVehicle(v) {
+  /* Halfway between the cards along the top (about 100 px) and the top of the tools. */
+  const H = map.getContainer().clientHeight, tools = $('vehTools').getBoundingClientRect().top || H;
+  const y = (100 + Math.min(tools, H)) / 2;
+  try { map.easeTo({ center: [v.lon, v.lat], zoom: Math.max(map.getZoom(), 19.2), offset: [0, Math.round(y - H / 2)], duration: 600 }); } catch { /* the map is busy */ }
+}
+/** The odour on the vehicle, as the search's one hide. */
+function placeVehicleHide() {
+  const v = rec.vehicle;
+  if (!v) return;
+  v.spot = v.spot ?? `fw${driverSide(v.lat, v.lon)}`;
+  const s = spotWorld(v, v.spot);
+  rec.hides = [{ lat: s.lat, lon: s.lon, t: rec.hides[0]?.t ?? Date.now(), spot: s.spot, h: s.h }];
+  paintHides();
+}
+function paintVehicle(v = rec.vehicle) {
+  if (!v) { for (const id of ['vehicle', 'vehBody', 'vehRing']) setSrc(id, EMPTY); return; }
+  setSrc('vehRing', vehicleLay() ? { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: footprint(v, 0.45) } } : EMPTY);
+  drawVehicle(v);
+  paintVehLights();
+}
+/** The vehicle on the map: the 3D model where the map can draw one, else its outline. */
+function drawVehicle(v) {
+  if (map?.getLayer('veh-model')) {
+    const id = `veh-${vehicleById(v.type).id}`;
+    try { if (!map.hasModel?.(id)) map.addModel(id, new URL(vehicleModel(v.type), location.href).href); } catch { /* drawn once it loads */ }
+    map.setLayoutProperty('veh-model', 'model-id', id);
+    /* The models face +x; the map turns them from east, clockwise. */
+    map.setPaintProperty('veh-model', 'model-rotation', [0, 0, (v.heading - 90 + 360) % 360]);
+    setSrc('vehicle', { type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: [v.lon, v.lat] } });
+    setSrc('vehBody', EMPTY);
+  } else {
+    setSrc('vehBody', { type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [footprint(v)] } });
+  }
+}
+function paintVehTools() {
+  const v = rec.vehicle;
+  for (const b of $('vehPlace').children) b.setAttribute('aria-pressed', String(b.dataset.vehPlace === veh.place));
+  const cur = v?.type ?? vehicleById(db.kv.get('vehicleType')).id;
+  $('vehTypes').innerHTML = VEHICLES.map(x =>
+    `<button class="veh-card" data-veh-type="${x.id}" aria-pressed="${x.id === cur}"><img src="${cardOf(x.id)}" alt=""><span>${esc(x.label)}</span></button>`).join('');
+  $('btnVehTurn').hidden = !v;
+  const where = { verge: 'on the verge', park: 'in the car park', free: 'placed' };
+  $('layHudText').textContent = v ? `${vehicleById(v.type).label} ${where[v.place]}`
+    : veh.place === 'verge' ? 'Tap beside a road' : veh.place === 'park' ? 'Tap inside a car park' : 'Tap where the vehicle is';
+  $('layCaption').textContent = v
+    ? `Tap again to move it. The odour is on the front wheel well, ${v.spot?.endsWith('l') === (driverSide(v.lat, v.lon) === 'l') ? 'driver' : 'passenger'} side.`
+    : veh.place === 'verge' ? 'The lit lines are the verges the map knows. The vehicle lines up with the road by itself.'
+    : veh.place === 'park' ? 'The lit areas are the car parks the map knows.' : 'It faces up the screen. Turn it round once placed.';
 }
 /* A hide dropped here is where a fix put it, not a finger, and says so: a
    first call plainly far from it is scored wrong (call.js, firstCallWasFind),
@@ -4957,6 +5105,7 @@ async function layStop() {
   stopFollowing();
   if (rec.kind === 'hide') {
     map.off('click', onHideTap);
+    stopVehicleLay();
     map.getCanvas().style.cursor = '';
     if (!rec.hides.length) { dropDraft(); return go('scrHome'); }
     $('confirmText').textContent = `${rec.hides.length} hide${rec.hides.length === 1 ? '' : 's'} set`;
@@ -4991,7 +5140,7 @@ async function confirmLay() {
       ? `${rec.hides.length} hide${rec.hides.length === 1 ? '' : 's'} set, not searched yet.`
       : `${fmtKm(pathLen(rec.pts))} trail laid, not run yet.`,
     data: isHide
-      ? { hides: rec.hides, weather: null }
+      ? { hides: rec.hides, weather: null, ...(rec.vehicle ? { vehicle: { ...rec.vehicle } } : {}) }
       : { trail: rec.pts, waypoints: rec.wps, weather: null, contamination: [] },
   };
   /* Only once the phone has really taken it. If the save was refused — a full
@@ -10821,11 +10970,20 @@ function wire() {
       if (t.dataset.target === 'other') $('otherTarget').focus();
       return;
     }
+    const ca = e.target.closest('[data-carries]');
+    if (ca) {
+      db.kv.set('vehicleCarries', ca.dataset.carries);
+      db.kv.set('odour.vehicle', '');          // a narcotic is not an explosive: the old pick does not carry over
+      odourTyping = false;
+      repaintFrom(ca, renderHome);
+      if (ca.dataset.carries === 'other') $('otherTarget').focus();
+      return;
+    }
     const od = e.target.closest('[data-odour]');
     if (od) { odourTyping = false; db.kv.set(`odour.${S.target.id}`, od.dataset.odour); return repaintFrom(od, renderHome); }
     if (e.target.closest('[data-odour-other]')) {
       odourTyping = true;
-      if (ODOURS[S.target.id]?.list.includes(S.odour)) db.kv.set(`odour.${S.target.id}`, '');
+      if (odourSetOf(S.target, S.carries)?.list.includes(S.odour)) db.kv.set(`odour.${S.target.id}`, '');
       renderHome();
       return $('otherTarget').focus();
     }
@@ -10865,11 +11023,32 @@ function wire() {
     dropDraft();            // thrown away on purpose: never offered back
     stopFollowing();
     plumeStop();
-    if (rec.kind === 'hide') { map.off('click', onHideTap); map.getCanvas().style.cursor = ''; }
+    if (rec.kind === 'hide') { map.off('click', onHideTap); stopVehicleLay(); map.getCanvas().style.cursor = ''; }
     clearMap();
     go('scrHome');
   });
   $('btnDropHide').addEventListener('click', dropHideAtFeet);
+  $('vehPlace').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-veh-place]');
+    if (!b) return;
+    veh.place = b.dataset.vehPlace;
+    paintVehTools(); paintVehLights();
+  });
+  $('vehTypes').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-veh-type]');
+    if (!b) return;
+    db.kv.set('vehicleType', b.dataset.vehType);
+    /* Stood again where it was tapped: a wider vehicle stands further off the road. */
+    if (rec.vehicle && veh.tap) placeVehicleAt(veh.tap, b.dataset.vehType, rec.vehicle.place);
+    else paintVehTools();
+  });
+  $('btnVehTurn').addEventListener('click', () => {
+    const v = rec.vehicle;
+    if (!v) return;
+    v.turned = !v.turned;
+    v.heading = (v.heading + 180) % 360;
+    placeVehicleHide(); paintVehicle(); paintVehTools();
+  });
 
   // Confirm
   $('btnConfirm').addEventListener('click', confirmLay);
