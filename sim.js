@@ -76,6 +76,13 @@ const POOL_PARTS = () => PV.poolParts;
 export function poolRadius(dwellS) {
   return Math.min(PV.poolCap, PV.poolBase + PV.poolGrow * Math.sqrt(Math.max(0, dwellS) / 60));
 }
+/* A placed odour (a training aid of a few grams) gives off far less than a
+   person standing waiting to be found, whom the pool above was chosen for,
+   so its pool is drawn at this share of the width. CHOSEN, not measured, as
+   the pool itself is: set 2026-11-22 after a vehicle hide's cloud looked far
+   too wide a minute after it went in. */
+export const HIDE_POOL = 0.4;
+export const hidePoolRadius = (dwellS) => poolRadius(dwellS) * HIDE_POOL;
 
 /**
  * Where a scent particle released at `origin` ends up after `secs` airborne.
@@ -277,6 +284,7 @@ export class ScentSim {
   reseedPool() {
     this.pool.length = 0;
     const srcs = this.poolSources();
+    const firstHide = srcs.length - (this.hides?.length || 0);      // the trail's end comes first, then the hides
     for (let i = 0; i < srcs.length; i++) {
       const src = srcs[i];
       const parts = POOL_PARTS();
@@ -296,6 +304,7 @@ export class ScentSim {
              the wait goes on instead of merely brightening. */
           join: Math.random(),
           str: 0,
+          hide: i >= firstHide,               // a placed odour: a smaller pool, drawn lower (glow.js)
         });
       }
     }
@@ -424,7 +433,7 @@ export class ScentSim {
          BRIGHTER than the trail beside it — one figure applied in two places
          and forgotten in a third. */
       const hp = !!src.hard;
-      const poolR = poolRadius(dwellS) * (hp ? WIDEN : 1);
+      const poolR = poolRadius(dwellS) * (hp ? WIDEN : 1) * (s.hide ? HIDE_POOL : 1);
       const g = project(src, s.ang, s.rad * poolR, home0);
       s.hlat = g.lat; s.hlon = g.lon;
       driftFrom(T, g, s.phase * AIR * (s.life ?? 1) / mix * (hp ? CARRY : 1), wx, st, 5, WALLS, d);

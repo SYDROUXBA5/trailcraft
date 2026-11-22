@@ -377,9 +377,9 @@ export function makeScentGlow(map) {
     for (const s of parts) {
       const w = weight(s);
       if (!(w > 0.004)) continue;
-      const d = Math.hypot((s.lat - s.hlat) * mLat, (s.lon - s.hlon) * mLon), r = (s.seed % 6.28318) / 6.28318, h = parcelHeight(d, r, st), o = n * 7;
-      data[o] = (mercX(s.lon) - ox) * kk; data[o + 1] = -(mercY(s.lat) - oy) * kk; data[o + 2] = groundAt(s.lat, s.lon, now) + (0.4 + h) * ex;
-      data[o + 3] = w * scale; data[o + 4] = Math.min(1, Math.max(0, s.str)); data[o + 5] = Math.min(14, 1.8 + 0.11 * d + 0.16 * h);      // a parcel that has gone further has spread wider: soft enough that thin scent reads as haze, not dots data[o + 6] = Math.min(1, Math.max(0, (h - 3) / 17));
+      const d = Math.hypot((s.lat - s.hlat) * mLat, (s.lon - s.hlon) * mLon), r = (s.seed % 6.28318) / 6.28318, low = s.hide ? 0.35 : 1, h = parcelHeight(d, r, st) * low, o = n * 7;   // a placed odour hangs low (sim.js HIDE_POOL)
+      data[o] = (mercX(s.lon) - ox) * kk; data[o + 1] = -(mercY(s.lat) - oy) * kk; data[o + 2] = groundAt(s.lat, s.lon, now) + (0.4 * low + h) * ex;
+      data[o + 3] = w * scale; data[o + 4] = Math.min(1, Math.max(0, s.str)); data[o + 5] = Math.min(14, (1.8 + 0.11 * d + 0.16 * h) * (s.hide ? 0.5 : 1));      // a parcel that has gone further has spread wider: soft enough that thin scent reads as haze, not dots data[o + 6] = Math.min(1, Math.max(0, (h - 3) / 17));
       n++;
     }
     count = n; dirty = true; map.triggerRepaint();
