@@ -757,7 +757,11 @@ t('a vehicle search places a vehicle, keeps its odour on it, and saves both', ()
   assert.match(start, /if \(t\.id === 'vehicle'\) startVehicleLay\(\);\s*else map\.on\('click', onHideTap\);/, 'a tap places the vehicle, not a loose hide');
   assert.match(bodyOf('placeVehicleHide'), /rec\.hides = \[\{ lat: s\.lat, lon: s\.lon, t: rec\.hides\[0\]\?\.t \?\? Date\.now\(\), spot: s\.spot, h: s\.h \}\];/,
     'one hide, on the vehicle, keeping the time it first went in');
-  assert.match(js, /\{ hides: rec\.hides, weather: null, \.\.\.\(rec\.vehicle \? \{ vehicle: \{ \.\.\.rec\.vehicle \} \} : \{\}\) \}/, 'saved with the search');
+  assert.match(js, /\{ hides: rec\.hides, weather: null, \.\.\.\(rec\.vehicle \? vehicleData\(\) : \{\}\) \}/, 'saved with the search');
+  assert.match(bodyOf('vehicleData'), /approach: veh\.approach \? \{ \.\.\.veh\.approach \} : null,\s*showScent: !!veh\.showScent, plannedMin: vehAgeMin\(\)/,
+    'with where the dog starts, whether the handler sees the scent, and the time it was planned for');
+  assert.match(bodyOf('vehPreview'), /plume\.clock = t \+ vehAgeMin\(\) \* 60000;/, 'the look ahead is a frame of the same simulation');
+  assert.match(bodyOf('stopVehicleLay'), /if \(plume\.sim && plume\.clock != null\) \{ plume\.clock = null; plumeFrame\(\); \}/, 'and ends with the set-up');
   assert.match(js, /placeVehicleAt\(veh\.tap, b\.dataset\.vehType, rec\.vehicle\.place\)/, 'a new kind stands where the old one stood, not where the buttons now point');
   for (const fn of ['layStop']) assert.match(bodyOf(fn), /stopVehicleLay\(\);/, `${fn} lets go of the map`);
   assert.match(js, /map\.off\('click', onHideTap\); stopVehicleLay\(\);/, 'and so does Cancel');

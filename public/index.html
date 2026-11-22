@@ -341,13 +341,44 @@
   <div class="hud-pill" id="layHud"><span class="rec-dot" id="layDot" hidden></span><span id="layHudText">Ready</span></div>
   <div class="glass-bottom">
     <div class="veh-tools" id="vehTools" hidden>
-      <div class="veh-place" id="vehPlace" role="group" aria-label="Where the vehicle is">
-        <button class="btn small" data-veh-place="verge" aria-pressed="true">Roadside</button>
-        <button class="btn small" data-veh-place="park" aria-pressed="false">Car park</button>
-        <button class="btn small" data-veh-place="free" aria-pressed="false">Anywhere</button>
+      <div class="veh-stage" data-veh-stage="place">
+        <div class="veh-place" id="vehPlace" role="group" aria-label="Where the vehicle is">
+          <button class="btn small" data-veh-place="verge" aria-pressed="true">Roadside</button>
+          <button class="btn small" data-veh-place="park" aria-pressed="false">Car park</button>
+          <button class="btn small" data-veh-place="free" aria-pressed="false">Anywhere</button>
+        </div>
+        <div class="veh-types" id="vehTypes" role="group" aria-label="Which vehicle"></div>
+        <button class="btn ghost small" id="btnVehTurn" hidden>Turn it round</button>
       </div>
-      <div class="veh-types" id="vehTypes" role="group" aria-label="Which vehicle"></div>
-      <button class="btn ghost small" id="btnVehTurn" hidden>Turn it round</button>
+      <div class="veh-stage" data-veh-stage="odour" hidden>
+        <div class="veh-pick"><img id="vehPickImg" alt="The vehicle from above, front to the right"><div id="vehPickSpots" role="group" aria-label="Where the odour is"></div></div>
+        <p class="veh-say" id="vehSpotName"></p>
+        <span class="label">The odour went in</span>
+        <div class="veh-place veh-when" id="vehWhen" role="group" aria-label="When the odour went in">
+          <button class="btn small" data-veh-when="0" aria-pressed="true">Just now</button>
+          <button class="btn small" data-veh-when="10" aria-pressed="false">10 min ago</button>
+          <button class="btn small" data-veh-when="30" aria-pressed="false">30 min ago</button>
+          <button class="btn small" data-veh-when="60" aria-pressed="false">1 h ago</button>
+        </div>
+      </div>
+      <div class="veh-stage" data-veh-stage="time" hidden>
+        <p class="veh-say" id="vehWind"></p>
+        <span class="label">Odour has been in for</span>
+        <div class="veh-age"><span><b id="vehAgeBig">15</b> min</span>
+          <button class="veh-play" id="vehPlay" aria-label="Play the build-up" aria-pressed="false"></button></div>
+        <input type="range" class="veh-range" id="vehAge" min="0" max="60" step="1" value="15" aria-label="Minutes the odour has been in">
+        <p class="veh-say" id="vehAgeSay"></p>
+      </div>
+      <div class="veh-stage" data-veh-stage="start" hidden>
+        <div class="veh-place" id="vehApproach" role="group" aria-label="Which side the dog comes from">
+          <button class="btn small" data-veh-approach="downwind" aria-pressed="false">Downwind</button>
+          <button class="btn small" data-veh-approach="crosswind" aria-pressed="false">Crosswind</button>
+          <button class="btn small" data-veh-approach="upwind" aria-pressed="false">Upwind</button>
+        </div>
+        <p class="veh-say" id="vehStartSay"></p>
+        <label class="veh-toggle"><input type="checkbox" id="vehShowScent"> Show the scent to the handler</label>
+      </div>
+      <div class="veh-nav"><button class="btn ghost small" id="vehBack" hidden>Back</button><button class="btn moss small" id="vehNext" disabled>Next</button></div>
     </div>
     <div class="row-gap" id="hideTools" hidden>
       <button class="btn card-btn" id="btnDropHide">Drop hide at my feet</button>
