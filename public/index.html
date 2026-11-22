@@ -100,36 +100,41 @@
 
 <!-- The compass, top right of every map screen. -->
 <span class="wx-rose" id="wxRose" role="button" tabindex="0" hidden aria-label="Compass">
-  <!-- The compass people already know from their phone and their watch: a
-       dark dial that turns under a fixed mark, north in red, and the heading
-       written in the middle — which is also how anyone can see at a glance
-       that it is working. The blue marker rides the dial: where the wind is
-       carrying the air. -->
+  <!-- The liquid lens (Rémi's pick of ten drafts, 22 Nov 2026): a disc of the
+       same glass as the weather box, with the ground showing through. The
+       ring turns under a fixed mark, north in red; the letters stay upright
+       while it turns (app.css, .wx-up), so E and W never read upside down;
+       the heading sits in the middle in big thin numbers, which is also how
+       anyone can see at a glance that it is working. The chevron rides the
+       ring: where the wind is carrying the air. -->
   <svg viewBox="0 0 100 100" aria-hidden="true">
     <defs>
       <radialGradient id="wxDial" cx="50%" cy="36%" r="72%">
         <stop offset="0" stop-color="#1C2E57"/><stop offset="1" stop-color="#060C1C"/>
       </radialGradient>
+      <filter id="wxGlow" x="-1" y="-1" width="3" height="3"><feGaussianBlur stdDeviation="1.6"/></filter>
     </defs>
     <circle cx="50" cy="50" r="49" fill="url(#wxDial)" stroke="#FFFFFF" stroke-opacity="0.3" stroke-width="1.2"/>
     <g id="wxRoseRing">
-      <path d="M57.54 7.26L58.09 4.11M64.84 9.22L65.94 6.21M77.90 16.75L79.95 14.30M83.25 22.10L85.70 20.05M90.78 35.16L93.79 34.06M92.74 42.46L95.89 41.91M92.74 57.54L95.89 58.09M90.78 64.84L93.79 65.94M83.25 77.90L85.70 79.95M77.90 83.25L79.95 85.70M64.84 90.78L65.94 93.79M57.54 92.74L58.09 95.89M42.46 92.74L41.91 95.89M35.16 90.78L34.06 93.79M22.10 83.25L20.05 85.70M16.75 77.90L14.30 79.95M9.22 64.84L6.21 65.94M7.26 57.54L4.11 58.09M7.26 42.46L4.11 41.91M9.22 35.16L6.21 34.06M16.75 22.10L14.30 20.05M22.10 16.75L20.05 14.30M35.16 9.22L34.06 6.21M42.46 7.26L41.91 4.11" fill="none" stroke="#FFFFFF" stroke-opacity="0.55" stroke-width="1"/>
-      <path d="M70.20 15.01L73.30 9.64M84.99 29.80L90.36 26.70M90.40 50.00L96.60 50.00M84.99 70.20L90.36 73.30M70.20 84.99L73.30 90.36M50.00 90.40L50.00 96.60M29.80 84.99L26.70 90.36M15.01 70.20L9.64 73.30M9.60 50.00L3.40 50.00M15.01 29.80L9.64 26.70M29.80 15.01L26.70 9.64" fill="none" stroke="#FFFFFF" stroke-width="1.8" stroke-linecap="round"/>
-      <path d="M50 2.6 L45 11.4 L55 11.4Z" fill="#FF453A"/>
-      <g font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Arial, sans-serif" font-weight="700" font-size="11.5" text-anchor="middle">
-        <text x="50" y="26.4" fill="#FF453A">N</text>
-        <text x="77.6" y="54.1" fill="#FFFFFF">E</text>
-        <text x="50" y="81.6" fill="#FFFFFF">S</text>
-        <text x="22.4" y="54.1" fill="#FFFFFF">W</text>
+      <path d="M53.85 5.97L54.08 3.38M57.68 6.47L58.13 3.91M61.44 7.31L62.11 4.79M65.12 8.47L66.01 6.02M68.68 9.94L69.78 7.58M75.35 13.79L76.84 11.66M78.41 16.14L80.08 14.15M81.25 18.75L83.09 16.91M83.86 21.59L85.85 19.92M86.21 24.65L88.34 23.16M90.06 31.32L92.42 30.22M91.53 34.88L93.98 33.99M92.69 38.56L95.21 37.89M93.53 42.32L96.09 41.87M94.03 46.15L96.62 45.92M94.03 53.85L96.62 54.08M93.53 57.68L96.09 58.13M92.69 61.44L95.21 62.11M91.53 65.12L93.98 66.01M90.06 68.68L92.42 69.78M86.21 75.35L88.34 76.84M83.86 78.41L85.85 80.08M81.25 81.25L83.09 83.09M78.41 83.86L80.08 85.85M75.35 86.21L76.84 88.34M68.68 90.06L69.78 92.42M65.12 91.53L66.01 93.98M61.44 92.69L62.11 95.21M57.68 93.53L58.13 96.09M53.85 94.03L54.08 96.62M46.15 94.03L45.92 96.62M42.32 93.53L41.87 96.09M38.56 92.69L37.89 95.21M34.88 91.53L33.99 93.98M31.32 90.06L30.22 92.42M24.65 86.21L23.16 88.34M21.59 83.86L19.92 85.85M18.75 81.25L16.91 83.09M16.14 78.41L14.15 80.08M13.79 75.35L11.66 76.84M9.94 68.68L7.58 69.78M8.47 65.12L6.02 66.01M7.31 61.44L4.79 62.11M6.47 57.68L3.91 58.13M5.97 53.85L3.38 54.08M5.97 46.15L3.38 45.92M6.47 42.32L3.91 41.87M7.31 38.56L4.79 37.89M8.47 34.88L6.02 33.99M9.94 31.32L7.58 30.22M13.79 24.65L11.66 23.16M16.14 21.59L14.15 19.92M18.75 18.75L16.91 16.91M21.59 16.14L19.92 14.15M24.65 13.79L23.16 11.66M31.32 9.94L30.22 7.58M34.88 8.47L33.99 6.02M38.56 7.31L37.89 4.79M42.32 6.47L41.87 3.91M46.15 5.97L45.92 3.38" stroke="#FFFFFF" stroke-opacity="0.45" stroke-width="0.7" stroke-linecap="round"/>
+      <path d="M70.90 13.80L73.40 9.47M86.20 29.10L90.53 26.60M86.20 70.90L90.53 73.40M70.90 86.20L73.40 90.53M29.10 86.20L26.60 90.53M13.80 70.90L9.47 73.40M13.80 29.10L9.47 26.60M29.10 13.80L26.60 9.47" stroke="#FFFFFF" stroke-width="1.3" stroke-linecap="round"/>
+      <path d="M50 2.6 L54.4 10.6 L45.6 10.6Z" fill="#FF453A" filter="url(#wxGlow)" opacity="0.9"/>
+      <path d="M50 2.6 L54.4 10.6 L45.6 10.6Z" fill="#FF453A"/>
+      <g font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Arial, sans-serif" font-size="10.5" text-anchor="middle">
+        <text class="wx-up" x="50.0" y="21.2" fill="#FF5A4E" font-weight="700">N</text>
+        <text class="wx-up" x="82.5" y="53.7" fill="#FFFFFF" font-weight="600">E</text>
+        <text class="wx-up" x="50.0" y="86.2" fill="#FFFFFF" font-weight="600">S</text>
+        <text class="wx-up" x="17.5" y="53.7" fill="#FFFFFF" font-weight="600">W</text>
       </g>
       <g id="wxArrow">
-        <path d="M50 2.2 L55.6 12.6 L50 10.2 L44.4 12.6Z" fill="#4DA3FF" stroke="#060C1C" stroke-width="0.9" stroke-linejoin="round"/>
+        <path d="M50 7.6 L53.8 13.8 L50 12.2 L46.2 13.8Z" fill="#4DA3FF" filter="url(#wxGlow)"/>
+        <path d="M50 7.6 L53.8 13.8 L50 12.2 L46.2 13.8Z" fill="#4DA3FF"/>
       </g>
     </g>
-    <rect id="wxIndex" x="48.5" y="0" width="3" height="9.5" rx="1.5" fill="#6F7E9C"/>
-    <g font-family="-apple-system, 'SF Pro Rounded', 'Helvetica Neue', Arial, sans-serif" text-anchor="middle">
-      <text id="wxDeg" x="50" y="55.5" font-size="18" font-weight="700" fill="#FFFFFF">—</text>
-      <text id="wxCard" x="50" y="66.5" font-size="8.2" font-weight="700" fill="#9AB0D6" letter-spacing="0.5"></text>
+    <rect id="wxIndex" x="48.9" y="-0.4" width="2.2" height="5.4" rx="1.1" fill="#6F7E9C"/>
+    <g font-family="-apple-system, 'SF Pro Display', 'Helvetica Neue', Arial, sans-serif" text-anchor="middle">
+      <text id="wxDeg" x="50.8" y="54" font-size="16.5" font-weight="300" fill="#FFFFFF" letter-spacing="-0.4">—</text>
+      <text id="wxCard" x="50" y="63.8" font-size="7.6" font-weight="600" fill="#9AB0D6" letter-spacing="0.9"></text>
     </g>
   </svg>
 </span>

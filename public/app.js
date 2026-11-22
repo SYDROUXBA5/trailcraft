@@ -3052,6 +3052,7 @@ function paintRose() {
   const live = compass.heading != null;
   compass.ring = unwrapTo(compass.ring, -(compass.heading ?? 0));
   ring.style.transform = `rotate(${compass.ring.toFixed(1)}deg)`;
+  rose.style.setProperty('--ring', `${compass.ring.toFixed(1)}deg`);   // the letters turn back by this, to stay upright
   if (compass.wind != null) {
     compass.arrow = unwrapTo(compass.arrow, compass.wind);
     arrow.style.transform = `rotate(${compass.arrow.toFixed(1)}deg)`;
