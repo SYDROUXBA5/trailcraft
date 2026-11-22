@@ -368,6 +368,12 @@
       </div>
       <div class="veh-stage" data-veh-stage="time" hidden>
         <p class="veh-say" id="vehWind"></p>
+        <div class="veh-place veh-two" id="vehWindMode" role="group" aria-label="Which wind">
+          <button class="btn small" data-veh-wind="forecast" aria-pressed="true">Forecast</button>
+          <button class="btn small" data-veh-wind="felt" aria-pressed="false">Turn it myself</button>
+        </div>
+        <div id="vehWheel" hidden tabindex="0" role="slider" aria-label="Where the wind comes from" aria-valuemin="0" aria-valuemax="315"
+          style="touch-action: none; user-select: none; -webkit-user-select: none; cursor: grab; display: flex; align-items: center; gap: 14px;"></div>
         <span class="label">Odour has been in for</span>
         <div class="veh-age"><span><b id="vehAgeBig">15</b> min</span>
           <button class="veh-play" id="vehPlay" aria-label="Play the build-up" aria-pressed="false"></button></div>

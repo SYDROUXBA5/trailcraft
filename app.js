@@ -16,7 +16,7 @@ import { handlerStats, teachesDrift, runAgeMin } from './store.js';
 import { plumePalette, stepPalette, windPalette, trackPalette, COLOUR_PRESETS, isHex, mix, hexToRgb } from './colours.js';
 import { FLAT, buildTerrain, stability, regime, flowAt, normOf, rainRate, RAIN_SUMS_PER_HOUR, windAt,
          laidWind, cleanWindFelt, windTrusted, forecastAt, feltMoment, nearestPoint, windFeltFor, forecastSaid,
-         windWords, feltPanel, FELT_POINTS, feltPicked, feltSame, sameFelt, feltOf, anchorFelt, feltWeather,
+         windWords, feltPanel, FELT_POINTS, feltPicked, feltSame, sameFelt, feltOf, anchorFelt, feltWeather, makeWindFelt,
          seriesCovers } from './field.js';
 import { predictedOffsets, ScentSim, driftFrom, stepByFlow, flowBearing, hidePoolRadius, NOSE, AIRBORNE } from './sim.js';
 import { PARAMS, DIALS, PV, setParam, resetParams, changed, isDefault, tally, dialById, PRESETS, applyPreset } from './params.js';
@@ -2090,11 +2090,11 @@ function layHidePlume() {
       line the cloud begins, at the time looked ahead to. */
 const VEH_STAGES = ['place', 'odour', 'time', 'start'];
 const veh = { stage: 'place', place: 'verge', roads: [], parks: [], at: null, tap: null, timer: 0,
-  age: 15, play: 0, approach: null, showScent: false };
+  age: 15, play: 0, approach: null, showScent: false, felt: null, wheelFrom: null, wheelDrag: false };
 const vehicleLay = () => rec.kind === 'hide' && S.target.id === 'vehicle';
 
 function startVehicleLay() {
-  Object.assign(veh, { stage: 'place', place: 'verge', at: null, tap: null, age: 15, approach: null, showScent: false });
+  Object.assign(veh, { stage: 'place', place: 'verge', at: null, tap: null, age: 15, approach: null, showScent: false, felt: null, wheelFrom: null });
   $('vehShowScent').checked = false;
   paintVehTools();
   map.on('click', onVehicleTap);
@@ -2252,9 +2252,13 @@ function paintVehTime() {
   const min = vehAgeMin(), wx = rec.wx;
   $('vehAge').value = String(min);
   $('vehAgeBig').textContent = String(min);
+  const felt = veh.felt, from = felt ? felt.from : wx?.wind_direction;
   $('vehWind').innerHTML = wx
-    ? `<b>${esc(fmtWind(wx.wind_speed))}</b> from ${esc(cardinal(wx.wind_direction))} · forecast`
+    ? `<b>${esc(fmtWind(wx.wind_speed))}</b> from ${esc(cardinal(from))} · ${felt ? 'set by you' : 'forecast'}`
     : 'Waiting for the forecast';
+  for (const b of $('vehWindMode').children) { b.setAttribute('aria-pressed', String((b.dataset.vehWind === 'felt') === !!felt)); b.disabled = !wx; }
+  $('vehWheel').hidden = !felt;
+  if (felt) paintWheel();
   const across = 2 * hidePoolRadius(min * 60), reach = wx ? wx.wind_speed * NOSE * AIRBORNE : null;
   $('vehAgeSay').innerHTML = `Cloud round the vehicle about <b>${esc(fmtM(across))} across</b>`
     + (reach != null ? ` · carried about <b>${esc(fmtM(reach))}</b> downwind` : '')
@@ -2272,6 +2276,57 @@ function vehPlay(on = !veh.play) {
     }, 160);
   }
   if ($('vehPlay')) $('vehPlay').setAttribute('aria-pressed', String(!!veh.play));
+}
+
+/* Wind: the forecast, or the setter's own: a wheel turned to where the wind
+   comes from. It is kept as the app's felt wind (field.js), which the run,
+   the replay and the grade already read, and like every felt wind it is one
+   of the eight points of the compass: a direction felt on the ground is not
+   finer than that. The speed stays the forecast's. */
+const vehWind = () => (veh.felt ? feltWeather(rec.wx, veh.felt) : rec.wx);
+function setVehWind(mode) {
+  const ref = rec.wx?.wind_direction;
+  if (mode === 'felt' && Number.isFinite(ref)) {
+    veh.wheelFrom = veh.wheelFrom ?? nearestPoint(ref);
+    veh.felt = makeWindFelt(veh.wheelFrom, ref);
+  } else veh.felt = null;
+  /* The cloud in that air, at the time looked ahead to. */
+  if (rec.wx && rec.hides.length) { plumeStart(null, vehWind(), undefined, null, { hides: rec.hides }); vehPreview(); }
+  paintVehTime();
+  if (rec.vehicle && !veh.wheelDrag) frameVehicle(rec.vehicle, 18.6);       // the vehicle and its cloud above the taller panel
+}
+function buildWheel() {
+  if ($('vehWheel').firstChild) return;
+  const ticks = Array.from({ length: 16 }, (_, i) => `<line x1="100" y1="12" x2="100" y2="${i % 2 ? 20 : 26}" stroke="rgba(255,255,255,${i % 2 ? 0.35 : 0.8})" stroke-width="${i % 2 ? 1.5 : 2.5}" transform="rotate(${i * 22.5} 100 100)"/>`).join('');
+  const letters = [['N', 100, 44], ['E', 158, 106], ['S', 100, 166], ['W', 42, 106]]
+    .map(([t, x, y]) => `<text x="${x}" y="${y}" text-anchor="middle" font-size="16" font-weight="700" fill="${t === 'N' ? '#FF5A52' : 'rgba(255,255,255,0.9)'}" font-family="system-ui, sans-serif">${t}</text>`).join('');
+  $('vehWheel').innerHTML = `<svg width="118" height="118" viewBox="0 0 200 200" aria-hidden="true" style="display:block; flex: none">
+    <circle cx="100" cy="100" r="94" fill="rgba(255,255,255,0.06)" stroke="rgba(255,255,255,0.28)" stroke-width="2"/>${ticks}${letters}
+    <g id="vehWheelArrow"><path d="M100 14 L100 70" stroke="#5FF2E0" stroke-width="7" stroke-linecap="round"/>
+      <path d="M86 64 L100 86 L114 64 Z" fill="#5FF2E0"/><circle cx="100" cy="14" r="9" fill="#5FF2E0" stroke="#fff" stroke-width="2.5"/></g>
+    </svg>
+    <span style="display: flex; flex-direction: column; gap: 2px; min-width: 0">
+      <b id="vehWheelText" style="font-size: calc(26 * var(--px)); font-weight: 400"></b>
+      <span style="font-size: calc(13 * var(--px)); opacity: 0.8">Turn the wheel to where the wind comes from</span></span>`;
+}
+function paintWheel() {
+  buildWheel();
+  const f = veh.wheelFrom ?? 0;
+  $('vehWheelArrow').setAttribute('transform', `rotate(${f} 100 100)`);
+  $('vehWheelText').textContent = `From ${cardinal(f)}`;
+  $('vehWheel').setAttribute('aria-valuenow', String(f));
+  $('vehWheel').setAttribute('aria-valuetext', `from ${cardinal(f)}`);
+}
+/** The point of the compass under the finger, measured from the wheel's middle. */
+function wheelPoint(e) {
+  const r = $('vehWheel').querySelector('svg').getBoundingClientRect();
+  return nearestPoint((Math.atan2(e.clientX - (r.left + r.width / 2), -(e.clientY - (r.top + r.height / 2))) * 180) / Math.PI);
+}
+function turnWheel(p) {
+  if (p === veh.wheelFrom) return;
+  veh.wheelFrom = p;
+  paintWheel();
+  navigator.vibrate?.(8);
 }
 
 /* Start: where the dog starts: where the setter stands now (a GPS fix), or
@@ -5416,7 +5471,7 @@ async function layStop() {
     set-up time it was planned for. */
 function vehicleData() {
   return { vehicle: { ...rec.vehicle }, approach: veh.approach ? { ...veh.approach } : null,
-    showScent: !!veh.showScent, plannedMin: vehAgeMin() };
+    showScent: !!veh.showScent, plannedMin: vehAgeMin(), windFelt: veh.felt ? { ...veh.felt } : null };
 }
 async function confirmLay() {
   const t = S.target;
@@ -11351,6 +11406,24 @@ function wire() {
   });
   $('vehAge').addEventListener('input', (e) => { vehPlay(false); veh.age = Number(e.target.value); paintVehTime(); vehPreview(); });
   $('vehPlay').addEventListener('click', () => vehPlay());
+  $('vehWindMode').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-veh-wind]');
+    if (b && !b.disabled) setVehWind(b.dataset.vehWind);
+  });
+  {
+    const wheel = $('vehWheel');
+    wheel.addEventListener('pointerdown', (e) => { veh.wheelDrag = true; wheel.setPointerCapture?.(e.pointerId); turnWheel(wheelPoint(e)); });
+    wheel.addEventListener('pointermove', (e) => { if (veh.wheelDrag) turnWheel(wheelPoint(e)); });
+    /* Let go: the cloud is drawn again in the wind turned to. */
+    for (const ev of ['pointerup', 'pointercancel']) wheel.addEventListener(ev, () => { if (!veh.wheelDrag) return; veh.wheelDrag = false; setVehWind('felt'); });
+    wheel.addEventListener('keydown', (e) => {
+      const step = { ArrowRight: 45, ArrowUp: 45, ArrowLeft: -45, ArrowDown: -45 }[e.key];
+      if (!step) return;
+      e.preventDefault();
+      turnWheel(nearestPoint((veh.wheelFrom ?? 0) + step));
+      setVehWind('felt');
+    });
+  }
   $('btnStartHere').addEventListener('click', startWhereIAm);
   $('btnStartPlace').addEventListener('click', () => { veh.placingStart = true; paintVehStart(); });
   $('vehShowScent').addEventListener('change', (e) => { veh.showScent = e.target.checked; });
