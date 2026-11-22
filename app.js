@@ -25,7 +25,7 @@ import { CONTAM_COLOURS, colourIndex, contamColour, nextColour, contamStatus, co
   attachWalk, withIds, contamWords, trailClock, reorderContam, contamKey } from './contam.js';
 import { decodeTile, tileOf, tileBox } from './mvt.js';
 import { VEHICLES, vehicleById, modelOf as vehicleModel, cardOf, spotsOf, spotWorld, footprint, driverSide, roadsOf, parksOf,
-         snapToVerge, parkAt, vergeLines, parkAreas } from './vehicles.js';
+         snapToVerge, parkAt, vergeLines, parkAreas, scentAlong, indicationOn } from './vehicles.js';
 import { wallIndex, bandInWalls } from './walls.js';
 import { GROUND_LAYERS, buildGround, surfaceAt, surfaceAlong, surfaceRows, withSurface,
          tilesCovering, isHard, GROUND_V, GROUND_RULES, readingSig, readingFits, readingVersion,
@@ -588,7 +588,7 @@ const srcData = { runner: EMPTY, steps: EMPTY, dog: EMPTY, handler: EMPTY, paws:
                   fix: EMPTY, fixEnds: EMPTY, bandWall: EMPTY,
                   routeDone: EMPTY, routeAhead: EMPTY, puck: EMPTY, scent: EMPTY, contamScent: EMPTY, wind: EMPTY,
                   flow: EMPTY, flowPulse: EMPTY, air: EMPTY, acc: EMPTY,
-                  vehicle: EMPTY, vehBody: EMPTY, vehRing: EMPTY, vehVerge: EMPTY, vehPark: EMPTY, vehApproach: EMPTY };
+                  vehicle: EMPTY, vehBody: EMPTY, vehRing: EMPTY, vehVerge: EMPTY, vehPark: EMPTY, vehApproach: EMPTY, vehScentTrack: EMPTY };
 
 /** Where the map opens before any fix: the contiguous United States. */
 const USA_BOUNDS = [[-124.8, 24.4], [-66.9, 49.4]];
@@ -663,6 +663,8 @@ function replayDusk(on) {
   for (const id of appLayers) {
     for (const prop of lit[map.getLayer(id)?.type] || []) { try { map.setPaintProperty(id, prop, want ? 1 : 0); } catch { /* an older map */ } }
   }
+  /* The vehicle model a little, or a white pickup goes grey at dusk; fully lit it would read flat. */
+  try { if (map.getLayer('veh-model')) map.setPaintProperty('veh-model', 'model-emissive-strength', want ? 0.45 : 0); } catch { /* an older map */ }
 }
 
 function addOverlays() {
@@ -854,6 +856,10 @@ function addOverlays() {
   add({ id: 'dog-dash', type: 'line', source: 'dog',
         layout: { 'line-cap': 'butt', 'line-join': 'round', visibility: 'none' },
         paint: { 'line-color': '#FFFFFF', 'line-width': 4.5, 'line-opacity': 0.98, 'line-dasharray': [2, 1.5] } });
+  /* A vehicle search's replay: the dog's track where its nose was in the
+     modelled cloud (vehicles.js scentAlong), under the paws. */
+  add({ id: 'veh-scent-track', type: 'line', source: 'vehScentTrack', layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: { 'line-color': '#33EBDB', 'line-width': 6, 'line-opacity': 0.85, 'line-blur': 0.6 } });
   /* The dog's track as paw prints: the same thinning and turning as the
      footprints, a narrower gait. */
   if (!map.hasImage('paw')) map.addImage('paw', pawSdf(), { pixelRatio: 2, sdf: true });
@@ -2272,9 +2278,13 @@ function setApproach(at, side = null) {
   const start = side && !at?.lat ? project(h, approachBearing(side), APPROACH_M) : { lat: at.lat, lon: at.lon };
   veh.approach = { lat: start.lat, lon: start.lon, side: side ?? sideOf(start) };
   setSrc('start', pointsOf([start]));
-  const end = project(h, bearing(h, start), 2.5);
-  setSrc('vehApproach', { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: [[start.lon, start.lat], [end.lon, end.lat]] } });
+  setSrc('vehApproach', approachLine(start, h));
   paintVehStart();
+}
+/** The dashed line from the start to just short of the odour. */
+function approachLine(start, h) {
+  const end = project(h, bearing(h, start), 2.5);
+  return { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: [[start.lon, start.lat], [end.lon, end.lat]] } };
 }
 /** Metres out from the odour where the line first enters the cloud, or null. */
 function meetsScent(start, h) {
@@ -2343,6 +2353,76 @@ function vehGo(step) {
   else if (veh.stage === 'start' && veh.approach) fitOver($('vehTools'), [rec.hides[0], veh.approach]);
   else frameVehicle(v, 19.2);
 }
+/* ── A vehicle search: the run and the replay ─────────────────────────
+   On the run the vehicle stands where it was set, with the start and the
+   approach line: the handler can see a vehicle, not the odour in it. The
+   odour and its cloud wait for Show hides, or show from the start when the
+   search was set up to show the scent (trainer view, recorded as shown).
+   In trainer view the run line says how far the dog is from the vehicle and
+   how long it has been in the cloud as drawn. The replay colours the track
+   where the dog's nose was in the modelled cloud and says when it first
+   was, for how long, and whether the Indication was at the vehicle. */
+let vehRun = null;
+function drawVehicleScene(d) {
+  drawVehicle(d.vehicle);
+  const a = d.approach, h = d.hides?.[0];
+  if (a) setSrc('start', pointsOf([a]));
+  if (a && h) setSrc('vehApproach', approachLine(a, h));
+}
+function startVehicleRun(s) {
+  vehRun = { s, inMs: 0, last: null };
+  drawVehicleScene(s.data);
+  hudText = vehRunHud;
+  if (s.data.showScent && !run.revealed) toggleReveal();
+}
+/** The cloud as drawn right now, at the dog's last fix: the same rule as the set-up's line. */
+function vehRunFix(pt) {
+  if (!vehRun || run.session?.id !== vehRun.s.id) return;
+  const parts = run.revealed && plume.sim ? plume.sim.drawable().filter(q => (q.str ?? 0) > 0.06) : [];
+  const inNow = parts.some(q => Math.abs(q.lat - pt.lat) < 3e-5 && dist(pt, q) < 2.5);
+  if (inNow && vehRun.last?.in) vehRun.inMs += pt.t - vehRun.last.t;
+  vehRun.last = { t: pt.t, in: inNow };
+  $('runHudText').textContent = hudText();
+}
+function vehRunHud() {
+  const base = gpsHudText();
+  if (!vehRun || !run.revealed || run.session?.id !== vehRun.s.id) return base;
+  const p = rec.pts[rec.pts.length - 1], v = vehRun.s.data.vehicle;
+  if (!p || !v) return base;
+  const d = Math.max(0, dist(p, v) - vehicleById(v.type).L / 2);
+  /* The pill sits between the wind card and the compass and breaks at any
+     space, so it is held to two halves. */
+  const nb = (x) => x.replace(/ /g, '\u00A0');
+  return `${nb(`${fmtM(d)} away ·`)} ${nb(`${fmtDur(vehRun.inMs)} in scent`)}`;
+}
+let vehScent = { id: null, n: -1, r: null };
+function paintVehReplay(s, at) {
+  const v = s?.data?.vehicle, el = $('repVehicle');
+  if (!v || replay.mark?.hidden) { el.hidden = true; setSrc('vehScentTrack', EMPTY); return; }
+  const track = dogTrackOf(s.data) || s.data.track || [];
+  if (vehScent.id !== s.id || vehScent.n !== track.length) {
+    vehScent = { id: s.id, n: track.length, r: scentAlong(track, s.data.hides || [], (t) => windAt(s, t).wx, { T: plume.T || FLAT }) };
+  }
+  const r = vehScent.r, lines = [];
+  let cur = null, ms = 0;
+  for (let k = 0; k < track.length && track[k].t <= at; k++) {
+    if (!r.inScent[k]) { cur = null; continue; }
+    if (!cur) { cur = k > 0 ? [[track[k - 1].lon, track[k - 1].lat]] : []; lines.push(cur); }
+    cur.push([track[k].lon, track[k].lat]);
+    if (k > 0 && r.inScent[k - 1]) ms += track[k].t - track[k - 1].t;
+  }
+  setSrc('vehScentTrack', { type: 'Feature', properties: {}, geometry: { type: 'MultiLineString', coordinates: lines.filter(l => l.length > 1) } });
+  const t0 = track[0]?.t ?? replay.from, ind = indicationOn(marksOf(s), v);
+  const bits = [r.first < 0 ? 'Never in the modelled scent'
+    : track[r.first].t <= at ? `First in scent ${fmtM(r.firstDist)} out, at ${fmtDur(r.firstT)}` : 'Not in scent yet'];
+  if (ms) bits.push(`working scent ${fmtDur(ms)}`);
+  if (ind && (ind.t == null || ind.t <= at)) {
+    bits.push(ind.at ? `Indication at the vehicle${ind.t != null ? `, ${fmtDur(ind.t - t0)}` : ''}` : `Indication ${fmtM(ind.d)} from the odour`);
+  }
+  el.textContent = bits.join(' · ');
+  el.hidden = false;
+}
+
 /* A hide dropped here is where a fix put it, not a finger, and says so: a
    first call plainly far from it is scored wrong (call.js, firstCallWasFind),
    with the fix's own uncertainty allowed for. */
@@ -3867,6 +3947,7 @@ function drawReplayGround(s, { keep = false } = {}) {
     const w0 = windAt(s, replay.at).wx;
     if (w0 && s.data.hides?.length) plumeStart(null, w0, plume.T, null,
       { at: replay.at, since: replay.from, hides: s.data.hides });
+    if (s.data.vehicle) drawVehicleScene(s.data);
   } else if (noLineYet(s.data) || !(s.data.trail?.length > 1)) {
     /* A blind trail with no line yet: the dog alone, and the find. So is a
        run whose trail the video is holding back until the end. */
@@ -4073,7 +4154,7 @@ function paintReplay() {
   const off = here && s.data.trail?.length > 1
     ? signedOffsets(s.data.trail, [here]).filter(Number.isFinite)[0] : null;
   $('repHudText').textContent = fmtDur(at - replay.from);
-  const laid = targetById(s.targetId).kind === 'hide' ? 'Hides' : 'Trail';
+  const laid = s.data.vehicle ? 'Odour' : targetById(s.targetId).kind === 'hide' ? 'Hides' : 'Trail';
   /* A drawn line's clock is made up, so the replay does not age it either. */
   /* The wind the scent is drawn in, when it was felt rather than forecast. */
   const felt = windWords(s, { imperial: imp(), short: true });
@@ -4085,6 +4166,7 @@ function paintReplay() {
   /* Marking before the answer is seen: nothing about the trail to say yet. */
   if (replay.mark?.hidden) $('repCaption').textContent = `Pause where it happened, then tap what the dog did${felt ? ` · ${felt}` : ''}`;
   paintReach(s, at);
+  paintVehReplay(s, at);
   const f = replay.to > replay.from ? (at - replay.from) / (replay.to - replay.from) : 1;
   const sc = $('repScrub');
   if (document.activeElement !== sc) sc.value = String(Math.round(f * 1000));
@@ -5056,7 +5138,7 @@ function onFix(pos) {
   if (rec.kind === 'lay') setTrail(rec.pts);
   if (rec.kind === 'run') setDogTrack(rec.pts);
   paintNav();
-  if (rec.kind === 'run') coachOnFix(pt);
+  if (rec.kind === 'run') { coachOnFix(pt); vehRunFix(pt); }
   if (rec.kind === 'lay') {
     if (rec.pts.length === 1) {
       /* The plume needs real weather, and the first fix is the first moment
@@ -7145,6 +7227,8 @@ async function startRun(s) {
   /* A plume left drawing by a screen that was swiped away rather than closed
      would paint the answer onto a blind run. */
   plumeStop();
+  vehRun = null;
+  if (hudText === vehRunHud) hudText = gpsHudText;
   const t = targetById(s.targetId);
   /* A blind trail's session holds its one run, and has no line to run
      again: a second dog on the same trail starts a blind trail of its own. */
@@ -7242,6 +7326,7 @@ async function startRun(s) {
      the coach needs it. */
   if (!(await startWatch('runHudText'))) { coachStop(); dropRunCopy(); return go('scrHome'); }
   startFollowing(null);
+  if (s.data.vehicle) startVehicleRun(s);
   /* Wind, even on a blind run: it says nothing about where the trail is, and
      it is the first thing you want before deciding where to cast. The wind
      as the dog set off, which is the one the coach reasons with, not the
@@ -7252,7 +7337,8 @@ async function startRun(s) {
   toast(isNative() && coach.on
     ? (speaksInTheDark() ? 'Coach on. Its voice carries on with the phone locked' : 'Coach on. Its calls only play while the screen is on')
     : blindTrail ? 'Blind trail. Tap Found at the find'
-      : t.kind === 'person' ? 'Running blind — the trail is hidden' : 'Searching');
+      : t.kind === 'person' ? 'Running blind — the trail is hidden'
+      : s.data.vehicle ? (s.data.showScent ? 'Searching the vehicle. Scent shown' : 'Searching the vehicle') : 'Searching');
 }
 
 function toggleReveal() {

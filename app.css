@@ -2944,6 +2944,7 @@ html.hv-lift .style-pick { bottom: calc(var(--hv-gap, 0px) + 132px); }
 .veh-toggle input { width: 22px; height: 22px; accent-color: var(--moss); }
 .veh-nav { display: grid; grid-template-columns: 1fr 2fr; gap: 8px; }
 .veh-nav .btn { min-height: 46px; }
+.veh-sum { color: #33EBDB; font-weight: 600; }
 .veh-nav #vehNext:only-child, .veh-nav #vehBack[hidden] + #vehNext { grid-column: 1 / -1; }
 
 /* ═══════════════════════════════════════════════════════════════════════
