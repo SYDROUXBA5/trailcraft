@@ -435,8 +435,6 @@ t('store: removing a dog deletes the squad licence kept for it on this phone, an
   db.deleteHandler('h');
   assert.equal(db.kv.get(licenceKeyOf('rex')), null);
   assert.equal(licenceKeyOf('rex'), 'squadLicence.rex');
-  assert.match(readFileSync(new URL('../public/squad-ui.js', import.meta.url), 'utf8'), /const licenceKey = \(dogId\) => `squadLicence\.\$\{dogId\}`;/,
-    'the squad screen keeps it under the same key');
 });
 
 t('store: every change is announced, and a deletion leaves a tombstone', () => {

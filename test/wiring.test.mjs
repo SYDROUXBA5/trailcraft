@@ -252,7 +252,7 @@ t('seeing the answer once counts for the rest of the run', () => {
     'and the call is judged when it is answered, not when it was asked');
   /* The same three conditions, in call.js asksHowSure (whose truth table
      test/handler.test.mjs checks), plus "not during an incident". */
-  assert.match(js, /if \(asksHowSure\(\{ firstInd: isFirstInd, revealed: !!run\.revealedAt, coach: coach\.on, incident: incidentRunOn\(\) \}\)\) openCall\(wp\);/,
+  assert.match(js, /if \(asksHowSure\(\{ firstInd: isFirstInd, revealed: !!run\.revealedAt, coach: coach\.on, incident: false \}\)\) openCall\(wp\);/,
     'and they are not asked once they have looked, or while the coach is talking');
   assert.ok(/revealedAt: run\.revealedAt \|\| s\.data\.revealedAt \|\| null/.test(js),
     'the run is saved with when the answer was shown');
