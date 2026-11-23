@@ -26,7 +26,7 @@ import { CONTAM_COLOURS, colourIndex, contamColour, nextColour, contamStatus, co
 import { decodeTile, tileOf, tileBox } from './mvt.js';
 import { VEHICLES, vehicleById, modelOf as vehicleModel, cardOf, spotsOf, spotById, describeSpot, spotWorld, footprint, driverSide, roadsOf, parksOf,
          snapToVerge, parkAt, vergeLines, parkAreas, scentAlong, indicationOn,
-         DISTRACTORS, vehicleAt, odourHides, gradeVehicles } from './vehicles.js';
+         DISTRACTORS, vehicleAt, odourHides, gradeVehicles, COLOURS, colourById, vehicleName } from './vehicles.js';
 import { wallIndex, bandInWalls } from './walls.js';
 import { GROUND_LAYERS, buildGround, surfaceAt, surfaceAlong, surfaceRows, withSurface,
          tilesCovering, isHard, GROUND_V, GROUND_RULES, readingSig, readingFits, readingVersion,
@@ -892,7 +892,9 @@ function addOverlays() {
   add({ id: 'veh-body', type: 'fill', source: 'vehBody', paint: { 'fill-color': '#F2F4F7', 'fill-outline-color': '#0B1630' } });
   if (typeof map.addModel === 'function') {
     add({ id: 'veh-model', type: 'model', source: 'vehicle',
-          paint: { 'model-scale': [1, 1, 1], 'model-type': 'common-3d', 'model-cast-shadows': true, 'model-receive-shadows': true } });
+          paint: { 'model-scale': [1, 1, 1], 'model-type': 'common-3d', 'model-cast-shadows': true, 'model-receive-shadows': true,
+                   /* A colour given to a vehicle is laid on in full; none, and it keeps the model's own. */
+                   'model-color': ['to-color', ['get', 'c']], 'model-color-mix-intensity': ['get', 'ci'] } });
   }
   /* Several vehicles: each one's number over it (held the same on screen however the map is tilted), and the odours on them, the target in ice, distractors in amber. */
   add({ id: 'veh-num-bg', type: 'circle', source: 'vehNums',
@@ -2280,7 +2282,8 @@ function paintVehicle(v = rec.vehicle) {
 function drawVehicles(list) {
   list = (list || []).filter(Boolean).map((v, i) => ({ ...v, n: v.n ?? i + 1 }));
   const pts = { type: 'FeatureCollection', features: list.map(v => ({ type: 'Feature',
-    properties: { n: v.n, m: `veh-${vehicleById(v.type).id}` }, geometry: { type: 'Point', coordinates: [v.lon, v.lat] } })) };
+    properties: { n: v.n, m: `veh-${vehicleById(v.type).id}`, c: colourById(v.colour)?.hex ?? '#FFFFFF', ci: colourById(v.colour) ? 1 : 0 },
+    geometry: { type: 'Point', coordinates: [v.lon, v.lat] } })) };
   setSrc('vehNums', list.length > 1 ? pts : EMPTY);
   if (map?.getLayer('veh-model') && list.length) {
     for (const v of list) {
@@ -2321,7 +2324,7 @@ function paintVehOdour() {
   if (!v) return;
   const many = manyVehicles(), spec = vehicleById(v.type), across = spec.L * 1.08, down = across * PICK_DOWN;
   $('vehWhich').hidden = !many;
-  if (many) $('vehWhich').innerHTML = rec.vehicles.map(x => `<button class="btn small" data-veh-n="${x.n}" aria-pressed="${x === v}">${x.n} · ${esc(vehicleById(x.type).label)}`
+  if (many) $('vehWhich').innerHTML = rec.vehicles.map(x => `<button class="btn small" data-veh-n="${x.n}" aria-pressed="${x === v}">${x.n} · ${esc(vehicleName(x))}`
     + (x.odours || []).map(o => `<i class="veh-dot ${o.kind === 'distractor' ? 'd' : 't'}"></i>`).join('') + '</button>').join('');
   for (const b of $('vehKind').children) b.setAttribute('aria-pressed', String(b.dataset.vehKind === veh.kind));
   $('vehDistract').hidden = veh.kind !== 'distractor';
@@ -2329,6 +2332,10 @@ function paintVehOdour() {
     `<button class="btn small" data-veh-distract="${esc(n)}" aria-pressed="${n === veh.distract}">${esc(n === 'Other' ? '+ Other' : n)}</button>`).join('');
   $('vehDistractOther').hidden = veh.kind !== 'distractor' || veh.distract !== 'Other';
   $('vehPickImg').src = `img/vehicles/${spec.id}-top.webp`;
+  /* The picture in the vehicle's colour: the colour multiplied into the paint, inside the picture's own outline. */
+  const paint = colourById(v.colour), tint = $('vehPickTint');
+  tint.hidden = !paint;
+  if (paint) { tint.style.background = paint.hex; tint.style.webkitMaskImage = tint.style.maskImage = `url(${$('vehPickImg').src})`; }
   const cur = curOdour(v);
   $('vehPickSpots').innerHTML = (v.odours || []).map(o => {
     const s = spotOf({ ...v, ...o });
@@ -2546,10 +2553,13 @@ function paintVehTools() {
     $('vehRotate').hidden = !v || veh.adding;
     if (v) $('vehFacing').textContent = `Facing ${cardinal(v.heading)}`;
     $('vehFleet').hidden = !v;
-    $('vehFleetSay').innerHTML = v ? (veh.adding ? `<b>Vehicle ${rec.vehicles.length + 1}</b>` : `<b>Vehicle ${v.n} · ${esc(vehicleById(v.type).label)}</b>`) : '';
+    $('vehFleetSay').innerHTML = v ? (veh.adding ? `<b>Vehicle ${rec.vehicles.length + 1}</b>` : `<b>Vehicle ${v.n} · ${esc(vehicleName(v))}</b>`) : '';
     $('btnVehAdd').setAttribute('aria-pressed', String(veh.adding));
     $('btnVehAdd').textContent = veh.adding ? 'Cancel' : '+ Add vehicle';
     $('btnVehRemove').hidden = !manyVehicles() || veh.adding;
+    $('vehColours').hidden = !v || veh.adding;
+    if (v) $('vehColours').innerHTML = COLOURS.map(c => `<button class="veh-swatch" data-veh-colour="${c.id}" style="background:${c.hex}"`
+      + ` aria-label="${esc(c.label)}" aria-pressed="${v.colour === c.id}"></button>`).join('');
   } else if (st === 'odour') paintVehOdour();
   else if (st === 'time') paintVehTime();
   else paintVehStart();
@@ -2562,7 +2572,7 @@ function paintVehTools() {
   const many = manyVehicles(), nT = rec.hides.length, nD = rec.distractors?.length || 0;
   $('layHudText').textContent = st === 'place'
     ? (veh.adding ? `Place vehicle ${rec.vehicles.length + 1}`
-      : v ? (many ? `${rec.vehicles.length} vehicles` : `${vehicleById(v.type).label} ${where[v.place]}`)
+      : v ? (many ? `${rec.vehicles.length} vehicles` : `${vehicleName(v)} ${where[v.place]}`)
       : veh.place === 'verge' ? 'Tap beside a road' : veh.place === 'park' ? 'Tap inside a car park' : 'Tap where the vehicle is')
     : st === 'odour' && many ? `Vehicle ${v.n}`
     : { odour: 'Odour spot', time: 'Set-up time', start: 'Start point' }[st];
@@ -2665,7 +2675,7 @@ function paintVehReplay(s, at) {
     const head = [g.right ? 'Right car \u2713' : rows.some(r => r.target && r.status === 'missed') ? 'Target not found yet' : '',
       g.falses ? `${g.falses} false indication${g.falses === 1 ? '' : 's'}` : 'No false indications'].filter(Boolean).join(' · ');
     el.innerHTML = `<b class="veh-grade-head">${esc(head)}</b><span class="veh-grade-sub">${esc(bits.join(' · '))}</span>`
-      + rows.map(r => `<span class="veh-grade ${r.status}"><i>${r.n}</i><span>${esc(vehicleById(r.type).label)} · ${esc(r.target ? `${r.odours.filter(o => o.kind !== 'distractor').map(odourWord).join(', ')} (target)` : r.distractors.join(', ') || 'nothing')}</span>`
+      + rows.map(r => `<span class="veh-grade ${r.status}"><i>${r.n}</i><span>${esc(vehicleName(r))} · ${esc(r.target ? `${r.odours.filter(o => o.kind !== 'distractor').map(odourWord).join(', ')} (target)` : r.distractors.join(', ') || 'nothing')}</span>`
         + `<em>${esc(r.status === 'looked' ? `Looked ${Math.round(r.lookMs / 1000)} s` : TAG[r.status])}</em></span>`).join('');
     el.hidden = false;
     return;
@@ -11587,6 +11597,13 @@ function wire() {
     else paintVehTools();
   });
   $('btnVehAdd').addEventListener('click', () => { veh.adding = !veh.adding; paintVehicle(); paintVehTools(); });
+  $('vehColours').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-veh-colour]'), v = rec.vehicle;
+    if (!b || !v) return;
+    v.colour = v.colour === b.dataset.vehColour ? null : b.dataset.vehColour;      // the same again: back to the model's own
+    navigator.vibrate?.(10);
+    paintVehicle(); paintVehTools();
+  });
   $('btnVehRemove').addEventListener('click', removeVehicle);
   $('vehWhich').addEventListener('click', (e) => {
     const b = e.target.closest('[data-veh-n]'), v = b && rec.vehicles.find(x => x.n === Number(b.dataset.vehN));

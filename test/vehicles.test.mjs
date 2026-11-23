@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { VEHICLES, vehicleById, spotsOf, spotWorld, footprint, keepsLeft, driverSide, roadsOf, parksOf,
   snapToVerge, parkAt, vergeLines, parkAreas, toLocal, fromLocal, VERGE_GAP, SNAP_MAX, modelOf, cardOf, scentAlong, indicationOn, describeSpot,
-  DISTRACTORS, fromBody, vehicleAt, odourHides, gradeVehicles } from '../public/vehicles.js';
+  DISTRACTORS, fromBody, vehicleAt, odourHides, gradeVehicles, COLOURS, colourById, vehicleName } from '../public/vehicles.js';
 import { ScentSim, poolRadius, hidePoolRadius, HIDE_POOL } from '../public/sim.js';
 
 let pass = 0;
@@ -216,6 +216,17 @@ t('an Indication at a distractor is a false one; far from every vehicle it is aw
     { kind: 'Indication', ...fromLocal(TX, [40, 40]), t: 6 }, { kind: 'Mark', ...fromLocal(TX, [6, 0]), t: 7 }], row);
   assert.equal(g.rows.find(r => r.n === 3).status, 'false');
   assert.equal(g.falses, 1); assert.equal(g.away, 1); assert.equal(g.right, false); assert.equal(g.passed, 1);
+});
+
+t('a vehicle can be given a colour, and is then called by it', () => {
+  assert.equal(COLOURS.length, 8); assert.ok(COLOURS.every(c => /^#[0-9A-F]{6}$/.test(c.hex)), 'every paint a hex colour');
+  assert.equal(colourById('red').label, 'Red'); assert.equal(colourById('mauve'), null); assert.equal(colourById(undefined), null);
+  assert.equal(vehicleName({ type: 'pickup', colour: 'red' }), 'Red pickup');
+  assert.equal(vehicleName({ type: 'box', colour: 'white' }), 'White box truck');
+  assert.equal(vehicleName({ type: 'van' }), 'Van', 'no colour given: the kind alone');
+  assert.equal(vehicleName({ type: 'suv', colour: 'blue' }), 'Blue SUV', 'an SUV stays an SUV');
+  const g = gradeVehicles([], [], [{ ...row[1], colour: 'blue' }]);
+  assert.equal(g.rows[0].colour, 'blue', 'the replay rows know the colour');
 });
 
 console.log(`\n${pass} vehicle tests passed`);

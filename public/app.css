@@ -2978,6 +2978,13 @@ html.hv-lift .style-pick { bottom: calc(var(--hv-gap, 0px) + 132px); }
 .veh-dot.d { background: #FFA630; }
 .veh-mark.d { background: #FFA630; border-color: #3A2000; box-shadow: 0 0 12px rgba(255, 166, 48, 0.9); }
 .veh-mark.other { width: 12px; height: 12px; margin: -6px 0 0 -6px; border-width: 2px; opacity: 0.75; }
+/* A vehicle's colour: eight paints in a row, the chosen one ringed in ice. */
+.veh-colours { display: grid; grid-template-columns: repeat(8, minmax(0, 44px)); justify-content: space-between; gap: 4px; }
+.veh-swatch { aspect-ratio: 1; width: 100%; min-height: 36px; padding: 0; border-radius: 50%; cursor: pointer;
+  border: 1.5px solid rgba(255, 255, 255, 0.45); }
+.veh-swatch[aria-pressed="true"] { border: 3px solid #00E5FF; box-shadow: 0 0 10px #00E5FF; }
+.veh-pick-tint { position: absolute; inset: 0; pointer-events: none; mix-blend-mode: multiply;
+  -webkit-mask-size: 100% 100%; mask-size: 100% 100%; }
 .veh-odours { display: flex; flex-direction: column; gap: 4px; }
 .veh-odours:empty { display: none; }
 .veh-odour { display: grid; grid-template-columns: auto auto minmax(0, 1fr) 44px; gap: 8px; align-items: center; padding-left: 10px;
