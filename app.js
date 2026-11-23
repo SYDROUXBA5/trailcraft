@@ -52,6 +52,7 @@ import { CLIP, CLIP_SAYS, clipSupport, canHoldScreen, clipOffered, answerPlan, w
 import { isNative, watchBackground, canHaptic, haptic, watchHeading, shareFile, shareBlob, keepAwake,
          canSpeakNative, nativeVoices, speakNative, stopNativeSpeech, watchNativeVoices } from './native.js';
 import { readBackup, restoreChanges, restoreQuestion, restoreNothing, BACKUP_MAX_BYTES } from './backup.js';
+import { initSetupDial } from './setup-dial.js';
 import { firebaseConfig } from './firebase-config.js';
 import { checkAuthFields, AUTH_MIN_PASSWORD, profilePhoto } from './sync-core.js';
 import { createStore, migrateV1, TARGETS, ODOURS, CARRIES, odourSetOf, targetById, targetText, verbs, uid,
@@ -12740,6 +12741,7 @@ function restampCalls() {
 function boot() {
   applyTheme();          // the head script already painted it; this keeps it in step
   applyMotion();
+  initSetupDial();       // the set-up rows open as a dial (setup-dial.js); once, however often boot runs
   try { restampCalls(); } catch { /* a full phone: the calls are still on it */ }
   snap();
   if (openFromHash()) return;   // a trail someone sent: that first, the app's own business after

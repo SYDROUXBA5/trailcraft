@@ -16,6 +16,8 @@ const SHELL = [
   'sync-core.js', 'dogtrack.js', 'sync.js', 'firebase-config.js', 'share.js', 'pdf.js', 'coach.js', 'native.js', 'backup.js',
   'levels.js', 'teams.js', 'pixel-team.js', 'board.js',
   'sheet.js',
+  /* The set-up dial; its holograms load only when it opens (three.js is a pinned vendor file). */
+  'setup-dial.js', 'holo.js',
   /* The pixel art, a module to a subject behind pixel-team.js. Each is its own request, so each is listed. */
   'pixel/core.js', 'pixel/ramps.js', 'pixel/lands.js', 'pixel/paint.js', 'pixel/terrain.js', 'pixel/dog.js', 'pixel/human.js', 'pixel/props.js', 'pixel/rope.js', 'pixel/states.js', 'pixel/moments.js', 'pixel/stones.js',
   'pixel/layout.js', 'pixel/scenery.js', 'pixel/tracks.js', 'pixel/landmarks.js', 'pixel/scene.js', 'pixel/ground.js', 'pixel/board-art.js', 'pixel/close.js', 'pixel/fx.js', 'pixel/ambient.js',
@@ -110,7 +112,10 @@ const pinned = (url) =>
     /* The vehicle models: large, so fetched the first time a vehicle search
        is set up rather than at install, then kept like the vendored files.
        A changed model needs a new file name. */
-    || /\/models\/[a-z]+\.glb$/.test(url.pathname));
+    || /\/models\/[a-z]+\.glb$/.test(url.pathname)
+    /* The set-up dial's meshes and molecules: kept the first time the dial opens.
+       A changed one needs a new number in its name (person-1 → person-2). */
+    || /\/holo\/[a-z]+-\d+\.json$/.test(url.pathname));
 
 const cacheable = (url) => pinned(url) || (
   /* Mapbox's count of the map being opened is a question, not a file. Kept in
