@@ -59,6 +59,7 @@ const QUAD_FS = `#version 300 es
 precision highp float;
 uniform sampler2D uT;
 uniform float uK, uGain;
+uniform vec3 uTail, uEmber, uAmber, uHot, uLoft;   // the colours, thin to thick (the trail's own, or a contamination person's)
 in vec2 vUv; out vec4 o;
 void main(){
   vec3 s = texture(uT, vUv).rgb; float d = s.r;
@@ -66,11 +67,11 @@ void main(){
   float fresh = clamp(s.g / d, 0.0, 1.0), loft = clamp(s.b / d, 0.0, 1.0);
   float L = 1.0 - exp(-pow(d * uK, 0.62));                 // how much of the view the scent fills, with the thin edge kept visible
   float t = clamp(0.35 * fresh + 0.45 * L + 0.2 * L * L, 0.0, 1.0);
-  vec3 tail = vec3(0.30, 0.09, 0.40), ember = vec3(0.92, 0.19, 0.07), amber = vec3(1.0, 0.50, 0.12), hot = vec3(1.0, 0.86, 0.62);
+  vec3 tail = uTail, ember = uEmber, amber = uAmber, hot = uHot;
   vec3 col = mix(tail, ember, smoothstep(0.02, 0.26, t));
   col = mix(col, amber, smoothstep(0.24, 0.56, t));
   col = mix(col, hot, smoothstep(0.66, 1.0, t));
-  col = mix(col, vec3(1.0, 0.80, 0.52), loft * 0.45);        // lifted into the light
+  col = mix(col, uLoft, loft * 0.45);                       // lifted into the light
   vec3 glow = pow(col * (L * 0.98 + pow(L, 12.0) * 0.35), vec3(0.72)) * uGain;
   o = vec4(glow, 0.42 * L);                                  // the map under thick scent is dimmed a little, as in the engine
 }`;
@@ -170,7 +171,17 @@ export function parcelHeight(d, r, st) {
   return base + 0.10 * Math.pow(d, 0.8) * r;                                                                                   // neutral: it spreads upward slowly
 }
 
-export function makeScentGlow(map) {
+/* The trail's colours: thin scent a dim violet-red, thick scent amber, the core pale and hot. */
+const TRAIL_PALETTE = { tail: [0.30, 0.09, 0.40], ember: [0.92, 0.19, 0.07], amber: [1.0, 0.50, 0.12], hot: [1.0, 0.86, 0.62], loft: [1.0, 0.80, 0.52] };
+const rgbOf = (hex) => { const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex || '') || [0, 'ff', 'ff', 'ff']; return [1, 2, 3].map(i => parseInt(m[i], 16) / 255); };
+/** A contamination person's colours (contam.js CONTAM_COLOURS) laid out the same way: their dark for thin scent,
+    their colour in the body, their light for the core. So their scent glows like the trail's, but is theirs. */
+export const paletteFrom = (c) => { const d = rgbOf(c.dark), h = rgbOf(c.hex), l = rgbOf(c.light);
+  return { tail: d.map(v => v * 0.6), ember: d, amber: h, hot: l.map((v, i) => v * 0.75 + h[i] * 0.25), loft: l }; };   // the core stays their colour, not white
+
+/* opts.id: the layer's id (one per palette); opts.palette: its colours (the trail's by default). */
+export function makeScentGlow(map, opts = {}) {
+  const PAL = opts.palette || TRAIL_PALETTE, MAIN = !opts.id;
   let gl = null, ok = true, sprite = null, quad = null, vao = null, buf = null, qvao = null, qbuf = null, fbo = null, tex = null, fw = 0, fh = 0, wide = true, cap = 64;
   let count = 0, data = new Float32Array(0), origin = null, shown = true, hideWind = false, hidePlume = false, dirty = false;
   let wind = null, wvao = null, wbuf = null, wn = 0, wdata = new Float32Array(0), wdirty = false, wcol = [0.86, 0.91, 1.0], wz = 0;
@@ -251,7 +262,7 @@ export function makeScentGlow(map) {
     return M;
   }
   const layer = {
-    id: 'scent-engine-glow', type: 'custom', renderingMode: '3d',
+    id: opts.id || 'scent-engine-glow', type: 'custom', renderingMode: '3d',
     onAdd(_map, context) {
       gl = context; fbo = null; tex = null; fw = fh = 0; rfbo = null; rtex = null; rw = rh = 0; rn = 0; rdirty = true;
       try {
@@ -359,6 +370,7 @@ export function makeScentGlow(map) {
       gl.uniform1i(gl.getUniformLocation(quad, 'uT'), 0);
       gl.uniform1f(gl.getUniformLocation(quad, 'uK'), wide ? 0.9 : 7.2);
       gl.uniform1f(gl.getUniformLocation(quad, 'uGain'), 1.0);
+      for (const k of ['tail', 'ember', 'amber', 'hot', 'loft']) gl.uniform3fv(gl.getUniformLocation(quad, 'u' + k[0].toUpperCase() + k.slice(1)), PAL[k]);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
       gl.bindVertexArray(null);
     },
@@ -385,7 +397,7 @@ export function makeScentGlow(map) {
     count = n; dirty = true; map.triggerRepaint();
   }
   /* for checking from the console on a development machine only */
-  if (typeof location !== 'undefined' && /^(localhost|127\.0\.0\.1)$/.test(location.hostname)) globalThis.__scentGlow = { map, peek: () => ({ count, origin, reach: [rn, rshow, rpieces ? rpieces.length : 0], sample: Array.from(data.subarray(0, 14)), ground: ground.size, ex: groundEx, wide, cap, terrain: map.getTerrain && map.getTerrain(), q: origin && map.queryTerrainElevation && map.queryTerrainElevation({ lng: origin.lon, lat: origin.lat }), pitch: map.getPitch(), zoom: map.getZoom(), proj: map.getProjection && map.getProjection().name }) };
+  if (MAIN && typeof location !== 'undefined' && /^(localhost|127\.0\.0\.1)$/.test(location.hostname)) globalThis.__scentGlow = { map, peek: () => ({ count, origin, reach: [rn, rshow, rpieces ? rpieces.length : 0], sample: Array.from(data.subarray(0, 14)), ground: ground.size, ex: groundEx, wide, cap, terrain: map.getTerrain && map.getTerrain(), q: origin && map.queryTerrainElevation && map.queryTerrainElevation({ lng: origin.lon, lat: origin.lat }), pitch: map.getPitch(), zoom: map.getZoom(), proj: map.getProjection && map.getProjection().name }) };
   /* The wind strokes. streaks: each has where it is now (lat, lon), the points it has been through (tail: [lon, lat] pairs,
      oldest first) and a strength a (0..1). */
   function setWind(streaks) {
