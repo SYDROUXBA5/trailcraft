@@ -66,7 +66,7 @@ import { MOTIONS, motionChoice, motionOn, COAT_IDS, teamLook, makeTeam, putTeam,
          shownLevel, withShown, momentFor, takenBack, beforeMoment, resultLine, levelsSaid, debriefWouldFix } from './teams.js';
 import { createTeam, COATS, JACKETS, HATS, MOMENTS, drawAmbient, landOfLevel } from './pixel-team.js';
 import { mountBoard } from './board.js';
-import { makeScentGlow } from './glow.js';
+import { makeScentGlow, paletteFrom } from './glow.js';
 import { REACH, reachOf, reachTimes, reachCount, strideAlong } from './reach.js';
 import { searchWords, logRows, recentRuns, runAt, midnight, facets, filterRows, groupRows, foldersOf, inFolder, folderList, folderNamed,
          cleanFolderName, putMany, toggleFolder, renameIn, dropFrom, mergeFolders, emptyHeld, folderPatch } from './log.js';
@@ -1257,11 +1257,24 @@ const pointsOf = (pts, kindKey) => ({
 /* ── How the plume is drawn: as light with height (the scent engine's look), or as the specks it began as ── */
 let scentGlow = null;
 const glowOn = () => settings.plumeLook !== 'specks' && !!scentGlow && scentGlow.ok;
+/* Each contamination person's scent glows the same way, in their own colours: one layer per colour, made the first time it
+   is needed, and put back if the map's style was changed under it. */
+const contamGlows = new Map();
+function contamGlow(ci) {
+  let g = contamGlows.get(ci);
+  if (!g) { g = makeScentGlow(map, { id: `contam-glow-${ci}`, palette: paletteFrom(CONTAM_COLOURS[ci % CONTAM_COLOURS.length]) }); contamGlows.set(ci, g); }
+  if (map && !map.getLayer(g.layer.id)) {                       // just above the trail's glow, under what is drawn over it
+    const L = map.getStyle()?.layers || [], i = L.findIndex(l => l.id === 'scent-engine-glow');
+    map.addLayer(g.layer, i >= 0 && L[i + 1] ? L[i + 1].id : undefined);
+  }
+  return g;
+}
+const eachContamGlow = (f) => { for (const g of contamGlows.values()) f(g); };
 function applyPlumeLook() {
   if (!map || !scentGlow) return;
   const g = glowOn();
-  for (const id of ['scent-glow', 'scent-dots']) if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', g ? 'none' : 'visible');
-  scentGlow.setShown(g);
+  for (const id of ['scent-glow', 'scent-dots', 'contam-glow', 'contam-dots']) if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', g ? 'none' : 'visible');
+  scentGlow.setShown(g); eachContamGlow(x => x.setShown(g));
 }
 function setSrc(id, data) {
   srcData[id] = data;
@@ -2871,7 +2884,7 @@ function plumeStop() {
   plume.sim = null; plume.trail = null; plume.contam = null;
   plume.walls = null; plume.bandWalls = 0; plume.lastField = null;
   setSrc('bandWall', EMPTY);
-  setSrc('scent', EMPTY); scentGlow?.clear(); plume.specks = true;
+  setSrc('scent', EMPTY); scentGlow?.clear(); eachContamGlow(x => x.clear()); plume.specks = true;
   setSrc('contamScent', EMPTY);
   setSrc('flow', EMPTY);
   setSrc('flowPulse', EMPTY);
@@ -4156,7 +4169,7 @@ function paintRepDock() {
   $('repLayPlume').setAttribute('aria-pressed', String(repUi.plume));
 }
 function applyRepLayers() {
-  scentGlow?.setHidden?.({ wind: !repUi.wind, plume: !repUi.plume });
+  scentGlow?.setHidden?.({ wind: !repUi.wind, plume: !repUi.plume }); eachContamGlow(x => x.setHidden({ plume: !repUi.plume }));
   if (map && !glowOn()) {
     for (const id of ['scent-glow', 'scent-dots']) if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', repUi.plume ? 'visible' : 'none');
   }
@@ -5092,7 +5105,11 @@ function plumeFrame() {
   if (plume.contam) {
     plume.contam.prune(now, plume.wx, plume.st, { max: 5000, since: plume.since });
     plume.contam.advance(plume.T, plume.wx, plume.st, now);
-    setSrc('contamScent', contamParcels(plume.contam));
+    if (glowOn()) {                                    // as light, like the trail, each person in their colours
+      for (const x of plume.contam.sims) contamGlow(x.ci).update(x.sim.drawable(), plume.st, parcelWeight);
+      const here = new Set(plume.contam.sims.map(x => x.ci)); for (const [ci, g] of contamGlows) if (!here.has(ci)) g.clear();   // someone taken off the list
+      if (plume.contamSpecks !== false) { setSrc('contamScent', EMPTY); plume.contamSpecks = false; }
+    } else { setSrc('contamScent', contamParcels(plume.contam)); plume.contamSpecks = true; eachContamGlow(x => x.clear()); }
   }
   paintFlow();
   plumeTerrain();
