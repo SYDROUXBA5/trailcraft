@@ -896,7 +896,7 @@ function addOverlays() {
   /* The odour itself, in its own colour, so the source can be told from its
      cloud and pinpointed on a vehicle. */
   add({ id: 'hide-source', type: 'circle', source: 'hides',
-        paint: { 'circle-radius': 4, 'circle-color': '#FF073A', 'circle-stroke-width': 1.5, 'circle-stroke-color': '#FFFFFF' } });
+        paint: { 'circle-radius': 4, 'circle-color': '#00E5FF', 'circle-stroke-width': 1.5, 'circle-stroke-color': '#002A33' } });
   add({ id: 'nose-halo', type: 'circle', source: 'nose',
         paint: { 'circle-radius': 15, 'circle-color': '#FFFFFF', 'circle-opacity': 0.22, 'circle-blur': 0.6 } });
   add({ id: 'nose-dot', type: 'circle', source: 'nose',

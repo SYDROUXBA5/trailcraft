@@ -2940,7 +2940,7 @@ html.hv-lift .style-pick { bottom: calc(var(--hv-gap, 0px) + 132px); }
 .veh-pick img { width: 100%; height: 100%; display: block; }
 .veh-pick-tap { position: absolute; inset: 0; cursor: crosshair; touch-action: manipulation; }
 .veh-mark { position: absolute; width: 18px; height: 18px; margin: -9px 0 0 -9px; border-radius: 50%; pointer-events: none;
-  background: #FF073A; border: 3px solid #FFFFFF; box-shadow: 0 0 12px rgba(255, 7, 58, 0.9); }
+  background: #00E5FF; border: 3px solid #002A33; box-shadow: 0 0 12px rgba(0, 229, 255, 0.9); }
 .veh-rotate { display: grid; grid-template-columns: 52px minmax(0, 1fr) 52px auto; gap: 6px; align-items: center; }
 .veh-rotate .btn { min-height: 46px; font-size: calc(22 * var(--px)); touch-action: none; user-select: none; -webkit-user-select: none; }
 .veh-rotate #btnVehTurn { font-size: calc(14 * var(--px)); }
@@ -2993,7 +2993,7 @@ html.hv-lift .style-pick { bottom: calc(var(--hv-gap, 0px) + 132px); }
    without each of them having to be found and changed.
    ═══════════════════════════════════════════════════════════════════════ */
 :root[data-theme="dark"] {
-  --paper: #000000;           /* Rémi's colours, 22 Nov 2026: black #000000, blue #007BFF, red #FF073A */
+  --paper: #000000;           /* Rémi's colours, 22 Nov 2026: black #000000, blue #007BFF, ice #00E5FF */
   --card: #14171C;
   --border: #2B3038;
   --ink: #F5F7FA;
@@ -3005,7 +3005,7 @@ html.hv-lift .style-pick { bottom: calc(var(--hv-gap, 0px) + 132px); }
   --aqua: #007BFF; --aqua-rgb: 0, 123, 255;   /* the lit colour: blue (the token keeps its old name) */
   --on-aqua: #FFFFFF;         /* words on a lit blue button */
   --lit: #007BFF; --lit-rgb: 0, 123, 255;
-  --alarm: #FF073A; --alarm-rgb: 255, 7, 58;   /* red: what cannot be undone, and the odour itself */
+  --alarm: #FF073A; --alarm-rgb: 255, 7, 58;   /* red: only what cannot be undone (delete) */
   --smoke: 0, 0, 0; --smoke-b: 0, 0, 0; --smoke-c: 0, 0, 0; --smoke-d: 0, 0, 0;
   --r: 26px;
   --display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Roboto", "Segoe UI", system-ui, sans-serif;
@@ -3469,38 +3469,40 @@ html.hv-lift .style-pick { bottom: calc(var(--hv-gap, 0px) + 132px); }
   :root[data-theme="dark"] #wxDial stop:first-child, :root[data-theme="dark"] #wxDial stop:last-child { stop-opacity: 0; }
 }
 
-/* ── Rémi's colours in proportion (22 Nov 2026): 60 % black, 30 % blue, 10 % red ──
+/* ── Rémi's colours in proportion (22 Nov 2026): 60 % black, 30 % blue, 10 % ice ──
    Black is the ground. Blue is what things are made of: cards, chips,
-   buttons at rest, the glass panes and their edges. Red is the one thing to
-   press, and the odour itself: the main action buttons, play, Stop and Done,
-   the odour's dot. Dark theme only; the light theme keeps its own. */
+   buttons at rest, the glass panes and their edges. Ice (#00E5FF) is the one
+   thing to press, and the odour itself, drawn as a line rather than a fill:
+   the main buttons are blue glass with an ice edge and an ice arrow, play is
+   an ice disc. Red was tried first and dropped (Rémi: "I don't like the red");
+   it stays only on delete and the compass N. Dark theme only. */
 :root[data-theme="dark"] {
   --card: #0A1E3B;
   --border: #1F4B87;
   --smoke: 3, 22, 50; --smoke-b: 3, 22, 50; --smoke-d: 2, 12, 28;
   --lg-tint: rgba(0, 70, 160, 0.30);
-  --cta: #FF073A; --cta-rgb: 255, 7, 58; --on-cta: #FFFFFF;
+  --cta: #00E5FF; --cta-rgb: 0, 229, 255; --on-cta: #001A1F;
 }
 :root[data-theme="dark"] .chip:not(.selected),
 :root[data-theme="dark"] .sum-chip:not([class*="lvl-"]),
 :root[data-theme="dark"] :where(.screen.paper, .screen.tutorial) .btn:not(.moss):not(.ember):not(.danger) {
   background-color: rgba(0, 123, 255, 0.16); border-color: rgba(0, 123, 255, 0.42);
 }
-:root[data-theme="dark"] .btn.moss, :root[data-theme="dark"] .btn.ember {
-  background: var(--cta); color: var(--on-cta); border-color: rgba(255, 255, 255, 0.5); text-shadow: none;
+:root[data-theme="dark"] .btn.moss, :root[data-theme="dark"] .btn.ember,
+:root[data-theme="dark"] .screen.paper .btn.moss.big, :root[data-theme="dark"] .screen.paper .btn.ember.big {
+  background: rgba(0, 123, 255, 0.18); color: #FFFFFF; text-shadow: none;
+  border: 2px solid var(--cta);
 }
-:root[data-theme="dark"] .screen.paper .btn.moss, :root[data-theme="dark"] .screen.paper .btn.ember {
-  box-shadow: 0 0 0 1px rgba(var(--cta-rgb), 0.3), 0 12px 34px -10px rgba(var(--cta-rgb), 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.45);
+:root[data-theme="dark"] .screen.paper .btn.moss, :root[data-theme="dark"] .screen.paper .btn.ember,
+:root[data-theme="dark"] .screen.paper .btn.moss.big, :root[data-theme="dark"] .screen.paper .btn.ember.big {
+  box-shadow: 0 0 20px -8px rgba(var(--cta-rgb), 0.8), inset 0 0 14px -8px rgba(var(--cta-rgb), 0.5);
 }
-:root[data-theme="dark"] .screen.paper .btn.moss.big .go-arrow { background: #FFFFFF; color: var(--cta); box-shadow: none; }
-:root[data-theme="dark"] .rep-dock .rep-play, :root[data-theme="dark"] .veh-play { background: var(--cta); color: var(--on-cta); }
 /* The home screen's own rules are more particular, so they are matched here. */
-:root[data-theme="dark"] .screen.paper .btn.moss.big {
-  color: #FFFFFF;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0) 60%), var(--cta);
-  border-color: rgba(255, 255, 255, 0.5);
-  box-shadow: 0 0 0 1px rgba(var(--cta-rgb), 0.3), 0 0 46px -8px rgba(var(--cta-rgb), 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.35);
-}
-:root[data-theme="dark"] .screen.paper .btn.moss.big i { color: rgba(255, 255, 255, 0.85); }
+:root[data-theme="dark"] .screen.paper .btn.moss.big .go-arrow,
+:root[data-theme="dark"] .screen.paper .btn.ember.big .go-arrow { background: var(--cta); color: var(--on-cta); box-shadow: none; }
+:root[data-theme="dark"] .screen.paper .btn.moss.big i,
+:root[data-theme="dark"] .screen.paper .btn.ember.big i { color: rgba(255, 255, 255, 0.8); }
+:root[data-theme="dark"] .rep-dock .rep-play, :root[data-theme="dark"] .veh-play { background: var(--cta); color: var(--on-cta); }
+:root[data-theme="dark"] .veh-play::after { border-left-color: var(--on-cta); }
 :root[data-theme="dark"] .chip:not(.selected):not([aria-pressed="true"]):not(.ghost),
 :root[data-theme="dark"] .age-chip:not(.selected) { background-color: rgba(0, 123, 255, 0.16); border-color: rgba(0, 123, 255, 0.42); }
