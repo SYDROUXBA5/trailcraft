@@ -348,6 +348,7 @@
           <button class="btn small" data-veh-place="free" aria-pressed="false">Anywhere</button>
         </div>
         <div class="veh-types" id="vehTypes" role="group" aria-label="Which vehicle"></div>
+        <div class="veh-colours" id="vehColours" role="group" aria-label="Its colour" hidden></div>
         <div class="veh-rotate" id="vehRotate" hidden>
           <button class="btn small" id="btnVehLeft" aria-label="Turn left (hold to keep turning)">&#10226;</button>
           <span id="vehFacing" aria-live="polite"></span>
@@ -363,7 +364,7 @@
         </div>
         <div class="veh-which veh-distract" id="vehDistract" role="group" aria-label="Which distractor" hidden></div>
         <input class="veh-other" id="vehDistractOther" type="text" maxlength="30" placeholder="Name the distractor" aria-label="Name the distractor" hidden>
-        <div class="veh-pick"><img id="vehPickImg" alt="The vehicle from above, front to the right"><div id="vehPickSpots" class="veh-pick-tap" aria-label="Tap the vehicle where the odour is"></div></div>
+        <div class="veh-pick"><img id="vehPickImg" alt="The vehicle from above, front to the right"><div id="vehPickTint" class="veh-pick-tint" hidden></div><div id="vehPickSpots" class="veh-pick-tap" aria-label="Tap the vehicle where the odour is"></div></div>
         <p class="veh-say" id="vehSpotName"></p>
         <div class="veh-odours" id="vehOdourList"></div>
         <span class="label">The odour went in</span>

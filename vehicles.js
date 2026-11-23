@@ -39,6 +39,18 @@ export const VEHICLES = [
   { id: 'box',    label: 'Box truck', L: 7.90, W: 2.45, H: 3.30, front: 3.10, rear: -1.35, door: 2.70 },
 ];
 export const vehicleById = (id) => VEHICLES.find(v => v.id === id) ?? VEHICLES[0];
+/* The paint a vehicle can be given, as a dealer would name it. None given:
+   the model's own colours. On the map it is laid on in full (model-color). */
+export const COLOURS = [
+  { id: 'white', label: 'White', hex: '#F4F5F6' }, { id: 'silver', label: 'Silver', hex: '#B9BFC7' },
+  { id: 'grey', label: 'Grey', hex: '#6E737B' },   { id: 'black', label: 'Black', hex: '#1D1F23' },
+  { id: 'red', label: 'Red', hex: '#B3261E' },     { id: 'blue', label: 'Blue', hex: '#1F4FA3' },
+  { id: 'green', label: 'Green', hex: '#2F5D3A' }, { id: 'beige', label: 'Beige', hex: '#C9B48C' },
+];
+export const colourById = (id) => COLOURS.find(c => c.id === id) ?? null;
+/** A vehicle as a handler would say it: "Red pickup", or just "Pickup" with no colour given. */
+export const vehicleName = (v) => { const c = colourById(v?.colour), l = vehicleById(v?.type).label;
+  return c ? `${c.label} ${l === l.toUpperCase() ? l : l.toLowerCase()}` : l; };          // "Blue SUV", "Red pickup"
 /** The 3D model and the two pictures made for each kind (Blender, 2026-11-22). */
 export const modelOf = (id) => `models/${vehicleById(id).id}.glb`;
 export const cardOf = (id) => `img/vehicles/${vehicleById(id).id}.webp`;
@@ -325,7 +337,7 @@ export function odourHides(vehicles, t) {
 export function gradeVehicles(track, marks, vehicles, { until = Infinity, near = 2, look = 2000, margin = 4, gap = 15000 } = {}) {
   const rows = (vehicles || []).map(v => {
     const odours = v.odours || [];
-    return { v, n: v.n, type: v.type, odours, target: odours.some(o => o.kind !== 'distractor'),
+    return { v, n: v.n, type: v.type, colour: v.colour ?? null, odours, target: odours.some(o => o.kind !== 'distractor'),
       distractors: odours.filter(o => o.kind === 'distractor').map(o => o.name || 'Distractor'),
       lookMs: 0, indicated: null, falses: [] };
   });
