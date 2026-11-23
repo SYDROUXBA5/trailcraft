@@ -282,3 +282,74 @@ export function indicationOn(marks, veh, { margin = 5 } = {}) {
   const d = dist(m, veh);
   return { t: m.t ?? null, d, at: d <= vehicleById(veh.type).L / 2 + margin };
 }
+
+/* ── Several vehicles: scent discrimination ───────────────────────────
+   A search can stand several vehicles, each with its own odours: the target
+   the dog must find, and distractors it must leave (coffee, food, gloves,
+   and the like). Each odour sits on a vehicle like a single search's hide:
+   `{ kind: 'target' | 'distractor', name, spot, spotU, spotV, spotH, spotName }`. */
+export const DISTRACTORS = ['Coffee', 'Food', 'Gloves', 'Plastic bag', 'Dryer sheet', 'Fuel', 'Pet food'];
+
+/** Metres from a point to the vehicle's body: 0 on it or under it. */
+export function fromBody(veh, p) {
+  const [x, y] = toLocal(veh, p), f = unit(veh.heading), l = unit(veh.heading - 90), s = vehicleById(veh.type);
+  const u = x * f[0] + y * f[1], w = x * l[0] + y * l[1];
+  return Math.hypot(Math.max(0, Math.abs(u) - s.L / 2), Math.max(0, Math.abs(w) - s.W / 2));
+}
+/** The vehicle a point is on or beside, within `within` metres of its body, or null. */
+export function vehicleAt(vehicles, p, within = 0.5) {
+  let best = null, bd = Infinity;
+  for (const v of vehicles || []) { const d = fromBody(v, p); if (d <= within && d < bd) { best = v; bd = d; } }
+  return best;
+}
+/** Every odour, where it sits in the world, all put out at time `t`: the
+    targets (a search's hides) and the distractors, each saying which vehicle. */
+export function odourHides(vehicles, t) {
+  const targets = [], distractors = [];
+  for (const v of vehicles || []) for (const o of v.odours || []) {
+    const s = spotWorld({ ...v, ...o }, o.spot);
+    const h = { lat: s.lat, lon: s.lon, t, spot: s.spot, h: s.h, n: v.n, name: o.name || null };
+    (o.kind === 'distractor' ? distractors : targets).push(h);
+  }
+  return { targets, distractors };
+}
+/**
+ * The search graded car by car. For each vehicle: how long the dog was
+ * close to its body (within `near` metres, gaps in the track longer than
+ * `gap` not counted), and the Indications given at it (an Indication goes
+ * to the vehicle whose body is nearest, within `margin` metres; further from
+ * every vehicle it is "away"). A vehicle with the target is Indicated or
+ * Missed; any other vehicle has a False indication, was Looked at (`look`
+ * ms or more close by) or was Ignored. Only what happened by `until` counts.
+ */
+export function gradeVehicles(track, marks, vehicles, { until = Infinity, near = 2, look = 2000, margin = 4, gap = 15000 } = {}) {
+  const rows = (vehicles || []).map(v => {
+    const odours = v.odours || [];
+    return { v, n: v.n, type: v.type, odours, target: odours.some(o => o.kind !== 'distractor'),
+      distractors: odours.filter(o => o.kind === 'distractor').map(o => o.name || 'Distractor'),
+      lookMs: 0, indicated: null, falses: [] };
+  });
+  const pts = (track || []).filter(p => Number.isFinite(p?.lat) && (p.t ?? 0) <= until);
+  for (let k = 1; k < pts.length; k++) {
+    const dt = pts[k].t - pts[k - 1].t;
+    if (!(dt > 0) || dt > gap) continue;
+    for (const r of rows) if (fromBody(r.v, pts[k]) <= near) r.lookMs += dt;
+  }
+  let away = 0;
+  for (const m of marks || []) {
+    if (m?.kind !== 'Indication' || !Number.isFinite(m.lat) || !Number.isFinite(m.lon) || (m.t ?? 0) > until) continue;
+    let best = null, bd = Infinity;
+    for (const r of rows) { const d = fromBody(r.v, m); if (d < bd) { bd = d; best = r; } }
+    if (!best || bd > margin) { away++; continue; }
+    if (best.target) best.indicated = best.indicated ?? { t: m.t ?? null, d: bd };
+    else best.falses.push({ t: m.t ?? null, d: bd });
+  }
+  for (const r of rows) {
+    r.status = r.target ? (r.indicated ? 'indicated' : 'missed')
+      : r.falses.length ? 'false' : r.lookMs >= look ? 'looked' : 'ignored';
+    delete r.v;
+  }
+  const targets = rows.filter(r => r.target), falses = rows.reduce((a, r) => a + r.falses.length, 0);
+  return { rows, right: targets.length > 0 && targets.every(r => r.indicated), falses, away,
+    passed: rows.filter(r => !r.target && r.distractors.length && r.status !== 'false').length };
+}

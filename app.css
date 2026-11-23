@@ -2959,6 +2959,46 @@ html.hv-lift .style-pick { bottom: calc(var(--hv-gap, 0px) + 132px); }
 .veh-nav .btn { min-height: 46px; }
 .veh-sum { color: #33EBDB; font-weight: 600; }
 .veh-nav #vehNext:only-child, .veh-nav #vehBack[hidden] + #vehNext { grid-column: 1 / -1; }
+/* Several vehicles (scent discrimination): which one the tools work on,
+   target or distractor, and every odour set. The target is ice, a
+   distractor amber, on the map, in the picture and in the cloud. */
+.veh-fleet { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 6px; align-items: center; }
+.veh-fleet > span { font-size: calc(14 * var(--px)); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.veh-fleet .btn { min-height: 44px; font-size: calc(14 * var(--px)); }
+.veh-which { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; margin-inline: -2px; padding-inline: 2px; }
+.veh-which::-webkit-scrollbar { display: none; }
+.veh-which .btn { flex: none; }
+.veh-which .btn { min-height: 44px; font-size: calc(14 * var(--px)); display: inline-flex; align-items: center; gap: 6px; }
+.veh-which .btn[aria-pressed="true"] { background: var(--moss); border-color: var(--moss); color: #fff; }
+.veh-distract .btn[aria-pressed="true"] { background: rgba(255, 166, 48, 0.16); border-color: #FFA630; color: #FFA630; }
+.veh-kind .btn[data-veh-kind="distractor"][aria-pressed="true"] { background: #FFA630; border-color: #FFA630; color: #1F1300; }
+.veh-other { min-height: 44px; font-size: calc(15 * var(--px)); padding: 0 12px; border-radius: 12px; border: 1px solid rgba(255, 255, 255, 0.25);
+  background: rgba(255, 255, 255, 0.06); color: inherit; }
+.veh-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; flex: none; background: #00E5FF; }
+.veh-dot.d { background: #FFA630; }
+.veh-mark.d { background: #FFA630; border-color: #3A2000; box-shadow: 0 0 12px rgba(255, 166, 48, 0.9); }
+.veh-mark.other { width: 12px; height: 12px; margin: -6px 0 0 -6px; border-width: 2px; opacity: 0.75; }
+.veh-odours { display: flex; flex-direction: column; gap: 4px; }
+.veh-odours:empty { display: none; }
+.veh-odour { display: grid; grid-template-columns: auto auto minmax(0, 1fr) 44px; gap: 8px; align-items: center; padding-left: 10px;
+  border-radius: 12px; background: rgba(255, 255, 255, 0.06); font-size: calc(14 * var(--px)); }
+.veh-odour b { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.veh-odour > span { opacity: 0.7; font-size: calc(13 * var(--px)); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.veh-stage[data-veh-stage="odour"] .veh-pick { width: min(100%, 300px); margin-inline: auto; }
+.veh-odour .btn { min-height: 44px; padding: 0; font-size: calc(20 * var(--px)); }
+/* The replay of a search with several vehicles, car by car. */
+.veh-grade-head { display: block; font-size: calc(15 * var(--px)); color: #fff; }
+.veh-grade-sub { display: block; margin-bottom: 4px; font-weight: 400; opacity: 0.8; font-size: calc(13 * var(--px)); }
+.veh-grade { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 8px; align-items: center; margin-top: 4px; font-weight: 500; color: #fff; }
+.veh-grade i { font-style: normal; width: 22px; height: 22px; border-radius: 50%; border: 1.5px solid rgba(255, 255, 255, 0.7); display: grid; place-items: center;
+  font-size: calc(12 * var(--px)); }
+.veh-grade span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.veh-grade em { font-style: normal; font-size: calc(12 * var(--px)); font-weight: 700; padding: 2px 8px; border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12); color: rgba(255, 255, 255, 0.78); }
+.veh-grade.indicated em { background: #00E5FF; color: #001A1F; }
+.veh-grade.looked em { background: #FFA630; color: #1F1300; }
+.veh-grade.false em { background: #FFFFFF; color: #000; }
+.veh-grade.missed em { background: transparent; border: 1.5px solid #00E5FF; color: #00E5FF; }
 
 /* ── The map screens' tools on one floating panel of glass ─────────────
    Setting a hide or a vehicle, and the run, in either theme: the tools sit
