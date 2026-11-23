@@ -337,6 +337,11 @@
   <div class="glass-bottom">
     <div class="veh-tools" id="vehTools" hidden>
       <div class="veh-stage" data-veh-stage="place">
+        <div class="veh-fleet" id="vehFleet" hidden>
+          <span id="vehFleetSay" aria-live="polite"></span>
+          <button class="btn ghost small" id="btnVehRemove" hidden>Remove</button>
+          <button class="btn small" id="btnVehAdd" aria-pressed="false">+ Add vehicle</button>
+        </div>
         <div class="veh-place" id="vehPlace" role="group" aria-label="Where the vehicle is">
           <button class="btn small" data-veh-place="verge" aria-pressed="true">Roadside</button>
           <button class="btn small" data-veh-place="park" aria-pressed="false">Car park</button>
@@ -351,8 +356,16 @@
         </div>
       </div>
       <div class="veh-stage" data-veh-stage="odour" hidden>
+        <div class="veh-which" id="vehWhich" role="group" aria-label="Which vehicle" hidden></div>
+        <div class="veh-place veh-two veh-kind" id="vehKind" role="group" aria-label="Target or distractor">
+          <button class="btn small" data-veh-kind="target" aria-pressed="true">Target</button>
+          <button class="btn small" data-veh-kind="distractor" aria-pressed="false">Distractor</button>
+        </div>
+        <div class="veh-which veh-distract" id="vehDistract" role="group" aria-label="Which distractor" hidden></div>
+        <input class="veh-other" id="vehDistractOther" type="text" maxlength="30" placeholder="Name the distractor" aria-label="Name the distractor" hidden>
         <div class="veh-pick"><img id="vehPickImg" alt="The vehicle from above, front to the right"><div id="vehPickSpots" class="veh-pick-tap" aria-label="Tap the vehicle where the odour is"></div></div>
         <p class="veh-say" id="vehSpotName"></p>
+        <div class="veh-odours" id="vehOdourList"></div>
         <span class="label">The odour went in</span>
         <div class="veh-place veh-when" id="vehWhen" role="group" aria-label="When the odour went in">
           <button class="btn small" data-veh-when="0" aria-pressed="true">Just now</button>

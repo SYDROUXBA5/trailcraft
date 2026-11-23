@@ -25,7 +25,8 @@ import { CONTAM_COLOURS, colourIndex, contamColour, nextColour, contamStatus, co
   attachWalk, withIds, contamWords, trailClock, reorderContam, contamKey } from './contam.js';
 import { decodeTile, tileOf, tileBox } from './mvt.js';
 import { VEHICLES, vehicleById, modelOf as vehicleModel, cardOf, spotsOf, spotById, describeSpot, spotWorld, footprint, driverSide, roadsOf, parksOf,
-         snapToVerge, parkAt, vergeLines, parkAreas, scentAlong, indicationOn } from './vehicles.js';
+         snapToVerge, parkAt, vergeLines, parkAreas, scentAlong, indicationOn,
+         DISTRACTORS, vehicleAt, odourHides, gradeVehicles } from './vehicles.js';
 import { wallIndex, bandInWalls } from './walls.js';
 import { GROUND_LAYERS, buildGround, surfaceAt, surfaceAlong, surfaceRows, withSurface,
          tilesCovering, isHard, GROUND_V, GROUND_RULES, readingSig, readingFits, readingVersion,
@@ -572,7 +573,7 @@ const srcData = { runner: EMPTY, steps: EMPTY, dog: EMPTY, handler: EMPTY, paws:
                   fix: EMPTY, fixEnds: EMPTY, bandWall: EMPTY,
                   routeDone: EMPTY, routeAhead: EMPTY, puck: EMPTY, scent: EMPTY, contamScent: EMPTY, wind: EMPTY,
                   flow: EMPTY, flowPulse: EMPTY, air: EMPTY, acc: EMPTY,
-                  vehicle: EMPTY, vehBody: EMPTY, vehRing: EMPTY, vehVerge: EMPTY, vehPark: EMPTY, vehApproach: EMPTY, vehScentTrack: EMPTY };
+                  vehicle: EMPTY, vehBody: EMPTY, vehRing: EMPTY, vehNums: EMPTY, vehOdours: EMPTY, distractScent: EMPTY, vehVerge: EMPTY, vehPark: EMPTY, vehApproach: EMPTY, vehScentTrack: EMPTY };
 
 /** Where the map opens before any fix: the contiguous United States. */
 const USA_BOUNDS = [[-124.8, 24.4], [-66.9, 49.4]];
@@ -723,6 +724,9 @@ function addOverlays() {
                  'circle-color': '#E9902F',
                  'circle-opacity': ['*', ['get', 's'], 0.20],
                  'circle-blur': 1 } });
+  add({ id: 'distract-dots', type: 'circle', source: 'distractScent',
+        paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 13, 0.7, 17, 1.5, 19, 2.6],
+                 'circle-color': AMBER, 'circle-opacity': ['+', 0.25, ['*', ['get', 's'], 0.7]], 'circle-blur': 0.18 } });
   add({ id: 'scent-dots', type: 'circle', source: 'scent',
         paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 13, 0.7, 17, 1.5, 19, 2.6],
                  'circle-color': ['interpolate', ['linear'], ['get', 's'],
@@ -890,6 +894,20 @@ function addOverlays() {
     add({ id: 'veh-model', type: 'model', source: 'vehicle',
           paint: { 'model-scale': [1, 1, 1], 'model-type': 'common-3d', 'model-cast-shadows': true, 'model-receive-shadows': true } });
   }
+  /* Several vehicles: each one's number over it (held the same on screen however the map is tilted), and the odours on them, the target in ice, distractors in amber. */
+  add({ id: 'veh-num-bg', type: 'circle', source: 'vehNums',
+        paint: { 'circle-radius': 11, 'circle-color': '#0B0F14', 'circle-stroke-width': 2, 'circle-stroke-color': '#FFFFFF',
+                 'circle-translate': [0, -30], 'circle-translate-anchor': 'viewport', 'circle-pitch-alignment': 'viewport', 'circle-pitch-scale': 'viewport' } });
+  add({ id: 'veh-num', type: 'symbol', source: 'vehNums',
+        layout: { 'text-field': ['to-string', ['get', 'n']], 'text-size': 13, 'text-allow-overlap': true, 'text-ignore-placement': true,
+                  'text-pitch-alignment': 'viewport', 'text-rotation-alignment': 'viewport' },
+        paint: { 'text-color': '#FFFFFF', 'text-occlusion-opacity': 1, 'text-translate': [0, -30], 'text-translate-anchor': 'viewport' } });
+  add({ id: 'veh-odours', type: 'circle', source: 'vehOdours',
+        paint: { 'circle-radius': 6, 'circle-color': '#FFFFFF', 'circle-stroke-width': 3,
+                 'circle-stroke-color': ['match', ['get', 'k'], 'd', AMBER, ICE] } });
+  add({ id: 'veh-odour-names', type: 'symbol', source: 'vehOdours',
+        layout: { 'text-field': ['get', 'name'], 'text-size': 14, 'text-offset': [0, 0.9], 'text-anchor': 'top', 'text-allow-overlap': true },
+        paint: { 'text-color': ['match', ['get', 'k'], 'd', AMBER, ICE], 'text-halo-color': '#0B0F14', 'text-halo-width': 2.4, 'text-occlusion-opacity': 1 } });
   if (rec.vehicle) paintVehicle();          // a new map style drops the model's settings
   add({ id: 'hide-dots', type: 'circle', source: 'hides',
         paint: { 'circle-radius': 9, 'circle-color': '#C99A2E',
@@ -1270,10 +1288,32 @@ function contamGlow(ci) {
   return g;
 }
 const eachContamGlow = (f) => { for (const g of contamGlows.values()) f(g); };
+/* A vehicle search's scent glows in two colours: the target's in ice, the
+   distractors' in amber, so the place they mix is the place the dog chooses. */
+const ICE = '#00E5FF', AMBER = '#FFA630';
+const sideGlows = new Map();
+function sideGlow(key) {
+  let g = sideGlows.get(key);
+  if (!g) {
+    g = makeScentGlow(map, { id: `veh-${key}-glow`, palette: paletteFrom(key === 'target'
+      ? { dark: '#004E5C', hex: ICE, light: '#CFFBFF' } : { dark: '#6B2600', hex: '#FF8A12', light: '#FFB54A' }) });
+    sideGlows.set(key, g);
+  }
+  if (map && !map.getLayer(g.layer.id)) {
+    const L = map.getStyle()?.layers || [], i = L.findIndex(l => l.id === 'scent-engine-glow');
+    map.addLayer(g.layer, i >= 0 && L[i + 1] ? L[i + 1].id : undefined);
+    g.lifted = false;
+  }
+  if (map && !g.lifted) {                 // the vehicles' numbers and odour dots stay readable over the light
+    for (const id of ['veh-odours', 'veh-odour-names', 'veh-num-bg', 'veh-num']) if (map.getLayer(id)) map.moveLayer(id);
+    g.lifted = true;
+  }
+  return g;
+}
 function applyPlumeLook() {
   if (!map || !scentGlow) return;
   const g = glowOn();
-  for (const id of ['scent-glow', 'scent-dots', 'contam-glow', 'contam-dots']) if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', g ? 'none' : 'visible');
+  for (const id of ['scent-glow', 'scent-dots', 'contam-glow', 'contam-dots', 'distract-dots']) if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', g ? 'none' : 'visible');
   scentGlow.setShown(g); eachContamGlow(x => x.setShown(g));
 }
 function setSrc(id, data) {
@@ -2015,7 +2055,7 @@ function startLay() {
   rec.wxAsk = null;             // (or, for hides, with the first hide: layHidePlume)
   $('hideTools').hidden = t.kind !== 'hide' || t.id === 'vehicle';
   $('vehTools').hidden = t.id !== 'vehicle';
-  rec.vehicle = null;
+  rec.vehicle = null; rec.vehicles = []; rec.distractors = [];
   $('btnLayStart').hidden = t.kind === 'hide';
   $('btnLayStop').hidden = true;
   $('layDot').hidden = true;
@@ -2043,7 +2083,7 @@ function onHideTap(e) {
 }
 function paintHides() {
   keepDraft(true);          // a hide is placed by tapping, not by a GPS fix
-  setSrc('hides', pointsOf(rec.hides));
+  setSrc('hides', vehicleLay() ? EMPTY : pointsOf(rec.hides));     // a vehicle search draws its odours in its own colours
   const n = rec.hides.length;
   if (!vehicleLay()) $('layHudText').textContent = n ? `${n} hide${n === 1 ? '' : 's'} placed` : 'Place each hide';
   $('btnLayStop').hidden = n === 0 || (vehicleLay() && veh.stage !== 'start');
@@ -2053,21 +2093,24 @@ function paintHides() {
    moment it was placed. The forecast is asked for at the first hide, as a
    trail asks at its first fix, and each later hide joins the same cloud. */
 function layHidePlume() {
-  if (rec.kind !== 'hide' || !rec.hides.length) return;
+  const distract = vehicleLay() ? rec.distractors : null;
+  if (rec.kind !== 'hide' || !(rec.hides.length || distract?.length)) return;
   if (plume.sim && rec.wx) {
     plume.sim.seedHides(rec.hides);
-    plume.trail = hideGround(rec.hides);
+    plume.distract = distractSim(distract);
+    plume.ice = vehicleLay();
+    plume.trail = hideGround([...rec.hides, ...(distract || [])]);
     plumeTerrain(true); plumeWalls(true);
     return;
   }
   if (rec.wxAsk) return;
   const ask = rec.wxAsk = {};
-  const h = rec.hides[0];
+  const h = rec.hides[0] ?? distract[0];
   fetchWeather(h.lat, h.lon, h.t)
     .then(wx => {
       if (rec.wxAsk !== ask || rec.kind !== 'hide') return;      // a later lay, or no longer setting hides
       rec.wx = wx;
-      plumeStart(null, wx, undefined, null, { hides: rec.hides });
+      plumeStart(null, wx, undefined, null, vehPlumeOpts());
       if (vehicleLay()) { vehPreview(); paintVehTools(); }
     })
     .catch(() => toast('No weather — the scent cloud needs it, so it stays off'));
@@ -2087,11 +2130,34 @@ function layHidePlume() {
       line the cloud begins, at the time looked ahead to. */
 const VEH_STAGES = ['place', 'odour', 'time', 'start'];
 const veh = { stage: 'place', place: 'verge', roads: [], parks: [], at: null, tap: null, timer: 0,
-  age: 15, play: 0, approach: null, showScent: false, felt: null, wheelFrom: null, wheelDrag: false };
+  age: 15, play: 0, approach: null, showScent: false, felt: null, wheelFrom: null, wheelDrag: false,
+  adding: false, kind: 'target', distract: DISTRACTORS[0], other: '', setT: null };
+/* Several vehicles (scent discrimination): rec.vehicles holds them all, each
+   numbered and carrying its odours (vehicles.js); rec.vehicle is the one the
+   tools are working on. The targets are the search's hides, as for one
+   vehicle; the distractors are kept beside them and drawn as their own cloud. */
+const vehPlumeOpts = () => ({ hides: rec.hides, distract: rec.distractors, ice: true });
+const manyVehicles = () => (rec.vehicles?.length || 0) > 1;
+const odourWord = (o) => (o.kind === 'distractor' ? (o.name || 'Distractor') : (o.name || S.odour || 'Target'));
+/** The vehicles a saved search stood: its list, or the one vehicle an older search kept. */
+function vehiclesOf(d) {
+  if (d?.vehicles?.length) return d.vehicles;
+  const v = d?.vehicle;
+  return v ? [{ ...v, n: 1, odours: [{ kind: 'target', name: null, spot: v.spot, spotU: v.spotU, spotV: v.spotV, spotH: v.spotH, spotName: v.spotName }] }] : [];
+}
+/** The odours as dots on the map, each with its name. */
+function odourDots(vehicles, names = true) {
+  const { targets, distractors } = odourHides(vehicles, 0);
+  const f = (h, k) => ({ type: 'Feature', properties: { k, name: names ? (k === 'd' ? h.name : (h.name || S.odour || 'Target')) : '' },
+    geometry: { type: 'Point', coordinates: [h.lon, h.lat] } });
+  return { type: 'FeatureCollection', features: [...distractors.map(h => f(h, 'd')), ...targets.map(h => f(h, 't'))] };
+}
 const vehicleLay = () => rec.kind === 'hide' && S.target.id === 'vehicle';
 
 function startVehicleLay() {
-  Object.assign(veh, { stage: 'place', place: 'verge', at: null, tap: null, age: 15, approach: null, showScent: false, felt: null, wheelFrom: null });
+  Object.assign(veh, { stage: 'place', place: 'verge', at: null, tap: null, age: 15, approach: null, showScent: false, felt: null, wheelFrom: null,
+    adding: false, kind: 'target', distract: DISTRACTORS[0], other: '', setT: null });
+  rec.vehicles = []; rec.distractors = []; rec.vehicle = null;
   $('vehShowScent').checked = false;
   paintVehTools();
   map.on('click', onVehicleTap);
@@ -2104,7 +2170,7 @@ function stopVehicleLay() {
   clearTimeout(veh.timer);
   vehPlay(false);
   $('vehTools').hidden = true;
-  setSrc('vehVerge', EMPTY); setSrc('vehPark', EMPTY);
+  setSrc('vehVerge', EMPTY); setSrc('vehPark', EMPTY); setSrc('vehOdours', EMPTY); setSrc('vehNums', EMPTY);
   /* The look ahead ends with the set-up: the cloud goes back to the real clock. */
   if (plume.sim && plume.clock != null) { plume.clock = null; plumeFrame(); }
 }
@@ -2131,10 +2197,34 @@ function paintVehLights() {
 }
 function onVehicleTap(e) {
   const tap = { lat: e.lngLat.lat, lon: e.lngLat.lng };
-  if (veh.stage === 'place') { if (placeVehicleAt(tap)) navigator.vibrate?.(20); }
-  else if (veh.stage === 'start') { setApproach({ ...tap, how: 'map' }); navigator.vibrate?.(20); }
+  if (veh.stage === 'place') {
+    /* A tap on another vehicle chooses it; on the ground it moves the chosen
+       one there, or stands a new one when adding. */
+    const hit = !veh.adding && vehicleAt(rec.vehicles, tap, 0.4);
+    if (hit && hit !== rec.vehicle) return selectVehicle(hit);
+    const add = veh.adding || !rec.vehicles.length;           // a new one is the kind picked for it, not the last one's
+    if (placeVehicleAt(tap, add ? vehicleById(db.kv.get('vehicleType')).id : undefined, veh.place, { add })) navigator.vibrate?.(20);
+  } else if (veh.stage === 'odour') {
+    const hit = vehicleAt(rec.vehicles, tap, 1.5);
+    if (hit && hit !== rec.vehicle) selectVehicle(hit);
+  } else if (veh.stage === 'start') { setApproach({ ...tap, how: 'map' }); navigator.vibrate?.(20); }
 }
-function placeVehicleAt(tap, type = rec.vehicle?.type ?? vehicleById(db.kv.get('vehicleType')).id, place = veh.place) {
+function selectVehicle(v) {
+  rec.vehicle = v; veh.adding = false;
+  navigator.vibrate?.(10);
+  paintVehicle(); paintVehTools();
+  frameVehicle(v, veh.stage === 'odour' ? 20.4 : 19.2);
+}
+/** Takes the chosen vehicle away; the rest are numbered again from 1. */
+function removeVehicle() {
+  if (!manyVehicles()) return;
+  const i = rec.vehicles.indexOf(rec.vehicle);
+  rec.vehicles.splice(i, 1);
+  rec.vehicles.forEach((v, k) => { v.n = k + 1; });
+  rec.vehicle = rec.vehicles[Math.max(0, i - 1)];
+  placeVehicleHide(); paintVehicle(); paintVehTools();
+}
+function placeVehicleAt(tap, type = rec.vehicle?.type ?? vehicleById(db.kv.get('vehicleType')).id, place = veh.place, { add = false } = {}) {
   let at;
   if (place === 'verge') {
     at = snapToVerge(veh.roads, tap, type);
@@ -2144,11 +2234,15 @@ function placeVehicleAt(tap, type = rec.vehicle?.type ?? vehicleById(db.kv.get('
     if (!at) { toast(mapKey() ? 'No car park on the map there. Tap inside a lit one, or choose Anywhere.' : 'This map has no car parks to find. Choose Anywhere.'); return false; }
   } else at = { ...tap, heading: (map.getBearing() + 360) % 360, place: 'free' };
   veh.tap = tap;
-  /* Turned by hand: the same turn on the new spot or the new kind. */
-  const was = rec.vehicle, turn = was?.turn ?? 0;
-  rec.vehicle = { type, lat: at.lat, lon: at.lon, heading: Math.round((((at.heading + turn) % 360) + 360) % 360 * 10) / 10,
-    turn, place: at.place, road: at.road ?? null, carries: S.carries, spot: was?.spot ?? null,
-    ...(was?.spot === 'tap' ? { spotU: was.spotU, spotV: was.spotV, spotH: was.spotH, spotName: was.spotName } : {}) };
+  /* Turned by hand: the same turn on the new spot or the new kind. A new
+     vehicle starts square; the first one carries the target to begin with. */
+  const was = add ? null : rec.vehicle, turn = was?.turn ?? 0;
+  const v = was || { n: rec.vehicles.length + 1, odours: rec.vehicles.length ? [] : [{ kind: 'target', name: S.odour || null, spot: null }] };
+  Object.assign(v, { type, lat: at.lat, lon: at.lon, heading: Math.round((((at.heading + turn) % 360) + 360) % 360 * 10) / 10,
+    turn, place: at.place, road: at.road ?? null, carries: S.carries, _tap: tap });
+  for (const o of v.odours) o.spot = o.spot ?? `fw${driverSide(v.lat, v.lon)}`;
+  if (!was) { rec.vehicles.push(v); veh.adding = false; }
+  rec.vehicle = v;
   placeVehicleHide();
   paintVehicle();
   paintVehTools();
@@ -2162,35 +2256,45 @@ function frameVehicle(v, zoom = 19.2) {
   const y = (100 + Math.min(tools, H)) / 2;
   try { map.easeTo({ center: [v.lon, v.lat], zoom: Math.max(map.getZoom(), zoom), offset: [0, Math.round(y - H / 2)], duration: 600 }); } catch { /* the map is busy */ }
 }
-/** The odour on the vehicle, as the search's one hide. It keeps the time it
-    went in when the vehicle moves or the spot changes. */
+/** The odours on the vehicles, as the search's hides (the targets) and its
+    distractors. All keep the time they went in when a vehicle moves or a spot changes. */
 function placeVehicleHide() {
-  const v = rec.vehicle;
-  if (!v) return;
-  v.spot = v.spot ?? `fw${driverSide(v.lat, v.lon)}`;
-  const s = spotWorld(v, v.spot);
-  rec.hides = [{ lat: s.lat, lon: s.lon, t: rec.hides[0]?.t ?? Date.now(), spot: s.spot, h: s.h }];
+  if (!rec.vehicle) return;
+  veh.setT = veh.setT ?? rec.hides[0]?.t ?? Date.now();
+  const { targets, distractors } = odourHides(rec.vehicles, veh.setT);
+  rec.hides = targets; rec.distractors = distractors;
+  setSrc('vehOdours', odourDots(rec.vehicles, veh.stage !== 'place' && (manyVehicles() || distractors.length > 0)));
   paintHides();
-  if (veh.approach) setApproach(veh.approach);
+  if (veh.approach && rec.hides[0]) setApproach(veh.approach);
 }
 function paintVehicle(v = rec.vehicle) {
-  if (!v) { for (const id of ['vehicle', 'vehBody', 'vehRing']) setSrc(id, EMPTY); return; }
-  setSrc('vehRing', vehicleLay() && veh.stage === 'place' ? { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: footprint(v, 0.45) } } : EMPTY);
-  drawVehicle(v);
+  const list = vehicleLay() && rec.vehicles?.length ? rec.vehicles : v ? [v] : [];
+  if (!list.length) { for (const id of ['vehicle', 'vehBody', 'vehRing', 'vehNums']) setSrc(id, EMPTY); return; }
+  const ring = vehicleLay() && v && (veh.stage === 'place' || (veh.stage === 'odour' && manyVehicles()));
+  setSrc('vehRing', ring ? { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: footprint(v, 0.45) } } : EMPTY);
+  drawVehicles(list);
   paintVehLights();
 }
-/** The vehicle on the map: the 3D model where the map can draw one, else its outline. */
-function drawVehicle(v) {
-  if (map?.getLayer('veh-model')) {
-    const id = `veh-${vehicleById(v.type).id}`;
-    try { if (!map.hasModel?.(id)) map.addModel(id, new URL(vehicleModel(v.type), location.href).href); } catch { /* drawn once it loads */ }
-    map.setLayoutProperty('veh-model', 'model-id', id);
-    /* The models face +x; the map turns them from east, clockwise. */
-    map.setPaintProperty('veh-model', 'model-rotation', [0, 0, (v.heading - 90 + 360) % 360]);
-    setSrc('vehicle', { type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: [v.lon, v.lat] } });
+/** The vehicles on the map: the 3D models where the map can draw them, else
+    their outlines. With more than one, each has its number over it. */
+function drawVehicles(list) {
+  list = (list || []).filter(Boolean).map((v, i) => ({ ...v, n: v.n ?? i + 1 }));
+  const pts = { type: 'FeatureCollection', features: list.map(v => ({ type: 'Feature',
+    properties: { n: v.n, m: `veh-${vehicleById(v.type).id}` }, geometry: { type: 'Point', coordinates: [v.lon, v.lat] } })) };
+  setSrc('vehNums', list.length > 1 ? pts : EMPTY);
+  if (map?.getLayer('veh-model') && list.length) {
+    for (const v of list) {
+      const id = `veh-${vehicleById(v.type).id}`;
+      try { if (!map.hasModel?.(id)) map.addModel(id, new URL(vehicleModel(v.type), location.href).href); } catch { /* drawn once it loads */ }
+    }
+    map.setLayoutProperty('veh-model', 'model-id', ['get', 'm']);
+    /* The models face +x; the map turns them from east, clockwise. Each its own way. */
+    map.setPaintProperty('veh-model', 'model-rotation', ['match', ['get', 'n'],
+      ...list.flatMap(v => [v.n, ['literal', [0, 0, (v.heading - 90 + 360) % 360]]]), ['literal', [0, 0, 0]]]);
+    setSrc('vehicle', pts);
     setSrc('vehBody', EMPTY);
   } else {
-    setSrc('vehBody', { type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [footprint(v)] } });
+    setSrc('vehBody', { type: 'FeatureCollection', features: list.map(v => ({ type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [footprint(v)] } })) });
   }
 }
 
@@ -2209,15 +2313,38 @@ function spotOf(v) {
   const s = v?.spot ? spotById(v.type, v.spot) : null;
   return s ? { u: s.u, v: s.v, h: s.h, say: spotSay(v, s) } : null;
 }
+const distractName = () => (veh.distract === 'Other' ? (veh.other.trim() || 'Other') : veh.distract);
+/** The odour of the kind being placed on this vehicle: its target, or the distractor of the name chosen. */
+const curOdour = (v) => (v?.odours || []).find(o => (veh.kind === 'target' ? o.kind !== 'distractor' : o.kind === 'distractor' && o.name === distractName()));
 function paintVehOdour() {
   const v = rec.vehicle;
   if (!v) return;
-  const spec = vehicleById(v.type), across = spec.L * 1.08, down = across * PICK_DOWN, s = spotOf(v);
+  const many = manyVehicles(), spec = vehicleById(v.type), across = spec.L * 1.08, down = across * PICK_DOWN;
+  $('vehWhich').hidden = !many;
+  if (many) $('vehWhich').innerHTML = rec.vehicles.map(x => `<button class="btn small" data-veh-n="${x.n}" aria-pressed="${x === v}">${x.n} · ${esc(vehicleById(x.type).label)}`
+    + (x.odours || []).map(o => `<i class="veh-dot ${o.kind === 'distractor' ? 'd' : 't'}"></i>`).join('') + '</button>').join('');
+  for (const b of $('vehKind').children) b.setAttribute('aria-pressed', String(b.dataset.vehKind === veh.kind));
+  $('vehDistract').hidden = veh.kind !== 'distractor';
+  if (veh.kind === 'distractor') $('vehDistract').innerHTML = [...DISTRACTORS, 'Other'].map(n =>
+    `<button class="btn small" data-veh-distract="${esc(n)}" aria-pressed="${n === veh.distract}">${esc(n === 'Other' ? '+ Other' : n)}</button>`).join('');
+  $('vehDistractOther').hidden = veh.kind !== 'distractor' || veh.distract !== 'Other';
   $('vehPickImg').src = `img/vehicles/${spec.id}-top.webp`;
-  $('vehPickSpots').innerHTML = s
-    ? `<span class="veh-mark" style="left:${(50 + (s.u / across) * 100).toFixed(1)}%;top:${(50 - (s.v / down) * 100).toFixed(1)}%"></span>` : '';
-  $('vehSpotName').innerHTML = s ? `<b>${esc(s.say)}</b> · about ${esc(fmtM(s.h, 1))} up` : 'Tap the vehicle where the odour is.';
-  const ago = Math.round((Date.now() - (rec.hides[0]?.t ?? Date.now())) / 60000);
+  const cur = curOdour(v);
+  $('vehPickSpots').innerHTML = (v.odours || []).map(o => {
+    const s = spotOf({ ...v, ...o });
+    return s ? `<span class="veh-mark${o.kind === 'distractor' ? ' d' : ''}${o === cur ? '' : ' other'}" style="left:${(50 + (s.u / across) * 100).toFixed(1)}%;top:${(50 - (s.v / down) * 100).toFixed(1)}%"></span>` : '';
+  }).join('');
+  /* With more than one odour about, this vehicle's are listed, each where it
+     sits; the others show as dots on their numbers above and on the map. */
+  const listed = many || rec.vehicles.reduce((a, x) => a + (x.odours?.length || 0), 0) > 1;
+  $('vehOdourList').innerHTML = listed ? (v.odours || []).map((o, i) => `<div class="veh-odour"><i class="veh-dot ${o.kind === 'distractor' ? 'd' : 't'}"></i>`
+    + `<b>${esc(odourWord(o))}</b><span>${esc(spotOf({ ...v, ...o })?.say || '')}</span>`
+    + `<button class="btn ghost small" data-veh-drop="${v.n}:${i}" aria-label="Take the ${esc(odourWord(o))} off">&times;</button></div>`).join('') : '';
+  const s = cur ? spotOf({ ...v, ...cur }) : null;
+  $('vehSpotName').hidden = !!(s && listed);
+  $('vehSpotName').innerHTML = s ? `<b>${esc(odourWord(cur))}</b> · ${esc(s.say)} · about ${esc(fmtM(s.h, 1))} up`
+    : veh.kind === 'target' ? 'Tap the vehicle where the target odour is.' : `Tap the vehicle where the ${esc(distractName().toLowerCase())} is.`;
+  const ago = Math.round((Date.now() - (veh.setT ?? Date.now())) / 60000);
   for (const b of $('vehWhen').children) b.setAttribute('aria-pressed', String(Math.abs(Number(b.dataset.vehWhen) - ago) <= 1 || (b.dataset.vehWhen === '0' && ago < 1)));
 }
 /** A tap on the picture, as a point on the vehicle. */
@@ -2226,7 +2353,11 @@ function pickSpotAt(x, y) {
   if (!v || !box.width) return;
   const across = vehicleById(v.type).L * 1.08, down = across * PICK_DOWN;
   const d = describeSpot(v, ((x - box.left) / box.width - 0.5) * across, (0.5 - (y - box.top) / box.height) * down);
-  Object.assign(v, { spot: 'tap', spotU: d.u, spotV: d.v, spotH: d.h, spotName: d.name });
+  const at = { spot: 'tap', spotU: d.u, spotV: d.v, spotH: d.h, spotName: d.name };
+  /* One target a vehicle, and one of each distractor: a tap moves it if it is already there. */
+  const o = curOdour(v);
+  if (o) Object.assign(o, at);
+  else v.odours.push(veh.kind === 'target' ? { kind: 'target', name: S.odour || null, ...at } : { kind: 'distractor', name: distractName(), ...at });
   navigator.vibrate?.(15);
   placeVehicleHide(); paintVehTools();
 }
@@ -2288,7 +2419,7 @@ function setVehWind(mode) {
     veh.felt = makeWindFelt(veh.wheelFrom, ref);
   } else veh.felt = null;
   /* The cloud in that air, at the time looked ahead to. */
-  if (rec.wx && rec.hides.length) { plumeStart(null, vehWind(), undefined, null, { hides: rec.hides }); vehPreview(); }
+  if (rec.wx && rec.hides.length) { plumeStart(null, vehWind(), undefined, null, vehPlumeOpts()); vehPreview(); }
   paintVehTime();
   if (rec.vehicle && !veh.wheelDrag) frameVehicle(rec.vehicle, 18.6);       // the vehicle and its cloud above the taller panel
 }
@@ -2409,29 +2540,40 @@ function paintVehTools() {
   for (const el of $('vehTools').querySelectorAll('[data-veh-stage]')) el.hidden = el.dataset.vehStage !== st;
   if (st === 'place') {
     for (const b of $('vehPlace').children) b.setAttribute('aria-pressed', String(b.dataset.vehPlace === veh.place));
-    const cur = v?.type ?? vehicleById(db.kv.get('vehicleType')).id;
+    const cur = (!veh.adding && v?.type) || vehicleById(db.kv.get('vehicleType')).id;
     $('vehTypes').innerHTML = VEHICLES.map(x =>
       `<button class="veh-card" data-veh-type="${x.id}" aria-pressed="${x.id === cur}"><img src="${cardOf(x.id)}" alt=""><span>${esc(x.label)}</span></button>`).join('');
-    $('vehRotate').hidden = !v;
+    $('vehRotate').hidden = !v || veh.adding;
     if (v) $('vehFacing').textContent = `Facing ${cardinal(v.heading)}`;
+    $('vehFleet').hidden = !v;
+    $('vehFleetSay').innerHTML = v ? (veh.adding ? `<b>Vehicle ${rec.vehicles.length + 1}</b>` : `<b>Vehicle ${v.n} · ${esc(vehicleById(v.type).label)}</b>`) : '';
+    $('btnVehAdd').setAttribute('aria-pressed', String(veh.adding));
+    $('btnVehAdd').textContent = veh.adding ? 'Cancel' : '+ Add vehicle';
+    $('btnVehRemove').hidden = !manyVehicles() || veh.adding;
   } else if (st === 'odour') paintVehOdour();
   else if (st === 'time') paintVehTime();
   else paintVehStart();
   const i = VEH_STAGES.indexOf(st);
   $('vehBack').hidden = i === 0;
   $('vehNext').hidden = i === VEH_STAGES.length - 1;
-  $('vehNext').disabled = !v;
+  $('vehNext').disabled = !v || (st === 'odour' && !rec.hides.length);      // something to find before the clock
   $('btnLayStop').hidden = st !== 'start' || !rec.hides.length;
   const where = { verge: 'on the verge', park: 'in the car park', free: 'placed' };
+  const many = manyVehicles(), nT = rec.hides.length, nD = rec.distractors?.length || 0;
   $('layHudText').textContent = st === 'place'
-    ? (v ? `${vehicleById(v.type).label} ${where[v.place]}`
+    ? (veh.adding ? `Place vehicle ${rec.vehicles.length + 1}`
+      : v ? (many ? `${rec.vehicles.length} vehicles` : `${vehicleById(v.type).label} ${where[v.place]}`)
       : veh.place === 'verge' ? 'Tap beside a road' : veh.place === 'park' ? 'Tap inside a car park' : 'Tap where the vehicle is')
+    : st === 'odour' && many ? `Vehicle ${v.n}`
     : { odour: 'Odour spot', time: 'Set-up time', start: 'Start point' }[st];
+  const key = nD ? ' Ice: the target\u2019s scent. Amber: the distractors\u2019.' : '';
   $('layCaption').textContent = st === 'place'
-    ? (v ? 'Tap again to move it.'
+    ? (veh.adding ? (veh.place === 'park' ? 'Tap a bay in a lit car park.' : veh.place === 'verge' ? 'Tap beside a lit road.' : 'Tap where it stands.')
+      : v ? (many ? 'Tap a vehicle to choose it, the ground to move it.' : 'Tap again to move it, or add another vehicle.')
       : veh.place === 'verge' ? 'The lit lines are the verges the map knows. The vehicle lines up with the road by itself.'
       : veh.place === 'park' ? 'The lit areas are the car parks the map knows.' : 'It faces up the screen. Turn it round once placed.')
-    : st === 'start' ? 'Tap the map to move the start.' : '';
+    : st === 'odour' ? (many ? 'Tap a vehicle on the map, or its number, to work on it.' : '') + (nT ? '' : ' Put the target in a vehicle.')
+    : st === 'start' ? 'Tap the map to move the start.' + key : key.trim();
 }
 function vehGo(step) {
   const i = Math.max(0, Math.min(VEH_STAGES.length - 1, VEH_STAGES.indexOf(veh.stage) + step));
@@ -2444,8 +2586,10 @@ function vehGo(step) {
   const v = rec.vehicle;
   if (!v) return;
   if (veh.stage === 'odour') frameVehicle(v, 20.4);
-  else if (veh.stage === 'start' && veh.approach) fitOver($('vehTools'), [rec.hides[0], veh.approach]);
+  else if (veh.stage === 'start' && veh.approach) fitOver($('vehTools'), [...rec.vehicles, veh.approach]);
+  else if (manyVehicles() && veh.stage !== 'place') fitOver($('vehTools'), rec.vehicles);
   else frameVehicle(v, 19.2);
+  setSrc('vehOdours', odourDots(rec.vehicles, veh.stage !== 'place' && (manyVehicles() || (rec.distractors?.length || 0) > 0)));
 }
 /* ── A vehicle search: the run and the replay ─────────────────────────
    On the run the vehicle stands where it was set, with the start and the
@@ -2458,7 +2602,7 @@ function vehGo(step) {
    was, for how long, and whether the Indication was at the vehicle. */
 let vehRun = null;
 function drawVehicleScene(d) {
-  drawVehicle(d.vehicle);
+  drawVehicles(vehiclesOf(d));
   const a = d.approach, h = d.hides?.[0];
   if (a) setSrc('start', pointsOf([a]));
   if (a && h) setSrc('vehApproach', approachLine(a, h));
@@ -2481,9 +2625,11 @@ function vehRunFix(pt) {
 function vehRunHud() {
   const base = gpsHudText();
   if (!vehRun || !run.revealed || run.session?.id !== vehRun.s.id) return base;
-  const p = rec.pts[rec.pts.length - 1], v = vehRun.s.data.vehicle;
-  if (!p || !v) return base;
-  const d = Math.max(0, dist(p, v) - vehicleById(v.type).L / 2);
+  const p = rec.pts[rec.pts.length - 1];
+  /* The nearest vehicle with a target in it. */
+  const vs = vehiclesOf(vehRun.s.data).filter(x => (x.odours || []).some(o => o.kind !== 'distractor'));
+  if (!p || !vs.length) return base;
+  const d = Math.min(...vs.map(v => Math.max(0, dist(p, v) - vehicleById(v.type).L / 2)));
   /* The pill sits between the wind card and the compass and breaks at any
      space, so it is held to two halves. */
   const nb = (x) => x.replace(/ /g, '\u00A0');
@@ -2510,6 +2656,20 @@ function paintVehReplay(s, at) {
   const bits = [r.first < 0 ? 'Never in the modelled scent'
     : track[r.first].t <= at ? `First in scent ${fmtM(r.firstDist)} out, at ${fmtDur(r.firstT)}` : 'Not in scent yet'];
   if (ms) bits.push(`working scent ${fmtDur(ms)}`);
+  const vs = vehiclesOf(s.data);
+  if (vs.length > 1 || s.data.distractors?.length) {
+    /* Several vehicles: car by car, as far as the replay has got. */
+    const g = gradeVehicles(track, marksOf(s), vs, { until: at >= replay.to ? Infinity : at });   // at the end: a call made after the last fix counts
+    const TAG = { indicated: 'Indicated \u2713', missed: 'Not found', false: 'False indication', ignored: 'Ignored' };
+    const rows = [...g.rows].sort((a, b) => (b.target - a.target) || (b.distractors.length - a.distractors.length) || (a.n - b.n));
+    const head = [g.right ? 'Right car \u2713' : rows.some(r => r.target && r.status === 'missed') ? 'Target not found yet' : '',
+      g.falses ? `${g.falses} false indication${g.falses === 1 ? '' : 's'}` : 'No false indications'].filter(Boolean).join(' · ');
+    el.innerHTML = `<b class="veh-grade-head">${esc(head)}</b><span class="veh-grade-sub">${esc(bits.join(' · '))}</span>`
+      + rows.map(r => `<span class="veh-grade ${r.status}"><i>${r.n}</i><span>${esc(vehicleById(r.type).label)} · ${esc(r.target ? `${r.odours.filter(o => o.kind !== 'distractor').map(odourWord).join(', ')} (target)` : r.distractors.join(', ') || 'nothing')}</span>`
+        + `<em>${esc(r.status === 'looked' ? `Looked ${Math.round(r.lookMs / 1000)} s` : TAG[r.status])}</em></span>`).join('');
+    el.hidden = false;
+    return;
+  }
   if (ind && (ind.t == null || ind.t <= at)) {
     bits.push(ind.at ? `Indication at the vehicle${ind.t != null ? `, ${fmtDur(ind.t - t0)}` : ''}` : `Indication ${fmtM(ind.d)} from the odour`);
   }
@@ -2758,6 +2918,7 @@ async function plumeWalls(force = false) {
     plume.walls = W;
     plume.sim.walls = W;
     if (plume.contam) plume.contam.walls = W;
+    if (plume.distract) plume.distract.walls = W;
     /* They usually arrive after the band was first drawn: redraw what reads
        it, or the readout says nothing about buildings until a dial moves. */
     if (bench.on) benchPaintLight();
@@ -2782,7 +2943,7 @@ const bandWallNote = () => (plume.bandWalls
 /* `hides`: a search's placed sources instead of a laid line. Each feeds the
    air from the moment it was stamped (sim.js seedHides), so its cloud grows
    with the time it has been out, as a person standing at a trail's end does. */
-function plumeStart(trail, wx, T, contamination = null, { at = null, since = at, hides = null } = {}) {
+function plumeStart(trail, wx, T, contamination = null, { at = null, since = at, hides = null, distract = null, ice = false } = {}) {
   plumeStop();
   /* A plume showing a past moment is on that clock from its very first
      frame, which is drawn below. That frame prunes, and a prune cannot be
@@ -2794,6 +2955,8 @@ function plumeStart(trail, wx, T, contamination = null, { at = null, since = at,
   if (!settings.plume || !wx) return;
   plume.sim = new ScentSim();
   plume.contam = contamSim(contamination);
+  plume.ice = !!ice;
+  plume.distract = distractSim(distract);
   /* Every few metres, not every GPS fix. A fix arrives when the walker moves,
      so at a slow pace the emission points stand far enough apart to read as
      separate puffs. Sampling the SAME line more finely does not change the
@@ -2806,7 +2969,7 @@ function plumeStart(trail, wx, T, contamination = null, { at = null, since = at,
   plume.st = stability(wx.soil_temp, wx.temp);
   /* The ground the terrain, the walls and the wind tracers are fetched round:
      the line, or for a search the hides themselves. */
-  plume.trail = hides?.length ? hideGround(hides) : trail ? [...trail] : [];
+  plume.trail = hides?.length ? hideGround([...hides, ...(distract || [])]) : trail ? [...trail] : [];
   plume.T = T || FLAT;
   plume.tAt = 0; plume.tLen = 0;
   plumeTerrain(true);
@@ -2823,6 +2986,8 @@ function plumeStart(trail, wx, T, contamination = null, { at = null, since = at,
 }
 /** A search's hides as the points the plume's ground is fetched round. */
 const hideGround = (hides) => hides.map(h => ({ lat: h.lat, lon: h.lon, t: h.t }));
+/** A vehicle search's distractors as their own cloud, drawn apart from the target's. */
+const distractSim = (list) => (list?.length ? new ScentSim().seedHides(list) : null);
 
 /** How finely the line is sampled for emission: a point every 3 m, and the
     whole thing re-walked a few times so the parcels at any one spot span the
@@ -2881,7 +3046,9 @@ function paintPlumeLook() { for (const b of $('plumeLook').children) b.setAttrib
 function plumeStop() {
   tracersStop();
   clearInterval(plume.tick); plume.tick = 0;
-  plume.sim = null; plume.trail = null; plume.contam = null;
+  plume.sim = null; plume.trail = null; plume.contam = null; plume.distract = null; plume.ice = false;
+  for (const g of sideGlows.values()) g.clear();
+  setSrc('distractScent', EMPTY);
   plume.walls = null; plume.bandWalls = 0; plume.lastField = null;
   setSrc('bandWall', EMPTY);
   setSrc('scent', EMPTY); scentGlow?.clear(); eachContamGlow(x => x.clear()); plume.specks = true;
@@ -4032,11 +4199,12 @@ function drawReplayGround(s, { keep = false } = {}) {
   if (!keep) clearMap();
   if (targetById(s.targetId).kind === 'hide') {
     // A search has hides and no trail: no start and no plan. Its plume is the hides' own cloud.
-    setSrc('hides', pointsOf(s.data.hides || []));
+    const isVeh = !!s.data.vehicle;
+    setSrc('hides', isVeh ? EMPTY : pointsOf(s.data.hides || []));
     const w0 = windAt(s, replay.at).wx;
     if (w0 && s.data.hides?.length) plumeStart(null, w0, plume.T, null,
-      { at: replay.at, since: replay.from, hides: s.data.hides });
-    if (s.data.vehicle) drawVehicleScene(s.data);
+      { at: replay.at, since: replay.from, hides: s.data.hides, distract: s.data.distractors, ice: isVeh });
+    if (isVeh) { drawVehicleScene(s.data); setSrc('vehOdours', odourDots(vehiclesOf(s.data), vehiclesOf(s.data).length > 1 || !!s.data.distractors?.length)); }
   } else if (noLineYet(s.data) || !(s.data.trail?.length > 1)) {
     /* A blind trail with no line yet: the dog alone, and the find. So is a
        run whose trail the video is holding back until the end. */
@@ -5099,9 +5267,16 @@ function plumeFrame() {
   plume.sim.prune(now, plume.wx, plume.st, { max: 9000, since: plume.since });
   plume.sim.advance(plume.T, plume.wx, plume.st, now);
   if (glowOn()) {
-    scentGlow.update(plume.sim.drawable(), plume.st, parcelWeight);
+    (plume.ice ? sideGlow('target') : scentGlow).update(plume.sim.drawable(), plume.st, parcelWeight);
+    if (plume.ice) scentGlow.clear();
     if (plume.specks !== false) { setSrc('scent', EMPTY); plume.specks = false; }      // the specks are not needed while the glow is showing
-  } else { setSrc('scent', parcelsGeo(plume.sim)); plume.specks = true; scentGlow?.clear(); }
+  } else { setSrc('scent', parcelsGeo(plume.sim)); plume.specks = true; scentGlow?.clear(); sideGlows.get('target')?.clear(); }
+  if (plume.distract) {
+    plume.distract.prune(now, plume.wx, plume.st, { max: 5000, since: plume.since });
+    plume.distract.advance(plume.T, plume.wx, plume.st, now);
+    if (glowOn()) { sideGlow('distract').update(plume.distract.drawable(), plume.st, parcelWeight); setSrc('distractScent', EMPTY); }
+    else { setSrc('distractScent', parcelsGeo(plume.distract)); sideGlows.get('distract')?.clear(); }
+  }
   if (plume.contam) {
     plume.contam.prune(now, plume.wx, plume.st, { max: 5000, since: plume.since });
     plume.contam.advance(plume.T, plume.wx, plume.st, now);
@@ -5466,9 +5641,21 @@ async function layStop() {
     starts and from which side, whether the handler sees the scent, and the
     set-up time it was planned for. */
 function vehicleData() {
-  return { vehicle: { ...rec.vehicle }, approach: veh.approach ? { ...veh.approach } : null,
+  const plain = ({ _tap, ...v }) => ({ ...v, odours: (v.odours || []).map(o => ({ ...o })) });
+  const vehicles = rec.vehicles.map(plain);
+  /* `vehicle` stays the one with the target, as a search with one vehicle kept it. */
+  const tv = vehicles.find(v => v.odours.some(o => o.kind !== 'distractor')) || plain(rec.vehicle);
+  const to = tv.odours.find(o => o.kind !== 'distractor');
+  const { odours, ...vehicle } = tv;
+  return { vehicle: { ...vehicle, ...(to ? { spot: to.spot, spotU: to.spotU, spotV: to.spotV, spotH: to.spotH, spotName: to.spotName } : {}) },
+    vehicles, distractors: (rec.distractors || []).map(h => ({ ...h })),
+    approach: veh.approach ? { ...veh.approach } : null,
     showScent: !!veh.showScent, plannedMin: vehAgeMin(), windFelt: veh.felt ? { ...veh.felt } : null };
 }
+/** A search with several vehicles or distractors says so in its card; any other, null. */
+const vehSummary = () => { const n = (k, w) => `${k} ${w}${k === 1 ? '' : 's'}`;
+  if (!rec.vehicle || !(manyVehicles() || rec.distractors?.length)) return null;
+  return `${n(rec.vehicles.length, 'vehicle')}, ${n(rec.hides.length, 'target')}, ${n(rec.distractors.length, 'distractor')}, not searched yet.`; };
 async function confirmLay() {
   const t = S.target;
   const isHide = rec.kind === 'hide';
@@ -5480,7 +5667,7 @@ async function confirmLay() {
     id: uid(), handlerId: S.handler.id, dogId: null,
     layerId: S.layer?.id ?? null, targetId: t.id, odour: S.odour || null, startedAt,
     summary: isHide
-      ? `${rec.hides.length} hide${rec.hides.length === 1 ? '' : 's'} set, not searched yet.`
+      ? vehSummary() ?? `${rec.hides.length} hide${rec.hides.length === 1 ? '' : 's'} set, not searched yet.`
       : `${fmtKm(pathLen(rec.pts))} trail laid, not run yet.`,
     data: isHide
       ? { hides: rec.hides, weather: null, ...(rec.vehicle ? vehicleData() : {}) }
@@ -7461,10 +7648,12 @@ function toggleReveal() {
     } else plumeStop();
     drawContam(run.revealed ? s.data.contamination : null, trailClock(s.data));
   } else {
-    setSrc('hides', run.revealed ? pointsOf(s.data.hides) : EMPTY);
+    const isVeh = !!s.data.vehicle, vs = isVeh ? vehiclesOf(s.data) : [];
+    setSrc('hides', run.revealed && !isVeh ? pointsOf(s.data.hides) : EMPTY);
+    setSrc('vehOdours', run.revealed && isVeh ? odourDots(vs, vs.length > 1 || !!s.data.distractors?.length) : EMPTY);
     /* The hides' cloud is the answer drawn in air, so it waits for the same
        button, in the air the dog set off in. */
-    if (run.revealed) plumeStart(null, windAt(s, run.startedAt).wx, undefined, null, { hides: s.data.hides });
+    if (run.revealed) plumeStart(null, windAt(s, run.startedAt).wx, undefined, null, { hides: s.data.hides, distract: s.data.distractors, ice: isVeh });
     else plumeStop();
   }
   paintReveal();
@@ -11394,17 +11583,42 @@ function wire() {
     if (!b) return;
     db.kv.set('vehicleType', b.dataset.vehType);
     /* Stood again where it was tapped: a wider vehicle stands further off the road. */
-    if (rec.vehicle && veh.tap) placeVehicleAt(veh.tap, b.dataset.vehType, rec.vehicle.place);
+    if (rec.vehicle?._tap && !veh.adding) placeVehicleAt(rec.vehicle._tap, b.dataset.vehType, rec.vehicle.place);
     else paintVehTools();
+  });
+  $('btnVehAdd').addEventListener('click', () => { veh.adding = !veh.adding; paintVehicle(); paintVehTools(); });
+  $('btnVehRemove').addEventListener('click', removeVehicle);
+  $('vehWhich').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-veh-n]'), v = b && rec.vehicles.find(x => x.n === Number(b.dataset.vehN));
+    if (v) selectVehicle(v);
+  });
+  $('vehKind').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-veh-kind]');
+    if (b) { veh.kind = b.dataset.vehKind; paintVehTools(); }
+  });
+  $('vehDistract').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-veh-distract]');
+    if (!b) return;
+    veh.distract = b.dataset.vehDistract; paintVehTools();
+    if (veh.distract === 'Other') $('vehDistractOther').focus();
+  });
+  $('vehDistractOther').addEventListener('input', (e) => { veh.other = e.target.value.slice(0, 30); });
+  $('vehOdourList').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-veh-drop]');
+    if (!b) return;
+    const [n, i] = b.dataset.vehDrop.split(':').map(Number), v = rec.vehicles.find(x => x.n === n);
+    if (!v) return;
+    v.odours.splice(i, 1);
+    placeVehicleHide(); paintVehicle(); paintVehTools();
   });
   $('vehPickSpots').addEventListener('click', (e) => pickSpotAt(e.clientX, e.clientY));
   $('vehWhen').addEventListener('click', (e) => {
     const b = e.target.closest('[data-veh-when]');
-    if (!b || !rec.hides[0]) return;
+    if (!b || !rec.vehicle) return;
     const m = Number(b.dataset.vehWhen);
-    rec.hides[0].t = Date.now() - m * 60000;          // set back: an odour put out before the app was opened
+    veh.setT = Date.now() - m * 60000;                 // set back: odours put out before the app was opened
     veh.age = Math.max(veh.age, m);
-    paintHides(); paintVehTools();
+    placeVehicleHide(); paintVehTools();
   });
   $('vehAge').addEventListener('input', (e) => { vehPlay(false); veh.age = Number(e.target.value); paintVehTime(); vehPreview(); });
   $('vehPlay').addEventListener('click', () => vehPlay());

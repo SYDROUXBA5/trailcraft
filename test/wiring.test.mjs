@@ -762,17 +762,20 @@ t('the team, its board and its levels show only for trailing', () => {
 t('a vehicle search places a vehicle, keeps its odour on it, and saves both', () => {
   const start = bodyOf('startLay');
   assert.match(start, /if \(t\.id === 'vehicle'\) startVehicleLay\(\);\s*else map\.on\('click', onHideTap\);/, 'a tap places the vehicle, not a loose hide');
-  assert.match(bodyOf('placeVehicleHide'), /rec\.hides = \[\{ lat: s\.lat, lon: s\.lon, t: rec\.hides\[0\]\?\.t \?\? Date\.now\(\), spot: s\.spot, h: s\.h \}\];/,
-    'one hide, on the vehicle, keeping the time it first went in');
+  assert.match(bodyOf('placeVehicleHide'), /veh\.setT = veh\.setT \?\? rec\.hides\[0\]\?\.t \?\? Date\.now\(\);\s*const \{ targets, distractors \} = odourHides\(rec\.vehicles, veh\.setT\);\s*rec\.hides = targets; rec\.distractors = distractors;/,
+    'the odours on the vehicles: the targets are the hides, the distractors kept beside them, all keeping the time they went in');
+  assert.match(bodyOf('placeVehicleAt'), /if \(!was\) \{ rec\.vehicles\.push\(v\); veh\.adding = false; \}/, 'Add vehicle stands another, numbered');
+  assert.match(bodyOf('onVehicleTap'), /const hit = !veh\.adding && vehicleAt\(rec\.vehicles, tap, 0\.4\);\s*if \(hit && hit !== rec\.vehicle\) return selectVehicle\(hit\);/, 'a tap on another vehicle chooses it');
+  assert.match(bodyOf('vehicleData'), /vehicles, distractors: \(rec\.distractors \|\| \[\]\)\.map\(h => \(\{ \.\.\.h \}\)\),/, 'every vehicle and distractor saved');
   assert.match(js, /\{ hides: rec\.hides, weather: null, \.\.\.\(rec\.vehicle \? vehicleData\(\) : \{\}\) \}/, 'saved with the search');
   assert.match(bodyOf('vehicleData'), /approach: veh\.approach \? \{ \.\.\.veh\.approach \} : null,\s*showScent: !!veh\.showScent, plannedMin: vehAgeMin\(\)/,
     'with where the dog starts, whether the handler sees the scent, and the time it was planned for');
   assert.match(bodyOf('vehPreview'), /plume\.clock = t \+ vehAgeMin\(\) \* 60000;/, 'the look ahead is a frame of the same simulation');
   assert.match(bodyOf('vehicleData'), /windFelt: veh\.felt \? \{ \.\.\.veh\.felt \} : null/, 'the wind turned on the wheel is the search’s felt wind');
   assert.match(bodyOf('setVehWind'), /veh\.felt = makeWindFelt\(veh\.wheelFrom, ref\);/, 'kept as the app’s own felt wind, eight points');
-  assert.match(bodyOf('setVehWind'), /plumeStart\(null, vehWind\(\), undefined, null, \{ hides: rec\.hides \}\); vehPreview\(\);/, 'and the cloud is drawn in it');
+  assert.match(bodyOf('setVehWind'), /plumeStart\(null, vehWind\(\), undefined, null, vehPlumeOpts\(\)\); vehPreview\(\);/, 'and the cloud is drawn in it');
   assert.match(bodyOf('stopVehicleLay'), /if \(plume\.sim && plume\.clock != null\) \{ plume\.clock = null; plumeFrame\(\); \}/, 'and ends with the set-up');
-  assert.match(js, /placeVehicleAt\(veh\.tap, b\.dataset\.vehType, rec\.vehicle\.place\)/, 'a new kind stands where the old one stood, not where the buttons now point');
+  assert.match(js, /placeVehicleAt\(rec\.vehicle\._tap, b\.dataset\.vehType, rec\.vehicle\.place\)/, 'a new kind stands where the old one stood, not where the buttons now point');
   for (const fn of ['layStop']) assert.match(bodyOf(fn), /stopVehicleLay\(\);/, `${fn} lets go of the map`);
   assert.match(js, /map\.off\('click', onHideTap\); stopVehicleLay\(\);/, 'and so does Cancel');
 });
@@ -783,7 +786,8 @@ t('a vehicle search runs with its vehicle and start on the map, and replays with
   assert.match(js, /\$\('wpRow'\)\.hidden = onTrail;\s*\/\*[^*]*\*\/\s*if \(s\.data\.vehicle\) \$\('wpRow'\)\.hidden = true;/, 'no marks row on a vehicle search');
   assert.match(js, /vehRun = null;\s*if \(hudText === vehRunHud\) hudText = gpsHudText;/, 'the next run is not given this run’s line');
   assert.match(bodyOf('vehRunHud'), /if \(!vehRun \|\| !run\.revealed \|\| run\.session\?\.id !== vehRun\.s\.id\) return base;/, 'a blind handler is told nothing');
-  assert.match(bodyOf('drawReplayGround'), /if \(s\.data\.vehicle\) drawVehicleScene\(s\.data\);/);
+  assert.match(bodyOf('drawReplayGround'), /const isVeh = !!s\.data\.vehicle;[\s\S]*if \(isVeh\) \{ drawVehicleScene\(s\.data\);/);
+  assert.match(bodyOf('paintVehReplay'), /const g = gradeVehicles\(track, marksOf\(s\), vs, \{ until: at >= replay\.to \? Infinity : at \}\);/, 'several vehicles: graded car by car, as far as the replay has got');
   assert.match(bodyOf('paintReplay'), /paintReach\(s, at\);\s*paintVehReplay\(s, at\);/);
   assert.match(bodyOf('paintVehReplay'), /scentAlong\(track, s\.data\.hides \|\| \[\], \(t\) => windAt\(s, t\)\.wx,/, 'in the wind of each moment');
   assert.match(bodyOf('paintVehReplay'), /if \(!v \|\| replay\.mark\?\.hidden\)/, 'and says nothing while marking blind');
@@ -794,7 +798,7 @@ t('a search’s hides draw their own scent cloud while set, on Show hides, and i
      to, so no search ever showed any scent. The vehicle search stands on it. */
   const start = bodyOf('plumeStart');
   assert.match(start, /if \(hides\?\.length\) plume\.sim\.seedHides\(hides\);\s*else plume\.sim\.seed\(plumeSamples\(trail\)\);/);
-  assert.match(start, /plume\.trail = hides\?\.length \? hideGround\(hides\) : trail \? \[\.\.\.trail\] : \[\];/,
+  assert.match(start, /plume\.trail = hides\?\.length \? hideGround\(\[\.\.\.hides, \.\.\.\(distract \|\| \[\]\)\]\) : trail \? \[\.\.\.trail\] : \[\];/,
     'terrain, walls and tracers are fetched round the hides');
   assert.match(bodyOf('paintHides'), /layHidePlume\(\);/, 'each hide placed joins the cloud');
   const lay = bodyOf('layHidePlume');
@@ -803,7 +807,7 @@ t('a search’s hides draw their own scent cloud while set, on Show hides, and i
   assert.match(lay, /if \(rec\.wxAsk !== ask \|\| rec\.kind !== 'hide'\) return;/, 'an answer for an earlier lay draws nothing');
   assert.match(bodyOf('startLay'), /rec\.wxAsk = null;/);
   const reveal = bodyOf('toggleReveal');
-  assert.match(reveal, /if \(run\.revealed\) plumeStart\(null, windAt\(s, run\.startedAt\)\.wx, undefined, null, \{ hides: s\.data\.hides \}\);\s*else plumeStop\(\);/,
+  assert.match(reveal, /if \(run\.revealed\) plumeStart\(null, windAt\(s, run\.startedAt\)\.wx, undefined, null, \{ hides: s\.data\.hides, distract: s\.data\.distractors, ice: isVeh \}\);\s*else plumeStop\(\);/,
     'a blind handler sees no cloud until Show hides, as with a trail');
 });
 
@@ -812,7 +816,7 @@ t('a replay shows the air as it was, and a search can be replayed', () => {
      before the replay set its own: a run from yesterday lost every parcel.
      A search has no trail, and reading its first point threw. */
   const start = bodyOf('plumeStart');
-  assert.match(start, /function plumeStart\(trail, wx, T, contamination = null, \{ at = null, since = at, hides = null \} = \{\}\)/);
+  assert.match(start, /function plumeStart\(trail, wx, T, contamination = null, \{ at = null, since = at, hides = null, distract = null, ice = false \} = \{\}\)/);
   assert.ok(start.indexOf('plume.clock = at;') > 0 && start.indexOf('plume.clock = at;') < start.indexOf('plumeFrame();'),
     'the clock is set before the first frame prunes');
   assert.ok(start.indexOf('plume.clock = at;') < start.indexOf('if (!settings.plume'), 'and on every start, so none leaks');
@@ -830,8 +834,8 @@ t('a replay shows the air as it was, and a search can be replayed', () => {
   assert.doesNotMatch(open + ground, /plume\.clock =/, 'the clock is plumeStart’s to set');
   const hide = ground.indexOf("if (targetById(s.targetId).kind === 'hide') {");
   assert.ok(hide > 0 && hide < ground.indexOf('s.data.trail[0]'), 'a search never reads a trail it does not have');
-  assert.match(ground.slice(hide), /^[^}]*setSrc\('hides', pointsOf\(s\.data\.hides \|\| \[\]\)\);/, 'it shows the hides');
-  assert.match(ground.slice(hide), /^[^}]*const w0 = windAt\(s, replay\.at\)\.wx;\s*if \(w0 && s\.data\.hides\?\.length\) plumeStart\(null, w0, plume\.T, null,\s*\{ at: replay\.at, since: replay\.from, hides: s\.data\.hides \}\)/,
+  assert.match(ground.slice(hide), /^[^}]*setSrc\('hides', isVeh \? EMPTY : pointsOf\(s\.data\.hides \|\| \[\]\)\);/, 'it shows the hides (a vehicle search, its odours in their own colours)');
+  assert.match(ground.slice(hide), /^[^}]*const w0 = windAt\(s, replay\.at\)\.wx;\s*if \(w0 && s\.data\.hides\?\.length\) plumeStart\(null, w0, plume\.T, null,\s*\{ at: replay\.at, since: replay\.from, hides: s\.data\.hides, distract: s\.data\.distractors, ice: isVeh \}\)/,
     'and their cloud, on the replay’s clock, in the wind of that moment');
   /* Framed into the map the replay's own sheet leaves showing, and only once
      that sheet has been painted and has the height it keeps. */
