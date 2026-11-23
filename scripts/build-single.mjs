@@ -36,7 +36,7 @@ const MODULES = ['native', 'params', 'geo', 'colours', 'mvt', 'ground', 'debrief
   'pixel/core', 'pixel/ramps', 'pixel/lands', 'pixel/paint', 'pixel/terrain', 'pixel/dog', 'pixel/human', 'pixel/props', 'pixel/rope', 'pixel/states', 'pixel/moments', 'pixel/stones', 'pixel/layout',
   'pixel/scenery', 'pixel/tracks', 'pixel/landmarks', 'pixel/scene', 'pixel/ground', 'pixel/board-art', 'pixel/close', 'pixel/fx', 'pixel/ambient', 'pixel/team', 'pixel/player',
   'pixel-team', 'board',
-  'sheet'];
+  'sheet', 'setup-dial'];
 
 /** Inline-script safety: a literal "</script>" inside JS would end the tag.
     The escape is invisible at runtime (identical string value). */
@@ -159,6 +159,12 @@ for (const [local, cdn] of Object.entries(CDN)) {
   html = html.replace(`"${local}"`, () => `"${cdn}"`);
   if (html === before) throw new Error(`index.html no longer loads ${local}: update CDN in build-single.mjs`);
 }
+
+/* Not folded in: the set-up dial's holograms. holo.js and three.js load with import()
+   only when the dial opens, and file:// refuses that, so this copy's dial shows names
+   in the orb instead (setup-dial.js falls back by itself). */
+const LAZY = ['holo.js', 'vendor/three-0.187.0/three.module.js', 'vendor/three-0.187.0/three.core.js'];
+if (LAZY.some(f => html.includes(f))) throw new Error('index.html now loads a hologram file directly: fold it in or keep it lazy');
 
 html = html.replace(/<script src="vendor\/qrcode\.js"><\/script>/, () => `<script>\n${safe(pub('vendor/qrcode.js'))}\n</script>`);
 html = html.replace(/<script src="vendor\/jsQR\.js"><\/script>/, () => `<script>\n${safe(pub('vendor/jsQR.js'))}\n</script>`);

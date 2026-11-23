@@ -58,5 +58,24 @@
         "sourceSha256": "aaadf57dc500df7207a3df83aadd8fb3e08a6c96fe3724a539ce63a19ace8220"
       }
     }
+  },
+  "three@0.187.0": {
+    "tarball": "https://registry.npmjs.org/three/-/three-0.187.0.tgz",
+    "integrity": "sha512-Qiu7R+Cmh8CstZsY1uJOSWnVlfo7ZtNLV7mF8Jltk3LB3AtDu9cRZlcnRKkAk8Y4z6KKw35z7Y7Urd7jWY8etA==",
+    "licence": "MIT (LICENSE)",
+    "files": {
+      "three.module.js": {
+        "sha256": "104f56145899722094556490d787aae0617cc2fc3382f31df02d724ea1aee341",
+        "bytes": 658900
+      },
+      "three.core.js": {
+        "sha256": "613e370f76638fdef83926642bf256dc9615684922de1ce1f63a8583e5d78578",
+        "bytes": 1474799
+      },
+      "LICENSE": {
+        "sha256": "8b378ebe60e2fe500158cb0ac71cb5e8b7d92953c2abcc63a0eb90499653b5bc",
+        "bytes": 1081
+      }
+    }
   }
 }

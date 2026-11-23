@@ -46,6 +46,12 @@ export const PACKAGES = [
     integrity: 'sha512-/JVja0IDO8zPETGv4TvvBwo7RwcQFz+RQ3JBETNtUSeqsDdI9G7fhRTkCy1sPKnLzW0xpm/kL8GOj6ncndTT3g==',
     files: { 'firebase-app.js': 'firebase-app.js', 'firebase-auth.js': 'firebase-auth.js', 'firebase-firestore.js': 'firebase-firestore.js' },
   },
+  {
+    /* The set-up dial's holograms: drawn with three.js, loaded only when the dial opens. */
+    name: 'three', version: '0.187.0', licence: 'MIT (LICENSE)',
+    integrity: 'sha512-Qiu7R+Cmh8CstZsY1uJOSWnVlfo7ZtNLV7mF8Jltk3LB3AtDu9cRZlcnRKkAk8Y4z6KKw35z7Y7Urd7jWY8etA==',
+    files: { 'build/three.module.js': 'three.module.js', 'build/three.core.js': 'three.core.js', 'LICENSE': 'LICENSE' },
+  },
 ];
 
 const GSTATIC_APP = (v) => `from"https://www.gstatic.com/firebasejs/${v}/firebase-app.js"`;
