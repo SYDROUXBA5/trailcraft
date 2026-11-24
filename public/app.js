@@ -1897,16 +1897,27 @@ function paintHomeOrb() {
       .then(h => (homeHolo.h = h)).catch(() => null);
   }
   homeHolo.p.then(h => { if (h) { h.show(homeHolo.kind); homeOrbRun(); } });
+  paintHomeAir();
   if (!homeHolo.watching && setupDialEl()) {
     homeHolo.watching = true;
     new MutationObserver(homeOrbRun).observe(setupDialEl(), { attributes: true, attributeFilter: ['hidden'] });
     document.addEventListener('visibilitychange', homeOrbRun);
   }
 }
+/* And behind it, in the dark theme: scent on a slow wind meeting the orb (home-scent.js), on the same terms. */
+const homeAir = { a: null, p: null };
+const darkTheme = () => document.documentElement.dataset.theme === 'dark';
+function paintHomeAir() {
+  if (homeAir.p || !darkTheme() || !$('homeAir')) return;
+  homeAir.p = import('./home-scent.js').then(m => m.createHomeAir($('homeAir'), $('homeOrb')))
+    .then(a => { homeAir.a = a; homeOrbRun(); }).catch(() => null);   // no background is fine
+}
 function homeOrbRun() {
+  const on = currentScreen === 'scrHome' && setupDialEl()?.hidden !== false && !document.hidden;
+  if (homeAir.a) { if (on && darkTheme()) homeAir.a.start(); else homeAir.a.stop(); }
   const h = homeHolo.h;
   if (!h) return;
-  if (currentScreen === 'scrHome' && setupDialEl()?.hidden !== false && !document.hidden) h.start(); else h.stop();
+  if (on) h.start(); else h.stop();
 }
 function toggleHomeSetup() {
   homeSetupOpen = !homeSetupOpen;
