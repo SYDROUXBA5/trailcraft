@@ -57,12 +57,12 @@ const fromB64 = (s, T) => { const b = atob(s), u = new Uint8Array(b.length); for
 const meshOf = (j) => { const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.BufferAttribute(fromB64(j.pos, Float32Array), 3)); g.setAttribute('normal', new THREE.BufferAttribute(fromB64(j.nor, Float32Array), 3));
   g.setIndex(new THREE.BufferAttribute(fromB64(j.idx, j.u32 ? Uint32Array : Uint16Array), 1)); return g; };
-/* Stand it on the ring, its largest side (or its height) = size. */
+/* Its largest side (or its height) = size, its middle on the middle of the orb; the ring goes under it (show). */
 const fit = (obj, size, axis = 'y') => {
   const b = new THREE.Box3().setFromObject(obj), s = new THREE.Vector3(); b.getSize(s);
   obj.scale.multiplyScalar(size / (axis === 'max' ? Math.max(s.x, s.y, s.z) : s[axis]));
   const b2 = new THREE.Box3().setFromObject(obj), c = new THREE.Vector3(); b2.getCenter(c);
-  obj.position.x -= c.x; obj.position.z -= c.z; obj.position.y += -1.02 - b2.min.y; return obj;
+  obj.position.x -= c.x; obj.position.z -= c.z; obj.position.y -= c.y; return obj;
 };
 const lit = (geos, base) => { const g = new THREE.Group(), mats = [];
   for (const geo of geos) { const m = lightMat(ICE, base); mats.push(m); g.add(geo.isObject3D ? (geo.material = m, geo) : new THREE.Mesh(geo, m)); }
@@ -94,7 +94,7 @@ const molecule = (m) => {
   if (rods.length) { const bm = solidMat('#8FDCEB'); mats.push(bm);
     const ib = new THREE.InstancedMesh(new THREE.CylinderGeometry(1, 1, 1, 14), bm, rods.length), M = new THREE.Matrix4();
     rods.forEach((r, n) => { M.compose(r.pos, r.q, new THREE.Vector3(r.r, r.len, r.r)); ib.setMatrixAt(n, M); }); g.add(ib); }
-  g.position.y = .25; g.userData.mats = mats; g.userData.mol = true; return g;
+  g.position.y = 0; g.userData.mats = mats; g.userData.mol = true; return g;          // on the middle of the orb
 };
 
 /** A hologram in `host` (a square `size` px). show(kind): 'person', 'vehicle',
@@ -107,14 +107,15 @@ export async function createHolo(host, size) {
   renderer.setPixelRatio(Math.min(2, devicePixelRatio || 1)); renderer.setSize(size, size); renderer.setClearColor(0x000000, 0);
   host.appendChild(renderer.domElement);
   const scene = new THREE.Scene(), camera = new THREE.PerspectiveCamera(30, 1, .1, 50);
-  camera.position.set(0, .22, 5.8); camera.lookAt(0, .06, 0);
+  /* Far enough back that a molecule turning, or a vehicle spinning, stays inside the circle. */
+  camera.position.set(0, .3, 6.3); camera.lookAt(0, 0, 0);
   const ring = new THREE.Mesh(new THREE.RingGeometry(.69, .74, 96), new THREE.MeshBasicMaterial({ color: ICE, transparent: true, opacity: .8, blending: THREE.AdditiveBlending, side: THREE.DoubleSide }));
   ring.rotation.x = -Math.PI / 2; ring.position.y = -1.08; scene.add(ring);
   const stage = new THREE.Group(); scene.add(stage);
   const personGeo = meshOf(person), pickupGeo = meshOf(pickup);
   const make = (kind) => {
     if (kind === 'person') return fit(lit([personGeo], .17), 2.15);
-    if (kind === 'vehicle') return fit(lit([pickupGeo], .19), 2.9, 'max');
+    if (kind === 'vehicle') return fit(lit([pickupGeo], .19), 2.5, 'max');
     if (kind?.startsWith('mol:')) { const m = mols[kind.slice(4)]; return m ? molecule(m) : null; }
     if (['narcotics', 'explosives', 'firearms', 'article', 'sport', 'other'].includes(kind)) return fit(lit(prim(kind), .2), 1.9, 'max');
     return null;
@@ -142,6 +143,7 @@ export async function createHolo(host, size) {
       const obj = make(kind); if (!obj) { draw(); return; }
       const b = new THREE.Box3().setFromObject(obj);
       setU(obj, 'uMinY', b.min.y); setU(obj, 'uMaxY', b.max.y); setU(obj, 'uReveal', 0); stage.add(obj); cur = obj;
+      ring.position.y = obj.userData.mol ? -1.45 : b.min.y - .06;              // under its feet; a molecule floats over it
       await tween(650, k => setU(obj, 'uReveal', 1 - (1 - k) ** 3));
       if (!run) draw();
     },
