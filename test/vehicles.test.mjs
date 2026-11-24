@@ -25,7 +25,8 @@ t('five kinds, each with its model, its picture and real proportions', () => {
     assert.ok(v.L > v.W && v.W > 1.5 && v.H > 1, v.id);
     assert.ok(v.front > 0 && v.rear < 0 && v.front < v.L / 2 && -v.rear < v.L / 2, `${v.id} axles under the body`);
   }
-  assert.equal(modelOf('pickup'), 'models/pickup.glb');
+  assert.equal(modelOf('pickup'), 'models/pickup-paint.glb');
+  assert.equal(modelOf('pickup', 'glass'), 'models/pickup-glass.glb', 'its windows, tyres and trim apart, never tinted');
   assert.equal(cardOf('van'), 'img/vehicles/van.webp');
   assert.equal(vehicleById('nonsense').id, 'car');
 });

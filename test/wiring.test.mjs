@@ -765,6 +765,11 @@ t('a vehicle search places a vehicle, keeps its odour on it, and saves both', ()
   assert.match(bodyOf('placeVehicleHide'), /veh\.setT = veh\.setT \?\? rec\.hides\[0\]\?\.t \?\? Date\.now\(\);\s*const \{ targets, distractors \} = odourHides\(rec\.vehicles, veh\.setT\);\s*rec\.hides = targets; rec\.distractors = distractors;/,
     'the odours on the vehicles: the targets are the hides, the distractors kept beside them, all keeping the time they went in');
   assert.match(bodyOf('placeVehicleAt'), /if \(!was\) \{ rec\.vehicles\.push\(v\); veh\.adding = false; \}/, 'Add vehicle stands another, numbered');
+  assert.match(bodyOf('placeVehicleAt'), /const v = was \|\| \{ n: rec\.vehicles\.length \+ 1, odours: \[\] \};/, 'every vehicle starts blank: no target put in the first');
+  assert.match(bodyOf('addOverlays'), /if \(srcData\.vehicle\?\.features\?\.length && vehDrawn\.length\) drawVehicles\(vehDrawn\);/,
+    'a new map style draws the vehicles again, on the set-up, the run and the replay');
+  assert.match(js, /add\(\{ id: 'veh-glass', type: 'model', source: 'vehicle', layout: \{ 'model-id': \['get', 'mg'\] \}/, 'glass, tyres and trim a model of their own, never tinted');
+  assert.doesNotMatch(html, /data-veh-place="park"/, 'no Car park choice');
   assert.match(bodyOf('onVehicleTap'), /const hit = !veh\.adding && vehicleAt\(rec\.vehicles, tap, 0\.4\);\s*if \(hit && hit !== rec\.vehicle\) return selectVehicle\(hit\);/, 'a tap on another vehicle chooses it');
   assert.match(bodyOf('vehicleData'), /vehicles, distractors: \(rec\.distractors \|\| \[\]\)\.map\(h => \(\{ \.\.\.h \}\)\),/, 'every vehicle and distractor saved');
   assert.match(js, /\{ hides: rec\.hides, weather: null, \.\.\.\(rec\.vehicle \? vehicleData\(\) : \{\}\) \}/, 'saved with the search');

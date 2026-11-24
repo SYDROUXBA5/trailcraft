@@ -52,7 +52,8 @@ export const colourById = (id) => COLOURS.find(c => c.id === id) ?? null;
 export const vehicleName = (v) => { const c = colourById(v?.colour), l = vehicleById(v?.type).label;
   return c ? `${c.label} ${l === l.toUpperCase() ? l : l.toLowerCase()}` : l; };          // "Blue SUV", "Red pickup"
 /** The 3D model and the two pictures made for each kind (Blender, 2026-11-22). */
-export const modelOf = (id) => `models/${vehicleById(id).id}.glb`;
+/** Each kind is two models (tools/split_glass.py): its paint, which takes a colour, and its glass, tyres and trim, always black. */
+export const modelOf = (id, part = 'paint') => `models/${vehicleById(id).id}-${part === 'glass' ? 'glass' : 'paint'}.glb`;
 export const cardOf = (id) => `img/vehicles/${vehicleById(id).id}.webp`;
 
 /* Where on a vehicle an odour can sit. u is forward of the middle, v is to

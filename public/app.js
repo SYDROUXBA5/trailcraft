@@ -891,10 +891,13 @@ function addOverlays() {
         paint: { 'line-color': '#007BFF', 'line-width': 2.2 } });
   add({ id: 'veh-body', type: 'fill', source: 'vehBody', paint: { 'fill-color': '#F2F4F7', 'fill-outline-color': '#0B1630' } });
   if (typeof map.addModel === 'function') {
-    add({ id: 'veh-model', type: 'model', source: 'vehicle',
+    /* Each vehicle is two models (vehicles.js modelOf): its paint, which a colour given to it is laid on in
+       full (none, and it keeps the model's own), and its glass, tyres and trim, always black and never tinted. */
+    add({ id: 'veh-model', type: 'model', source: 'vehicle', layout: { 'model-id': ['get', 'm'] },
           paint: { 'model-scale': [1, 1, 1], 'model-type': 'common-3d', 'model-cast-shadows': true, 'model-receive-shadows': true,
-                   /* A colour given to a vehicle is laid on in full; none, and it keeps the model's own. */
                    'model-color': ['to-color', ['get', 'c']], 'model-color-mix-intensity': ['get', 'ci'] } });
+    add({ id: 'veh-glass', type: 'model', source: 'vehicle', layout: { 'model-id': ['get', 'mg'] },
+          paint: { 'model-scale': [1, 1, 1], 'model-type': 'common-3d', 'model-cast-shadows': true, 'model-receive-shadows': true } });
   }
   /* Several vehicles: each one's number over it (held the same on screen however the map is tilted), and the odours on them, the target in ice, distractors in amber. */
   add({ id: 'veh-num-bg', type: 'circle', source: 'vehNums',
@@ -910,7 +913,10 @@ function addOverlays() {
   add({ id: 'veh-odour-names', type: 'symbol', source: 'vehOdours',
         layout: { 'text-field': ['get', 'name'], 'text-size': 14, 'text-offset': [0, 0.9], 'text-anchor': 'top', 'text-allow-overlap': true },
         paint: { 'text-color': ['match', ['get', 'k'], 'd', AMBER, ICE], 'text-halo-color': '#0B0F14', 'text-halo-width': 2.4, 'text-occlusion-opacity': 1 } });
-  if (rec.vehicle) paintVehicle();          // a new map style drops the model's settings
+  /* A new map style drops the models and how each one is turned: the vehicles drawn are drawn again,
+     on the set-up, the run and the replay alike. */
+  if (srcData.vehicle?.features?.length && vehDrawn.length) drawVehicles(vehDrawn);
+  if (rec.vehicle && vehicleLay()) paintVehicle();
   add({ id: 'hide-dots', type: 'circle', source: 'hides',
         paint: { 'circle-radius': 9, 'circle-color': '#C99A2E',
                  'circle-stroke-width': 2.5, 'circle-stroke-color': '#FFFFFF' } });
@@ -1283,7 +1289,8 @@ const contamGlows = new Map();
 function contamGlow(ci) {
   let g = contamGlows.get(ci);
   if (!g) { g = makeScentGlow(map, { id: `contam-glow-${ci}`, palette: paletteFrom(CONTAM_COLOURS[ci % CONTAM_COLOURS.length]) }); contamGlows.set(ci, g); }
-  if (map && !map.getLayer(g.layer.id)) {                       // just above the trail's glow, under what is drawn over it
+  /* Not while a new map style is still loading: it cannot be asked for its layers yet (style.load comes next). */
+  if (map?.isStyleLoaded?.() && !map.getLayer(g.layer.id)) {    // just above the trail's glow, under what is drawn over it
     const L = map.getStyle()?.layers || [], i = L.findIndex(l => l.id === 'scent-engine-glow');
     map.addLayer(g.layer, i >= 0 && L[i + 1] ? L[i + 1].id : undefined);
   }
@@ -1301,12 +1308,13 @@ function sideGlow(key) {
       ? { dark: '#004E5C', hex: ICE, light: '#CFFBFF' } : { dark: '#6B2600', hex: '#FF8A12', light: '#FFB54A' }) });
     sideGlows.set(key, g);
   }
-  if (map && !map.getLayer(g.layer.id)) {
+  if (!map?.isStyleLoaded?.()) return g;                         // a new map style still loading: next frame
+  if (!map.getLayer(g.layer.id)) {
     const L = map.getStyle()?.layers || [], i = L.findIndex(l => l.id === 'scent-engine-glow');
     map.addLayer(g.layer, i >= 0 && L[i + 1] ? L[i + 1].id : undefined);
     g.lifted = false;
   }
-  if (map && !g.lifted) {                 // the vehicles' numbers and odour dots stay readable over the light
+  if (!g.lifted) {                 // the vehicles' numbers and odour dots stay readable over the light
     for (const id of ['veh-odours', 'veh-odour-names', 'veh-num-bg', 'veh-num']) if (map.getLayer(id)) map.moveLayer(id);
     g.lifted = true;
   }
@@ -2239,7 +2247,7 @@ function placeVehicleAt(tap, type = rec.vehicle?.type ?? vehicleById(db.kv.get('
   /* Turned by hand: the same turn on the new spot or the new kind. A new
      vehicle starts square; the first one carries the target to begin with. */
   const was = add ? null : rec.vehicle, turn = was?.turn ?? 0;
-  const v = was || { n: rec.vehicles.length + 1, odours: rec.vehicles.length ? [] : [{ kind: 'target', name: S.odour || null, spot: null }] };
+  const v = was || { n: rec.vehicles.length + 1, odours: [] };          // every vehicle starts blank, in any order
   Object.assign(v, { type, lat: at.lat, lon: at.lon, heading: Math.round((((at.heading + turn) % 360) + 360) % 360 * 10) / 10,
     turn, place: at.place, road: at.road ?? null, carries: S.carries, _tap: tap });
   for (const o of v.odours) o.spot = o.spot ?? `fw${driverSide(v.lat, v.lon)}`;
@@ -2279,21 +2287,22 @@ function paintVehicle(v = rec.vehicle) {
 }
 /** The vehicles on the map: the 3D models where the map can draw them, else
     their outlines. With more than one, each has its number over it. */
+let vehDrawn = [];
 function drawVehicles(list) {
-  list = (list || []).filter(Boolean).map((v, i) => ({ ...v, n: v.n ?? i + 1 }));
+  list = vehDrawn = (list || []).filter(Boolean).map((v, i) => ({ ...v, n: v.n ?? i + 1 }));
   const pts = { type: 'FeatureCollection', features: list.map(v => ({ type: 'Feature',
-    properties: { n: v.n, m: `veh-${vehicleById(v.type).id}`, c: colourById(v.colour)?.hex ?? '#FFFFFF', ci: colourById(v.colour) ? 1 : 0 },
+    properties: { n: v.n, m: `veh-${vehicleById(v.type).id}-paint`, mg: `veh-${vehicleById(v.type).id}-glass`,
+      c: colourById(v.colour)?.hex ?? '#FFFFFF', ci: colourById(v.colour) ? 1 : 0 },
     geometry: { type: 'Point', coordinates: [v.lon, v.lat] } })) };
   setSrc('vehNums', list.length > 1 ? pts : EMPTY);
   if (map?.getLayer('veh-model') && list.length) {
-    for (const v of list) {
-      const id = `veh-${vehicleById(v.type).id}`;
-      try { if (!map.hasModel?.(id)) map.addModel(id, new URL(vehicleModel(v.type), location.href).href); } catch { /* drawn once it loads */ }
+    for (const v of list) for (const part of ['paint', 'glass']) {
+      const id = `veh-${vehicleById(v.type).id}-${part}`;
+      try { if (!map.hasModel?.(id)) map.addModel(id, new URL(vehicleModel(v.type, part), location.href).href); } catch { /* drawn once it loads */ }
     }
-    map.setLayoutProperty('veh-model', 'model-id', ['get', 'm']);
-    /* The models face +x; the map turns them from east, clockwise. Each its own way. */
-    map.setPaintProperty('veh-model', 'model-rotation', ['match', ['get', 'n'],
-      ...list.flatMap(v => [v.n, ['literal', [0, 0, (v.heading - 90 + 360) % 360]]]), ['literal', [0, 0, 0]]]);
+    /* The models face +x; the map turns them from east, clockwise. Each its own way, paint and glass together. */
+    const turn = ['match', ['get', 'n'], ...list.flatMap(v => [v.n, ['literal', [0, 0, (v.heading - 90 + 360) % 360]]]), ['literal', [0, 0, 0]]];
+    for (const id of ['veh-model', 'veh-glass']) if (map.getLayer(id)) map.setPaintProperty(id, 'model-rotation', turn);
     setSrc('vehicle', pts);
     setSrc('vehBody', EMPTY);
   } else {
@@ -2335,7 +2344,7 @@ function paintVehOdour() {
   /* The picture in the vehicle's colour: the colour multiplied into the paint, inside the picture's own outline. */
   const paint = colourById(v.colour), tint = $('vehPickTint');
   tint.hidden = !paint;
-  if (paint) { tint.style.background = paint.hex; tint.style.webkitMaskImage = tint.style.maskImage = `url(${$('vehPickImg').src})`; }
+  if (paint) { tint.style.background = paint.hex; tint.style.webkitMaskImage = tint.style.maskImage = `url(img/vehicles/${spec.id}-paint.png)`; }
   const cur = curOdour(v);
   $('vehPickSpots').innerHTML = (v.odours || []).map(o => {
     const s = spotOf({ ...v, ...o });
@@ -2589,6 +2598,13 @@ function vehGo(step) {
   const i = Math.max(0, Math.min(VEH_STAGES.length - 1, VEH_STAGES.indexOf(veh.stage) + step));
   vehPlay(false);
   veh.stage = VEH_STAGES[i];
+  /* One vehicle and nothing in it yet: the target goes in by itself, on the usual spot. With several, none
+     is chosen for you: any can be blank, and the target goes where it is put. */
+  if (veh.stage === 'odour' && rec.vehicles.length === 1 && !rec.vehicles[0].odours.length) {
+    const v = rec.vehicles[0];
+    v.odours.push({ kind: 'target', name: S.odour || null, spot: `fw${driverSide(v.lat, v.lon)}` });
+    placeVehicleHide();
+  }
   if (['time', 'start'].includes(veh.stage)) vehPreview();
   else if (plume.sim && plume.clock != null) { plume.clock = null; plumeFrame(); }
   paintVehicle();
