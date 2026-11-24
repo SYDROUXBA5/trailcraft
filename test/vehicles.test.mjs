@@ -4,7 +4,9 @@ import assert from 'node:assert/strict';
 import { VEHICLES, vehicleById, spotsOf, spotWorld, footprint, keepsLeft, driverSide, roadsOf, parksOf,
   snapToVerge, parkAt, vergeLines, parkAreas, toLocal, fromLocal, VERGE_GAP, SNAP_MAX, modelOf, cardOf, scentAlong, indicationOn, describeSpot,
   DISTRACTORS, fromBody, vehicleAt, odourHides, gradeVehicles, COLOURS, colourById, vehicleName } from '../public/vehicles.js';
-import { ScentSim, poolRadius, hidePoolRadius, HIDE_POOL } from '../public/sim.js';
+import { ScentSim, poolRadius, hidePoolRadius, HIDE_POOL, VEHICLE_SPREAD } from '../public/sim.js';
+import { stability, FLAT } from '../public/field.js';
+import { dist } from '../public/geo.js';
 
 let pass = 0;
 const t = (name, fn) => { fn(); pass++; console.log(`  ok  ${name}`); };
@@ -228,6 +230,21 @@ t('a vehicle can be given a colour, and is then called by it', () => {
   assert.equal(vehicleName({ type: 'suv', colour: 'blue' }), 'Blue SUV', 'an SUV stays an SUV');
   const g = gradeVehicles([], [], [{ ...row[1], colour: 'blue' }]);
   assert.equal(g.rows[0].colour, 'blue', 'the replay rows know the colour');
+});
+
+t('a vehicle search\'s odour spreads at half the pace: half the clock, half the carry', () => {
+  assert.equal(VEHICLE_SPREAD, 0.5);
+  const wx = { temp: 15, soil_temp: 14, wind_speed: 3, wind_gusts: 3, wind_direction: 270 }, st = stability(14, 15);
+  const T0 = 0, at = T0 + 20 * 60e3;
+  const reach = (sim) => { sim.advance(FLAT, wx, st, at); const live = sim.pool.filter(p => p.str > 0);
+    return { n: live.length, far: Math.max(...live.map(p => dist(p, TX))), wide: Math.max(...live.map(p => dist({ lat: p.hlat, lon: p.hlon }, TX))) }; };
+  const full = reach(new ScentSim().seedHides([{ ...TX, t: T0 }]));
+  const half = reach(new ScentSim({ spread: 0.5 }).seedHides([{ ...TX, t: T0 }]));
+  assert.ok(half.far < full.far * 0.6, `carried half as far: ${half.far.toFixed(1)} vs ${full.far.toFixed(1)} m`);
+  assert.ok(half.wide <= hidePoolRadius(10 * 60) + 0.01, `at 20 min the pool is the width of 10 min: ${half.wide.toFixed(2)} m`);
+  assert.ok(half.n < full.n, 'and fewer parcels have joined it yet');
+  const trail = new ScentSim({ spread: 0.5 }).seed([{ ...TX, t: T0 }, { ...fromLocal(TX, [5, 0]), t: 4000 }]);
+  assert.ok(trail.pool.every(p => !p.hide), 'a person at a trail end is not slowed: only a placed odour');
 });
 
 console.log(`\n${pass} vehicle tests passed`);

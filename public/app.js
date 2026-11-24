@@ -18,7 +18,7 @@ import { FLAT, buildTerrain, stability, regime, flowAt, normOf, rainRate, RAIN_S
          laidWind, cleanWindFelt, windTrusted, forecastAt, feltMoment, nearestPoint, windFeltFor, forecastSaid,
          windWords, feltPanel, FELT_POINTS, feltPicked, feltSame, sameFelt, feltOf, anchorFelt, feltWeather, makeWindFelt,
          seriesCovers } from './field.js';
-import { predictedOffsets, ScentSim, driftFrom, stepByFlow, flowBearing, hidePoolRadius, NOSE, AIRBORNE } from './sim.js';
+import { predictedOffsets, ScentSim, driftFrom, stepByFlow, flowBearing, hidePoolRadius, NOSE, AIRBORNE, VEHICLE_SPREAD } from './sim.js';
 import { PARAMS, DIALS, PV, setParam, resetParams, changed, isDefault, tally, dialById, PRESETS, applyPreset } from './params.js';
 import { encodeTrail, decodeTrail, cardUrl, cardFromText, walkedPlanFor, sameCard, encodeContam, isContamCard, TOO_TWISTY } from './card.js';
 import { CONTAM_COLOURS, colourIndex, contamColour, nextColour, contamStatus, contamWay, newContam, contamWalkFor,
@@ -2403,7 +2403,7 @@ function paintVehTime() {
   for (const b of $('vehWindMode').children) { b.setAttribute('aria-pressed', String((b.dataset.vehWind === 'felt') === !!felt)); b.disabled = !wx; }
   $('vehWheel').hidden = !felt;
   if (felt) paintWheel();
-  const across = 2 * hidePoolRadius(min * 60), reach = wx ? wx.wind_speed * NOSE * AIRBORNE : null;
+  const across = 2 * hidePoolRadius(min * 60 * VEHICLE_SPREAD), reach = wx ? wx.wind_speed * NOSE * AIRBORNE * VEHICLE_SPREAD : null;
   $('vehAgeSay').innerHTML = `Cloud round the vehicle about <b>${esc(fmtM(across))} across</b>`
     + (reach != null ? ` · carried about <b>${esc(fmtM(reach))}</b> downwind` : '')
     + '. A look ahead: the run uses the real time since the odour went in.';
@@ -2979,7 +2979,7 @@ function plumeStart(trail, wx, T, contamination = null, { at = null, since = at,
   plume.clock = at;
   plume.since = since;
   if (!settings.plume || !wx) return;
-  plume.sim = new ScentSim();
+  plume.sim = new ScentSim({ spread: ice ? VEHICLE_SPREAD : 1 });      // a vehicle search's odours spread at half the pace
   plume.contam = contamSim(contamination);
   plume.ice = !!ice;
   plume.distract = distractSim(distract);
@@ -3013,7 +3013,7 @@ function plumeStart(trail, wx, T, contamination = null, { at = null, since = at,
 /** A search's hides as the points the plume's ground is fetched round. */
 const hideGround = (hides) => hides.map(h => ({ lat: h.lat, lon: h.lon, t: h.t }));
 /** A vehicle search's distractors as their own cloud, drawn apart from the target's. */
-const distractSim = (list) => (list?.length ? new ScentSim().seedHides(list) : null);
+const distractSim = (list) => (list?.length ? new ScentSim({ spread: VEHICLE_SPREAD }).seedHides(list) : null);
 
 /** How finely the line is sampled for emission: a point every 3 m, and the
     whole thing re-walked a few times so the parcels at any one spot span the

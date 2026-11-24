@@ -83,6 +83,11 @@ export function poolRadius(dwellS) {
    too wide a minute after it went in. */
 export const HIDE_POOL = 0.4;
 export const hidePoolRadius = (dwellS) => poolRadius(dwellS) * HIDE_POOL;
+/* A vehicle search's odours spread at half the pace: the cloud widens and
+   thickens on half the clock, and each parcel is carried half as far.
+   CHOSEN, not measured: set 2026-11-23 after the scent round the vehicles
+   read as spreading too fast. A cloud asks for it with new ScentSim({ spread }). */
+export const VEHICLE_SPREAD = 0.5;
 
 /**
  * Where a scent particle released at `origin` ends up after `secs` airborne.
@@ -184,9 +189,10 @@ export class ScentSim {
      Contamination is someone who walked THROUGH: nobody stood at the end of
      a cross-track waiting to be found, and the pool drawn there was the
      hottest thing on the map, telling a handler they had. */
-  constructor({ pool = true } = {}) {
+  constructor({ pool = true, spread = 1 } = {}) {
     this.parts = []; this.trail = []; this.pool = []; this.walls = null; this.keep = 1; this.laid = 0;
     this.endPool = pool;
+    this.spread = spread;               // a placed odour's pace: its clock and its carry (VEHICLE_SPREAD)
   }
 
   /** Seed one particle set from a laid trail. Each keeps the point it came from
@@ -416,7 +422,8 @@ export class ScentSim {
     for (const s of this.pool) {
       const src = srcs[s.src];
       if (!src) { s.str = 0; continue; }
-      const dwellS = (now - src.t) / 1000;
+      const k = s.hide ? this.spread : 1;
+      const dwellS = (now - src.t) / 1000 * k;
       if (dwellS <= 0) { s.str = 0; continue; }
       const build = 1 - Math.exp(-dwellS / PBUILD);
       /* Not in the air yet: this parcel joins later in the wait. Park it back
@@ -436,7 +443,7 @@ export class ScentSim {
       const poolR = poolRadius(dwellS) * (hp ? WIDEN : 1) * (s.hide ? HIDE_POOL : 1);
       const g = project(src, s.ang, s.rad * poolR, home0);
       s.hlat = g.lat; s.hlon = g.lon;
-      driftFrom(T, g, s.phase * AIR * (s.life ?? 1) / mix * (hp ? CARRY : 1), wx, st, 5, WALLS, d);
+      driftFrom(T, g, s.phase * AIR * (s.life ?? 1) / mix * (hp ? CARRY : 1) * k, wx, st, 5, WALLS, d);
       s.lat = d.lat; s.lon = d.lon;
       // Up to ~1.5× a fresh trail particle — the hottest thing on the map.
       s.str = (PSB + PSR * build) * (1 - s.phase * PFADE) * (hp ? GIVE : 1);
