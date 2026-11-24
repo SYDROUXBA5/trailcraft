@@ -1,18 +1,151 @@
-/* Holograms for the set-up dial (Rémi, 23 Nov 2026): the thing searched for and
-   the vehicle drawn in ice light (a fresnel rim, scan lines, a slight flicker),
-   and every training aid as its own molecule, solid and shaded so its shape
-   reads. People and dogs are never drawn: the dial shows their names.
+/* Holograms for the set-up dial (Rémi, 23–24 Nov 2026).
 
-   Loaded only when the dial opens — import('./holo.js') — so the app starts as
-   fast as before; three.js is vendored at a pinned version. The meshes and the
-   molecules are small JSON files made from scans and from each odour's SMILES
-   (trailcraft-vehicle-search/tools/holo_geometry.py and make_odour_molecules.py).
-   With Reduce Motion on, nothing spins, flickers or builds itself. */
+   What is searched for, drawn as a hologram: a realistic model (made with an AI
+   3D tool from a product photo, cleaned in Blender into an even quad mesh;
+   trailcraft-vehicle-search/tools/holo_import.py) shown as a fine wire of light
+   with its creases bright, a nearly clear glass body with scan contours, a band
+   of light sweeping up it, all softly blooming, standing on a projector base
+   (rings, ticks, turning arcs, a faint beam and motes rising in it). Every
+   training aid is its own molecule, solid and shaded so its shape reads. People
+   and dogs are never drawn: the dial shows their names.
+
+   Loaded only when the dial opens — import('./holo.js') — and each model only
+   the first time its answer comes up, so the app starts as fast as before;
+   three.js is vendored at a pinned version. With Reduce Motion on, nothing
+   spins, sweeps, rises or builds itself. */
 import * as THREE from './vendor/three-0.187.0/three.module.js';
 
 const ICE = new THREE.Color('#00E5FF');
 const still = () => matchMedia('(prefers-reduced-motion: reduce)').matches || document.documentElement.dataset.motion === 'off';   // the phone's setting, or the app's own
+const fromB64 = (s, T) => { const b = atob(s), u = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return new T(u.buffer); };
 
+/* kind: [file, size, 'max' (largest side) or 'y' (height), crease angle, contour spacing] */
+const MODELS = {
+  vehicle: ['holo/vehicle-2.json', 2.8, 'max', 70, 0.05], person: ['holo/person-1.json', 2.15, 'y', 50, 0.035],
+  narcotics: ['holo/narcotics-2.json', 1.9, 'max', 70, 0.05], explosives: ['holo/explosives-2.json', 1.9, 'max', 30, 0.05],
+  firearms: ['holo/firearms-2.json', 1.9, 'max', 70, 0.045], article: ['holo/article-2.json', 2.1, 'max', 70, 0.05],
+  sport: ['holo/sport-2.json', 1.9, 'max', 70, 0.05], other: ['holo/other-2.json', 1.5, 'max', 70, 0.05],
+};
+const CAM_D = 6.25;
+/* One set of dials for whatever hologram is up (only one is, at a time). */
+const H = { uRes: { value: new THREE.Vector2(512, 512) }, uScan: { value: -9 }, uTime: { value: 0 }, uNear: { value: CAM_D - 1.4 }, uFar: { value: CAM_D + 1.4 },
+  uFade: { value: 1 }, uCut: { value: 9 } };
+/* Light only adds to the colour and leaves alpha alone; the last pass makes alpha from how bright it is. */
+const ADD = { blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor,
+  blendEquationAlpha: THREE.AddEquation, blendSrcAlpha: THREE.ZeroFactor, blendDstAlpha: THREE.OneFactor };
+/* Lines take the brightest of themselves and what is under them, so a dense wire reads as a fine mesh, never a glare. */
+const MAX = { blending: THREE.CustomBlending, blendEquation: THREE.MaxEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor,
+  blendEquationAlpha: THREE.MaxEquation, blendSrcAlpha: THREE.ZeroFactor, blendDstAlpha: THREE.OneFactor };
+
+/* Lines of light: each edge a quad turned to face the screen, `width` px across, a white-hot core, an ice edge,
+   brightest at the front, faint where hidden. Quads face whichever way their edge runs: both sides drawn. */
+function fatLines(pairs, { width = 2.1, gain = 1, hidden = false, core = 1 } = {}) {
+  const p = pairs.attributes.position.array, n = p.length / 6;
+  const A = new Float32Array(n * 12), B = new Float32Array(n * 12), T = new Float32Array(n * 4), S = new Float32Array(n * 4), I = new Uint32Array(n * 6);
+  for (let i = 0; i < n; i++) for (let k = 0; k < 4; k++) {
+    const v = i * 4 + k;
+    for (let c = 0; c < 3; c++) { A[v * 3 + c] = p[i * 6 + c]; B[v * 3 + c] = p[i * 6 + 3 + c]; }
+    T[v] = k < 2 ? 0 : 1; S[v] = k % 2 ? 1 : -1;
+    if (k === 0) I.set([v, v + 1, v + 2, v + 2, v + 1, v + 3], i * 6);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(A, 3)); g.setAttribute('aB', new THREE.BufferAttribute(B, 3));
+  g.setAttribute('aT', new THREE.BufferAttribute(T, 1)); g.setAttribute('aS', new THREE.BufferAttribute(S, 1)); g.setIndex(new THREE.BufferAttribute(I, 1));
+  return new THREE.Mesh(g, new THREE.ShaderMaterial({ transparent: true, depthWrite: false, depthTest: !hidden, side: THREE.DoubleSide, ...MAX,
+    uniforms: { ...H, uWidth: { value: width }, uColor: { value: ICE }, uGain: { value: gain }, uCore: { value: core } },
+    vertexShader: `attribute vec3 aB; attribute float aT; attribute float aS; uniform vec2 uRes; uniform float uWidth, uScan, uNear, uFar;
+      varying float vS; varying float vFade; varying float vScan; varying float vY;
+      void main() {
+        vec4 wa = modelMatrix * vec4(position, 1.0), wb = modelMatrix * vec4(aB, 1.0);
+        vec4 ca = projectionMatrix * viewMatrix * wa, cb = projectionMatrix * viewMatrix * wb;
+        vec2 d = (cb.xy / cb.w - ca.xy / ca.w) * uRes; float L = length(d); vec2 dir = L > 1e-5 ? d / L : vec2(1.0, 0.0), nrm = vec2(-dir.y, dir.x);
+        vec4 c = aT < 0.5 ? ca : cb; vec4 w = aT < 0.5 ? wa : wb;
+        c.xy += (nrm * aS * uWidth + dir * (aT * 2.0 - 1.0) * uWidth * 0.6) / uRes * c.w;
+        vS = aS; vY = w.y; vFade = clamp((-(viewMatrix * w).z - uNear) / (uFar - uNear), 0.0, 1.0);
+        float q = (w.y - uScan) * 11.0; vScan = exp(-q * q); gl_Position = c; }`,
+    fragmentShader: `uniform vec3 uColor; uniform float uGain, uFade, uCut, uCore; varying float vS; varying float vFade; varying float vScan; varying float vY;
+      void main() { if (vY > uCut) discard;
+        float r = abs(vS), a = 1.0 - smoothstep(0.62, 1.0, r), core = 1.0 - smoothstep(0.15, 0.6, r);
+        float qc = (vY - uCut) * 14.0, edge = exp(-qc * qc);            /* the line being drawn, while it builds */
+        float k = mix(1.55, 0.38, vFade) + vScan * 1.6 + edge * 2.0;
+        vec3 c = mix(uColor, vec3(0.80, 1.0, 1.0), clamp(vScan + edge + (1.0 - vFade) * 0.35, 0.0, 1.0));
+        c = mix(c, vec3(1.0), core * (0.55 - 0.4 * vFade) * uCore);
+        gl_FragColor = vec4(c * k * a * uGain * uFade, 0.0); }` }));
+}
+
+/* The body: nearly clear, a fresnel rim, scan contours that glow in the band's wake, brighter where it passes. */
+const fill = (g, spacing) => new THREE.Mesh(g, new THREE.ShaderMaterial({ transparent: true, depthWrite: false, side: THREE.DoubleSide, ...ADD,
+  uniforms: { ...H, uC: { value: ICE }, uSp: { value: spacing } },
+  vertexShader: `varying vec3 vN; varying vec3 vV; varying vec3 vW;
+    void main() { vec4 w = modelMatrix * vec4(position, 1.0); vW = w.xyz; vN = normalize(mat3(modelMatrix) * normal); vV = normalize(cameraPosition - w.xyz);
+      gl_Position = projectionMatrix * viewMatrix * w; }`,
+  fragmentShader: `uniform vec3 uC; uniform float uSp, uScan, uFade, uCut; varying vec3 vN; varying vec3 vV; varying vec3 vW;
+    void main() { if (vW.y > uCut) discard;
+      float f = pow(1.0 - abs(dot(normalize(vN), vV)), 2.6);
+      float d = abs(fract(vW.y / uSp) - 0.5) * uSp, w = fwidth(vW.y); float line = 1.0 - smoothstep(w * 0.4, w * 1.6, uSp * 0.5 - d);
+      float qb = (vW.y - uScan) * 9.0, band = exp(-qb * qb), above = smoothstep(uScan + 0.02, uScan - 0.25, vW.y);
+      float trail = smoothstep(uScan - 0.55, uScan, vW.y) * above;
+      float k = 0.012 + 0.34 * f + line * (0.012 + 0.10 * f + 0.55 * trail) + band * 0.16;
+      gl_FragColor = vec4(uC * k * uFade, 0.0); }` }));
+
+/* The projector it stands on: rings, ticks, three turning arcs, a faint beam and motes rising in it. */
+function base() {
+  const grp = new THREE.Group(), mat = (op) => new THREE.ShaderMaterial({ transparent: true, depthWrite: false, side: THREE.DoubleSide, ...ADD,
+    uniforms: { ...H, uC: { value: ICE }, uOp: { value: op } }, vertexShader: `void main() { gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+    fragmentShader: `uniform vec3 uC; uniform float uOp, uFade; void main() { gl_FragColor = vec4(uC * uOp * uFade, 0.0); }` });
+  const flat = (geo, op, into = grp) => { const m = new THREE.Mesh(geo, mat(op)); m.rotation.x = -Math.PI / 2; into.add(m); return m; };
+  flat(new THREE.RingGeometry(1.0, 1.025, 128), 0.85); flat(new THREE.RingGeometry(0.80, 0.81, 128), 0.45); flat(new THREE.CircleGeometry(1.0, 96), 0.05);
+  const arcs = new THREE.Group(); grp.add(arcs);
+  for (let i = 0; i < 3; i++) flat(new THREE.RingGeometry(0.86, 0.905, 64, 1, i * 2.094, 1.25), 0.55, arcs);
+  const t = [];
+  for (let a = 0; a < 360; a += 6) { const big = a % 30 === 0, r0 = big ? 1.05 : 1.065, r1 = big ? 1.14 : 1.10, c = Math.cos(a * Math.PI / 180), s = Math.sin(a * Math.PI / 180);
+    t.push(r0 * c, 0, r0 * s, r1 * c, 0, r1 * s); }
+  const tg = new THREE.BufferGeometry(); tg.setAttribute('position', new THREE.Float32BufferAttribute(t, 3));
+  grp.add(fatLines(tg, { width: 1.3, gain: 0.7 }));
+  const beam = new THREE.Mesh(new THREE.CylinderGeometry(1.08, 0.99, 1, 96, 1, true), new THREE.ShaderMaterial({ transparent: true, depthWrite: false, side: THREE.DoubleSide, ...ADD,
+    uniforms: { ...H, uC: { value: ICE } }, vertexShader: `varying float vY; void main() { vY = uv.y; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+    fragmentShader: `uniform vec3 uC; uniform float uFade; varying float vY; void main() { float k = 1.0 - vY; gl_FragColor = vec4(uC * 0.11 * k * k * uFade, 0.0); }` }));
+  grp.add(beam);
+  const N = 70, P = new Float32Array(N * 3), seed = new Float32Array(N);
+  for (let i = 0; i < N; i++) { const r = Math.sqrt(Math.random()) * 0.95, a = Math.random() * 6.283; P[i * 3] = r * Math.cos(a); P[i * 3 + 2] = r * Math.sin(a); seed[i] = Math.random(); }
+  const pg = new THREE.BufferGeometry(); pg.setAttribute('position', new THREE.BufferAttribute(P, 3)); pg.setAttribute('aSeed', new THREE.BufferAttribute(seed, 1));
+  const uH = { value: 1 };
+  grp.add(new THREE.Points(pg, new THREE.ShaderMaterial({ transparent: true, depthWrite: false, ...ADD, uniforms: { ...H, uH, uC: { value: ICE } },
+    vertexShader: `attribute float aSeed; uniform float uTime, uH; varying float vA;
+      void main() { float k = fract(aSeed * 7.3 + uTime * (0.06 + 0.08 * aSeed)); vec3 p = position; p.y = k * uH;
+        vA = smoothstep(0.0, 0.12, k) * (1.0 - smoothstep(0.55, 1.0, k)); vec4 mv = modelViewMatrix * vec4(p, 1.0);
+        gl_PointSize = (2.0 + 2.5 * aSeed) * (6.25 / -mv.z); gl_Position = projectionMatrix * mv; }`,
+    fragmentShader: `uniform vec3 uC; uniform float uFade; varying float vA;
+      void main() { float a = smoothstep(0.5, 0.0, length(gl_PointCoord - 0.5)); gl_FragColor = vec4(mix(uC, vec3(1.0), 0.4) * a * vA * 0.9 * uFade, 0.0); }` })));
+  /* Stand it under something `h` tall. */
+  grp.userData = { arcs, fit(y0, h) { grp.position.y = y0; beam.scale.y = h + 0.25; beam.position.y = (h + 0.25) / 2; uH.value = h + 0.25; } };
+  return grp;
+}
+
+/* The model: its wire (when it has one) faint over the surface, its creases bright, its glass body, hidden lines faint. */
+function hologram(j, [, size, axis, angle, spacing], kind) {
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(fromB64(j.pos, Float32Array), 3)); g.setAttribute('normal', new THREE.BufferAttribute(fromB64(j.nor, Float32Array), 3));
+  g.setIndex(new THREE.BufferAttribute(fromB64(j.idx, j.u32 ? Uint32Array : Uint16Array), 1));
+  g.computeBoundingBox(); const s = new THREE.Vector3(); g.boundingBox.getSize(s);
+  const k = size / (axis === 'max' ? Math.max(s.x, s.y, s.z) : s[axis]); g.scale(k, k, k); g.computeBoundingBox();
+  const c = new THREE.Vector3(); g.boundingBox.getCenter(c); g.translate(-c.x, -c.y, -c.z); g.computeBoundingBox();
+  const grp = new THREE.Group(), edges = new THREE.EdgesGeometry(g, angle);
+  const depth = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ colorWrite: false, polygonOffset: true, polygonOffsetFactor: 2, polygonOffsetUnits: 2 }));
+  const body = fill(g, spacing), hid = fatLines(edges, { width: 1.1, gain: 0.16, hidden: true });
+  const lines = fatLines(edges, { width: kind === 'person' ? 1.3 : 2.1, gain: kind === 'person' ? 0.45 : 1.3 });
+  depth.renderOrder = 0; body.renderOrder = 1; hid.renderOrder = 2; lines.renderOrder = 3;
+  grp.add(depth, body, hid, lines);
+  if (j.wire) {
+    const w = new THREE.BufferGeometry(); w.setAttribute('position', g.attributes.position);
+    w.setIndex(new THREE.BufferAttribute(fromB64(j.wire, j.u32 ? Uint32Array : Uint16Array), 1));
+    const wire = fatLines(w.toNonIndexed(), { width: 1.0, gain: 0.36, core: 0.15 });      // a fine ice wire, no white core to glare wire.renderOrder = 3; grp.add(wire);
+  }
+  grp.userData = { min: g.boundingBox.min.y, max: g.boundingBox.max.y };
+  return grp;
+}
+
+/* Molecules: solid, lit and shaded, unchanged. They write alpha, so they stay solid over the orb. */
 const VS = `varying vec3 vN; varying vec3 vV; varying vec3 vW;
   void main() {
     #ifdef USE_INSTANCING
@@ -23,19 +156,7 @@ const VS = `varying vec3 vN; varying vec3 vV; varying vec3 vW;
       vN = normalize(normalMatrix * normal);
     #endif
     vW = w.xyz; vec4 mv = viewMatrix * w; vV = normalize(-mv.xyz); gl_Position = projectionMatrix * mv; }`;
-/* Light: see-through, brightest at the rim. */
-const FS = `uniform float uTime, uOpacity, uReveal, uMinY, uMaxY, uBase, uScan; uniform vec3 uColor;
-  varying vec3 vN; varying vec3 vV; varying vec3 vW;
-  void main() {
-    float cut = mix(uMinY - .05, uMaxY + .05, uReveal); if (vW.y > cut) discard;
-    float fr = pow(1.0 - abs(dot(normalize(vN), normalize(vV))), 2.0);
-    float scan = mix(1.0, .5 + .5 * step(.45, fract(vW.y * 24.0 - uTime * 1.3)), uScan);
-    float band = smoothstep(.14, .0, abs(vW.y - cut)) * (1.0 - step(.999, uReveal));
-    float flick = 1.0 - uScan * .07 * (1.0 - sin(uTime * 41.0) * sin(uTime * 17.0));
-    float a = ((uBase + fr * .95) * scan * flick + band * .45) * uOpacity;
-    gl_FragColor = vec4(uColor * (.55 + fr * 1.35) + vec3(.55, 1.0, 1.0) * band * .45, a); }`;
-/* Solid: lit and shaded, for molecules. */
-const MFS = `uniform float uTime, uOpacity, uReveal, uMinY, uMaxY, uBase, uScan; uniform vec3 uColor;
+const MFS = `uniform float uTime, uOpacity, uReveal, uMinY, uMaxY, uScan; uniform vec3 uColor;
   varying vec3 vN; varying vec3 vV; varying vec3 vW;
   void main() {
     float cut = mix(uMinY - .05, uMaxY + .05, uReveal); if (vW.y > cut) discard;
@@ -45,37 +166,10 @@ const MFS = `uniform float uTime, uOpacity, uReveal, uMinY, uMaxY, uBase, uScan;
     float scan = mix(1.0, .88 + .12 * step(.5, fract(vW.y * 26.0 - uTime * 1.3)), uScan);
     float band = smoothstep(.14, .0, abs(vW.y - cut)) * (1.0 - step(.999, uReveal));
     vec3 col = uColor * (.18 + .82 * diff) * scan + vec3(1.0) * spec * .55 + mix(uColor, vec3(1.0), .3) * fr * .75 + vec3(.6, 1.0, 1.0) * band * .6;
-    gl_FragColor = vec4(col, uOpacity); }`;
-const uniforms = (color, base) => ({ uTime: { value: 0 }, uOpacity: { value: 1 }, uReveal: { value: 1 }, uMinY: { value: -1 }, uMaxY: { value: 1 },
-  uBase: { value: base }, uScan: { value: still() ? 0 : 1 }, uColor: { value: new THREE.Color(color) } });
-const lightMat = (color = ICE, base = .17) => new THREE.ShaderMaterial({ uniforms: uniforms(color, base), vertexShader: VS, fragmentShader: FS,
-  transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide });
-const solidMat = (color) => new THREE.ShaderMaterial({ uniforms: uniforms(color, 0), vertexShader: VS, fragmentShader: MFS,
-  transparent: true, depthWrite: true, blending: THREE.NormalBlending });
-
-const fromB64 = (s, T) => { const b = atob(s), u = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return new T(u.buffer); };
-const meshOf = (j) => { const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.BufferAttribute(fromB64(j.pos, Float32Array), 3)); g.setAttribute('normal', new THREE.BufferAttribute(fromB64(j.nor, Float32Array), 3));
-  g.setIndex(new THREE.BufferAttribute(fromB64(j.idx, j.u32 ? Uint32Array : Uint16Array), 1)); return g; };
-/* Its largest side (or its height) = size, its middle on the middle of the orb; the ring goes under it (show). */
-const fit = (obj, size, axis = 'y') => {
-  const b = new THREE.Box3().setFromObject(obj), s = new THREE.Vector3(); b.getSize(s);
-  obj.scale.multiplyScalar(size / (axis === 'max' ? Math.max(s.x, s.y, s.z) : s[axis]));
-  const b2 = new THREE.Box3().setFromObject(obj), c = new THREE.Vector3(); b2.getCenter(c);
-  obj.position.x -= c.x; obj.position.z -= c.z; obj.position.y -= c.y; return obj;
-};
-const lit = (geos, base) => { const g = new THREE.Group(), mats = [];
-  for (const geo of geos) { const m = lightMat(ICE, base); mats.push(m); g.add(geo.isObject3D ? (geo.material = m, geo) : new THREE.Mesh(geo, m)); }
-  g.userData.mats = mats; return g; };
-const prim = (kind) => {
-  const M = (geo, x = 0, y = 0, z = 0, rz = 0) => { const m = new THREE.Mesh(geo); m.position.set(x, y, z); m.rotation.z = rz; return m; };
-  if (kind === 'narcotics') return [M(new THREE.CapsuleGeometry(.36, .9, 12, 32), -.15, .25, 0, .8), M(new THREE.CapsuleGeometry(.22, .5, 10, 24), .55, -.45, .2, -.5)];
-  if (kind === 'firearms') return [M(new THREE.CylinderGeometry(.28, .28, 1.2, 32)), M(new THREE.ConeGeometry(.26, .55, 32), 0, .87), M(new THREE.CylinderGeometry(.31, .31, .12, 32), 0, -.62)];
-  if (kind === 'explosives') return [-.36, 0, .36].map(x => M(new THREE.CylinderGeometry(.17, .17, 1.4, 24), x)).concat([M(new THREE.TorusGeometry(.62, .05, 10, 40), 0, .3, 0, Math.PI / 2)]);
-  if (kind === 'article') return [M(new THREE.BoxGeometry(1.4, .9, .9)), M(new THREE.TorusGeometry(.28, .05, 10, 30, Math.PI), 0, .45)];
-  if (kind === 'sport') { const d = M(new THREE.SphereGeometry(.55, 32, 24), 0, -.1); d.scale.y = 1.25; return [d, M(new THREE.ConeGeometry(.42, .7, 32), 0, .78)]; }
-  return [M(new THREE.IcosahedronGeometry(.8, 1))];
-};
+    gl_FragColor = vec4(col * uOpacity, uOpacity); }`;
+const solidMat = (color) => new THREE.ShaderMaterial({ vertexShader: VS, fragmentShader: MFS, transparent: true, depthWrite: true,
+  blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor,
+  uniforms: { uTime: { value: 0 }, uOpacity: { value: 1 }, uReveal: { value: 1 }, uMinY: { value: -1 }, uMaxY: { value: 1 }, uScan: { value: still() ? 0 : 1 }, uColor: { value: new THREE.Color(color) } } });
 const COL = { C: ['#18D8F2', .15], N: ['#3F7BFF', .17], O: ['#E6FDFF', .17], Cl: ['#7DFFC8', .2], K: ['#B794FF', .24], P: ['#FFC266', .2], S: ['#FFE066', .2] };
 const molecule = (m) => {
   const g = new THREE.Group(), P = m.atoms.map(a => new THREE.Vector3(...a.p)), rad = Math.max(.8, ...P.map(p => p.length())), k = 1.28 / rad, mats = [];
@@ -94,43 +188,64 @@ const molecule = (m) => {
   if (rods.length) { const bm = solidMat('#8FDCEB'); mats.push(bm);
     const ib = new THREE.InstancedMesh(new THREE.CylinderGeometry(1, 1, 1, 14), bm, rods.length), M = new THREE.Matrix4();
     rods.forEach((r, n) => { M.compose(r.pos, r.q, new THREE.Vector3(r.r, r.len, r.r)); ib.setMatrixAt(n, M); }); g.add(ib); }
-  g.position.y = 0; g.userData.mats = mats; g.userData.mol = true; return g;          // on the middle of the orb
+  g.userData = { mats, mol: true }; return g;
 };
+
+/* Bloom: the frame blurred twice at half size and twice at quarter size, added back over itself; alpha from brightness. */
+const QV = `varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`;
+const blurMat = new THREE.ShaderMaterial({ uniforms: { tSrc: { value: null }, uDir: { value: new THREE.Vector2() } }, vertexShader: QV,
+  fragmentShader: `uniform sampler2D tSrc; uniform vec2 uDir; varying vec2 vUv;
+    void main() { vec3 c = texture2D(tSrc, vUv).rgb * 0.2270;
+      c += (texture2D(tSrc, vUv + uDir * 1.3846).rgb + texture2D(tSrc, vUv - uDir * 1.3846).rgb) * 0.3162;
+      c += (texture2D(tSrc, vUv + uDir * 3.2308).rgb + texture2D(tSrc, vUv - uDir * 3.2308).rgb) * 0.0703; gl_FragColor = vec4(c, 1.0); }` });
+const mixMat = new THREE.ShaderMaterial({ uniforms: { tA: { value: null }, tB: { value: null }, tC: { value: null } }, vertexShader: QV,
+  fragmentShader: `uniform sampler2D tA, tB, tC; varying vec2 vUv;
+    void main() { vec4 s = texture2D(tA, vUv); vec3 c = s.rgb + texture2D(tB, vUv).rgb * 0.75 + texture2D(tC, vUv).rgb * 0.7;
+      c = min(c, vec3(1.0)); float a = max(s.a, max(c.r, max(c.g, c.b)));
+      gl_FragColor = vec4(c, a); }` });
 
 /** A hologram in `host` (a square `size` px). show(kind): 'person', 'vehicle',
     'narcotics', 'explosives', 'firearms', 'article', 'sport', 'other',
     'mol:<odour name as the app lists it>', or null. dial(deg) turns it with the dial. */
 export async function createHolo(host, size) {
-  const [person, pickup, mols] = await Promise.all(['holo/person-1.json', 'holo/pickup-1.json', 'holo/molecules-1.json']
-    .map(u => fetch(u).then(r => { if (!r.ok) throw new Error(u); return r.json(); })));
-  const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true, premultipliedAlpha: false });
-  renderer.setPixelRatio(Math.min(2, devicePixelRatio || 1)); renderer.setSize(size, size); renderer.setClearColor(0x000000, 0);
+  const mols = await fetch('holo/molecules-1.json').then(r => { if (!r.ok) throw new Error('molecules'); return r.json(); });
+  const models = {};          // each model fetched the first time it is wanted
+  const load = (kind) => (models[kind] ??= fetch(MODELS[kind][0]).then(r => { if (!r.ok) throw new Error(kind); return r.json(); }));
+  const px = Math.round(size * Math.min(2, devicePixelRatio || 1));
+  const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+  renderer.setPixelRatio(1); renderer.setSize(px, px, false); renderer.setClearColor(0x000000, 0);
+  Object.assign(renderer.domElement.style, { width: size + 'px', height: size + 'px' });
   host.appendChild(renderer.domElement);
+  H.uRes.value.set(px, px);
+  const rt = (s) => new THREE.WebGLRenderTarget(s, s, { type: THREE.HalfFloatType });     // one sample: a multisampled target lost what lay outside the beam
+  const RT = rt(px), H1 = rt(px >> 1), H2 = rt(px >> 1), Q1 = rt(px >> 2), Q2 = rt(px >> 2);
+  const quadCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1), quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), blurMat), quadScene = new THREE.Scene(); quadScene.add(quad);
+  const pass = (src, dst, dx, dy) => { quad.material = blurMat; blurMat.uniforms.tSrc.value = src.texture; blurMat.uniforms.uDir.value.set(dx, dy); renderer.setRenderTarget(dst); renderer.render(quadScene, quadCam); };
+
   const scene = new THREE.Scene(), camera = new THREE.PerspectiveCamera(30, 1, .1, 50);
-  /* Far enough back that a molecule turning, or a vehicle spinning, stays inside the circle. */
-  camera.position.set(0, .3, 6.3); camera.lookAt(0, 0, 0);
-  const ring = new THREE.Mesh(new THREE.RingGeometry(.69, .74, 96), new THREE.MeshBasicMaterial({ color: ICE, transparent: true, opacity: .8, blending: THREE.AdditiveBlending, side: THREE.DoubleSide }));
-  ring.rotation.x = -Math.PI / 2; ring.position.y = -1.08; scene.add(ring);
-  const stage = new THREE.Group(); scene.add(stage);
-  const personGeo = meshOf(person), pickupGeo = meshOf(pickup);
-  const make = (kind) => {
-    if (kind === 'person') return fit(lit([personGeo], .17), 2.15);
-    if (kind === 'vehicle') return fit(lit([pickupGeo], .19), 2.5, 'max');
-    if (kind?.startsWith('mol:')) { const m = mols[kind.slice(4)]; return m ? molecule(m) : null; }
-    if (['narcotics', 'explosives', 'firearms', 'article', 'sport', 'other'].includes(kind)) return fit(lit(prim(kind), .2), 1.9, 'max');
-    return null;
+  /* A little from above, so a flat thing (a wallet, a tin) reads; far enough back that it stays inside the circle as it turns. */
+  camera.position.set(0, 2.05, 5.9); camera.lookAt(0, -0.05, 0);
+  const stage = new THREE.Group(), pad = base(); scene.add(stage, pad); pad.visible = false;
+
+  const draw = () => {
+    renderer.setRenderTarget(RT); renderer.setClearColor(0x000000, 0); renderer.clear(); renderer.render(scene, camera);
+    const h = 1 / (px >> 1), q = 1 / (px >> 2);
+    pass(RT, H1, h, 0); pass(H1, H2, 0, h); pass(H2, H1, h * 2, 0); pass(H1, H2, 0, h * 2);
+    pass(H2, Q1, q, 0); pass(Q1, Q2, 0, q); pass(Q2, Q1, q * 2, 0); pass(Q1, Q2, 0, q * 2);
+    quad.material = mixMat; mixMat.uniforms.tA.value = RT.texture; mixMat.uniforms.tB.value = H2.texture; mixMat.uniforms.tC.value = Q2.texture;
+    renderer.setRenderTarget(null); renderer.clear(); renderer.render(quadScene, quadCam);
   };
   let cur = null, curKind, dialDeg = 0, spin = 0, run = false, raf = 0, last = performance.now(), t0 = last;
-  const setU = (o, u, v) => o && o.userData.mats.forEach(m => { m.uniforms[u].value = v; });
+  const setU = (o, u, v) => o?.userData.mats?.forEach(m => { m.uniforms[u].value = v; });
   const tween = (ms, f) => new Promise(res => { if (still()) { f(1); return res(); } const s = performance.now();
-    const step = (t) => { const k = Math.min(1, (t - s) / ms); f(k); k < 1 ? requestAnimationFrame(step) : res(); }; requestAnimationFrame(step); });
-  const draw = () => renderer.render(scene, camera);
+    const step = (t) => { const k = Math.min(1, (t - s) / ms); f(k); if (!run) draw(); k < 1 ? requestAnimationFrame(step) : res(); }; requestAnimationFrame(step); });
   const frame = (t) => {
     const dt = Math.min(.05, (t - last) / 1000); last = t; const time = (t - t0) / 1000, calm = still();
     if (!calm) spin += dt * .55;
-    stage.rotation.y = (calm ? .5 : spin) + dialDeg * Math.PI / 180 * 2.2;
-    if (cur) { setU(cur, 'uTime', time); if (cur.userData.mol && !calm) { cur.rotation.x = Math.sin(time * .7) * .25; cur.rotation.z = Math.cos(time * .5) * .12; } }
-    ring.material.opacity = calm ? .7 : .62 + .2 * Math.sin(time * 3);
+    stage.rotation.y = (calm ? .75 : .75 + spin) + dialDeg * Math.PI / 180 * 2.2;
+    H.uTime.value = calm ? 2 : time; pad.userData.arcs.rotation.y = calm ? 0 : -time * .35;
+    if (cur?.userData.mol) { setU(cur, 'uTime', time); if (!calm) { cur.rotation.x = Math.sin(time * .7) * .25; cur.rotation.z = Math.cos(time * .5) * .12; } }
+    else if (cur) { const { min, max } = cur.userData; H.uScan.value = calm ? -9 : min - .15 + ((time * .42) % 1) * (max - min + .3); }
     draw(); if (run) raf = requestAnimationFrame(frame);
   };
   const api = {
@@ -138,13 +253,27 @@ export async function createHolo(host, size) {
     async show(kind) {
       if (kind === curKind) return; curKind = kind;
       const old = cur; cur = null;
-      if (old) { await tween(180, k => setU(old, 'uOpacity', 1 - k)); stage.remove(old); }
+      if (old) {
+        await tween(180, k => { if (old.userData.mol) setU(old, 'uOpacity', 1 - k); else H.uFade.value = 1 - k; });
+        stage.remove(old); pad.visible = false;
+      }
       if (kind !== curKind) return;
-      const obj = make(kind); if (!obj) { draw(); return; }
-      const b = new THREE.Box3().setFromObject(obj);
-      setU(obj, 'uMinY', b.min.y); setU(obj, 'uMaxY', b.max.y); setU(obj, 'uReveal', 0); stage.add(obj); cur = obj;
-      ring.position.y = obj.userData.mol ? -1.45 : b.min.y - .06;              // under its feet; a molecule floats over it
-      await tween(650, k => setU(obj, 'uReveal', 1 - (1 - k) ** 3));
+      let obj = null;
+      if (kind?.startsWith('mol:')) { const m = mols[kind.slice(4)]; obj = m ? molecule(m) : null; }
+      else if (MODELS[kind]) { const j = await load(kind).catch(() => null); if (kind !== curKind) return; obj = j && hologram(j, MODELS[kind], kind); }
+      if (!obj) { draw(); return; }
+      stage.add(obj); cur = obj;
+      if (obj.userData.mol) {
+        const b = new THREE.Box3().setFromObject(obj);
+        setU(obj, 'uMinY', b.min.y); setU(obj, 'uMaxY', b.max.y); setU(obj, 'uReveal', 0);
+        await tween(650, k => setU(obj, 'uReveal', 1 - (1 - k) ** 3));
+      } else {
+        /* It builds from the base up, a bright line drawing it, on its projector. */
+        const { min, max } = obj.userData; pad.userData.fit(min - .05, max - min); pad.visible = true;
+        H.uFade.value = 1; H.uCut.value = min - .05;
+        await tween(750, k => { H.uCut.value = min - .05 + (max - min + .3) * (1 - (1 - k) ** 3); });
+        H.uCut.value = 9;
+      }
       if (!run) draw();
     },
     dial(deg) { dialDeg = deg; },
