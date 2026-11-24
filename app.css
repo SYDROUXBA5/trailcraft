@@ -3577,8 +3577,8 @@ body.sd-open { overflow: hidden; }
 .sd-q { margin: 14px 22px 0; font-size: calc(28 * var(--px)); font-weight: 650; letter-spacing: -0.02em; line-height: 1.15; }
 .sd-ans { margin: 10px 22px 0; display: flex; flex-wrap: wrap; gap: 5px; min-height: 24px; }
 .sd-ans span { font-size: calc(12 * var(--px)); font-weight: 600; padding: 4px 8px; border-radius: 999px; color: #00E5FF; border: 1px solid rgba(0,229,255,.45); background: rgba(0,229,255,.08); }
-.sd-mid { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; padding-bottom: 268px; }
-.sd-orb { position: relative; width: min(272px, 34vh, 76vw); aspect-ratio: 1; border-radius: 50%; overflow: hidden; padding: 0; cursor: pointer; display: grid; place-items: center;
+.sd-mid { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; padding-bottom: 222px; }
+.sd-orb { position: relative; width: min(336px, 42vh, 86vw); aspect-ratio: 1; border-radius: 50%; overflow: hidden; padding: 0; cursor: pointer; display: grid; place-items: center;
   background: radial-gradient(circle at 38% 26%, rgba(255,255,255,.14), rgba(0,123,255,.16) 50%, rgba(0,30,70,.4)); border: 1px solid rgba(120,200,255,.36);
   box-shadow: inset 0 1px 0 rgba(255,255,255,.32), inset 0 -22px 34px rgba(0,229,255,.10), 0 0 64px -12px rgba(0,229,255,.6); }
 .sd-orb::after { content: ''; position: absolute; inset: 0; border-radius: 50%; pointer-events: none;
@@ -3591,13 +3591,13 @@ body.sd-open { overflow: hidden; }
 .sd-tx { margin-top: 10px; text-align: center; min-height: 64px; padding: 0 16px; }
 .sd-nm { font-size: calc(36 * var(--px)); font-weight: 700; letter-spacing: -0.02em; }
 .sd-sub { font-size: calc(16 * var(--px)); color: rgba(255,255,255,.65); margin-top: 3px; }
-.sd-dial { position: absolute; left: 50%; bottom: -498px; width: 760px; height: 760px; margin-left: -380px; border-radius: 50%; touch-action: none; }
+.sd-dial { position: absolute; left: 50%; bottom: -540px; width: 760px; height: 760px; margin-left: -380px; border-radius: 50%; touch-action: none; }
 .sd-dial svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
 .sd-labs { position: absolute; left: 50%; top: 50%; width: 0; height: 0; }
 .sd-l { position: absolute; left: 0; top: 0; white-space: nowrap; border: 0; background: none; padding: 4px 6px; font-size: calc(17 * var(--px)); font-weight: 600; color: rgba(255,255,255,.82); will-change: transform, opacity; }
 .sd-l.on { color: #fff; text-shadow: 0 0 14px rgba(0,229,255,.55); }
 .sd-l.add { color: rgba(160,220,255,.7); }
-.sd-lens { position: absolute; z-index: 2; left: 50%; bottom: 144px; width: 168px; height: 60px; margin-left: -84px; border-radius: 30px;
+.sd-lens { position: absolute; z-index: 2; left: 50%; bottom: 102px; width: 168px; height: 60px; margin-left: -84px; border-radius: 30px;
   background: linear-gradient(180deg, rgba(255,255,255,.12), rgba(255,255,255,.02) 60%, rgba(0,229,255,.06)); border: 1px solid rgba(255,255,255,.3);
   box-shadow: inset 0 1px 0 rgba(255,255,255,.5), inset 0 -12px 22px rgba(0,229,255,.12), 0 12px 30px rgba(0,0,0,.55), 0 0 28px rgba(0,229,255,.3);
   -webkit-backdrop-filter: saturate(170%) brightness(1.2); backdrop-filter: saturate(170%) brightness(1.2); }
