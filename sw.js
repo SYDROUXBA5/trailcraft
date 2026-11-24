@@ -19,6 +19,8 @@ const SHELL = [
   'sheet.js',
   /* The set-up dial; its holograms load only when it opens (three.js is a pinned vendor file). */
   'setup-dial.js', 'holo.js',
+  /* Home's dark background: scent meeting the orb (its baked air, holo/homeair-1.json, is a pinned file). */
+  'home-scent.js',
   /* The pixel art, a module to a subject behind pixel-team.js. Each is its own request, so each is listed. */
   'pixel/core.js', 'pixel/ramps.js', 'pixel/lands.js', 'pixel/paint.js', 'pixel/terrain.js', 'pixel/dog.js', 'pixel/human.js', 'pixel/props.js', 'pixel/rope.js', 'pixel/states.js', 'pixel/moments.js', 'pixel/stones.js',
   'pixel/layout.js', 'pixel/scenery.js', 'pixel/tracks.js', 'pixel/landmarks.js', 'pixel/scene.js', 'pixel/ground.js', 'pixel/board-art.js', 'pixel/close.js', 'pixel/fx.js', 'pixel/ambient.js',

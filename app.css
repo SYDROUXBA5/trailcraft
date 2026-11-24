@@ -3615,6 +3615,13 @@ body.sd-open { overflow: hidden; }
 #scrHome .home-orb::after { content: ''; position: absolute; inset: 0; border-radius: 50%; pointer-events: none;
   background: radial-gradient(60% 34% at 34% 16%, rgba(255, 255, 255, 0.2), transparent 70%); }
 #scrHome .home-orb canvas { position: absolute; inset: 0; width: 100% !important; height: 100% !important; }
+/* Behind it (dark only): scent on a slow wind meeting the orb, home-scent.js. It scrolls with the page and is never tapped. */
+#scrHome .home-air { position: absolute; top: 0; left: 0; width: 100%; height: 100%; overflow: hidden; pointer-events: none; z-index: 0; }
+#scrHome .home-air canvas { position: absolute; }
+#scrHome .home-air .air-specks { inset: 0; width: 100%; height: 100%; }
+#scrHome .home-air .air-haze { filter: blur(1.5px); }
+#scrHome > .page.home { position: relative; z-index: 1; }
+:root:not([data-theme="dark"]) #scrHome .home-air { display: none; }
 #scrHome .home-sum, :root[data-theme="dark"] #scrHome .home-sum { display: block; min-height: 0; margin-top: 12px; padding: 4px 8px;
   text-align: center; background: none; border: 0; box-shadow: none; }
 /* The title: what is searched for, large, lit from above; under it, smaller and in its own colour, how old
