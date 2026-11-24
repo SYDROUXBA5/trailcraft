@@ -284,6 +284,8 @@
     <!-- The team and the job, said back in one line. The rows that set each
          of them are folded under it until it is tapped, so the buttons below
          are on the screen without scrolling (Rémi, 20 Nov 2026). -->
+    <!-- What is searched for, as the dial draws it (holo.js): a tap on it opens the dial at that question. -->
+    <button type="button" class="home-orb" id="homeOrb" aria-label="What we are looking for: change it"></button>
     <button type="button" class="home-sum" id="homeSum" aria-expanded="false" aria-controls="homeSetup"></button>
     <div class="home-setup" id="homeSetup" hidden>
     <span class="label">Handler</span>
@@ -314,12 +316,14 @@
     <span class="label" id="lblSetter">Who lays the trail</span>
     <div class="chip-row" id="rowLayers"></div>
     </div>
+    <button class="btn big moss go" id="btnLay"><span class="go-text"><b id="btnLayLabel">Lay a trail</b><i id="btnLaySub"></i></span><span class="go-arrow" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span></button>
+    <div class="home-pair home-two">
+    <button class="btn big ember go" id="btnRun"><span class="go-text"><b id="btnRunLabel">Run a trail</b><i id="btnRunSub"></i></span><span class="go-arrow" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span></button>
+    <button class="btn big ghost go" id="homeSessions"><span class="go-text"><b>Sessions</b><i id="homeSessionsSub">Every trail on this phone</i></span></button>
+    </div>
     <!-- The picked handler and the picked dog are the team in play: its level,
          the name it has earned, and the way to its board. -->
     <button type="button" class="team-row" id="homeTeam" hidden></button>
-
-    <button class="btn big moss go" id="btnLay"><span class="go-text"><b id="btnLayLabel">Lay a trail</b><i id="btnLaySub"></i></span><span class="go-arrow" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span></button>
-    <button class="btn big ember go" id="btnRun"><span class="go-text"><b id="btnRunLabel">Run a trail</b><i id="btnRunSub"></i></span><span class="go-arrow" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span></button>
     <div class="home-pair">
     <button class="btn big ghost" id="btnScanHome" hidden><b>Scan a trail card</b><i>Take a trail, or a plan to walk, from another phone</i></button>
     </div>

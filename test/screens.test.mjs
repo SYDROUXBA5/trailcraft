@@ -106,7 +106,7 @@ function app() {
     replay: { s: null }, fixer: { s: null }, contam: { forSession: null },
     sessionById: (id) => sessions.get(id) ?? null,
     scan: { gen: 0 }, stopScan() {}, scanWalkedFor: null, scanCameFrom: 'scrPick',
-    renderHome() {}, renderSessions() {}, renderSettings() {}, renderResult() {}, paintPick() {},
+    renderHome() {}, renderSessions() {}, renderSettings() {}, renderResult() {}, paintPick() {}, homeOrbRun() {},
     handlerCardId: null, dogCardId: null, paintHandlerCard() {}, paintDogCard() {},
     /* The team board and its form paint themselves; a kept run's level is worked out by levels.js. */
     paintTeam() {}, closeTeamForm() {}, runLevelled() {}, debriefLevelRows: () => [], stickyLevel: () => ({}),

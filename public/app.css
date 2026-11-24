@@ -3603,3 +3603,43 @@ body.sd-open { overflow: hidden; }
   -webkit-backdrop-filter: saturate(170%) brightness(1.2); backdrop-filter: saturate(170%) brightness(1.2); }
 .sd-lens::before { content: ''; position: absolute; left: 50%; top: -9px; margin-left: -5px; width: 10px; height: 10px; border-radius: 50%; background: #00E5FF; box-shadow: 0 0 12px #00E5FF; }
 .sd-hint { position: absolute; z-index: 2; left: 0; right: 0; bottom: calc(18px + env(safe-area-inset-bottom)); text-align: center; font-size: calc(13 * var(--px)); color: rgba(255,255,255,.55); pointer-events: none; }
+
+/* ── Home: the hologram at the top (Rémi, 24 Nov 2026) ─────────────────────
+   What is searched for stands in an orb, drawn as the set-up dial draws it;
+   under it, said as a title (A person, hot) and a line (who, and who lays it).
+   The line is still the one button that opens the dial; each word its question. */
+#scrHome .home-orb { position: relative; display: block; width: min(240px, 62vw); aspect-ratio: 1; margin: 10px auto 0; padding: 0;
+  border-radius: 50%; overflow: hidden; cursor: pointer; border: 1px solid rgba(120, 200, 255, 0.36);
+  background: radial-gradient(circle at 38% 26%, rgba(255, 255, 255, 0.14), rgba(0, 123, 255, 0.16) 50%, rgba(0, 30, 70, 0.4));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3), inset 0 -22px 34px rgba(0, 229, 255, 0.1), 0 0 64px -12px rgba(0, 229, 255, 0.6); }
+#scrHome .home-orb::after { content: ''; position: absolute; inset: 0; border-radius: 50%; pointer-events: none;
+  background: radial-gradient(60% 34% at 34% 16%, rgba(255, 255, 255, 0.2), transparent 70%); }
+#scrHome .home-orb canvas { position: absolute; inset: 0; width: 100% !important; height: 100% !important; }
+#scrHome .home-sum, :root[data-theme="dark"] #scrHome .home-sum { display: block; min-height: 0; margin-top: 12px; padding: 4px 8px;
+  text-align: center; background: none; border: 0; box-shadow: none; }
+#scrHome .sum-what { display: flex; flex-wrap: wrap; justify-content: center; align-items: baseline; gap: 0 0.3em;
+  font: 700 calc(30 * var(--px)) / 1.15 var(--display); letter-spacing: -0.02em; color: var(--ink); }
+#scrHome .sum-what .sum-chip, :root[data-theme="dark"] #scrHome .sum-what .sum-chip { gap: 0; min-height: 0; padding: 0; border: 0; border-radius: 0;
+  background: none; font: inherit; color: inherit; }
+#scrHome .sum-what .sum-chip[class*="lvl-"] .lvl-mark { display: none; }
+#scrHome .sum-what .sum-chip[class*="lvl-"] { text-transform: lowercase; margin-left: -0.3em; }
+#scrHome .sum-what .sum-chip[class*="lvl-"]::before { content: ', '; color: var(--ink); white-space: pre; }
+#scrHome .sum-what .sum-chip.lvl-hot { color: #FF8B7F; }
+#scrHome .sum-what .sum-chip.lvl-warm { color: #FFC266; }
+#scrHome .sum-what .sum-chip.lvl-cold { color: #8FD3FF; }
+#scrHome .sum-line { display: flex; flex-wrap: wrap; justify-content: center; align-items: baseline; gap: 0 0.45em; margin-top: 6px;
+  font-size: calc(15 * var(--px)); color: var(--muted); }
+#scrHome .sum-line .sum-chips { flex: 0 1 auto; display: inline-flex; flex-wrap: wrap; justify-content: center; gap: 0; }
+#scrHome .sum-line .sum-chip, :root[data-theme="dark"] #scrHome .sum-line .sum-chip:not([class*="lvl-"]) { min-height: 0; padding: 0; border: 0;
+  background: none; font: 500 calc(15 * var(--px)) var(--body); color: var(--muted); }
+#scrHome .sum-line .sum-chip + .sum-chip::before { content: '·'; margin: 0 0.45em; opacity: 0.6; }
+#scrHome .sum-line .sum-chip .ava { display: none; }
+#scrHome .sum-line .sum-chip.need { color: var(--ember); }
+#scrHome .sum-line .sum-go { font-size: calc(15 * var(--px)); }
+#scrHome .sum-line .sum-go::before { content: '·'; margin-right: 0.45em; color: var(--muted); opacity: 0.6; }
+/* Lay alone and large; Run and Sessions side by side under it. */
+#scrHome .home-two { margin-top: 10px; }
+#scrHome .home-two .btn.big.go { min-height: 78px; padding: 12px 14px 12px 18px; }
+#scrHome .home-two .go-arrow { display: none; }              /* half a row: the words need the room, the whole button is the tap */
+#scrHome .home-two .btn.big.go b { font-size: calc(21 * var(--px)); }
+#scrHome #homeTeam { margin-top: 12px; }

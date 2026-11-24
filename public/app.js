@@ -446,6 +446,7 @@ function go(id, { back = false } = {}) {
   currentScreen = id;
   for (const s of SCREENS) $(s).hidden = s !== id;
   viewportFor(id);
+  homeOrbRun();                  // home's orb rests while home is away
   if (id === 'scrHome') renderHome();
   if (id === 'scrHandler' && handlerCardId) paintHandlerCard(handlerCardId);   // fresh after an edit
   /* And after a delete: going back to a list must not show what just went. */
@@ -1854,20 +1855,48 @@ function paintHomeSum() {
   const isPerson = target.kind === 'person';
   const solo = S.layerOnly && !dog;
   const chip = (html, cls = '') => `<span class="sum-chip${cls ? ' ' + cls : ''}">${html}</span>`;
+  /* Said as a title and a line under the orb: what is searched for (and how old the trail is),
+     then who is working and who lays it. Each part is still its own chip: a tap on one asks that question. */
+  const what = [chip(esc(odour ? `${target.label} · ${odour}` : target.label), 'what')];
+  if (isPerson) what.push(chip(`<span class="lvl-mark">${LEVEL_ICON[level.id]}</span>${esc(level.label)}`, `lvl-${level.id}`));
   const bits = [chip(avaHtml(handler) + esc(handler.name))];
   if (dog) bits.push(chip(avaHtml(dog) + esc(dog.name)));
   else if (!solo) bits.push(chip('No dog yet', 'need'));
-  bits.push(chip(esc(odour ? `${target.label} · ${odour}` : target.label)));
-  if (isPerson) bits.push(chip(`<span class="lvl-mark">${LEVEL_ICON[level.id]}</span>${esc(level.label)}`, `lvl-${level.id}`));
   if (!solo) {
     bits.push(layer ? chip(`${esc(layer.name)} ${isPerson ? 'lays it' : 'places it'}`)
       : isPerson ? chip('Who lays it?', 'need') : chip('Just me'));
   }
   if (homeSetupOpen === null) homeSetupOpen = !solo && (!dog || (isPerson && !layer));
   const btn = $('homeSum');
-  btn.innerHTML = `<span class="sum-chips">${bits.join('')}</span><span class="sum-go">${homeSetupOpen ? 'Done' : 'Change'}</span>`;
+  btn.innerHTML = `<span class="sum-what">${what.join('')}</span><span class="sum-line"><span class="sum-chips">${bits.join('')}</span><span class="sum-go">${homeSetupOpen ? 'Done' : 'Change'}</span></span>`;
   btn.setAttribute('aria-expanded', String(homeSetupOpen));
   $('homeSetup').hidden = !homeSetupOpen;
+}
+/* Home's orb: what is searched for, drawn as the set-up dial draws it (holo.js), loaded once home is up.
+   It runs only while home is on screen with the dial closed and the app in front. */
+const HOME_KIND = { person: 'person', vehicle: 'vehicle', article: 'article', cadaver: 'mol:Cadaver', narcotics: 'narcotics',
+  explosives: 'explosives', firearms: 'firearms', sport: 'sport', other: 'other' };
+const homeHolo = { h: null, p: null, kind: null, watching: false };
+const setupDialEl = () => document.getElementById('setupDial');      // made by setup-dial.js, not in the markup
+function paintHomeOrb() {
+  const orb = $('homeOrb');
+  if (!orb) return;
+  homeHolo.kind = HOME_KIND[S.target?.id] ?? 'other';
+  if (!homeHolo.p) {
+    homeHolo.p = import('./holo.js').then(m => m.createHolo(orb, Math.round(orb.getBoundingClientRect().width) || 240))
+      .then(h => (homeHolo.h = h)).catch(() => null);
+  }
+  homeHolo.p.then(h => { if (h) { h.show(homeHolo.kind); homeOrbRun(); } });
+  if (!homeHolo.watching && setupDialEl()) {
+    homeHolo.watching = true;
+    new MutationObserver(homeOrbRun).observe(setupDialEl(), { attributes: true, attributeFilter: ['hidden'] });
+    document.addEventListener('visibilitychange', homeOrbRun);
+  }
+}
+function homeOrbRun() {
+  const h = homeHolo.h;
+  if (!h) return;
+  if (currentScreen === 'scrHome' && setupDialEl()?.hidden !== false && !document.hidden) h.start(); else h.stop();
 }
 function toggleHomeSetup() {
   homeSetupOpen = !homeSetupOpen;
@@ -1942,7 +1971,9 @@ function renderHome() {
   $('lblSetter').hidden = solo;
   $('rowLayers').hidden = solo;
   paintHomeSum();
+  paintHomeOrb();
   for (const id of HOME_ROWS) showSelectedChip($(id));
+  { const n = db.sessions().length; $('homeSessionsSub').textContent = n ? `${n} on this phone` : 'None yet'; }
 
   $('btnRunLabel').textContent = v.run;
   $('btnRunSub').textContent = v.runSub;
@@ -12258,6 +12289,9 @@ function wire() {
   $('btnSetDone').addEventListener('click', () => go('scrHome'));
   $('btnAllSessions').addEventListener('click', () => openSessionList());
   $('homeAll').addEventListener('click', () => openSessionList());
+  $('homeSessions').addEventListener('click', () => openSessionList());
+  /* The orb is what is searched for: a tap on it asks that question of the dial, as a tap on its words does. */
+  $('homeOrb').addEventListener('click', () => $('homeSum').querySelector('.sum-what .sum-chip')?.click());
   $('btnTutorial').addEventListener('click', () => openTutorial(true));
   $('btnMapTut').addEventListener('click', openMapTut);
 
