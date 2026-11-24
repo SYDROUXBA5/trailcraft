@@ -2968,6 +2968,7 @@ html.hv-lift .style-pick { bottom: calc(var(--hv-gap, 0px) + 132px); }
 .veh-which { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; margin-inline: -2px; padding-inline: 2px; }
 .veh-which::-webkit-scrollbar { display: none; }
 .veh-which .btn { flex: none; }
+#vehWhich { flex-wrap: wrap; overflow: visible; }         /* every vehicle in sight, however many */
 .veh-which .btn { min-height: 44px; font-size: calc(14 * var(--px)); display: inline-flex; align-items: center; gap: 6px; }
 .veh-which .btn[aria-pressed="true"] { background: var(--moss); border-color: var(--moss); color: #fff; }
 .veh-distract .btn[aria-pressed="true"] { background: rgba(255, 166, 48, 0.16); border-color: #FFA630; color: #FFA630; }

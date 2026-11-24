@@ -13,6 +13,7 @@ const SHELL = [
   './', 'index.html', 'app.css',
   'app.js', 'geo.js', 'colours.js', 'draft.js', 'mvt.js', 'ground.js', 'params.js', 'debrief.js', 'call.js', 'marks.js', 'clip.js', 'field.js', 'walls.js', 'sim.js', 'glow.js', 'reach.js', 'vehicles.js', 'card.js', 'contam.js', 'store.js', 'log.js',
   'img/vehicles/car.webp', 'img/vehicles/car-top.webp', 'img/vehicles/suv.webp', 'img/vehicles/suv-top.webp', 'img/vehicles/pickup.webp', 'img/vehicles/pickup-top.webp', 'img/vehicles/van.webp', 'img/vehicles/van-top.webp', 'img/vehicles/box.webp', 'img/vehicles/box-top.webp',
+  'img/vehicles/car-paint.png', 'img/vehicles/suv-paint.png', 'img/vehicles/pickup-paint.png', 'img/vehicles/van-paint.png', 'img/vehicles/box-paint.png',
   'sync-core.js', 'dogtrack.js', 'sync.js', 'firebase-config.js', 'share.js', 'pdf.js', 'coach.js', 'native.js', 'backup.js',
   'levels.js', 'teams.js', 'pixel-team.js', 'board.js',
   'sheet.js',
@@ -112,7 +113,7 @@ const pinned = (url) =>
     /* The vehicle models: large, so fetched the first time a vehicle search
        is set up rather than at install, then kept like the vendored files.
        A changed model needs a new file name. */
-    || /\/models\/[a-z]+\.glb$/.test(url.pathname)
+    || /\/models\/[a-z]+-(paint|glass)\.glb$/.test(url.pathname)
     /* The set-up dial's meshes and molecules: kept the first time the dial opens.
        A changed one needs a new number in its name (person-1 → person-2). */
     || /\/holo\/[a-z]+-\d+\.json$/.test(url.pathname));
