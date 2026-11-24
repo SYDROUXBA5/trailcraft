@@ -3653,3 +3653,36 @@ body.sd-open { overflow: hidden; }
 #scrHome .home-two .go-arrow { display: none; }              /* half a row: the words need the room, the whole button is the tap */
 #scrHome .home-two .btn.big.go b { font-size: calc(21 * var(--px)); }
 #scrHome #homeTeam { margin-top: 12px; }
+
+
+/* ═══════════════════════════════════════════════════════════════════════
+   Real glass (glass.js; Rémi, 24 Nov 2026). The map draws these panes itself,
+   as glass that bends the ground at its edge, and marks each one it has drawn
+   with data-rg. A marked pane gives up its own blur, tint, rim and bevel: the
+   map's picture already has them. Unmarked, every rule above still applies,
+   so the blur is what shows wherever the map cannot draw the glass.
+   ═══════════════════════════════════════════════════════════════════════ */
+:root[data-theme="dark"] .wx-panel[data-rg],
+:root[data-theme="dark"] .hud-pill[data-rg],
+:root[data-theme="dark"] .wx-rose[data-rg],
+:root[data-theme="dark"] .map-fab[data-rg],
+:root[data-theme="dark"] .map-style[data-rg],
+:root[data-theme="dark"] #scrLay .glass-bottom[data-rg],
+:root[data-theme="dark"] #scrRun .glass-bottom[data-rg],
+:root[data-theme="dark"] .rep-dock[data-rg] {
+  position: fixed;                            /* as they already are */
+  background: none;
+  -webkit-backdrop-filter: none; backdrop-filter: none;
+  box-shadow: none;
+}
+:root[data-theme="dark"] .wx-panel[data-rg]::before, :root[data-theme="dark"] .wx-panel[data-rg]::after,
+:root[data-theme="dark"] .hud-pill[data-rg]::before, :root[data-theme="dark"] .hud-pill[data-rg]::after,
+:root[data-theme="dark"] .wx-rose[data-rg]::before, :root[data-theme="dark"] .wx-rose[data-rg]::after,
+:root[data-theme="dark"] .map-fab[data-rg]::before, :root[data-theme="dark"] .map-fab[data-rg]::after,
+:root[data-theme="dark"] .map-style[data-rg]::before, :root[data-theme="dark"] .map-style[data-rg]::after,
+:root[data-theme="dark"] #scrLay .glass-bottom[data-rg]::before, :root[data-theme="dark"] #scrLay .glass-bottom[data-rg]::after,
+:root[data-theme="dark"] #scrRun .glass-bottom[data-rg]::before, :root[data-theme="dark"] #scrRun .glass-bottom[data-rg]::after,
+:root[data-theme="dark"] .rep-dock[data-rg]::before, :root[data-theme="dark"] .rep-dock[data-rg]::after { display: none; }
+/* The warning states keep their amber over the glass. */
+:root[data-theme="dark"] .hud-pill.off[data-rg],
+:root[data-theme="dark"] .map-fab.nudge[data-rg] { background: var(--lg-sheen), rgba(255, 184, 107, 0.86); }
