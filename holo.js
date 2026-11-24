@@ -27,9 +27,9 @@ const MODELS = {
   sport: ['holo/sport-2.json', 1.9, 'max', 70, 0.05], other: ['holo/other-2.json', 1.5, 'max', 70, 0.05],
 };
 const CAM_D = 6.25;
-/* One set of dials for whatever hologram is up (only one is, at a time). */
-const H = { uRes: { value: new THREE.Vector2(512, 512) }, uScan: { value: -9 }, uTime: { value: 0 }, uNear: { value: CAM_D - 1.4 }, uFar: { value: CAM_D + 1.4 },
-  uFade: { value: 1 }, uCut: { value: 9 } };
+/* The dials every part of one hologram reads. Each hologram (the dial's, home's) has its own set. */
+const dials = () => ({ uRes: { value: new THREE.Vector2(512, 512) }, uScan: { value: -9 }, uTime: { value: 0 }, uNear: { value: CAM_D - 1.4 }, uFar: { value: CAM_D + 1.4 },
+  uFade: { value: 1 }, uCut: { value: 9 } });
 /* Light only adds to the colour and leaves alpha alone; the last pass makes alpha from how bright it is. */
 const ADD = { blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor,
   blendEquationAlpha: THREE.AddEquation, blendSrcAlpha: THREE.ZeroFactor, blendDstAlpha: THREE.OneFactor };
@@ -39,7 +39,7 @@ const MAX = { blending: THREE.CustomBlending, blendEquation: THREE.MaxEquation, 
 
 /* Lines of light: each edge a quad turned to face the screen, `width` px across, a white-hot core, an ice edge,
    brightest at the front, faint where hidden. Quads face whichever way their edge runs: both sides drawn. */
-function fatLines(pairs, { width = 2.1, gain = 1, hidden = false, core = 1 } = {}) {
+function fatLines(H, pairs, { width = 2.1, gain = 1, hidden = false, core = 1 } = {}) {
   const p = pairs.attributes.position.array, n = p.length / 6;
   const A = new Float32Array(n * 12), B = new Float32Array(n * 12), T = new Float32Array(n * 4), S = new Float32Array(n * 4), I = new Uint32Array(n * 6);
   for (let i = 0; i < n; i++) for (let k = 0; k < 4; k++) {
@@ -74,7 +74,7 @@ function fatLines(pairs, { width = 2.1, gain = 1, hidden = false, core = 1 } = {
 }
 
 /* The body: nearly clear, a fresnel rim, scan contours that glow in the band's wake, brighter where it passes. */
-const fill = (g, spacing) => new THREE.Mesh(g, new THREE.ShaderMaterial({ transparent: true, depthWrite: false, side: THREE.DoubleSide, ...ADD,
+const fill = (H, g, spacing) => new THREE.Mesh(g, new THREE.ShaderMaterial({ transparent: true, depthWrite: false, side: THREE.DoubleSide, ...ADD,
   uniforms: { ...H, uC: { value: ICE }, uSp: { value: spacing } },
   vertexShader: `varying vec3 vN; varying vec3 vV; varying vec3 vW;
     void main() { vec4 w = modelMatrix * vec4(position, 1.0); vW = w.xyz; vN = normalize(mat3(modelMatrix) * normal); vV = normalize(cameraPosition - w.xyz);
@@ -89,7 +89,7 @@ const fill = (g, spacing) => new THREE.Mesh(g, new THREE.ShaderMaterial({ transp
       gl_FragColor = vec4(uC * k * uFade, 0.0); }` }));
 
 /* The projector it stands on: rings, ticks, three turning arcs, a faint beam and motes rising in it. */
-function base() {
+function base(H) {
   const grp = new THREE.Group(), mat = (op) => new THREE.ShaderMaterial({ transparent: true, depthWrite: false, side: THREE.DoubleSide, ...ADD,
     uniforms: { ...H, uC: { value: ICE }, uOp: { value: op } }, vertexShader: `void main() { gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
     fragmentShader: `uniform vec3 uC; uniform float uOp, uFade; void main() { gl_FragColor = vec4(uC * uOp * uFade, 0.0); }` });
@@ -101,7 +101,7 @@ function base() {
   for (let a = 0; a < 360; a += 6) { const big = a % 30 === 0, r0 = big ? 1.05 : 1.065, r1 = big ? 1.14 : 1.10, c = Math.cos(a * Math.PI / 180), s = Math.sin(a * Math.PI / 180);
     t.push(r0 * c, 0, r0 * s, r1 * c, 0, r1 * s); }
   const tg = new THREE.BufferGeometry(); tg.setAttribute('position', new THREE.Float32BufferAttribute(t, 3));
-  grp.add(fatLines(tg, { width: 1.3, gain: 0.7 }));
+  grp.add(fatLines(H, tg, { width: 1.3, gain: 0.7 }));
   const beam = new THREE.Mesh(new THREE.CylinderGeometry(1.08, 0.99, 1, 96, 1, true), new THREE.ShaderMaterial({ transparent: true, depthWrite: false, side: THREE.DoubleSide, ...ADD,
     uniforms: { ...H, uC: { value: ICE } }, vertexShader: `varying float vY; void main() { vY = uv.y; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
     fragmentShader: `uniform vec3 uC; uniform float uFade; varying float vY; void main() { float k = 1.0 - vY; gl_FragColor = vec4(uC * 0.11 * k * k * uFade, 0.0); }` }));
@@ -123,7 +123,7 @@ function base() {
 }
 
 /* The model: its wire (when it has one) faint over the surface, its creases bright, its glass body, hidden lines faint. */
-function hologram(j, [, size, axis, angle, spacing], kind) {
+function hologram(H, j, [, size, axis, angle, spacing], kind) {
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.BufferAttribute(fromB64(j.pos, Float32Array), 3)); g.setAttribute('normal', new THREE.BufferAttribute(fromB64(j.nor, Float32Array), 3));
   g.setIndex(new THREE.BufferAttribute(fromB64(j.idx, j.u32 ? Uint32Array : Uint16Array), 1));
@@ -132,14 +132,14 @@ function hologram(j, [, size, axis, angle, spacing], kind) {
   const c = new THREE.Vector3(); g.boundingBox.getCenter(c); g.translate(-c.x, -c.y, -c.z); g.computeBoundingBox();
   const grp = new THREE.Group(), edges = new THREE.EdgesGeometry(g, angle);
   const depth = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ colorWrite: false, polygonOffset: true, polygonOffsetFactor: 2, polygonOffsetUnits: 2 }));
-  const body = fill(g, spacing), hid = fatLines(edges, { width: 1.1, gain: 0.16, hidden: true });
-  const lines = fatLines(edges, { width: kind === 'person' ? 1.3 : 2.1, gain: kind === 'person' ? 0.45 : 1.3 });
+  const body = fill(H, g, spacing), hid = fatLines(H, edges, { width: 1.1, gain: 0.16, hidden: true });
+  const lines = fatLines(H, edges, { width: kind === 'person' ? 1.3 : 2.1, gain: kind === 'person' ? 0.45 : 1.3 });
   depth.renderOrder = 0; body.renderOrder = 1; hid.renderOrder = 2; lines.renderOrder = 3;
   grp.add(depth, body, hid, lines);
   if (j.wire) {
     const w = new THREE.BufferGeometry(); w.setAttribute('position', g.attributes.position);
     w.setIndex(new THREE.BufferAttribute(fromB64(j.wire, j.u32 ? Uint32Array : Uint16Array), 1));
-    const wire = fatLines(w.toNonIndexed(), { width: 1.0, gain: 0.36, core: 0.15 });      // a fine ice wire, no white core to glare wire.renderOrder = 3; grp.add(wire);
+    const wire = fatLines(H, w.toNonIndexed(), { width: 1.0, gain: 0.36, core: 0.15 });      // a fine ice wire, no white core to glare wire.renderOrder = 3; grp.add(wire);
   }
   grp.userData = { min: g.boundingBox.min.y, max: g.boundingBox.max.y };
   return grp;
@@ -216,7 +216,7 @@ export async function createHolo(host, size) {
   renderer.setPixelRatio(1); renderer.setSize(px, px, false); renderer.setClearColor(0x000000, 0);
   Object.assign(renderer.domElement.style, { width: size + 'px', height: size + 'px' });
   host.appendChild(renderer.domElement);
-  H.uRes.value.set(px, px);
+  const H = dials(); H.uRes.value.set(px, px);
   const rt = (s) => new THREE.WebGLRenderTarget(s, s, { type: THREE.HalfFloatType });     // one sample: a multisampled target lost what lay outside the beam
   const RT = rt(px), H1 = rt(px >> 1), H2 = rt(px >> 1), Q1 = rt(px >> 2), Q2 = rt(px >> 2);
   const quadCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1), quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), blurMat), quadScene = new THREE.Scene(); quadScene.add(quad);
@@ -225,7 +225,7 @@ export async function createHolo(host, size) {
   const scene = new THREE.Scene(), camera = new THREE.PerspectiveCamera(30, 1, .1, 50);
   /* A little from above, so a flat thing (a wallet, a tin) reads; far enough back that it stays inside the circle as it turns. */
   camera.position.set(0, 2.05, 5.9); camera.lookAt(0, -0.05, 0);
-  const stage = new THREE.Group(), pad = base(); scene.add(stage, pad); pad.visible = false;
+  const stage = new THREE.Group(), pad = base(H); scene.add(stage, pad); pad.visible = false;
 
   const draw = () => {
     renderer.setRenderTarget(RT); renderer.setClearColor(0x000000, 0); renderer.clear(); renderer.render(scene, camera);
@@ -260,7 +260,7 @@ export async function createHolo(host, size) {
       if (kind !== curKind) return;
       let obj = null;
       if (kind?.startsWith('mol:')) { const m = mols[kind.slice(4)]; obj = m ? molecule(m) : null; }
-      else if (MODELS[kind]) { const j = await load(kind).catch(() => null); if (kind !== curKind) return; obj = j && hologram(j, MODELS[kind], kind); }
+      else if (MODELS[kind]) { const j = await load(kind).catch(() => null); if (kind !== curKind) return; obj = j && hologram(H, j, MODELS[kind], kind); }
       if (!obj) { draw(); return; }
       stage.add(obj); cur = obj;
       if (obj.userData.mol) {
