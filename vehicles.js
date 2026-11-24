@@ -11,7 +11,7 @@
    Pure: no map, no network. Everything works in metres on a local flat earth
    round the point it is given, and hands back plain {lat, lon}. */
 
-import { ScentSim } from './sim.js';
+import { ScentSim, VEHICLE_SPREAD } from './sim.js';
 import { stability, FLAT } from './field.js';
 import { dist } from './geo.js';
 
@@ -265,7 +265,7 @@ export function scentAlong(track, hides, wxAt, { T = FLAT, every = 4000, near = 
   const n = track?.length || 0, inScent = new Uint8Array(n);
   const out = { inScent, first: -1, firstT: null, firstDist: null, ms: 0 };
   if (!n || !hides?.length) return out;
-  const sim = new ScentSim().seedHides(hides);
+  const sim = new ScentSim({ spread: VEHICLE_SPREAD }).seedHides(hides);      // the cloud the map draws round a vehicle
   let i = 0;
   for (let t = track[0].t; i < n; t += every) {
     const wx = wxAt(t);
