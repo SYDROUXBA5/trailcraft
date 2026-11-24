@@ -1,6 +1,6 @@
 /* Offline shell. Trails happen where there is no signal, so the app itself must
    survive with none. Map tiles cache opportunistically as you pan an area. */
-const V = 'trailcraft-v147';
+const V = 'trailcraft-v148';
 /* Every module the app cannot start without. app.js is an ES module and its
    imports are separate requests — listing only app.js precaches a shell that
    cannot boot, which shows up as a working app that dies the first time it is
@@ -11,7 +11,7 @@ const V = 'trailcraft-v147';
    without either deployment breaking the other. */
 const SHELL = [
   './', 'index.html', 'app.css',
-  'app.js', 'geo.js', 'colours.js', 'draft.js', 'mvt.js', 'ground.js', 'params.js', 'debrief.js', 'call.js', 'marks.js', 'clip.js', 'field.js', 'walls.js', 'sim.js', 'glow.js', 'reach.js', 'vehicles.js', 'card.js', 'contam.js', 'store.js', 'log.js',
+  'app.js', 'geo.js', 'colours.js', 'draft.js', 'mvt.js', 'ground.js', 'params.js', 'debrief.js', 'call.js', 'marks.js', 'clip.js', 'field.js', 'walls.js', 'sim.js', 'glow.js', 'glass.js', 'reach.js', 'vehicles.js', 'card.js', 'contam.js', 'store.js', 'log.js',
   'img/vehicles/car.webp', 'img/vehicles/car-top.webp', 'img/vehicles/suv.webp', 'img/vehicles/suv-top.webp', 'img/vehicles/pickup.webp', 'img/vehicles/pickup-top.webp', 'img/vehicles/van.webp', 'img/vehicles/van-top.webp', 'img/vehicles/box.webp', 'img/vehicles/box-top.webp',
   'img/vehicles/car-paint.png', 'img/vehicles/suv-paint.png', 'img/vehicles/pickup-paint.png', 'img/vehicles/van-paint.png', 'img/vehicles/box-paint.png',
   'sync-core.js', 'dogtrack.js', 'sync.js', 'firebase-config.js', 'share.js', 'pdf.js', 'coach.js', 'native.js', 'backup.js',

@@ -68,6 +68,7 @@ import { MOTIONS, motionChoice, motionOn, COAT_IDS, teamLook, makeTeam, putTeam,
 import { createTeam, COATS, JACKETS, HATS, MOMENTS, drawAmbient, landOfLevel } from './pixel-team.js';
 import { mountBoard } from './board.js';
 import { makeScentGlow, paletteFrom } from './glow.js';
+import { makeRealGlass } from './glass.js';
 import { REACH, reachOf, reachTimes, reachCount, strideAlong } from './reach.js';
 import { searchWords, logRows, recentRuns, runAt, midnight, facets, filterRows, groupRows, foldersOf, inFolder, folderList, folderNamed,
          cleanFolderName, putMany, toggleFolder, renameIn, dropFrom, mergeFolders, emptyHeld, folderPatch } from './log.js';
@@ -76,7 +77,7 @@ import { searchWords, logRows, recentRuns, runAt, midnight, facets, filterRows, 
 const BUILD = '2026-11-24c';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
-const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true, plumeLook: 'glow',
+const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true, plumeLook: 'glow', glass: 'real',
   distUnits: 'metric', tempUnits: 'c', coordFormat: 'dd', theme: 'system', mapStyle: 'satellite', plumeColor: '#F5D14A', stepColor: '#0B1630', windColor: '#DCE9FF', dogColor: '#FFFFFF', trailStyle: 'steps', dogStyle: 'line', motion: 'auto', mbToken: (window.MB_TOKEN || '') };
 const loadJson = (k, f) => { try { return JSON.parse(localStorage.getItem(k)) ?? f; } catch { return f; } };
 let settings = { ...DEFAULTS, ...loadJson('tc.settings', {}) };
@@ -972,6 +973,12 @@ function addOverlays() {
                   'icon-ignore-placement': true, 'icon-rotate': ['get', 'brg'],
                   'icon-rotation-alignment': 'map', 'icon-pitch-alignment': 'map' } });
 
+  /* Last of all, so it has the whole map under it to bend: the glass of what floats over the map (glass.js).
+     The Look setting 'Glass over the map' chooses between it and the blur in app.css. */
+  realGlass = realGlass || makeRealGlass(map, { on: settings.glass !== 'blur' });
+  add(realGlass.layer);
+  realGlass.raise();
+
   mapReady = true;
   applyMapColours();
   for (const id of Object.keys(srcData)) map.getSource(id)?.setData(srcData[id]);
@@ -1283,6 +1290,8 @@ const pointsOf = (pts, kindKey) => ({
 });
 /* ── How the plume is drawn: as light with height (the scent engine's look), or as the specks it began as ── */
 let scentGlow = null;
+/* The glass of what floats over the map, drawn by the map itself (glass.js). Null until the map has its layers. */
+let realGlass = null;
 const glowOn = () => settings.plumeLook !== 'specks' && !!scentGlow && scentGlow.ok;
 /* Each contamination person's scent glows the same way, in their own colours: one layer per colour, made the first time it
    is needed, and put back if the map's style was changed under it. */
@@ -3101,6 +3110,7 @@ function plumeAdd(pt) {
   plume.sim.append(last ? plumeSamples([last, pt]) : [pt]);
 }
 function paintPlumeLook() { for (const b of $('plumeLook').children) b.setAttribute('aria-pressed', String(b.dataset.look === (settings.plumeLook === 'specks' ? 'specks' : 'glow'))); }
+function paintGlassLook() { for (const b of $('glassLook').children) b.setAttribute('aria-pressed', String(b.dataset.glass === (settings.glass === 'blur' ? 'blur' : 'real'))); }
 function plumeStop() {
   tracersStop();
   clearInterval(plume.tick); plume.tick = 0;
@@ -4593,6 +4603,7 @@ function openClip() {
   if (!clipOffered({ run: s?.data?.track?.length > 1, marking: !!replay.mark, recording: !!clipUi.job })) return;
   replayPause();
   clipUi.open = true;
+  realGlass?.hold(true);         // the video is copied from the map's picture: no glass in it (glass.js)
   $('clipSay').textContent = CLIP_INTRO;
   $('clipLen').hidden = false;
   $('clipStart').hidden = false;
@@ -4620,6 +4631,7 @@ function closeClip() {
   if (!clipUi.open) return;
   stopClip('closed');
   clipUi.open = false;
+  realGlass?.hold(false);
   clipUi.made = null;
   clipUi.saved = false;
   clipUi.saving = null;
@@ -11025,6 +11037,7 @@ function renderSettings() {
 
   $('plumeOn').checked = settings.plume !== false;
   paintPlumeLook();
+  paintGlassLook();
   paintCoachControls();
   paintStorageLine();
   paintColourRows();
@@ -12627,6 +12640,10 @@ function wire() {
     const b = e.target.closest('[data-look]'); if (!b) return;
     settings.plumeLook = b.dataset.look; saveSettings(); paintPlumeLook(); applyPlumeLook();
     if (plume.sim) plumeFrame();
+  });
+  $('glassLook').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-glass]'); if (!b) return;
+    settings.glass = b.dataset.glass; saveSettings(); paintGlassLook(); realGlass?.setOn(settings.glass !== 'blur');
   });
   $('plumeOn').addEventListener('change', () => {
     settings.plume = $('plumeOn').checked;
