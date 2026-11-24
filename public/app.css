@@ -3617,26 +3617,36 @@ body.sd-open { overflow: hidden; }
 #scrHome .home-orb canvas { position: absolute; inset: 0; width: 100% !important; height: 100% !important; }
 #scrHome .home-sum, :root[data-theme="dark"] #scrHome .home-sum { display: block; min-height: 0; margin-top: 12px; padding: 4px 8px;
   text-align: center; background: none; border: 0; box-shadow: none; }
-#scrHome .sum-what { display: flex; flex-wrap: wrap; justify-content: center; align-items: baseline; gap: 0 0.3em;
-  font: 700 calc(30 * var(--px)) / 1.15 var(--display); letter-spacing: -0.02em; color: var(--ink); }
+/* The title: what is searched for, large, lit from above; under it, smaller and in its own colour, how old
+   the trail is (a person) or which odour (a hide). Light pages get the same in ink and blue. */
+#scrHome { --t-a: #0B1630; --t-b: #0A6FD6; --o-a: #0A7F99; --o-b: #00A7C7; }
+:root[data-theme="dark"] #scrHome { --t-a: #FFFFFF; --t-b: #7BEEFF; --o-a: #B8F6FF; --o-b: #00E5FF; }
+#scrHome .sum-what { display: flex; flex-direction: column; align-items: center; gap: 0; }
 #scrHome .sum-what .sum-chip, :root[data-theme="dark"] #scrHome .sum-what .sum-chip { gap: 0; min-height: 0; padding: 0; border: 0; border-radius: 0;
-  background: none; font: inherit; color: inherit; }
+  background-color: transparent; overflow-wrap: anywhere; text-align: center; }   /* the colour only: the letters are painted with a gradient */
+#scrHome .sum-what .sum-chip.what { font: 800 calc(50 * var(--px)) / 1.02 var(--display); letter-spacing: -0.035em;
+  background: linear-gradient(180deg, var(--t-a) 30%, var(--t-b)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+:root[data-theme="dark"] #scrHome .sum-what .sum-chip.what { filter: drop-shadow(0 0 18px rgba(0, 229, 255, 0.45)); }
+#scrHome .sum-what .sum-chip[class*="lvl-"], #scrHome .sum-what .sum-chip.odour { font: 700 calc(26 * var(--px)) / 1.2 var(--display); letter-spacing: -0.01em;
+  -webkit-background-clip: text; background-clip: text; color: transparent; }
 #scrHome .sum-what .sum-chip[class*="lvl-"] .lvl-mark { display: none; }
-#scrHome .sum-what .sum-chip[class*="lvl-"] { text-transform: lowercase; margin-left: -0.3em; }
-#scrHome .sum-what .sum-chip[class*="lvl-"]::before { content: ', '; color: var(--ink); white-space: pre; }
-#scrHome .sum-what .sum-chip.lvl-hot { color: #FF8B7F; }
-#scrHome .sum-what .sum-chip.lvl-warm { color: #FFC266; }
-#scrHome .sum-what .sum-chip.lvl-cold { color: #8FD3FF; }
-#scrHome .sum-line { display: flex; flex-wrap: wrap; justify-content: center; align-items: baseline; gap: 0 0.45em; margin-top: 6px;
-  font-size: calc(15 * var(--px)); color: var(--muted); }
-#scrHome .sum-line .sum-chips { flex: 0 1 auto; display: inline-flex; flex-wrap: wrap; justify-content: center; gap: 0; }
-#scrHome .sum-line .sum-chip, :root[data-theme="dark"] #scrHome .sum-line .sum-chip:not([class*="lvl-"]) { min-height: 0; padding: 0; border: 0;
-  background: none; font: 500 calc(15 * var(--px)) var(--body); color: var(--muted); }
-#scrHome .sum-line .sum-chip + .sum-chip::before { content: '·'; margin: 0 0.45em; opacity: 0.6; }
-#scrHome .sum-line .sum-chip .ava { display: none; }
-#scrHome .sum-line .sum-chip.need { color: var(--ember); }
-#scrHome .sum-line .sum-go { font-size: calc(15 * var(--px)); }
-#scrHome .sum-line .sum-go::before { content: '·'; margin-right: 0.45em; color: var(--muted); opacity: 0.6; }
+#scrHome .sum-what .sum-chip[class*="lvl-"]::after { content: '\00a0trail'; }
+#scrHome .sum-what .sum-chip.lvl-hot { background-image: linear-gradient(180deg, #FFB3A8, #FF5A48); }
+#scrHome .sum-what .sum-chip.lvl-warm { background-image: linear-gradient(180deg, #FFE1A3, #FFA630); }
+#scrHome .sum-what .sum-chip.lvl-cold { background-image: linear-gradient(180deg, #CDEBFF, #5FB4FF); }
+#scrHome .sum-what .sum-chip.odour { background-image: linear-gradient(180deg, var(--o-a), var(--o-b)); }
+/* The line: who is working and who lays it, each a glass pill with its face; Change a lit pill of its own. */
+#scrHome .sum-line { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 8px; margin-top: 14px; }
+#scrHome .sum-line .sum-chips { flex: 0 1 auto; display: inline-flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+#scrHome .sum-line .sum-chip, :root[data-theme="dark"] #scrHome .sum-line .sum-chip:not([class*="lvl-"]) { min-height: 40px; padding: 6px 14px 6px 6px; border-radius: 999px;
+  background: var(--card); border: 1px solid var(--rim); color: var(--ink); font: 600 calc(16 * var(--px)) var(--body); white-space: nowrap; }
+:root[data-theme="dark"] #scrHome .sum-line .sum-chip:not([class*="lvl-"]) { background: rgba(255, 255, 255, 0.07); border-color: rgba(160, 210, 255, 0.28); color: #fff; }
+#scrHome .sum-line .sum-chip .ava { display: inline-grid; width: 28px; height: 28px; margin: 0 8px 0 0; font-size: calc(12 * var(--px)); }
+#scrHome .sum-line .sum-chip:not(:has(.ava)) { padding-left: 14px; }
+#scrHome .sum-line .sum-chip.need, :root[data-theme="dark"] #scrHome .sum-line .sum-chip.need { border-style: dashed; color: var(--ember); }
+#scrHome .sum-line .sum-go { display: inline-flex; align-items: center; min-height: 40px; padding: 6px 16px; border-radius: 999px; white-space: nowrap;
+  font: 700 calc(16 * var(--px)) var(--body); text-decoration: none; color: var(--moss); border: 1px solid currentColor; }
+:root[data-theme="dark"] #scrHome .sum-line .sum-go { color: #8FF4FF; background: rgba(0, 229, 255, 0.14); border-color: rgba(0, 229, 255, 0.6); }
 /* Lay alone and large; Run and Sessions side by side under it. */
 #scrHome .home-two { margin-top: 10px; }
 #scrHome .home-two .btn.big.go { min-height: 78px; padding: 12px 14px 12px 18px; }

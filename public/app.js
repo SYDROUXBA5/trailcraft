@@ -1857,7 +1857,8 @@ function paintHomeSum() {
   const chip = (html, cls = '') => `<span class="sum-chip${cls ? ' ' + cls : ''}">${html}</span>`;
   /* Said as a title and a line under the orb: what is searched for (and how old the trail is),
      then who is working and who lays it. Each part is still its own chip: a tap on one asks that question. */
-  const what = [chip(esc(odour ? `${target.label} · ${odour}` : target.label), 'what')];
+  const what = [chip(esc(target.label), 'what')];
+  if (odour) what.push(chip(esc(odour), 'odour'));               // its own line under the title, and its own question in the dial
   if (isPerson) what.push(chip(`<span class="lvl-mark">${LEVEL_ICON[level.id]}</span>${esc(level.label)}`, `lvl-${level.id}`));
   const bits = [chip(avaHtml(handler) + esc(handler.name))];
   if (dog) bits.push(chip(avaHtml(dog) + esc(dog.name)));
