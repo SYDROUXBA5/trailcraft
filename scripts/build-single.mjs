@@ -164,7 +164,8 @@ for (const [local, cdn] of Object.entries(CDN)) {
    only when the dial opens, and file:// refuses that, so this copy's dial shows names
    in the orb instead (setup-dial.js falls back by itself). */
 const LAZY = ['holo.js', 'vendor/three-0.187.0/three.module.js', 'vendor/three-0.187.0/three.core.js',
-  'home-scent.js'];                                 // home's dark background, likewise: this copy goes without
+  'home-scent.js',                                 // home's dark background, likewise: this copy goes without
+  'trail-orb.js'];                                 // and the trail in home's orb: this copy shows the plain orb
 if (LAZY.some(f => html.includes(f))) throw new Error('index.html now loads a hologram file directly: fold it in or keep it lazy');
 
 html = html.replace(/<script src="vendor\/qrcode\.js"><\/script>/, () => `<script>\n${safe(pub('vendor/qrcode.js'))}\n</script>`);

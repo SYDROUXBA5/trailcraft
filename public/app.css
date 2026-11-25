@@ -3642,6 +3642,21 @@ body.sd-open { overflow: hidden; }
 #scrHome .sum-what .sum-chip.lvl-warm { background-image: linear-gradient(180deg, #FFE1A3, #FFA630); }
 #scrHome .sum-what .sum-chip.lvl-cold { background-image: linear-gradient(180deg, #CDEBFF, #5FB4FF); }
 #scrHome .sum-what .sum-chip.odour { background-image: linear-gradient(180deg, var(--o-a), var(--o-b)); }
+/* The trail's age carries its own temperature, dark theme (Rémi, 25 Nov 2026): heat moving through
+   "Hot", a slow amber breath in "Warm", an icy glint across "Cold". Still with Reduce Motion. */
+@keyframes trailHeat { from { background-position: 0% 50%; } to { background-position: 200% 50%; } }
+@keyframes trailFlick { 0%, 100% { filter: drop-shadow(0 0 8px rgba(255, 90, 72, 0.45)); } 30% { filter: drop-shadow(0 0 16px rgba(255, 120, 60, 0.8)); }
+  55% { filter: drop-shadow(0 0 10px rgba(255, 90, 72, 0.55)); } 80% { filter: drop-shadow(0 0 18px rgba(255, 140, 60, 0.85)); } }
+@keyframes trailBreath { 0%, 100% { filter: drop-shadow(0 0 6px rgba(255, 166, 48, 0.3)); } 50% { filter: drop-shadow(0 0 16px rgba(255, 166, 48, 0.75)); } }
+@keyframes trailGlint { 0% { background-position: 120% 50%; } 60%, 100% { background-position: -20% 50%; } }
+:root[data-theme="dark"] #scrHome .sum-what .sum-chip.lvl-hot { background-image: linear-gradient(90deg, #FFD27A, #FF5A48 25%, #FF2E63 50%, #FF5A48 75%, #FFD27A);
+  background-size: 200% 100%; animation: trailHeat 2.2s linear infinite, trailFlick 1.6s ease-in-out infinite; }
+:root[data-theme="dark"] #scrHome .sum-what .sum-chip.lvl-warm { background-image: linear-gradient(180deg, #FFE1A3, #FFA630); animation: trailBreath 3s ease-in-out infinite; }
+:root[data-theme="dark"] #scrHome .sum-what .sum-chip.lvl-cold { background-image: linear-gradient(100deg, #9FD4FF 0%, #CDEBFF 38%, #FFFFFF 50%, #CDEBFF 62%, #9FD4FF 100%);
+  background-size: 260% 100%; animation: trailGlint 3.4s ease-in-out infinite; filter: drop-shadow(0 0 10px rgba(120, 200, 255, 0.55)); -webkit-text-stroke: 0.4px rgba(255, 255, 255, 0.35); }
+@media (prefers-reduced-motion: reduce) { #scrHome .sum-what .sum-chip[class*="lvl-"] { animation: none !important; } }
+:root[data-motion="off"] #scrHome .sum-what .sum-chip[class*="lvl-"] { animation: none !important; }
+#scrHome .home-orb canvas.trail-orb { border-radius: 50%; pointer-events: none; }     /* under the orb's glass, as the hologram is */
 /* The line: who is working and who lays it, each a glass pill with its face; Change a lit pill of its own. */
 #scrHome .sum-line { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 8px; margin-top: 14px; }
 #scrHome .sum-line .sum-chips { flex: 0 1 auto; display: inline-flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
