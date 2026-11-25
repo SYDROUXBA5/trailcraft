@@ -39,21 +39,24 @@ export const carriesOf = (id) => (CARRIES.includes(id) ? id : 'narcotics');
 /** The odour list a target asks from: a vehicle asks the one for what it carries. */
 export const odourSetOf = (target, carries) => ODOURS[target?.id === 'vehicle' ? carriesOf(carries) : target?.id];
 
-/* The odours a detection dog is imprinted on, as the certifying bodies name
-   them. Labels for the handler's records and nothing more: the engine treats
-   every one as a hide. Anything missing can be typed in. */
+/* The odours a detection dog is imprinted on: the narcotic and explosive
+   training aids ScentLogix sells, named as scentlogix.com/s/ names them
+   (read 2026-11-25; its "Any" picks and kits are not odours, and Firearms,
+   Dirty Diana and Dirty Harry are not listed as explosives). Labels for the
+   handler's records and nothing more: the engine treats every one as a hide.
+   Anything missing can be typed in. */
 export const ODOURS = {
   narcotics: {
     ask: 'Which narcotic', name: 'Name the narcotic',
-    list: ['Marijuana', 'Hashish', 'Cocaine', 'Crack cocaine', 'Heroin', 'Methamphetamine',
-      'MDMA (ecstasy)', 'Amphetamine', 'Fentanyl', 'Opium', 'Ketamine', 'Psilocybin',
-      'Synthetic cannabinoids', 'Pseudo training aid'],
+    list: ['Marijuana / Cannabis', 'Cocaine / Crack Cocaine', 'Heroin / Opium', 'Methamphetamine',
+      'MDMA / Ecstasy', 'Fentanyl', 'PCP / Angel Dust', 'LSD'],
   },
   explosives: {
     ask: 'Which explosive', name: 'Name the explosive',
-    list: ['Black powder', 'Smokeless powder', 'Pyrodex', 'Dynamite', 'TNT', 'RDX', 'C-4',
-      'PETN', 'Det cord', 'Semtex', 'Ammonium nitrate', 'ANFO', 'Emulsion / water gel',
-      'TATP', 'HMTD', 'Chlorates', 'Nitromethane', 'Urea nitrate', 'Cast booster', 'Safety fuse'],
+    list: ['Black Powder', 'Smokeless Powder', 'Dynamite', 'TNT / Tetryl', 'Tagged RDX', 'Untagged RDX',
+      'ETN / PETN', 'Semtex (A+H)', 'Nitroglycerin', 'Nitrocellulose', 'Ethylene Glycol Dinitrate',
+      'Ammonium Nitrate', 'Potassium Nitrate', 'Potassium Chlorate', 'Sodium Chlorate',
+      'Nitromethane', 'TATP', 'HMTD', 'IED / HME', 'ICAO-Mandated'],
   },
 };
 

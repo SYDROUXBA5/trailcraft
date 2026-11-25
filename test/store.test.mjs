@@ -642,7 +642,7 @@ t('odours: narcotics and explosives name theirs, each target remembers its own, 
     const set = ODOURS[id];
     assert.equal(targetById(id).kind, 'hide');
     assert.ok(set.ask && set.name);
-    assert.ok(set.list.length >= 10);
+    assert.ok(set.list.length >= 8, 'the ScentLogix aids: 8 narcotics, 20 explosives');
     assert.equal(new Set(set.list).size, set.list.length, 'no odour listed twice');
     for (const o of set.list) assert.ok(o.length <= 40, `${o} fits the typed field`);
   }
