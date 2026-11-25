@@ -1857,6 +1857,13 @@ function paintOdours() {
    out under itself and back. Folded is the usual state. It starts unfolded
    only when something the main button needs has not been chosen yet (no dog,
    or nobody to lay a person's trail), because that is found in the rows. */
+/* The icons over the Home pills: who handles, the dog, who set the hide or laid the trail. */
+const ROLE_ICON = {
+  handler: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="7" r="3.5"/><path d="M5 21c.6-4 3.4-6.5 7-6.5s6.4 2.5 7 6.5"/></svg>',
+  dog: '<svg viewBox="0 0 24 24" fill="currentColor"><ellipse cx="7" cy="9" rx="2" ry="2.6"/><ellipse cx="12" cy="6.5" rx="2" ry="2.6"/><ellipse cx="17" cy="9" rx="2" ry="2.6"/><path d="M12 12c-3.2 0-6 3.6-6 6.2 0 1.9 1.7 2.6 3.3 2.1 1.1-.3 1.8-.6 2.7-.6s1.6.3 2.7.6c1.6.5 3.3-.2 3.3-2.1 0-2.6-2.8-6.2-6-6.2z"/></svg>',
+  layer: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 21V4"/><path d="M6 4h11l-2.5 4L17 12H6"/></svg>',
+  trail: '<svg viewBox="0 0 24 24" fill="currentColor"><ellipse cx="8" cy="7" rx="2.6" ry="3.6" transform="rotate(-12 8 7)"/><ellipse cx="16" cy="15" rx="2.6" ry="3.6" transform="rotate(12 16 15)"/><circle cx="7.3" cy="12.6" r="1.3"/><circle cx="16.7" cy="20.6" r="1.3"/></svg>',
+};
 const HOME_ROWS = ['rowHandlers', 'rowDogs', 'rowTargets', 'rowCarries', 'rowOdours', 'rowLevels', 'rowLayers'];
 let homeSetupOpen = null;                         // null until the first paint has looked
 function paintHomeSum() {
@@ -1869,12 +1876,17 @@ function paintHomeSum() {
   const what = [chip(esc(target.label), 'what')];
   if (odour) what.push(chip(esc(odour), 'odour'));               // its own line under the title, and its own question in the dial
   if (isPerson) what.push(chip(`<span class="lvl-mark">${LEVEL_ICON[level.id]}</span>${esc(level.label)}`, `lvl-${level.id}`));
-  const bits = [chip(avaHtml(handler) + esc(handler.name))];
-  if (dog) bits.push(chip(avaHtml(dog) + esc(dog.name)));
-  else if (!solo) bits.push(chip('No dog yet', 'need'));
+  /* Each pill wears what it is above it: an icon in glass, and the word for
+     VoiceOver (Rémi, 25 Nov 2026: style 4, "icon above", in liquid glass).
+     Both sit outside the pill, whose own words still say which question a tap asks. */
+  const layWord = isPerson ? 'Trail laid by' : 'Hide set by';
+  const role = (r, word, html) => `<span class="sum-role r-${r}"><span class="sum-ico" aria-hidden="true">${ROLE_ICON[r === 'layer' && isPerson ? 'trail' : r]}</span><span class="sr-only">${word}</span>${html}</span>`;
+  const bits = [solo ? role('layer', 'Lays the trails', chip(avaHtml(handler) + esc(handler.name))) : role('handler', 'Handler', chip(avaHtml(handler) + esc(handler.name)))];
+  if (dog) bits.push(role('dog', 'Dog', chip(avaHtml(dog) + esc(dog.name))));
+  else if (!solo) bits.push(role('dog', 'Dog', chip('No dog yet', 'need')));
   if (!solo) {
-    bits.push(layer ? chip(`${esc(layer.name)} ${isPerson ? 'lays it' : 'places it'}`)
-      : isPerson ? chip('Who lays it?', 'need') : chip('Just me'));
+    bits.push(role('layer', layWord, layer ? chip(`${esc(layer.name)} ${isPerson ? 'lays it' : 'places it'}`)
+      : isPerson ? chip('Who lays it?', 'need') : chip('Just me')));
   }
   if (homeSetupOpen === null) homeSetupOpen = !solo && (!dog || (isPerson && !layer));
   const btn = $('homeSum');

@@ -168,7 +168,8 @@ export function initSetupDial() {
      line says which question to ask; otherwise the first one missing, or the first. */
   sum.addEventListener('click', (e) => {
     if (closing || sum.getAttribute('aria-expanded') === 'true') return;
-    const chip = e.target.closest('.sum-chip'); if (!chip) { intent = { first: true }; return; }   // Change: from the start
+    const chip = e.target.closest('.sum-chip') || e.target.closest('.sum-role')?.querySelector('.sum-chip');   // a pill, or the icon over it
+    if (!chip) { intent = { first: true }; return; }   // Change: from the start
     const word = chip.textContent.replace(/^[A-Z](?=[A-Z])/, '').split(' · ')[0].trim();
     const s = steps().find(x => optionsOf(x).some(o => o.name === word || word.startsWith(o.name)));
     intent = s ? { row: s.id } : { first: true };
