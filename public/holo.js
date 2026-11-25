@@ -188,7 +188,10 @@ const molecule = (m) => {
   if (rods.length) { const bm = solidMat('#8FDCEB'); mats.push(bm);
     const ib = new THREE.InstancedMesh(new THREE.CylinderGeometry(1, 1, 1, 14), bm, rods.length), M = new THREE.Matrix4();
     rods.forEach((r, n) => { M.compose(r.pos, r.q, new THREE.Vector3(r.r, r.len, r.r)); ib.setMatrixAt(n, M); }); g.add(ib); }
-  g.userData = { mats, mol: true }; return g;
+  /* However it turns, no atom leaves this ball: its reveal sweeps the whole of
+     it, so the line that draws it in never stays behind as a ceiling. */
+  const reach = 1.28 + Math.max(...m.atoms.map(a => (COL[a.e] || [, .2])[1]));
+  g.userData = { mats, mol: true, reach }; return g;
 };
 
 /* Bloom: the frame blurred twice at half size and twice at quarter size, added back over itself; alpha from brightness. */
@@ -264,8 +267,8 @@ export async function createHolo(host, size) {
       if (!obj) { draw(); return; }
       stage.add(obj); cur = obj;
       if (obj.userData.mol) {
-        const b = new THREE.Box3().setFromObject(obj);
-        setU(obj, 'uMinY', b.min.y); setU(obj, 'uMaxY', b.max.y); setU(obj, 'uReveal', 0);
+        const r = obj.userData.reach;              // the ball it turns in, not the shape it starts in
+        setU(obj, 'uMinY', -r); setU(obj, 'uMaxY', r); setU(obj, 'uReveal', 0);
         await tween(650, k => setU(obj, 'uReveal', 1 - (1 - k) ** 3));
       } else {
         /* It builds from the base up, a bright line drawing it, on its projector. */

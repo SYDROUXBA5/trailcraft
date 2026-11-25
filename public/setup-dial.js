@@ -20,7 +20,7 @@ const Q = { rowHandlers: 'Who is handling?', rowDogs: 'Which dog?', rowTargets: 
 const NAMED = new Set(['rowHandlers', 'rowDogs', 'rowLevels', 'rowLayers']);
 const KIND = { person: 'person', vehicle: 'vehicle', article: 'article', cadaver: 'mol:Cadaver', narcotics: 'narcotics', explosives: 'explosives',
   firearms: 'firearms', sport: 'sport', other: 'other' };
-const STEP = 30, R = 292;
+const STEP = 30, R = 292, LENS = 168, LENS_PAD = 44;      // the lens's least width, and the glass either side of the name
 const still = () => matchMedia('(prefers-reduced-motion: reduce)').matches || document.documentElement.dataset.motion === 'off';   // the phone's setting, or the app's own
 const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 
@@ -65,13 +65,18 @@ export function initSetupDial() {
 
   /* The dial: a spring that follows the thumb and settles on an answer. */
   let rot = 0, vel = 0, target = 0, alpha = 0, opts = [], els = [], cur = -1, cand = -1, candT = 0, quiet = true, raf = 0, last = 0;
-  let list = [], at = 0, only = false, intent = null, closing = false, holo = null, holoP = null;
+  let list = [], at = 0, only = false, intent = null, closing = false, holo = null, holoP = null, wid = [], big = [], lensW = LENS;
   const loop = (t) => {
     const dt = Math.min(.033, (t - last) / 1000 || .016); last = t;
     if (still()) { rot = target; vel = 0; } else { vel += (150 * (target - rot) - 21 * vel) * dt; rot += vel * dt; }
     els.forEach((e, i) => { const a = i * STEP + rot, ar = a * Math.PI / 180, d = Math.abs(a), near = Math.max(0, 1 - d / (STEP * .9));
-      e.style.transform = `translate(${(R * Math.sin(ar)).toFixed(2)}px, ${(-R * Math.cos(ar)).toFixed(2)}px) translate(-50%, -50%) scale(${(1 + .42 * near * near).toFixed(3)})`;
+      e.style.transform = `translate(${(R * Math.sin(ar)).toFixed(2)}px, ${(-R * Math.cos(ar)).toFixed(2)}px) translate(-50%, -50%) scale(${(1 + (big[i] ?? .42) * near * near).toFixed(3)})`;
       e.style.opacity = (Math.max(0, 1 - d / 78) * alpha).toFixed(3); e.classList.toggle('on', d < STEP / 2); });
+    if (wid.length) {          // the lens follows the width of the name turning under it
+      const pos = Math.max(0, Math.min(wid.length - 1, -rot / STEP)), i0 = Math.floor(pos), i1 = Math.min(wid.length - 1, i0 + 1), fr = pos - i0;
+      const lw = (i) => Math.max(LENS, wid[i] * (1 + big[i]) + LENS_PAD), w = lw(i0) * (1 - fr) + lw(i1) * fr;
+      if (Math.abs(w - lensW) > .5) { lensW = w; lens.style.width = `${w.toFixed(1)}px`; lens.style.marginLeft = `${(-w / 2).toFixed(1)}px`; }
+    }
     tg.setAttribute('transform', `rotate(${rot.toFixed(2)})`); holo?.dial(rot);
     const n = Math.round(-rot / STEP);
     if (!quiet && alpha > .5 && n >= 0 && n < els.length) {
@@ -116,6 +121,11 @@ export function initSetupDial() {
     opts = optionsOf(s); const sel = Math.max(0, opts.findIndex(o => o.sel));
     qEl.textContent = question(s); paintTop(); fade(qEl, true, 380);
     labs.innerHTML = opts.map(o => `<button type="button" class="sd-l${o.add ? ' add' : ''}" tabindex="-1">${esc(o.name)}</button>`).join(''); els = [...labs.children];
+    /* The name under the lens is drawn larger; the glass widens to hold it (up
+       to the screen less a margin), and a name too long even for that is drawn
+       smaller instead, so it never spills past the glass. */
+    const room = Math.max(LENS, Math.min(el.clientWidth - 28, 400)) - LENS_PAD;
+    wid = els.map(e => e.offsetWidth); big = wid.map(w => Math.min(.42, Math.max(-.4, room / (w || 1) - 1)));
     rot = -sel * STEP + 75 * dir; vel = 0; target = -sel * STEP; cur = -1; cand = -1; quiet = false;
     await tween(v => { alpha = v; }, 0, 1, 420);
   };
