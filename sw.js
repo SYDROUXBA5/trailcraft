@@ -1,6 +1,6 @@
 /* Offline shell. Trails happen where there is no signal, so the app itself must
    survive with none. Map tiles cache opportunistically as you pan an area. */
-const V = 'trailcraft-v149';
+const V = 'trailcraft-v150';
 /* Every module the app cannot start without. app.js is an ES module and its
    imports are separate requests — listing only app.js precaches a shell that
    cannot boot, which shows up as a working app that dies the first time it is
@@ -18,7 +18,7 @@ const SHELL = [
   'levels.js', 'teams.js', 'pixel-team.js', 'board.js',
   'sheet.js',
   /* The set-up dial; its holograms load only when it opens (three.js is a pinned vendor file). */
-  'setup-dial.js', 'holo.js',
+  'setup-dial.js', 'holo.js', 'trail-orb.js',
   /* Home's dark background: scent meeting the orb (its baked air, holo/homeair-1.json, is a pinned file). */
   'home-scent.js',
   /* The pixel art, a module to a subject behind pixel-team.js. Each is its own request, so each is listed. */

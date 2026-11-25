@@ -74,7 +74,7 @@ import { searchWords, logRows, recentRuns, runAt, midnight, facets, filterRows, 
          cleanFolderName, putMany, toggleFolder, renameIn, dropFrom, mergeFolders, emptyHeld, folderPatch } from './log.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-11-25c';
+const BUILD = '2026-11-25d';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true, plumeLook: 'glow', glass: 'real',
@@ -1899,11 +1899,17 @@ function paintHomeSum() {
 const HOME_KIND = { person: 'person', vehicle: 'vehicle', article: 'article', cadaver: 'mol:Cadaver', narcotics: 'narcotics',
   explosives: 'explosives', firearms: 'firearms', sport: 'sport', other: 'other' };
 const homeHolo = { h: null, p: null, kind: null, watching: false };
+/* On a person trail the orb shows the trail and its age instead (trail-orb.js). */
+const homeTrail = { t: null, p: null, level: null };
 const setupDialEl = () => document.getElementById('setupDial');      // made by setup-dial.js, not in the markup
 function paintHomeOrb() {
   const orb = $('homeOrb');
   if (!orb) return;
-  homeHolo.kind = HOME_KIND[S.target?.id] ?? 'other';
+  const trail = S.target?.kind === 'person';
+  homeHolo.kind = trail ? null : HOME_KIND[S.target?.id] ?? 'other';
+  homeTrail.level = trail ? S.level?.id ?? 'hot' : null;
+  if (trail && !homeTrail.p) homeTrail.p = import('./trail-orb.js').then(m => (homeTrail.t = m.createTrailOrb(orb))).catch(() => null);
+  homeTrail.p?.then(t => { if (t) { t.show(homeTrail.level); homeOrbRun(); } });
   if (!homeHolo.p) {
     homeHolo.p = import('./holo.js').then(m => m.createHolo(orb, Math.round(orb.getBoundingClientRect().width) || 240))
       .then(h => (homeHolo.h = h)).catch(() => null);
@@ -1927,9 +1933,11 @@ function paintHomeAir() {
 function homeOrbRun() {
   const on = currentScreen === 'scrHome' && setupDialEl()?.hidden !== false && !document.hidden;
   if (homeAir.a) { if (on && darkTheme()) homeAir.a.start(); else homeAir.a.stop(); }
+  const t = homeTrail.t;
+  if (t) { if (on && homeTrail.level) t.start(); else t.stop(); }
   const h = homeHolo.h;
   if (!h) return;
-  if (on) h.start(); else h.stop();
+  if (on && homeHolo.kind) h.start(); else h.stop();       // nothing to turn while the trail has the orb
 }
 function toggleHomeSetup() {
   homeSetupOpen = !homeSetupOpen;
