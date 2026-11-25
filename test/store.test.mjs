@@ -638,18 +638,18 @@ t('the cards count a drawn Trail Card\u2019s runs apart, and never tell them to 
 });
 
 t('odours: narcotics and explosives name theirs, each target remembers its own, the record says which', () => {
-  for (const id of ['narcotics', 'explosives']) {
+  for (const id of ['narcotics', 'explosives', 'sport']) {
     const set = ODOURS[id];
     assert.equal(targetById(id).kind, 'hide');
     assert.ok(set.ask && set.name);
-    assert.ok(set.list.length >= 8, 'the ScentLogix aids: 8 narcotics, 20 explosives');
+    assert.ok(set.list.length >= (id === 'sport' ? 4 : 8), 'the ScentLogix aids: 8 narcotics, 20 explosives; birch, anise, clove, cypress');
     assert.equal(new Set(set.list).size, set.list.length, 'no odour listed twice');
     for (const o of set.list) assert.ok(o.length <= 40, `${o} fits the typed field`);
   }
-  assert.deepEqual(Object.keys(ODOURS), ['narcotics', 'explosives']);
+  assert.deepEqual(Object.keys(ODOURS), ['narcotics', 'explosives', 'sport']);
   /* The set-up dial shows each listed odour as its molecule, found by name. */
-  const mols = JSON.parse(readFileSync(new URL('../public/holo/molecules-2.json', import.meta.url), 'utf8'));
-  for (const id of ['narcotics', 'explosives']) for (const o of ODOURS[id].list) {
+  const mols = JSON.parse(readFileSync(new URL('../public/holo/molecules-3.json', import.meta.url), 'utf8'));
+  for (const id of Object.keys(ODOURS)) for (const o of ODOURS[id].list) {
     const m = mols[o]; assert.ok(m && m.atoms.length && m.formula, `${o} has a molecule on the dial`);
     for (const [a, b] of m.bonds) assert.ok(m.atoms[a] && m.atoms[b], `${o}: bonds join atoms`);
   }

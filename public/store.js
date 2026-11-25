@@ -28,7 +28,7 @@ export const TARGETS = [
   { id: 'narcotics',  kind: 'hide',   label: 'Narcotics',  sub: 'detection hide' },
   { id: 'explosives', kind: 'hide',   label: 'Explosives', sub: 'detection hide' },
   { id: 'firearms',   kind: 'hide',   label: 'Firearms',   sub: 'detection hide' },
-  { id: 'sport',      kind: 'hide',   label: 'Sport odour', sub: 'birch, anise, clove, gun oil…' },
+  { id: 'sport',      kind: 'hide',   label: 'Sport odour', sub: 'birch, anise, clove, cypress' },
   { id: 'other',      kind: 'hide',   label: 'Other',      sub: 'anything else' },
 ];
 
@@ -57,6 +57,11 @@ export const ODOURS = {
       'ETN / PETN', 'Semtex (A+H)', 'Nitroglycerin', 'Nitrocellulose', 'Ethylene Glycol Dinitrate',
       'Ammonium Nitrate', 'Potassium Nitrate', 'Potassium Chlorate', 'Sodium Chlorate',
       'Nitromethane', 'TATP', 'HMTD', 'IED / HME', 'ICAO-Mandated'],
+  },
+  /* The sport scent-work odours (Rémi, 25 Nov 2026). */
+  sport: {
+    ask: 'Which sport odour', name: 'Name the sport odour',
+    list: ['Birch', 'Anise', 'Clove', 'Cypress'],
   },
 };
 

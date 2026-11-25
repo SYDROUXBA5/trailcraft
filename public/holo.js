@@ -211,7 +211,7 @@ const mixMat = new THREE.ShaderMaterial({ uniforms: { tA: { value: null }, tB: {
     'narcotics', 'explosives', 'firearms', 'article', 'sport', 'other',
     'mol:<odour name as the app lists it>', or null. dial(deg) turns it with the dial. */
 export async function createHolo(host, size) {
-  const mols = await fetch('holo/molecules-2.json').then(r => { if (!r.ok) throw new Error('molecules'); return r.json(); });
+  const mols = await fetch('holo/molecules-3.json').then(r => { if (!r.ok) throw new Error('molecules'); return r.json(); });
   const models = {};          // each model fetched the first time it is wanted
   const load = (kind) => (models[kind] ??= fetch(MODELS[kind][0]).then(r => { if (!r.ok) throw new Error(kind); return r.json(); }));
   const px = Math.round(size * Math.min(2, devicePixelRatio || 1));
