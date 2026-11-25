@@ -3654,6 +3654,25 @@ body.sd-open { overflow: hidden; }
 #scrHome .sum-line .sum-go { display: inline-flex; align-items: center; min-height: 40px; padding: 6px 16px; border-radius: 999px; white-space: nowrap;
   font: 700 calc(16 * var(--px)) var(--body); text-decoration: none; color: var(--moss); border: 1px solid currentColor; }
 :root[data-theme="dark"] #scrHome .sum-line .sum-go { color: #8FF4FF; background: rgba(0, 229, 255, 0.14); border-color: rgba(0, 229, 255, 0.6); }
+/* What each pill is: an icon above it (Rémi, 25 Nov 2026, style 4), in liquid glass on the dark theme. */
+#scrHome .sum-line { align-items: flex-end; }
+#scrHome .sum-line .sum-chips { align-items: flex-start; }
+#scrHome .sum-role { display: inline-flex; flex-direction: column; align-items: center; gap: 6px; }
+#scrHome .sum-ico { position: relative; display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%;
+  color: var(--ink); background: var(--card); border: 1px solid var(--rim); }
+#scrHome .sum-ico svg { width: 14px; height: 14px; }
+:root[data-theme="dark"] #scrHome .sum-ico,
+:root[data-theme="dark"] #scrHome .sum-line .sum-chip:not([class*="lvl-"]):not(.need) {
+  --lg-bw: 1px; position: relative; color: #fff; border: var(--lg-bw) solid transparent;
+  background: var(--lg-sheen), var(--lg-tint); -webkit-backdrop-filter: var(--lg-filter); backdrop-filter: var(--lg-filter); box-shadow: var(--lg-depth); }
+:root[data-theme="dark"] #scrHome .sum-ico { color: rgba(225, 246, 255, 0.95); }
+:root[data-theme="dark"] #scrHome .sum-ico::before,
+:root[data-theme="dark"] #scrHome .sum-line .sum-chip:not([class*="lvl-"]):not(.need)::before {
+  content: ""; position: absolute; inset: calc(-1 * var(--lg-bw)); border-radius: inherit; padding: 1px; background: var(--lg-rim);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude; pointer-events: none; }
+:root[data-theme="dark"] #scrHome .sum-ico::after,
+:root[data-theme="dark"] #scrHome .sum-line .sum-chip:not([class*="lvl-"]):not(.need)::after {
+  content: ""; position: absolute; inset: calc(-1 * var(--lg-bw)); border-radius: inherit; box-shadow: var(--lg-edge); mix-blend-mode: overlay; pointer-events: none; }
 /* Lay alone and large; Run and Sessions side by side under it. */
 #scrHome .home-two { margin-top: 10px; }
 #scrHome .home-two .btn.big.go { min-height: 78px; padding: 12px 14px 12px 18px; }
