@@ -647,6 +647,12 @@ t('odours: narcotics and explosives name theirs, each target remembers its own, 
     for (const o of set.list) assert.ok(o.length <= 40, `${o} fits the typed field`);
   }
   assert.deepEqual(Object.keys(ODOURS), ['narcotics', 'explosives']);
+  /* The set-up dial shows each listed odour as its molecule, found by name. */
+  const mols = JSON.parse(readFileSync(new URL('../public/holo/molecules-2.json', import.meta.url), 'utf8'));
+  for (const id of ['narcotics', 'explosives']) for (const o of ODOURS[id].list) {
+    const m = mols[o]; assert.ok(m && m.atoms.length && m.formula, `${o} has a molecule on the dial`);
+    for (const [a, b] of m.bonds) assert.ok(m.atoms[a] && m.atoms[b], `${o}: bonds join atoms`);
+  }
 
   assert.equal(targetText({ targetId: 'narcotics', odour: 'Cocaine' }), 'Narcotics · Cocaine');
   assert.equal(targetText({ targetId: 'explosives' }), 'Explosives');

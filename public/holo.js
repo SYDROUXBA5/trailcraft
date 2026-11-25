@@ -170,7 +170,7 @@ const MFS = `uniform float uTime, uOpacity, uReveal, uMinY, uMaxY, uScan; unifor
 const solidMat = (color) => new THREE.ShaderMaterial({ vertexShader: VS, fragmentShader: MFS, transparent: true, depthWrite: true,
   blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor,
   uniforms: { uTime: { value: 0 }, uOpacity: { value: 1 }, uReveal: { value: 1 }, uMinY: { value: -1 }, uMaxY: { value: 1 }, uScan: { value: still() ? 0 : 1 }, uColor: { value: new THREE.Color(color) } } });
-const COL = { C: ['#18D8F2', .15], N: ['#3F7BFF', .17], O: ['#E6FDFF', .17], Cl: ['#7DFFC8', .2], K: ['#B794FF', .24], P: ['#FFC266', .2], S: ['#FFE066', .2] };
+const COL = { C: ['#18D8F2', .15], N: ['#3F7BFF', .17], O: ['#E6FDFF', .17], Cl: ['#7DFFC8', .2], K: ['#B794FF', .24], P: ['#FFC266', .2], S: ['#FFE066', .2], Na: ['#FFB38A', .23] };
 const molecule = (m) => {
   const g = new THREE.Group(), P = m.atoms.map(a => new THREE.Vector3(...a.p)), rad = Math.max(.8, ...P.map(p => p.length())), k = 1.28 / rad, mats = [];
   P.forEach(p => p.multiplyScalar(k));
@@ -208,7 +208,7 @@ const mixMat = new THREE.ShaderMaterial({ uniforms: { tA: { value: null }, tB: {
     'narcotics', 'explosives', 'firearms', 'article', 'sport', 'other',
     'mol:<odour name as the app lists it>', or null. dial(deg) turns it with the dial. */
 export async function createHolo(host, size) {
-  const mols = await fetch('holo/molecules-1.json').then(r => { if (!r.ok) throw new Error('molecules'); return r.json(); });
+  const mols = await fetch('holo/molecules-2.json').then(r => { if (!r.ok) throw new Error('molecules'); return r.json(); });
   const models = {};          // each model fetched the first time it is wanted
   const load = (kind) => (models[kind] ??= fetch(MODELS[kind][0]).then(r => { if (!r.ok) throw new Error(kind); return r.json(); }));
   const px = Math.round(size * Math.min(2, devicePixelRatio || 1));
