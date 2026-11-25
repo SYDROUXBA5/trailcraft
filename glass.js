@@ -100,7 +100,7 @@ void main(){
   if(a <= 0.0){ o = vec4(0.0, 0.0, 0.0, sh); return; }
   float w = max(uBevel, 1.0);
   float t = clamp(-d / w, 0.0, 1.0);
-  float sl = pow(1.0 - t, 1.7);                 // how steep the bevel is here: 1 at the rim, 0 on the flat
+  float sl = pow(max(1.0 - t, 0.0), 1.7);                 // how steep the bevel is here: 1 at the rim, 0 on the flat
   float rad = uLook.z * 6.0 * uS;
   vec2 g = vec2(0.0, -1.0);
   vec3 N = vec3(0.0, 0.0, 1.0);
@@ -133,10 +133,10 @@ void main(){
   vec3 H1 = normalize(normalize(vec3(-0.55, -0.75, 0.50)) + V);
   vec3 H2 = normalize(normalize(vec3(0.55, 0.75, 0.42)) + V);
   col += (pow(max(dot(N, H1), 0.0), 30.0) + pow(max(dot(N, H2), 0.0), 30.0) * 0.28) * vec3(1.0, 0.98, 0.94) * 0.6;
-  col += pow(1.0 - N.z, 2.2) * vec3(0.50, 0.68, 0.85) * 0.16;
+  col += pow(max(1.0 - N.z, 0.0), 2.2) * vec3(0.50, 0.68, 0.85) * 0.16;
   float line = smoothstep(-1.5 * uS, -0.35 * uS, d);
   float fc = 0.5 + 0.5 * dot(g, normalize(vec2(-0.6, -0.8)));
-  col += line * (0.06 + 0.55 * pow(fc, 3.0) + 0.22 * pow(1.0 - fc, 3.0));
+  col += line * (0.06 + 0.55 * pow(max(fc, 0.0), 3.0) + 0.22 * pow(max(1.0 - fc, 0.0), 3.0));
   o = vec4(clamp(col, 0.0, 1.0) * a, a + (1.0 - a) * sh);
 }`;
 

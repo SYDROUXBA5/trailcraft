@@ -81,7 +81,7 @@ const fill = (H, g, spacing) => new THREE.Mesh(g, new THREE.ShaderMaterial({ tra
       gl_Position = projectionMatrix * viewMatrix * w; }`,
   fragmentShader: `uniform vec3 uC; uniform float uSp, uScan, uFade, uCut; varying vec3 vN; varying vec3 vV; varying vec3 vW;
     void main() { if (vW.y > uCut) discard;
-      float f = pow(1.0 - abs(dot(normalize(vN), vV)), 2.6);
+      float f = pow(max(1.0 - abs(dot(normalize(vN), vV)), 0.0), 2.6);   /* never a negative base: pow() of one is NaN, and the blur spreads a NaN pixel into a square */
       float d = abs(fract(vW.y / uSp) - 0.5) * uSp, w = fwidth(vW.y); float line = 1.0 - smoothstep(w * 0.4, w * 1.6, uSp * 0.5 - d);
       float qb = (vW.y - uScan) * 9.0, band = exp(-qb * qb), above = smoothstep(uScan + 0.02, uScan - 0.25, vW.y);
       float trail = smoothstep(uScan - 0.55, uScan, vW.y) * above;
@@ -161,7 +161,7 @@ const MFS = `uniform float uTime, uOpacity, uReveal, uMinY, uMaxY, uScan; unifor
   void main() {
     float cut = mix(uMinY - .05, uMaxY + .05, uReveal); if (vW.y > cut) discard;
     vec3 n = normalize(vN), v = normalize(vV), l = normalize(vec3(.45, .8, .55));
-    float diff = max(dot(n, l), 0.0), fr = pow(1.0 - max(dot(n, v), 0.0), 2.6);
+    float diff = max(dot(n, l), 0.0), fr = pow(max(1.0 - dot(n, v), 0.0), 2.6);   /* dot can round past 1 where a ball faces the camera: a negative base is NaN, a white square once blurred */
     float spec = pow(max(dot(reflect(-l, n), v), 0.0), 28.0);
     float scan = mix(1.0, .88 + .12 * step(.5, fract(vW.y * 26.0 - uTime * 1.3)), uScan);
     float band = smoothstep(.14, .0, abs(vW.y - cut)) * (1.0 - step(.999, uReveal));
