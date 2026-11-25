@@ -3691,20 +3691,27 @@ body.sd-open { overflow: hidden; }
 .ri .ri-float { animation: riFloat 3.6s ease-in-out infinite; }
 .ri-dog .ri-float { animation-delay: -1.2s; } .ri-layer .ri-float, .ri-trail .ri-float { animation-delay: -2.4s; }
 @keyframes riFloat { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-1.8px); } }
-/* The handler: breathing, and a bead of light running round the outline. */
-.ri .ri-breathe { transform-box: fill-box; transform-origin: 50% 100%; animation: riBreathe 3.4s ease-in-out infinite; }
-@keyframes riBreathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.045); } }
-.ri .ri-t { fill: none; stroke: #fff; stroke-width: 2.6; stroke-linecap: round; stroke-dasharray: 15 85; animation: riTrace 2.6s linear infinite; }
-.ri .ri-t2 { animation-delay: -1.3s; }
-@keyframes riTrace { from { stroke-dashoffset: 100; } to { stroke-dashoffset: 0; } }
-/* The dog: the toes press one after another, then the pad, and a ripple leaves it. */
-.ri .ri-toe, .ri .ri-palm { transform-box: fill-box; transform-origin: center; animation: riPress 2.6s cubic-bezier(.3, .7, .3, 1) infinite; }
-.ri .ri-toe.t2 { animation-delay: 0.13s; } .ri .ri-toe.t3 { animation-delay: 0.26s; } .ri .ri-toe.t4 { animation-delay: 0.39s; }
-.ri .ri-palm { animation-name: riPalm; animation-delay: 0.5s; }
-@keyframes riPress { 0%, 30%, 100% { transform: scale(1); opacity: 0.82; } 10% { transform: scale(1.28); opacity: 1; } }
-@keyframes riPalm { 0%, 34%, 100% { transform: scale(1); opacity: 0.86; } 12% { transform: scale(1.1); opacity: 1; } }
+/* The handler walks and the dog trots: their limbs are moved in the markup (app.js); here the bob of the
+   stride, the light running down the long line, the wagging tail, the sniff and the scent drawn in. */
+.ri .ri-l { fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; }
+.ri .ri-far { opacity: 0.5; }
+.ri .ri-bob { animation: riBob 0.52s ease-in-out infinite; }
+.ri .ri-bob-d { animation-duration: 0.31s; }
+@keyframes riBob { 0%, 100% { transform: translateY(0.5px); } 50% { transform: translateY(-0.5px); } }
+.ri .ri-leash { fill: none; stroke: currentColor; stroke-width: 1.3; stroke-linecap: round; opacity: 0.85; }
+.ri .ri-bead { stroke: #fff; stroke-width: 2; stroke-dasharray: 9 91; opacity: 1; animation: riBead 1.56s linear infinite; }
+@keyframes riBead { 0% { stroke-dashoffset: 9; opacity: 0; } 12% { opacity: 1; } 70% { opacity: 0.9; } 100% { stroke-dashoffset: -91; opacity: 0; } }
+.ri .ri-wag { transform-origin: 10.6px 22.2px; animation: riWag 0.26s ease-in-out infinite alternate; }
+@keyframes riWag { from { transform: rotate(-13deg); } to { transform: rotate(15deg); } }
+.ri .ri-sniff { transform-origin: 29px 22.5px; animation: riSniff 2.2s ease-in-out infinite; }
+@keyframes riSniff { 0%, 52%, 100% { transform: rotate(0deg); } 60% { transform: rotate(6deg); } 68% { transform: rotate(1.5deg); } 76% { transform: rotate(6deg); } 86% { transform: rotate(0deg); } }
+.ri .ri-nose { fill: #fff; }
+.ri .ri-smell { fill: #fff; opacity: 0; animation: riSmell 2.2s ease-in infinite; }
+.ri .ri-smell.late { animation-delay: 0.16s; }
+@keyframes riSmell { 0%, 50% { opacity: 0; transform: translate(1.5px, 0.6px); } 58% { opacity: 0.95; } 72%, 100% { opacity: 0; transform: translate(-2.3px, -2.9px); } }
+:root[data-theme="dark"] .ri .ri-l { stroke: url(#riG); }
+:root[data-theme="dark"] .ri .ri-leash { stroke: url(#riL); }
 .ri .ri-ring { fill: none; stroke: #fff; stroke-width: 1.4; transform-box: fill-box; transform-origin: center; opacity: 0; animation: riRing 2.6s ease-out infinite; }
-.ri-dog .ri-ring { animation-delay: 0.62s; }
 @keyframes riRing { 0% { transform: scale(0.6); opacity: 0; } 8% { opacity: 0.75; } 45%, 100% { transform: scale(2.7); opacity: 0; } }
 /* The hide: the cloth's wave is drawn in the markup; here the ping at the foot of the pole. */
 .ri .ri-cloth { opacity: 0.94; }
