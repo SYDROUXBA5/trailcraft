@@ -3669,23 +3669,65 @@ body.sd-open { overflow: hidden; }
 #scrHome .sum-line .sum-go { display: inline-flex; align-items: center; min-height: 40px; padding: 6px 16px; border-radius: 999px; white-space: nowrap;
   font: 700 calc(16 * var(--px)) var(--body); text-decoration: none; color: var(--moss); border: 1px solid currentColor; }
 :root[data-theme="dark"] #scrHome .sum-line .sum-go { color: #8FF4FF; background: rgba(0, 229, 255, 0.14); border-color: rgba(0, 229, 255, 0.6); }
-/* What each pill is: an icon above it (Rémi, 25 Nov 2026, style 4), in liquid glass on the dark theme. */
+/* What each pill is: an icon above it (Rémi, 25 Nov 2026, style 4). The pills are liquid glass on the dark
+   theme; the icons are not in glass (his second note that day): small holograms, drawn in app.js (ROLE_ICON). */
 #scrHome .sum-line { align-items: flex-end; }
 #scrHome .sum-line .sum-chips { align-items: flex-start; }
-#scrHome .sum-role { display: inline-flex; flex-direction: column; align-items: center; gap: 6px; }
-#scrHome .sum-ico { position: relative; display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%;
-  color: var(--ink); background: var(--card); border: 1px solid var(--rim); }
-#scrHome .sum-ico svg { width: 14px; height: 14px; }
-:root[data-theme="dark"] #scrHome .sum-ico,
+#scrHome .sum-role { display: inline-flex; flex-direction: column; align-items: center; gap: 3px; }
+#scrHome .sum-ico { display: grid; place-items: center; width: 42px; height: 47px; color: var(--ink); }
+#scrHome .sum-ico svg.ri { width: 42px; height: 47px; overflow: visible; }
+:root[data-theme="dark"] #scrHome .sum-ico { color: #EAFDFF; }
+:root[data-theme="dark"] #scrHome .sum-ico svg.ri { filter: drop-shadow(0 0 3px rgba(0, 229, 255, 0.85)) drop-shadow(0 0 10px rgba(0, 229, 255, 0.38)); }
+.ri .ri-s { fill: none; stroke: currentColor; stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; }
+.ri .ri-f { fill: currentColor; }
+:root[data-theme="dark"] .ri .ri-s { stroke: url(#riG); }
+:root[data-theme="dark"] .ri .ri-f { fill: url(#riG); }
+/* The projector ring under each, its light running round. */
+.ri .ri-pad { fill: none; stroke: currentColor; stroke-width: 1; opacity: 0.22; }
+.ri .ri-run { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-dasharray: 11 14; opacity: 0.85; animation: riRun 5s linear infinite; }
+:root[data-theme="dark"] .ri .ri-run { stroke: #00E5FF; }
+@keyframes riRun { to { stroke-dashoffset: -100; } }
+/* Each floats a little, out of step with its neighbours. */
+.ri .ri-float { animation: riFloat 3.6s ease-in-out infinite; }
+.ri-dog .ri-float { animation-delay: -1.2s; } .ri-layer .ri-float, .ri-trail .ri-float { animation-delay: -2.4s; }
+@keyframes riFloat { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-1.8px); } }
+/* The handler: breathing, and a bead of light running round the outline. */
+.ri .ri-breathe { transform-box: fill-box; transform-origin: 50% 100%; animation: riBreathe 3.4s ease-in-out infinite; }
+@keyframes riBreathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.045); } }
+.ri .ri-t { fill: none; stroke: #fff; stroke-width: 2.6; stroke-linecap: round; stroke-dasharray: 15 85; animation: riTrace 2.6s linear infinite; }
+.ri .ri-t2 { animation-delay: -1.3s; }
+@keyframes riTrace { from { stroke-dashoffset: 100; } to { stroke-dashoffset: 0; } }
+/* The dog: the toes press one after another, then the pad, and a ripple leaves it. */
+.ri .ri-toe, .ri .ri-palm { transform-box: fill-box; transform-origin: center; animation: riPress 2.6s cubic-bezier(.3, .7, .3, 1) infinite; }
+.ri .ri-toe.t2 { animation-delay: 0.13s; } .ri .ri-toe.t3 { animation-delay: 0.26s; } .ri .ri-toe.t4 { animation-delay: 0.39s; }
+.ri .ri-palm { animation-name: riPalm; animation-delay: 0.5s; }
+@keyframes riPress { 0%, 30%, 100% { transform: scale(1); opacity: 0.82; } 10% { transform: scale(1.28); opacity: 1; } }
+@keyframes riPalm { 0%, 34%, 100% { transform: scale(1); opacity: 0.86; } 12% { transform: scale(1.1); opacity: 1; } }
+.ri .ri-ring { fill: none; stroke: #fff; stroke-width: 1.4; transform-box: fill-box; transform-origin: center; opacity: 0; animation: riRing 2.6s ease-out infinite; }
+.ri-dog .ri-ring { animation-delay: 0.62s; }
+@keyframes riRing { 0% { transform: scale(0.6); opacity: 0; } 8% { opacity: 0.75; } 45%, 100% { transform: scale(2.7); opacity: 0; } }
+/* The hide: the cloth's wave is drawn in the markup; here the ping at the foot of the pole. */
+.ri .ri-cloth { opacity: 0.94; }
+.ri .ri-ping { transform-box: fill-box; transform-origin: center; animation: riPing 2.6s ease-in-out infinite; }
+@keyframes riPing { 0%, 100% { transform: scale(0.85); opacity: 0.75; } 12% { transform: scale(1.35); opacity: 1; } 40% { transform: scale(0.85); opacity: 0.75; } }
+/* The trail: two footprints, left then right, each landing bright and settling; scent rises from the fresh one. */
+.ri .ri-step { transform-box: fill-box; transform-origin: center; opacity: 0.42; animation: riStep 2.4s cubic-bezier(.3, .7, .3, 1) infinite; }
+.ri .ri-step.s2 { animation-delay: -1.2s; }
+@keyframes riStep { 0% { opacity: 0.42; transform: scale(0.86); } 9% { opacity: 1; transform: scale(1.1); } 18% { transform: scale(1); } 46% { opacity: 1; } 72%, 100% { opacity: 0.42; transform: scale(1); } }
+.ri .ri-mote { fill: #fff; opacity: 0; animation: riMote 2.4s ease-out infinite; }
+.ri .ri-mote.m2 { animation-delay: -1.2s; } .ri .ri-mote.late { animation-name: riMoteLate; }
+@keyframes riMote { 0%, 8% { opacity: 0; transform: translate(0, 0); } 16% { opacity: 0.95; } 52%, 100% { opacity: 0; transform: translate(2.5px, -9px); } }
+@keyframes riMoteLate { 0%, 20% { opacity: 0; transform: translate(0, 0); } 30% { opacity: 0.8; } 66%, 100% { opacity: 0; transform: translate(3.5px, -8px); } }
+/* Reduce Motion, or the app's own motion off: every icon whole and still. */
+@media (prefers-reduced-motion: reduce) { .ri * { animation: none !important; } .ri .ri-step { opacity: 1; } }
+:root[data-motion="off"] .ri * { animation: none !important; }
+:root[data-motion="off"] .ri .ri-step { opacity: 1; }
 :root[data-theme="dark"] #scrHome .sum-line .sum-chip:not([class*="lvl-"]):not(.need) {
   --lg-bw: 1px; position: relative; color: #fff; border: var(--lg-bw) solid transparent;
   background: var(--lg-sheen), var(--lg-tint); -webkit-backdrop-filter: var(--lg-filter); backdrop-filter: var(--lg-filter); box-shadow: var(--lg-depth); }
-:root[data-theme="dark"] #scrHome .sum-ico { color: rgba(225, 246, 255, 0.95); }
-:root[data-theme="dark"] #scrHome .sum-ico::before,
 :root[data-theme="dark"] #scrHome .sum-line .sum-chip:not([class*="lvl-"]):not(.need)::before {
   content: ""; position: absolute; inset: calc(-1 * var(--lg-bw)); border-radius: inherit; padding: 1px; background: var(--lg-rim);
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude; pointer-events: none; }
-:root[data-theme="dark"] #scrHome .sum-ico::after,
 :root[data-theme="dark"] #scrHome .sum-line .sum-chip:not([class*="lvl-"]):not(.need)::after {
   content: ""; position: absolute; inset: calc(-1 * var(--lg-bw)); border-radius: inherit; box-shadow: var(--lg-edge); mix-blend-mode: overlay; pointer-events: none; }
 /* Lay alone and large; Run and Sessions side by side under it. */
