@@ -74,7 +74,7 @@ import { searchWords, logRows, recentRuns, runAt, midnight, facets, filterRows, 
          cleanFolderName, putMany, toggleFolder, renameIn, dropFrom, mergeFolders, emptyHeld, folderPatch } from './log.js';
 
 /* The stamp a phone cannot lie about. Bump with every change. */
-const BUILD = '2026-11-25d';
+const BUILD = '2026-11-25e';
 
 /* ── Settings & store ─────────────────────────────────────────────── */
 const DEFAULTS = { ...COACH_DEFAULTS, accCap: 25, stillCap: 2.5, exagg: 2.4, plume: true, plumeLook: 'glow', glass: 'real',
@@ -1857,13 +1857,21 @@ function paintOdours() {
    out under itself and back. Folded is the usual state. It starts unfolded
    only when something the main button needs has not been chosen yet (no dog,
    or nobody to lay a person's trail), because that is found in the rows. */
-/* The icons over the Home pills: who handles, the dog, who set the hide or laid the trail. */
+/* The icons over the Home pills: who handles, the dog, who set the hide or laid the trail (Rémi, 25 Nov 2026:
+   no glass badge, a little bigger, every one animated). Each is a small hologram: a drawing in light floating
+   over a projector ring whose light runs round, as the orb's pad does. The handler breathes, light running
+   round the outline; the paw's toes press one after another and a ripple leaves the pad; the flag's cloth
+   carries a travelling wave over a ping where the hide sits; two footprints step, left then right, scent rising from each. The
+   motion is CSS (app.css, .ri-*), still with Reduce Motion; the cloth's wave is the one SMIL animation,
+   left out of the markup when motion is off. */
 const ROLE_ICON = {
-  handler: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="7" r="3.5"/><path d="M5 21c.6-4 3.4-6.5 7-6.5s6.4 2.5 7 6.5"/></svg>',
-  dog: '<svg viewBox="0 0 24 24" fill="currentColor"><ellipse cx="7" cy="9" rx="2" ry="2.6"/><ellipse cx="12" cy="6.5" rx="2" ry="2.6"/><ellipse cx="17" cy="9" rx="2" ry="2.6"/><path d="M12 12c-3.2 0-6 3.6-6 6.2 0 1.9 1.7 2.6 3.3 2.1 1.1-.3 1.8-.6 2.7-.6s1.6.3 2.7.6c1.6.5 3.3-.2 3.3-2.1 0-2.6-2.8-6.2-6-6.2z"/></svg>',
-  layer: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 21V4"/><path d="M6 4h11l-2.5 4L17 12H6"/></svg>',
-  trail: '<svg viewBox="0 0 24 24" fill="currentColor"><ellipse cx="8" cy="7" rx="2.6" ry="3.6" transform="rotate(-12 8 7)"/><ellipse cx="16" cy="15" rx="2.6" ry="3.6" transform="rotate(12 16 15)"/><circle cx="7.3" cy="12.6" r="1.3"/><circle cx="16.7" cy="20.6" r="1.3"/></svg>',
+  handler: '<svg class="ri ri-handler" viewBox="0 0 48 54"><defs><linearGradient id="riG" gradientUnits="userSpaceOnUse" x1="0" y1="4" x2="0" y2="44"><stop offset="0" stop-color="#fff"/><stop offset="1" stop-color="#7DEBFF"/></linearGradient></defs><ellipse class="ri-pad" cx="24" cy="48.5" rx="12.5" ry="3"/><ellipse class="ri-run" cx="24" cy="48.5" rx="12.5" ry="3" pathLength="100"/><g class="ri-float"><g class="ri-breathe"><circle class="ri-s" cx="24" cy="12" r="6"/><path class="ri-s" d="M10.5 38c0-9 5.6-14 13.5-14s13.5 5 13.5 14"/><circle class="ri-t" cx="24" cy="12" r="6" pathLength="100"/><path class="ri-t ri-t2" d="M10.5 38c0-9 5.6-14 13.5-14s13.5 5 13.5 14" pathLength="100"/></g></g></svg>',
+  dog: '<svg class="ri ri-dog" viewBox="0 0 48 54"><defs><linearGradient id="riG" gradientUnits="userSpaceOnUse" x1="0" y1="4" x2="0" y2="44"><stop offset="0" stop-color="#fff"/><stop offset="1" stop-color="#7DEBFF"/></linearGradient></defs><ellipse class="ri-pad" cx="24" cy="48.5" rx="12.5" ry="3"/><ellipse class="ri-run" cx="24" cy="48.5" rx="12.5" ry="3" pathLength="100"/><g class="ri-float"><circle class="ri-ring" cx="24" cy="30" r="7"/><g transform="rotate(-22 11.6 20.4)"><ellipse class="ri-f ri-toe t1" cx="11.6" cy="20.4" rx="3.6" ry="4.7"/></g><g transform="rotate(-8 19.4 13.2)"><ellipse class="ri-f ri-toe t2" cx="19.4" cy="13.2" rx="3.8" ry="5"/></g><g transform="rotate(8 28.6 13.2)"><ellipse class="ri-f ri-toe t3" cx="28.6" cy="13.2" rx="3.8" ry="5"/></g><g transform="rotate(22 36.4 20.4)"><ellipse class="ri-f ri-toe t4" cx="36.4" cy="20.4" rx="3.6" ry="4.7"/></g><path class="ri-f ri-palm" d="M24 21.6c-6.6 0-11.6 6.1-11.6 10.8 0 4 3.6 5.5 7 4.5 1.9-.6 3.1-1 4.6-1s2.7.4 4.6 1c3.4 1 7-.5 7-4.5 0-4.7-5-10.8-11.6-10.8z"/></g></svg>',
+  layer: '<svg class="ri ri-layer" viewBox="0 0 48 54"><defs><linearGradient id="riG" gradientUnits="userSpaceOnUse" x1="0" y1="4" x2="0" y2="44"><stop offset="0" stop-color="#fff"/><stop offset="1" stop-color="#7DEBFF"/></linearGradient></defs><ellipse class="ri-pad" cx="24" cy="48.5" rx="12.5" ry="3"/><ellipse class="ri-run" cx="24" cy="48.5" rx="12.5" ry="3" pathLength="100"/><g class="ri-float"><circle class="ri-ring" cx="17" cy="40.5" r="3"/><path class="ri-s" d="M17 6v33.5"/><path class="ri-f ri-cloth" d="M18.4 7.0C25.5 9.6 32.5 8.8 39.6 3.7L39.6 18.5C32.5 23.6 25.5 24.4 18.4 21.8Z"><animate attributeName="d" dur="1.9s" repeatCount="indefinite" keyTimes="0;0.125;0.25;0.375;0.5;0.625;0.75;0.875;1" values="M18.4 7.0C25.5 9.6 32.5 8.8 39.6 3.7L39.6 18.5C32.5 23.6 25.5 24.4 18.4 21.8Z;M18.4 7.0C25.5 6.2 32.5 13.1 39.6 5.2L39.6 20.0C32.5 27.9 25.5 21.0 18.4 21.8Z;M18.4 7.0C25.5 3.3 32.5 13.8 39.6 7.8L39.6 22.6C32.5 28.6 25.5 18.1 18.4 21.8Z;M18.4 7.0C25.5 2.6 32.5 10.5 39.6 9.9L39.6 24.7C32.5 25.3 25.5 17.4 18.4 21.8Z;M18.4 7.0C25.5 4.4 32.5 5.2 39.6 10.3L39.6 25.1C32.5 20.0 25.5 19.2 18.4 21.8Z;M18.4 7.0C25.5 7.8 32.5 0.9 39.6 8.8L39.6 23.6C32.5 15.7 25.5 22.6 18.4 21.8Z;M18.4 7.0C25.5 10.7 32.5 0.2 39.6 6.2L39.6 21.0C32.5 15.0 25.5 25.5 18.4 21.8Z;M18.4 7.0C25.5 11.4 32.5 3.5 39.6 4.1L39.6 18.9C32.5 18.3 25.5 26.2 18.4 21.8Z;M18.4 7.0C25.5 9.6 32.5 8.8 39.6 3.7L39.6 18.5C32.5 23.6 25.5 24.4 18.4 21.8Z"/></path><circle class="ri-f ri-ping" cx="17" cy="40.5" r="2.3"/></g></svg>',
+  trail: '<svg class="ri ri-trail" viewBox="0 0 48 54"><defs><linearGradient id="riG" gradientUnits="userSpaceOnUse" x1="0" y1="4" x2="0" y2="44"><stop offset="0" stop-color="#fff"/><stop offset="1" stop-color="#7DEBFF"/></linearGradient></defs><ellipse class="ri-pad" cx="24" cy="48.5" rx="12.5" ry="3"/><ellipse class="ri-run" cx="24" cy="48.5" rx="12.5" ry="3" pathLength="100"/><g class="ri-float"><g transform="rotate(-9 16.2 28.6)"><g class="ri-step s1"><ellipse class="ri-f" cx="16.2" cy="22.6" rx="5.3" ry="7.4"/><ellipse class="ri-f" cx="16.2" cy="35.0" rx="3.9" ry="3.5"/></g></g><circle class="ri-mote m1" cx="14.0" cy="16.6" r="1.15"/><circle class="ri-mote m1 late" cx="18.8" cy="18.1" r="0.95"/><g transform="rotate(9 31.8 18.6)"><g class="ri-step s2"><ellipse class="ri-f" cx="31.8" cy="12.6" rx="5.3" ry="7.4"/><ellipse class="ri-f" cx="31.8" cy="25.0" rx="3.9" ry="3.5"/></g></g><circle class="ri-mote m2" cx="29.6" cy="6.6" r="1.15"/><circle class="ri-mote m2 late" cx="34.4" cy="8.1" r="0.95"/></g></svg>',
 };
+const roleIcon = (r) => (matchMedia('(prefers-reduced-motion: reduce)').matches || document.documentElement.dataset.motion === 'off')
+  ? ROLE_ICON[r].replace(/<animate [^>]*\/>/g, '') : ROLE_ICON[r];
 const HOME_ROWS = ['rowHandlers', 'rowDogs', 'rowTargets', 'rowCarries', 'rowOdours', 'rowLevels', 'rowLayers'];
 let homeSetupOpen = null;                         // null until the first paint has looked
 function paintHomeSum() {
@@ -1880,7 +1888,7 @@ function paintHomeSum() {
      VoiceOver (Rémi, 25 Nov 2026: style 4, "icon above", in liquid glass).
      Both sit outside the pill, whose own words still say which question a tap asks. */
   const layWord = isPerson ? 'Trail laid by' : 'Hide set by';
-  const role = (r, word, html) => `<span class="sum-role r-${r}"><span class="sum-ico" aria-hidden="true">${ROLE_ICON[r === 'layer' && isPerson ? 'trail' : r]}</span><span class="sr-only">${word}</span>${html}</span>`;
+  const role = (r, word, html) => `<span class="sum-role r-${r}"><span class="sum-ico" aria-hidden="true">${roleIcon(r === 'layer' && isPerson ? 'trail' : r)}</span><span class="sr-only">${word}</span>${html}</span>`;
   const bits = [solo ? role('layer', 'Lays the trails', chip(avaHtml(handler) + esc(handler.name))) : role('handler', 'Handler', chip(avaHtml(handler) + esc(handler.name)))];
   if (dog) bits.push(role('dog', 'Dog', chip(avaHtml(dog) + esc(dog.name))));
   else if (!solo) bits.push(role('dog', 'Dog', chip('No dog yet', 'need')));
