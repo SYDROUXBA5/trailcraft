@@ -3013,7 +3013,7 @@ html.hv-lift .style-pick { bottom: calc(var(--hv-gap, 0px) + 132px); }
    on one rounded pane of smoked glass over the map rather than straight on
    the imagery (Rémi on his phone, 2026-11-22). The replay's dock is the same
    pane. With Reduce Transparency the pane is solid. */
-#scrLay .glass-bottom, #scrRun .glass-bottom, .rep-dock {
+#scrLay .glass-bottom, #scrRun .glass-bottom, .rep-dock, .screen.glass .glass-bottom {
   left: 10px; right: 10px; bottom: calc(var(--safe-b) + 10px); max-width: 540px;
   padding: 14px; border-radius: 28px;
   background: rgba(var(--smoke), 0.74); border: 1px solid rgba(255, 255, 255, 0.16);
@@ -3021,9 +3021,9 @@ html.hv-lift .style-pick { bottom: calc(var(--hv-gap, 0px) + 132px); }
   -webkit-backdrop-filter: blur(22px) saturate(150%); backdrop-filter: blur(22px) saturate(150%);
   color: #F5F7FA;                             /* light words on the smoked pane, in the light theme too */
 }
-#scrLay .glass-bottom .label, #scrRun .glass-bottom .label { color: rgba(255, 255, 255, 0.72); }
+#scrLay .glass-bottom .label, #scrRun .glass-bottom .label, .screen.glass .glass-bottom .label:not(.card .label) { color: rgba(255, 255, 255, 0.72); }   /* a card inside the pane keeps its own ink (the light theme's is a white card) */
 @media (prefers-reduced-transparency: reduce) {
-  #scrLay .glass-bottom, #scrRun .glass-bottom, .rep-dock { background: rgb(var(--smoke-d)); -webkit-backdrop-filter: none; backdrop-filter: none; }
+  #scrLay .glass-bottom, #scrRun .glass-bottom, .rep-dock, .screen.glass .glass-bottom { background: rgb(var(--smoke-d)); -webkit-backdrop-filter: none; backdrop-filter: none; }
 }
 #scrLay .glass-caption, #scrRun .glass-caption, .rep-dock .glass-caption { text-shadow: none; color: rgba(255, 255, 255, 0.78); font-weight: 500; }
 
@@ -3378,7 +3378,7 @@ html.hv-lift .style-pick { bottom: calc(var(--hv-gap, 0px) + 132px); }
 :root[data-theme="dark"] .map-fab,
 :root[data-theme="dark"] .map-style,
 :root[data-theme="dark"] #scrLay .glass-bottom,
-:root[data-theme="dark"] #scrRun .glass-bottom,
+:root[data-theme="dark"] #scrRun .glass-bottom, :root[data-theme="dark"] .screen.glass .glass-bottom,
 :root[data-theme="dark"] .rep-dock {
   --lg-bw: 1px;
   position: fixed;                            /* as they already are; said here so the rim's ::before has a host */
@@ -3396,7 +3396,7 @@ html.hv-lift .style-pick { bottom: calc(var(--hv-gap, 0px) + 132px); }
 :root[data-theme="dark"] .map-fab::before,
 :root[data-theme="dark"] .map-style::before,
 :root[data-theme="dark"] #scrLay .glass-bottom::before,
-:root[data-theme="dark"] #scrRun .glass-bottom::before,
+:root[data-theme="dark"] #scrRun .glass-bottom::before, :root[data-theme="dark"] .screen.glass .glass-bottom::before,
 :root[data-theme="dark"] .rep-dock::before {
   content: ""; position: absolute; inset: calc(-1 * var(--lg-bw)); z-index: 1;
   border-radius: inherit; padding: 1px;
@@ -3412,7 +3412,7 @@ html.hv-lift .style-pick { bottom: calc(var(--hv-gap, 0px) + 132px); }
 :root[data-theme="dark"] .map-fab::after,
 :root[data-theme="dark"] .map-style::after,
 :root[data-theme="dark"] #scrLay .glass-bottom::after,
-:root[data-theme="dark"] #scrRun .glass-bottom::after,
+:root[data-theme="dark"] #scrRun .glass-bottom::after, :root[data-theme="dark"] .screen.glass .glass-bottom::after,
 :root[data-theme="dark"] .rep-dock::after {
   content: ""; position: absolute; inset: calc(-1 * var(--lg-bw)); z-index: 1;
   border-radius: inherit;
@@ -3423,7 +3423,7 @@ html.hv-lift .style-pick { bottom: calc(var(--hv-gap, 0px) + 132px); }
 :root[data-theme="dark"] .wx-panel { border-radius: 22px; }
 /* Big panes catch less light along their long edges than a small pill. */
 :root[data-theme="dark"] #scrLay .glass-bottom::before,
-:root[data-theme="dark"] #scrRun .glass-bottom::before,
+:root[data-theme="dark"] #scrRun .glass-bottom::before, :root[data-theme="dark"] .screen.glass .glass-bottom::before,
 :root[data-theme="dark"] .rep-dock::before { opacity: 0.8; }
 
 /* The compass is a disc of the same glass: the dial lets the ground through,
@@ -3451,7 +3451,7 @@ html.hv-lift .style-pick { bottom: calc(var(--hv-gap, 0px) + 132px); }
 :root[data-theme="dark"] .map-style[aria-expanded="true"] { color: var(--lit); }
 
 /* On a pane: lighter glass, no backdrop of its own. */
-:root[data-theme="dark"] :where(#scrLay .glass-bottom, #scrRun .glass-bottom, .rep-dock) .btn,
+:root[data-theme="dark"] :where(#scrLay .glass-bottom, #scrRun .glass-bottom, .screen.glass .glass-bottom, .bench-sheet, .coach-sheet, .felt-sheet, .call-sheet, .nav-banner, .rep-dock) .btn,
 :root[data-theme="dark"] .rep-dock .rep-foot .btn,
 :root[data-theme="dark"] .rep-dock .rep-speed,
 :root[data-theme="dark"] .wp-pill {
@@ -3470,7 +3470,7 @@ html.hv-lift .style-pick { bottom: calc(var(--hv-gap, 0px) + 132px); }
    stays lit: aqua-tinted glass with an aqua edge, as a chosen chip is
    everywhere else in the dark theme. Without this the pane's light glass
    wiped the choice out (seen on the live site, build 2026-11-22a). */
-:root[data-theme="dark"] :where(#scrLay .glass-bottom, #scrRun .glass-bottom, .rep-dock) .btn[aria-pressed="true"] {
+:root[data-theme="dark"] :where(#scrLay .glass-bottom, #scrRun .glass-bottom, .screen.glass .glass-bottom, .bench-sheet, .coach-sheet, .felt-sheet, .call-sheet, .nav-banner, .rep-dock) .btn[aria-pressed="true"] {
   background: linear-gradient(180deg, rgba(var(--aqua-rgb), 0.42), rgba(var(--aqua-rgb), 0.2) 55%, rgba(var(--aqua-rgb), 0.28)), var(--moss);
   border-color: rgba(var(--aqua-rgb), 0.75);
   box-shadow:
@@ -3481,14 +3481,14 @@ html.hv-lift .style-pick { bottom: calc(var(--hv-gap, 0px) + 132px); }
 }
 /* Tinted buttons (Stop, a chosen option) keep their colour and gain the
    same gloss: a bright lip and a bevel. */
-:root[data-theme="dark"] :where(#scrLay .glass-bottom, #scrRun .glass-bottom, .rep-dock) :is(.btn.ember, .btn.moss, .btn.moss-on-dark, .btn.live-btn.alert, .btn.live-btn.on, .rep-play) {
+:root[data-theme="dark"] :where(#scrLay .glass-bottom, #scrRun .glass-bottom, .screen.glass .glass-bottom, .bench-sheet, .coach-sheet, .felt-sheet, .call-sheet, .nav-banner, .rep-dock) :is(.btn.ember, .btn.moss, .btn.moss-on-dark, .btn.live-btn.alert, .btn.live-btn.on, .rep-play) {
   box-shadow:
     inset 0 1px 0.5px rgba(255, 255, 255, 0.7),
     inset 0 12px 16px -12px rgba(255, 255, 255, 0.45),
     inset 0 -8px 14px -10px rgba(0, 0, 0, 0.22),
     0 8px 22px -10px rgba(0, 0, 0, 0.6);
 }
-:root[data-theme="dark"] :where(#scrLay .glass-bottom, #scrRun .glass-bottom, .rep-dock) .btn::before,
+:root[data-theme="dark"] :where(#scrLay .glass-bottom, #scrRun .glass-bottom, .screen.glass .glass-bottom, .bench-sheet, .coach-sheet, .felt-sheet, .call-sheet, .nav-banner, .rep-dock) .btn::before,
 :root[data-theme="dark"] .rep-dock .rep-foot .btn::before,
 :root[data-theme="dark"] .rep-dock .rep-speed::before,
 :root[data-theme="dark"] .wp-pill::before {
@@ -3500,7 +3500,7 @@ html.hv-lift .style-pick { bottom: calc(var(--hv-gap, 0px) + 132px); }
   pointer-events: none;
 }
 /* The row of marks is a groove cut into the pane. */
-:root[data-theme="dark"] :where(#scrLay .glass-bottom, #scrRun .glass-bottom, .rep-dock) .wp-row {
+:root[data-theme="dark"] :where(#scrLay .glass-bottom, #scrRun .glass-bottom, .screen.glass .glass-bottom, .bench-sheet, .coach-sheet, .felt-sheet, .call-sheet, .nav-banner, .rep-dock) .wp-row {
   background: rgba(0, 0, 0, 0.24); border-color: transparent;
   -webkit-backdrop-filter: none; backdrop-filter: none;
   box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.5), inset 0 -1px 0 rgba(255, 255, 255, 0.12);
@@ -3511,7 +3511,7 @@ html.hv-lift .style-pick { bottom: calc(var(--hv-gap, 0px) + 132px); }
 @media (prefers-reduced-transparency: reduce) {
   :root[data-theme="dark"] .wx-panel, :root[data-theme="dark"] .hud-pill, :root[data-theme="dark"] .wx-rose,
   :root[data-theme="dark"] .map-fab, :root[data-theme="dark"] .map-style,
-  :root[data-theme="dark"] #scrLay .glass-bottom, :root[data-theme="dark"] #scrRun .glass-bottom, :root[data-theme="dark"] .rep-dock {
+  :root[data-theme="dark"] #scrLay .glass-bottom, :root[data-theme="dark"] #scrRun .glass-bottom, :root[data-theme="dark"] .rep-dock, :root[data-theme="dark"] .screen.glass .glass-bottom {
     background: var(--lg-sheen), #101318; -webkit-backdrop-filter: none; backdrop-filter: none;
   }
   :root[data-theme="dark"] #wxDial stop:first-child, :root[data-theme="dark"] #wxDial stop:last-child { stop-opacity: 0; }
@@ -3759,7 +3759,7 @@ body.sd-open { overflow: hidden; }
 :root[data-theme="dark"] .map-fab[data-rg],
 :root[data-theme="dark"] .map-style[data-rg],
 :root[data-theme="dark"] #scrLay .glass-bottom[data-rg],
-:root[data-theme="dark"] #scrRun .glass-bottom[data-rg],
+:root[data-theme="dark"] #scrRun .glass-bottom[data-rg], :root[data-theme="dark"] .screen.glass .glass-bottom[data-rg],
 :root[data-theme="dark"] .rep-dock[data-rg] {
   position: fixed;                            /* as they already are */
   background: none;
@@ -3772,8 +3772,146 @@ body.sd-open { overflow: hidden; }
 :root[data-theme="dark"] .map-fab[data-rg]::before, :root[data-theme="dark"] .map-fab[data-rg]::after,
 :root[data-theme="dark"] .map-style[data-rg]::before, :root[data-theme="dark"] .map-style[data-rg]::after,
 :root[data-theme="dark"] #scrLay .glass-bottom[data-rg]::before, :root[data-theme="dark"] #scrLay .glass-bottom[data-rg]::after,
-:root[data-theme="dark"] #scrRun .glass-bottom[data-rg]::before, :root[data-theme="dark"] #scrRun .glass-bottom[data-rg]::after,
+:root[data-theme="dark"] #scrRun .glass-bottom[data-rg]::before, :root[data-theme="dark"] #scrRun .glass-bottom[data-rg]::after, :root[data-theme="dark"] .screen.glass .glass-bottom[data-rg]::before, :root[data-theme="dark"] .screen.glass .glass-bottom[data-rg]::after,
 :root[data-theme="dark"] .rep-dock[data-rg]::before, :root[data-theme="dark"] .rep-dock[data-rg]::after { display: none; }
 /* The warning states keep their amber over the glass. */
 :root[data-theme="dark"] .hud-pill.off[data-rg],
 :root[data-theme="dark"] .map-fab.nudge[data-rg] { background: var(--lg-sheen), rgba(255, 184, 107, 0.86); }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   Liquid glass on every window (Rémi, 27 Nov 2026: "every single window…
+   some of them do not have it, nothing match… from the sign in to all
+   other"). An audit photographed 34 screens and 23 pop-ups: only what
+   floats on the map, the Lay, Run and Replay docks and Home's pills had the
+   glass. Cards, sign-in, settings, the pop-up sheets and the bottom sheets
+   of the other map screens were flat navy boxes.
+
+   One recipe, the one above (--lg-*), for all of them. Three cases:
+   - a window with nothing in the way gets the drawn rim (::before) and the
+     bright edge (::after), exactly as the map panes and Home's pills;
+   - a window that scrolls, clips or already uses its ::before gets the same
+     light as shadows only, so nothing is cut off or scrolls away;
+   - what sits INSIDE a window is lighter glass with no backdrop of its own.
+   On a plain page there is nothing behind a card to blur, so the blur is
+   kept for Home (the air behind it), sign-in, the map and the pop-ups.
+   Every map screen's bottom sheet now shares the Lay and Run dock's rules
+   (the selectors above were widened), real glass included.
+   Dark theme only, as all the glass is. The pixel level-up card is not glass.
+   ═══════════════════════════════════════════════════════════════════════ */
+:root[data-theme="dark"] {
+  --lg-rim-s: inset 1px 1px 0 0 rgba(255, 255, 255, 0.40), inset -1px -1px 0 0 rgba(255, 255, 255, 0.20), inset 0 0 0 1px rgba(255, 255, 255, 0.07);
+  --lg-depth-s: var(--lg-rim-s), inset 0 -10px 18px -14px rgba(255, 255, 255, 0.22), 0 1px 2px rgba(0, 0, 0, 0.3), 0 14px 34px -14px rgba(0, 0, 0, 0.65);
+  --lg-on: linear-gradient(180deg, rgba(255, 255, 255, 0.085), rgba(255, 255, 255, 0.03) 55%, rgba(255, 255, 255, 0.055));
+  --lg-on-depth: inset 0 1px 0.5px rgba(255, 255, 255, 0.26), inset 0 0 0 1px rgba(255, 255, 255, 0.06), inset 0 -8px 14px -12px rgba(255, 255, 255, 0.2), 0 1px 2px rgba(0, 0, 0, 0.25);
+}
+/* The rim needs a positioned host (see the wiring test): the plain ones are told so, the others say again what they already are. */
+:root[data-theme="dark"] .card,
+:root[data-theme="dark"] .signin-card,
+:root[data-theme="dark"] .team-row,
+:root[data-theme="dark"] .map-tut-card { position: relative; }
+:root[data-theme="dark"] .toast,
+:root[data-theme="dark"] .bench-sheet,
+:root[data-theme="dark"] .call-sheet { position: fixed; }
+:root[data-theme="dark"] .nav-banner { position: absolute; }
+
+/* Windows with the drawn rim. */
+:root[data-theme="dark"] .card,
+:root[data-theme="dark"] .signin-card,
+:root[data-theme="dark"] .team-row,
+:root[data-theme="dark"] .map-tut-card,
+:root[data-theme="dark"] .toast,
+:root[data-theme="dark"] .bench-sheet,
+:root[data-theme="dark"] .call-sheet,
+:root[data-theme="dark"] .nav-banner {
+  --lg-bw: 1px;
+  background: var(--lg-sheen), var(--lg-tint);
+  border: var(--lg-bw) solid transparent;
+  -webkit-backdrop-filter: var(--lg-filter); backdrop-filter: var(--lg-filter);
+  box-shadow: var(--lg-depth);
+  color: #FFFFFF;
+}
+:root[data-theme="dark"] .card::before,
+:root[data-theme="dark"] .signin-card::before,
+:root[data-theme="dark"] .team-row::before,
+:root[data-theme="dark"] .map-tut-card::before,
+:root[data-theme="dark"] .toast::before,
+:root[data-theme="dark"] .bench-sheet::before,
+:root[data-theme="dark"] .call-sheet::before,
+:root[data-theme="dark"] .nav-banner::before {
+  content: ""; position: absolute; inset: calc(-1 * var(--lg-bw)); z-index: 1;
+  border-radius: inherit; padding: 1px;
+  background: var(--lg-rim);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor; mask-composite: exclude;
+  pointer-events: none; opacity: 0.8;
+}
+:root[data-theme="dark"] .card::after,
+:root[data-theme="dark"] .signin-card::after,
+:root[data-theme="dark"] .team-row::after,
+:root[data-theme="dark"] .map-tut-card::after,
+:root[data-theme="dark"] .toast::after,
+:root[data-theme="dark"] .bench-sheet::after,
+:root[data-theme="dark"] .call-sheet::after,
+:root[data-theme="dark"] .nav-banner::after {
+  content: ""; position: absolute; inset: calc(-1 * var(--lg-bw)); z-index: 1;
+  border-radius: inherit;
+  box-shadow: var(--lg-edge);
+  mix-blend-mode: overlay;
+  pointer-events: none;
+}
+/* Windows that scroll, clip or use their own ::before: the same light, as shadows. */
+:root[data-theme="dark"] :is(.check-list, .app-sheet-card, .clip-card, .dog-pick-card, .tile, .home-alert, .res-level, .save-trouble, .tn-stage, .tn-preset, .where-row,
+    .radio-card:not(.selected), .log-pick, .rk-note, .bench-grp, .bench-preset, .contam-key, .reach-key, .unit-toggle, .signin-tabs),
+:root[data-theme="dark"] .coach-sheet,
+:root[data-theme="dark"] .felt-sheet {
+  background: var(--lg-sheen), var(--lg-tint);
+  border-color: transparent;
+  -webkit-backdrop-filter: var(--lg-filter); backdrop-filter: var(--lg-filter);
+  box-shadow: var(--lg-depth-s);
+}
+/* Inside a window: lighter glass, no backdrop of its own. The docks that already had their glass keep their own rules. */
+:root[data-theme="dark"] :is(.card, .signin-card, .map-tut-card, .check-list, .app-sheet-card, .clip-card, .dog-pick-card, .coach-sheet, .felt-sheet, .call-sheet, .bench-sheet, .glass-bottom)
+  :is(.card, .team-row, .check-list, .tile, .home-alert, .res-level, .tn-stage, .tn-preset, .where-row, .radio-card:not(.selected), .rk-note, .bench-grp, .bench-preset, .unit-toggle, .signin-tabs):not(:is(#scrLay .glass-bottom, #scrRun .glass-bottom, .rep-dock, .wx-panel) *) {
+  background: var(--lg-on);
+  border-color: transparent;
+  -webkit-backdrop-filter: none; backdrop-filter: none;
+  box-shadow: var(--lg-on-depth);
+}
+:root[data-theme="dark"] :is(.card, .signin-card, .map-tut-card, .check-list, .app-sheet-card, .clip-card, .dog-pick-card, .coach-sheet, .felt-sheet, .call-sheet, .bench-sheet, .glass-bottom)
+  :is(.card, .team-row)::before,
+:root[data-theme="dark"] :is(.card, .signin-card, .map-tut-card, .check-list, .app-sheet-card, .clip-card, .dog-pick-card, .coach-sheet, .felt-sheet, .call-sheet, .bench-sheet, .glass-bottom)
+  :is(.card, .team-row)::after { display: none; }
+/* A plain page has nothing behind its cards to blur: the tint, sheen, rim and bevel are the glass there. */
+:root[data-theme="dark"] .screen.paper:not(#scrHome):not(#scrSignIn) :is(.card, .team-row, .check-list, .tile, .home-alert, .res-level, .tn-stage, .tn-preset, .where-row, .radio-card, .log-pick, .rk-note, .unit-toggle) { -webkit-backdrop-filter: none; backdrop-filter: none; }
+/* A text box in glass is a shallow well cut into it. */
+:root[data-theme="dark"] :is(input[type="text"], input[type="email"], input[type="password"], input[type="number"], input[type="date"], input[type="search"], input:not([type]), select, textarea) {
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.5), inset 0 0 0 1px rgba(255, 255, 255, 0.07), 0 1px 0 rgba(255, 255, 255, 0.10);
+}
+/* Real glass draws these map panes too; a marked one gives up its own. */
+:root[data-theme="dark"] .bench-sheet[data-rg],
+:root[data-theme="dark"] .nav-banner[data-rg] { background: none; -webkit-backdrop-filter: none; backdrop-filter: none; box-shadow: none; }
+:root[data-theme="dark"] :is(.bench-sheet, .nav-banner)[data-rg]::before,
+:root[data-theme="dark"] :is(.bench-sheet, .nav-banner)[data-rg]::after { display: none; }
+/* A sheet that opens OVER other controls (the coach's line over the Run dock, a question over the page) is thicker
+   glass: it blurs and dims hard, so what is under it is light and colour, never words showing through words. */
+:root[data-theme="dark"] :is(.coach-sheet, .felt-sheet, .call-sheet, .dog-pick-card, .clip-card, .app-sheet-card, .map-tut-card, .toast) {
+  --lg-filter: blur(22px) saturate(170%) brightness(0.5);
+  --lg-tint: rgba(2, 26, 66, 0.66);
+}
+/* A plain button on a page is a small piece of the same glass: the sheen and the bevel, no backdrop. The lit ones
+   (Lay a trail, Save) keep their ice ring. */
+:root[data-theme="dark"] :where(.screen.paper, .screen.tutorial) .btn:not(.moss):not(.ember):not(.danger):not([disabled]) {
+  background-image: var(--lg-sheen);
+  box-shadow: var(--lg-on-depth);
+}
+/* A text box in glass takes the glass's own blue. */
+:root[data-theme="dark"] :is(input[type="text"], input[type="email"], input[type="password"], input[type="number"], input[type="date"], input[type="search"], input:not([type]), select, textarea) {
+  background-color: rgba(0, 70, 160, 0.13);
+}
+@media (prefers-reduced-transparency: reduce) {
+  /* said twice over ([data-theme][data-theme]) so it outranks every rule above, whatever their :not()s add */
+  :root[data-theme="dark"][data-theme][data-theme] :is(.card, .signin-card, .team-row, .map-tut-card, .toast, .bench-sheet, .nav-banner, .call-sheet, .coach-sheet, .felt-sheet,
+      .check-list, .app-sheet-card, .clip-card, .dog-pick-card, .tile, .home-alert, .res-level, .save-trouble, .tn-stage, .tn-preset, .where-row, .log-pick, .rk-note, .bench-grp, .bench-preset, .contam-key, .reach-key) {
+    background: var(--card); -webkit-backdrop-filter: none; backdrop-filter: none;
+  }
+}
