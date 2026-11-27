@@ -20,7 +20,7 @@
    again, so the blur is always what is left. */
 
 /* The same pieces app.css gives the liquid glass to. */
-export const GLASS_PANES = '.wx-panel, .hud-pill, .wx-rose, .map-fab, .map-style, #scrLay .glass-bottom, #scrRun .glass-bottom, .rep-dock';
+export const GLASS_PANES = '.wx-panel, .hud-pill, .wx-rose, .map-fab, .map-style, #scrLay .glass-bottom, #scrRun .glass-bottom, .screen.glass .glass-bottom, .rep-dock, .bench-sheet, .nav-banner';
 /* How strongly the edge bends the ground, how far the colours part, how much the glass softens what is under it. */
 export const GLASS_LOOK = { refraction: 1.0, rainbow: 1.6, frost: 0.12 };
 /* The pane's own colour, as app.css states it in --lg-tint: 'rgba(0, 70, 160, 0.30)' to [r, g, b, a], each 0 to 1. */
