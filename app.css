@@ -3915,3 +3915,95 @@ body.sd-open { overflow: hidden; }
     background: var(--card); -webkit-backdrop-filter: none; backdrop-filter: none;
   }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   The lit edge (Rémi, 27 Nov 2026, of the light-blue outline on "Lay a
+   trail": "it doesnt match the premium feel of the glass"; he chose A of
+   three mock-ups). The outline was one flat 2px line of cyan with a glow,
+   the same all the way round, drawn ON the glass. Glass does not light up
+   like that. Its own rim catches the light: brightest where the light comes
+   in (top left) and where it leaves (bottom right), almost dark between,
+   and the colour pools inside the bottom edge.
+
+   So every light-blue outline is now the glass's rim, lit in ice:
+   - the lit buttons (Lay a trail, Start, Save…): see-through, so the rim is
+     drawn by ::before (it takes the place of the paper specular and of the
+     white rim a button has on a map pane);
+   - a chosen option (card, chip, toggle, tile): its fill is solid, so the
+     rim is painted in the border itself, and the fill is a brighter ice so
+     what is chosen still reads at a glance;
+   - Home's "Change" pill; and the arrow disc becomes a bead of the glass.
+   Focus rings are not outlines of this kind and are not touched. Dark only.
+   ═══════════════════════════════════════════════════════════════════════ */
+:root[data-theme="dark"] {
+  /* never quite dark between the two highlights: outdoors the lit button must still be the one that stands out */
+  --ice-rim: conic-gradient(from 0deg, rgba(130, 242, 255, 0.85), rgba(0, 229, 255, 0.36) 12.5%, rgba(160, 248, 255, 0.95) 37.5%,
+    rgba(0, 229, 255, 0.34) 62.5%, #F6FFFF 87.5%, rgba(130, 242, 255, 0.85));
+  --ice-fill: linear-gradient(180deg, rgba(0, 229, 255, 0.24), rgba(0, 118, 232, 0.24) 56%, rgba(0, 229, 255, 0.22));
+  --ice-depth: inset 0 1px 0.5px rgba(255, 255, 255, 0.6), inset 0 -18px 26px -16px rgba(0, 229, 255, 0.95), inset 0 0 0 0.5px rgba(0, 229, 255, 0.22),
+    0 0 0 0.5px rgba(0, 229, 255, 0.25), 0 10px 30px -12px rgba(0, 229, 255, 0.7), 0 1px 2px rgba(0, 0, 0, 0.35);
+}
+/* The lit buttons. */
+:root[data-theme="dark"] .btn.moss,
+:root[data-theme="dark"] .btn.ember,
+:root[data-theme="dark"] .screen.paper .btn.moss.big,
+:root[data-theme="dark"] .screen.paper .btn.ember.big {
+  position: relative;
+  border: 1.5px solid transparent;
+  background: var(--lg-sheen), var(--ice-fill);
+  box-shadow: var(--ice-depth);
+  color: #FFFFFF; text-shadow: none;
+}
+:root[data-theme="dark"] .btn.moss::before,
+:root[data-theme="dark"] .btn.ember::before,
+:root[data-theme="dark"] .screen.paper .btn.moss.big::before,
+:root[data-theme="dark"] .screen.paper .btn.ember.big::before {
+  display: block; content: ""; position: absolute; inset: -1.5px; width: auto; height: auto; z-index: 1; opacity: 1;
+  border-radius: inherit; padding: 1.5px;
+  background: var(--ice-rim);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor; mask-composite: exclude;
+  pointer-events: none;
+}
+/* The arrow on the big ones: a bead of the same glass, lit from the top left. */
+:root[data-theme="dark"] .screen.paper .btn.moss.big .go-arrow,
+:root[data-theme="dark"] .screen.paper .btn.ember.big .go-arrow {
+  background: radial-gradient(120% 120% at 30% 22%, #D9FDFF, #2FE9FF 42%, #00B4E0 100%);
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.8), inset 0 -3px 6px -2px rgba(0, 60, 90, 0.45), 0 4px 14px -4px rgba(0, 229, 255, 0.7);
+}
+/* A chosen option: solid ice glass, the rim painted in its own border (whatever width that already is). */
+:root[data-theme="dark"] .chip.selected,
+:root[data-theme="dark"] .radio-card.selected,
+:root[data-theme="dark"] .db-opt.on,
+:root[data-theme="dark"] .call-opt.on,
+:root[data-theme="dark"] .unit-toggle button.on,
+:root[data-theme="dark"] .look-seg .btn[aria-pressed="true"],
+:root[data-theme="dark"] .chip[aria-pressed="true"],
+:root[data-theme="dark"] .tile:has(input:checked) {
+  border-color: transparent;
+  background:
+    var(--lg-sheen) padding-box,
+    linear-gradient(180deg, rgba(0, 229, 255, 0.34), rgba(0, 140, 235, 0.22) 55%, rgba(0, 229, 255, 0.30)) padding-box,
+    linear-gradient(#0A2C55, #0A2C55) padding-box,
+    var(--ice-rim) border-box;
+  box-shadow: inset 0 1px 0.5px rgba(255, 255, 255, 0.5), inset 0 -12px 18px -14px rgba(0, 229, 255, 0.8), 0 8px 22px -12px rgba(0, 229, 255, 0.6), 0 1px 2px rgba(0, 0, 0, 0.35);
+  color: #FFFFFF;
+}
+/* A chosen option on a map pane keeps its see-through ice; its drawn rim turns from white to ice. */
+:root[data-theme="dark"] :where(#scrLay .glass-bottom, #scrRun .glass-bottom, .screen.glass .glass-bottom, .bench-sheet, .coach-sheet, .felt-sheet, .call-sheet, .nav-banner, .rep-dock) .btn[aria-pressed="true"] { border-color: transparent; }
+:root[data-theme="dark"] :where(#scrLay .glass-bottom, #scrRun .glass-bottom, .screen.glass .glass-bottom, .bench-sheet, .coach-sheet, .felt-sheet, .call-sheet, .nav-banner, .rep-dock) .btn[aria-pressed="true"]::before { background: var(--ice-rim); opacity: 1; }
+/* Home's "Change". */
+:root[data-theme="dark"] #scrHome .sum-line .sum-go {
+  position: relative;
+  border-color: transparent;
+  background: var(--lg-sheen), var(--ice-fill);
+  box-shadow: inset 0 1px 0.5px rgba(255, 255, 255, 0.5), inset 0 -8px 12px -10px rgba(0, 229, 255, 0.75), 0 6px 18px -10px rgba(0, 229, 255, 0.55);
+}
+:root[data-theme="dark"] #scrHome .sum-line .sum-go::before {
+  content: ""; position: absolute; inset: -1px; z-index: 1;
+  border-radius: inherit; padding: 1px;
+  background: var(--ice-rim);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor; mask-composite: exclude;
+  pointer-events: none;
+}
